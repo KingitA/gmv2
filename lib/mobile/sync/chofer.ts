@@ -16,6 +16,7 @@
 // lib/viajes/* (la misma que llama la route), para no re-autenticar N veces.
 
 import { GET as meGET } from "@/app/api/chofer/me/route"
+import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 import { GET as viajeGET } from "@/app/api/chofer/viaje/[id]/route"
 import { GET as billeteraGET } from "@/app/api/chofer/billetera/route"
 import { GET as cuentasGET } from "@/app/api/chofer/cuentas-bancarias/route"
@@ -157,11 +158,9 @@ const clientes: DatasetDef = {
   nombre: "chofer_clientes",
   roles: ROLES,
   async cargar(ctx) {
-    const [filas, saldos] = await Promise.all([
-      fetchAllRows<any>(() => ctx.supabase.from("clientes").select(CLIENTE_COLS).eq("activo", true)),
-      fetchAllRows<any>(() => ctx.supabase.from("v_saldo_clientes").select("cliente_id, saldo_actual"), "cliente_id"),
-    ])
-    const saldoDe = new Map(saldos.map((s) => [s.cliente_id, Number(s.saldo_actual) || 0]))
+    const filas = await fetchAllRows<any>(() => ctx.supabase.from("clientes").select(CLIENTE_COLS).eq("activo", true))
+    // Fuente única: real + proyectado (el chofer lee el proyectado)
+    const saldos = await getSaldosClientes(ctx.supabase, filas.map((c) => c.id))
     return filas.map((c) => ({
       id: c.id,
       nombre: c.nombre,
@@ -171,7 +170,8 @@ const clientes: DatasetDef = {
       codigo_cliente: c.codigo_cliente,
       direccion: c.direccion,
       localidad: c.localidad,
-      saldo_actual: saldoDe.get(c.id) ?? 0,
+      saldo_actual: saldos.get(c.id)?.saldo_real ?? 0,
+      saldo_proyectado: saldos.get(c.id)?.saldo_proyectado ?? 0,
     }))
   },
 }

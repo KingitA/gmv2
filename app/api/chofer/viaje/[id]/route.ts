@@ -1,7 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 import { esTripulante, HEADER_SIN_INICIAR, iniciarViajeSiDespachado } from "@/lib/viajes/chofer"
 import { armarHojaRuta } from "@/lib/viajes/hoja-ruta"
 
@@ -98,29 +97,20 @@ export async function GET(
       }
     }
 
-    // Saldo previo desde el LIBRO (fórmula única, misma que la ficha del
-    // cliente): saldo real del cliente menos lo que pesa el propio pedido de
-    // este viaje — antes se sumaban saldo_pendiente de comprobantes, que
-    // ignora pagos a cuenta y NC sin imputar, y daba otro número que la ficha.
-    const clienteIdsViaje = [...new Set((pedidos || []).map((p: any) => p.cliente_id))] as string[]
-    const saldosLibro = await getSaldosClientes(supabase, clienteIdsViaje)
-    const propioPorPedido = new Map<string, number>()
-    if (pedidoIds.length) {
-      const { data: compsPropios } = await supabase
-        .from("comprobantes_venta")
-        .select("pedido_id, saldo_pendiente")
-        .in("pedido_id", pedidoIds)
-        .is("anulado_en", null)
-        .neq("estado_pago", "anulado")
-      for (const c of compsPropios || [])
-        propioPorPedido.set(c.pedido_id, (propioPorPedido.get(c.pedido_id) || 0) + Number(c.saldo_pendiente || 0))
-    }
+    // Saldo previo: UNA fórmula (saldoDeParada en lib/cuenta-corriente/saldo.ts),
+    // la misma de la hoja de ruta y la ficha del cliente. Se toma de la parada
+    // del cliente en la hoja (por cliente, no por pedido: con dos pedidos del
+    // mismo cliente el saldo anterior se cuenta una sola vez).
+    const hoja = await armarHojaRuta(supabase, id)
+    const paradaDe = new Map((hoja?.paradas || []).map((p) => [p.cliente_id, p]))
+    const primerPedidoDe = new Map<string, string>()
+    for (const p of pedidos || []) if (!primerPedidoDe.has(p.cliente_id)) primerPedidoDe.set(p.cliente_id, p.id)
 
     const pedidosConDatos = await Promise.all(
       (pedidos || []).map(async (pedido: any) => {
-        const saldoReal = saldosLibro.get(pedido.cliente_id)?.saldo_real ?? 0
-        const saldo_anterior =
-          Math.round((saldoReal - (propioPorPedido.get(pedido.id) || 0)) * 100) / 100
+        const parada = paradaDe.get(pedido.cliente_id)
+        const esPrimero = primerPedidoDe.get(pedido.cliente_id) === pedido.id
+        const saldo_anterior = esPrimero ? parada?.saldo_anterior ?? 0 : 0
 
         const cobrado = pagosPorCliente.get(pedido.cliente_id) || 0
         const devuelto = devolucionesPorCliente.get(pedido.cliente_id) || 0
@@ -143,7 +133,7 @@ export async function GET(
           bultos: pedido.bultos || 0,
           total_pedido: Number(pedido.total) || 0,
           saldo_anterior,
-          total_a_cobrar: saldo_anterior + (Number(pedido.total) || 0),
+          total_a_cobrar: esPrimero ? parada?.total_a_cobrar ?? 0 : 0,
           cobrado,
           devuelto,
           remitos: remitosPorPedido.get(pedido.id) || [],
@@ -162,9 +152,6 @@ export async function GET(
 
     const total_gastos = gastos?.reduce((s, g) => s + Math.abs(Number(g.monto)), 0) || 0
     const total_cobrado = Array.from(pagosPorCliente.values()).reduce((s, v) => s + v, 0)
-
-    // Hoja de ruta (paradas con instrucción de oficina + plata del viaje)
-    const hoja = await armarHojaRuta(supabase, id)
 
     return NextResponse.json({
       viaje: {

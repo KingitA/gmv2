@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
+import { ESTADOS_DEVOLUCION_EN_PROCESO, getSaldosCliente, saldoDeParada } from "@/lib/cuenta-corriente/saldo"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 
 // Ficha de UN cliente dentro de un viaje de reparto: lo que ve el chofer al bajar
@@ -123,9 +123,23 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
     .eq("viaje_id", viajeId)
     .eq("cliente_id", clienteId)
 
-  // Doble saldo: real (libro mayor, confirmado) y proyectado (real − pendientes)
-  const saldos = await getSaldosCliente(supabase, clienteId)
-  const saldo_anterior = saldos.saldo_real
+  // Saldos desde la FUENTE ÚNICA (lib/cuenta-corriente/saldo.ts): real y
+  // proyectado del cliente, y el proyectado SIN lo de este viaje para el saldo
+  // anterior (misma fórmula que la hoja de ruta: saldoDeParada).
+  const pedidoIdsViaje = pedidos.map((p) => p.id)
+  const [saldos, saldosSinViaje, { data: compsViaje }] = await Promise.all([
+    getSaldosCliente(supabase, clienteId),
+    getSaldosCliente(supabase, clienteId, { excluirViajeId: viajeId }),
+    pedidoIdsViaje.length
+      ? supabase
+          .from("comprobantes_venta")
+          .select("pedido_id, total_factura, saldo_pendiente")
+          .in("pedido_id", pedidoIdsViaje)
+          .in("tipo_comprobante", ["FA", "FB", "FC", "PRES", "ND", "NDA", "NDB", "NDC"])
+          .is("anulado_en", null)
+          .neq("estado_pago", "anulado")
+      : Promise.resolve({ data: [] as any[] }),
+  ])
 
   // Valor de cada devolución EN UN COBRO (regla única valor-devolucion:
   // precio de factura, neto del 10% si la factura fue contado) + lo ya
@@ -153,7 +167,29 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
       valor_cobro: Math.max(0, Math.round((valorTotal - descontado) * 100) / 100),
     }
   })
-  const total_devuelto = (devoluciones || []).reduce((s, d) => s + Number(d.monto_total), 0)
+  // Devuelto en este viaje = valor de las devoluciones en proceso (las mismas
+  // que el proyectado deja afuera con excluirViajeId)
+  const enProceso = new Set<string>(ESTADOS_DEVOLUCION_EN_PROCESO)
+  const total_devuelto = Math.round(
+    devolucionesValoradas.filter((d: any) => enProceso.has(d.estado)).reduce((s, d: any) => s + d.valor_total, 0) * 100,
+  ) / 100
+  // Lo de este viaje: comprobantes si el pedido está facturado, si no el total del pedido
+  const compsPorPedido = new Map<string, any[]>()
+  for (const c of compsViaje || []) {
+    if (!compsPorPedido.has(c.pedido_id)) compsPorPedido.set(c.pedido_id, [])
+    compsPorPedido.get(c.pedido_id)!.push(c)
+  }
+  const totalViaje = pedidos.reduce((s, p) => {
+    const cs = compsPorPedido.get(p.id)
+    return s + (cs?.length ? cs.reduce((x, k) => x + (Number(k.total_factura) || 0), 0) : Number(p.total) || 0)
+  }, 0)
+  const propioEnLibro = (compsViaje || []).reduce((s, k: any) => s + (Number(k.saldo_pendiente) || 0), 0)
+  const { saldo_anterior, total_a_cobrar } = saldoDeParada({
+    saldos: saldosSinViaje,
+    propioEnLibro,
+    totalViaje,
+    devueltoViaje: total_devuelto,
+  })
   const total_cobrado = (pagos_registrados || []).reduce((s, p) => s + Number(p.monto), 0)
 
   return {
@@ -181,7 +217,7 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
       total_pedido: Number(pedido?.total) || 0,
       total_devuelto,
       total_cobrado,
-      total_a_cobrar: saldo_anterior + (Number(pedido?.total) || 0) - total_devuelto,
+      total_a_cobrar,
       ya_cobrado: total_cobrado > 0,
     },
     viaje_estado: viajeEstado,

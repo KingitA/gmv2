@@ -3,16 +3,42 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 // Estados de pago que están a la espera de verificación (no impactan el saldo real).
 export const ESTADOS_PENDIENTES = ["pendiente", "pendiente_rendicion"] as const
 
+// Devoluciones EN PROCESO: cargadas (pendiente) o aceptadas por depósito
+// (confirmado) pero todavía sin NC/reversa. Con la NC pasan a "facturado" y ya
+// están en el libro; las rechazadas no descuentan nada.
+export const ESTADOS_DEVOLUCION_EN_PROCESO = ["pendiente", "confirmado"] as const
+
+/**
+ * FUENTE ÚNICA del saldo de un cliente (regla del dueño, 16/10/2026): toda
+ * pantalla del ERP y de las apps que muestre cuánto debe un cliente sale de
+ * acá. Dos números, siempre con su nombre:
+ *  - REAL: el libro mayor (cuenta_corriente_clientes), solo lo confirmado.
+ *  - PROYECTADO: cómo queda si se confirma todo lo pendiente (cobros sin
+ *    verificar + devoluciones en proceso). Es el que leen vendedor y chofer.
+ */
 export interface SaldosCliente {
   /** Saldo del libro mayor: solo movimientos confirmados. Verdad contable. */
   saldo_real: number
   /** Σ cobros cargados pero NO verificados aún (no tocan el saldo real). */
   pendiente_verificacion: number
-  /** saldo_real − proyección exacta: "lo que quedaría si se confirma todo". */
+  /** Σ valor de las devoluciones en proceso (sin NC todavía): ya descuentan del proyectado. */
+  devoluciones_en_proceso: number
+  /** saldo_real − cobros pendientes (con su NC 10% y ajuste) − devoluciones en proceso. */
   saldo_proyectado: number
 }
 
-type PagoPendiente = { id: string; cliente_id?: string; monto: number; observaciones: string | null }
+export interface OpcionesSaldo {
+  /**
+   * Deja AFUERA de la proyección los cobros y devoluciones de este viaje: la
+   * hoja de ruta los muestra aparte (cobrado / devuelto), así el saldo
+   * anterior no cambia mientras el chofer cobra.
+   */
+  excluirViajeId?: string | null
+}
+
+const TANDA = 150
+
+type PagoPendiente ={ id: string; cliente_id?: string; monto: number; observaciones: string | null }
 
 /**
  * Proyección EXACTA por pago pendiente (una sola fórmula para TODAS las
@@ -74,21 +100,6 @@ async function calcularBajasExtra(
     for (const c of comps || []) totalDe.set(c.id, Math.abs(Number(c.total_factura)))
   }
 
-  // Devoluciones descontadas en el cobro: el monto asentado en
-  // devoluciones_descuentos ya es el VALOR de la regla única (neto del 10%
-  // si la factura fue contado) — exactamente lo que va a acreditar la NC
-  // cuando depósito confirme. Sin esto, el proyectado quedaba inflado por
-  // la devolución hasta la emisión de la NC.
-  const devPorPago = new Map<string, number>()
-  {
-    const { data: descs } = await supabase
-      .from("devoluciones_descuentos")
-      .select("pago_id, monto")
-      .in("pago_id", ids)
-    for (const d of descs || [])
-      devPorPago.set(d.pago_id, (devPorPago.get(d.pago_id) || 0) + Number(d.monto))
-  }
-
   // REGLA 07/10 (dueño, reemplaza la del 01/10): la NC del 10% contado es por el
   // TOTAL de cada comprobante y una sola vez. Los que ya tienen su NC/REV viva no
   // la vuelven a recibir (misma regla que la emisión: ya-bonificados).
@@ -126,67 +137,119 @@ async function calcularBajasExtra(
       for (const par of paresPorPago.get(p.id) || []) if (par.aplicar_10) extra -= par.monto * 0.1
     }
     extra += parsearMarcaAjuste(p.observaciones)
-    extra += devPorPago.get(p.id) || 0
+    // Las devoluciones descontadas en el cobro NO entran acá: cada devolución
+    // en proceso baja el proyectado UNA vez por sí misma (ver valorDevolucionesVivas),
+    // se haya descontado en un cobro o no.
     extras.set(p.id, extra)
   }
   return extras
 }
 
 /**
- * Saldos de un cliente desde la fuente única (libro mayor v_saldo_clientes) más
- * los cobros pendientes de verificación, para mostrar el doble saldo
- * (real vs proyectado) en las vistas de chofer/vendedor y cuenta corriente.
+ * Valor de las devoluciones en proceso, por cliente. Cada devolución baja el
+ * proyectado UNA vez, por su valor con la regla única (valorarDevoluciones:
+ * precio de factura, neto del 10% si la factura fue contado) — el mismo número
+ * que descuenta la pantalla de cobro y que va a acreditar la NC.
+ * Regla del dueño (16/10): apenas el vendedor o el chofer cargan la
+ * devolución, ya descuenta del proyectado; si después se rechaza, vuelve.
  */
-export async function getSaldosCliente(
+async function valorDevolucionesVivas(
   supabase: SupabaseClient,
-  clienteId: string,
-): Promise<SaldosCliente> {
-  const [{ data: saldoRow }, { data: pend }] = await Promise.all([
-    supabase.from("v_saldo_clientes").select("saldo_actual").eq("cliente_id", clienteId).maybeSingle(),
-    supabase
-      .from("pagos_clientes")
-      .select("id, monto, observaciones")
-      .eq("cliente_id", clienteId)
-      .in("estado", ESTADOS_PENDIENTES as unknown as string[]),
-  ])
-
-  const saldo_real = Number((saldoRow as any)?.saldo_actual ?? 0)
-  const pagosPend = (pend || []) as PagoPendiente[]
-  const pendiente_verificacion = pagosPend.reduce((s, p) => s + Number(p.monto), 0)
-
-  const extras = await calcularBajasExtra(supabase, pagosPend)
-  const bajaProyectada =
-    pendiente_verificacion + pagosPend.reduce((s, p) => s + (extras.get(p.id) ?? 0), 0)
-
-  return {
-    saldo_real,
-    pendiente_verificacion,
-    saldo_proyectado: Math.round((saldo_real - bajaProyectada) * 100) / 100,
-  }
+  clienteIds: string[],
+  opts: OpcionesSaldo,
+): Promise<Map<string, number>> {
+  if (!clienteIds.length) return new Map()
+  const { data: devs } = await supabase
+    .from("devoluciones")
+    .select("id, cliente_id, monto_total, viaje_id")
+    .in("cliente_id", clienteIds)
+    .in("estado", ESTADOS_DEVOLUCION_EN_PROCESO as unknown as string[])
+  return valorarPorCliente(
+    supabase,
+    (devs || []).filter((d: any) => !opts.excluirViajeId || d.viaje_id !== opts.excluirViajeId),
+  )
 }
 
 /**
- * Versión batch para listados: devuelve un Map cliente_id → SaldosCliente.
- * MISMA proyección exacta que la singular (comparten calcularBajasExtra).
+ * Valor de las devoluciones en proceso cargadas en un viaje, por cliente: lo
+ * que la hoja de ruta muestra como "devuelto" y resta del total a cobrar (son
+ * justo las que getSaldosClientes deja afuera con excluirViajeId).
+ */
+export async function valorDevolucionesDeViaje(
+  supabase: SupabaseClient,
+  viajeId: string,
+): Promise<Map<string, number>> {
+  const { data: devs } = await supabase
+    .from("devoluciones")
+    .select("id, cliente_id, monto_total")
+    .eq("viaje_id", viajeId)
+    .in("estado", ESTADOS_DEVOLUCION_EN_PROCESO as unknown as string[])
+  return valorarPorCliente(supabase, devs || [])
+}
+
+async function valorarPorCliente(
+  supabase: SupabaseClient,
+  vivas: Array<{ id: string; cliente_id: string; monto_total: number | string | null }>,
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  if (!vivas.length) return out
+
+  const { valorarDevoluciones } = await import("@/lib/cobranzas/valorar-devoluciones")
+  const porCliente = new Map<string, any[]>()
+  for (const d of vivas) {
+    if (!porCliente.has(d.cliente_id)) porCliente.set(d.cliente_id, [])
+    porCliente.get(d.cliente_id)!.push(d)
+  }
+  await Promise.all(
+    [...porCliente.entries()].map(async ([clienteId, lista]) => {
+      let valores = new Map<string, { total: number }>()
+      try {
+        valores = await valorarDevoluciones(supabase, { clienteId, devolucionIds: lista.map((d) => d.id) })
+      } catch (e: any) {
+        console.error("[saldo] valorarDevoluciones:", e?.message)
+      }
+      const total = lista.reduce((s, d) => s + (valores.get(d.id)?.total ?? (Number(d.monto_total) || 0)), 0)
+      out.set(clienteId, Math.round(total * 100) / 100)
+    }),
+  )
+  return out
+}
+
+/**
+ * Saldos de varios clientes (Map cliente_id → SaldosCliente). Es LA fórmula:
+ * la versión de un solo cliente la usa por dentro, así no pueden dar distinto.
  */
 export async function getSaldosClientes(
   supabase: SupabaseClient,
   clienteIds: string[],
+  opts: OpcionesSaldo = {},
 ): Promise<Map<string, SaldosCliente>> {
   const ids = [...new Set(clienteIds)].filter(Boolean)
   if (ids.length === 0) return new Map()
+  // Listados grandes (padrón entero): de a tandas, para no pasar el largo de URL
+  if (ids.length > TANDA) {
+    const result = new Map<string, SaldosCliente>()
+    for (let i = 0; i < ids.length; i += TANDA) {
+      const parte = await getSaldosClientes(supabase, ids.slice(i, i + TANDA), opts)
+      for (const [k, v] of parte) result.set(k, v)
+    }
+    return result
+  }
 
-  const [{ data: saldos }, { data: pend }] = await Promise.all([
+  const [{ data: saldos }, { data: pend }, devoluciones] = await Promise.all([
     supabase.from("v_saldo_clientes").select("cliente_id, saldo_actual").in("cliente_id", ids),
     supabase
       .from("pagos_clientes")
-      .select("id, cliente_id, monto, observaciones")
+      .select("id, cliente_id, monto, observaciones, viaje_id")
       .in("cliente_id", ids)
       .in("estado", ESTADOS_PENDIENTES as unknown as string[]),
+    valorDevolucionesVivas(supabase, ids, opts),
   ])
 
   const realMap = new Map((saldos || []).map((r: any) => [r.cliente_id, Number(r.saldo_actual)]))
-  const pagosPend = (pend || []) as PagoPendiente[]
+  const pagosPend = ((pend || []) as Array<PagoPendiente & { viaje_id?: string | null }>).filter(
+    (p) => !opts.excluirViajeId || p.viaje_id !== opts.excluirViajeId,
+  )
   const extras = await calcularBajasExtra(supabase, pagosPend)
 
   const pendMap = new Map<string, number>()
@@ -200,11 +263,49 @@ export async function getSaldosClientes(
   const result = new Map<string, SaldosCliente>()
   for (const id of ids) {
     const saldo_real = realMap.get(id) ?? 0
+    const dev = devoluciones.get(id) ?? 0
     result.set(id, {
       saldo_real,
-      pendiente_verificacion: pendMap.get(id) ?? 0,
-      saldo_proyectado: Math.round((saldo_real - (bajaMap.get(id) ?? 0)) * 100) / 100,
+      pendiente_verificacion: Math.round((pendMap.get(id) ?? 0) * 100) / 100,
+      devoluciones_en_proceso: dev,
+      saldo_proyectado: Math.round((saldo_real - (bajaMap.get(id) ?? 0) - dev) * 100) / 100,
     })
   }
   return result
+}
+
+/** Saldos de un cliente: misma fórmula que getSaldosClientes. */
+export async function getSaldosCliente(
+  supabase: SupabaseClient,
+  clienteId: string,
+  opts: OpcionesSaldo = {},
+): Promise<SaldosCliente> {
+  const m = await getSaldosClientes(supabase, [clienteId], opts)
+  return m.get(clienteId) ?? { saldo_real: 0, pendiente_verificacion: 0, devoluciones_en_proceso: 0, saldo_proyectado: 0 }
+}
+
+/**
+ * Saldo de un cliente en una parada de viaje — UNA fórmula para la hoja de
+ * ruta, la vista del chofer y la ficha del cliente en el viaje (antes había
+ * tres y la ficha contaba dos veces el pedido ya facturado).
+ *  - saldo_anterior = proyectado SIN lo de este viaje (cobros y devoluciones
+ *    del viaje se muestran aparte) − lo que ya pesa en el libro de los
+ *    comprobantes de este viaje.
+ *  - total_a_cobrar = saldo_anterior + lo de este viaje − lo devuelto en este viaje.
+ */
+export function saldoDeParada(args: {
+  saldos: SaldosCliente | undefined
+  /** Σ saldo_pendiente de los comprobantes de los pedidos de este viaje */
+  propioEnLibro: number
+  /** Lo de este viaje: comprobantes si está facturado, si no total del pedido */
+  totalViaje: number
+  /** Valor de las devoluciones cargadas en este viaje */
+  devueltoViaje: number
+}) {
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  const saldo_anterior = r2((args.saldos?.saldo_proyectado ?? 0) - args.propioEnLibro)
+  return {
+    saldo_anterior,
+    total_a_cobrar: r2(saldo_anterior + args.totalViaje - args.devueltoViaje),
+  }
 }

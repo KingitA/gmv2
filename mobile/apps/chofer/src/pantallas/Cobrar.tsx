@@ -365,7 +365,7 @@ export function Cobrar() {
               {resCli.map((cli) => (
                 <button key={cli.id} onClick={() => agregarCliente(cli)} className="w-full border-b px-3 py-2 text-left last:border-0 active:bg-blue-50">
                   <p className="text-sm font-medium">{nombreCliente(cli)}</p>
-                  <p className="text-xs text-gray-400">{cli.direccion || ""}{cli.localidad ? ` · ${cli.localidad}` : ""}{cli.saldo_actual > 0 ? ` · debe ${formatCurrency(cli.saldo_actual)}` : ""}</p>
+                  <p className="text-xs text-gray-400">{cli.direccion || ""}{cli.localidad ? ` · ${cli.localidad}` : ""}{(cli.saldo_proyectado ?? cli.saldo_actual) > 0 ? ` · debe ${formatCurrency(cli.saldo_proyectado ?? cli.saldo_actual)}` : ""}</p>
                 </button>
               ))}
             </div>

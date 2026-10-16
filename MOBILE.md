@@ -1985,3 +1985,29 @@ Si `mobile/node_modules` de un worktree es un junction a `gmv2-nuevo/mobile/node
 `@gm/core` resuelve al código de **gmv2-nuevo** (otra rama) y el typecheck/vitest de `mobile/`
 dan resultados falsos. Armar una carpeta real con junctions a cada paquete y `@gm/*`
 apuntando al propio worktree (quitar el junction con `cmd /c rmdir`, nunca borrado recursivo).
+
+## 21. Saldo del cliente: fuente única (16/10/2026)
+
+Regla del dueño: el saldo de un cliente sale de UN solo lugar, y todas las pantallas
+(ERP, app vendedor, app chofer, tablero, Playroom, Jarvis) muestran lo mismo.
+
+- Servidor: `lib/cuenta-corriente/saldo.ts` (`getSaldosClientes` / `getSaldosCliente`).
+  - **Real**: el libro mayor, solo lo confirmado.
+  - **Proyectado**: real − cobros sin verificar (con su NC 10 % y ajuste) − **devoluciones
+    en proceso** (pendiente/confirmado, sin NC todavía), por su valor de `valorarDevoluciones`.
+    Cada devolución descuenta una sola vez, se haya usado en un cobro o no.
+  - **Vendedor y chofer leen el proyectado como número principal** (lista de clientes,
+    filtro "con deuda", encabezado del pedido, viajes, estadísticas, cobro conjunto); el real
+    va chico al lado cuando difiere.
+- Parada de viaje: `saldoDeParada`, una sola fórmula para la hoja de ruta, `/api/chofer/viaje/[id]`
+  y la ficha del cliente en el viaje (antes la ficha contaba dos veces el pedido facturado).
+  - saldo_anterior = proyectado SIN los cobros/devoluciones de este viaje − saldo de los
+    comprobantes del viaje.
+  - total_a_cobrar = saldo_anterior + lo del viaje − lo devuelto en el viaje.
+- Overlay sin señal (mismas reglas que el servidor):
+  - vendedor: una devolución sin enviar baja el proyectado (lista y ficha); un cobro anulado
+    sin enviar lo vuelve a subir por su monto.
+  - chofer: una devolución sin enviar baja el total a cobrar de la parada.
+- Deuda por antigüedad: `v_aging_clientes` = `cc_deuda_antiguedad_base()` (migración
+  `20261016_cc_fuente_unica.sql`). Reparte el saldo del libro sobre los débitos más nuevos;
+  su total es siempre igual al libro.

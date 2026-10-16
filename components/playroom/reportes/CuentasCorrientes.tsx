@@ -90,21 +90,21 @@ const COLUMNS: Column<CCRow>[] = [
   { key: 'localidad', label: 'Localidad', sortable: true },
   { key: 'vendedor_nombre', label: 'Vendedor', sortable: true },
   {
-    key: 't0_30', label: '0–30 d', sortable: true, align: 'right',
+    key: 't0_30', label: '0–29 d', sortable: true, align: 'right',
     render: v => v > 0
       ? <span className="font-mono text-exito-600">{moneda(v, 0)}</span>
       : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => String(v),
   },
   {
-    key: 't31_60', label: '31–60 d', sortable: true, align: 'right',
+    key: 't31_60', label: '30–59 d', sortable: true, align: 'right',
     render: v => v > 0
       ? <span className="font-mono text-ambar-700">{moneda(v, 0)}</span>
       : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => String(v),
   },
   {
-    key: 't61_90', label: '61–90 d', sortable: true, align: 'right',
+    key: 't61_90', label: '60–89 d', sortable: true, align: 'right',
     render: v => v > 0
       ? <span className="font-mono" style={{ color: '#B8560F' }}>{moneda(v, 0)}</span>
       : <span style={{ color: '#9295AE' }}>—</span>,
@@ -135,7 +135,7 @@ const COLUMNS: Column<CCRow>[] = [
     exportValue: v => String(v ?? 0),
   },
   {
-    key: 'comprobante_mas_viejo', label: 'Comp. más viejo', sortable: true,
+    key: 'comprobante_mas_viejo', label: 'Deuda desde', sortable: true,
     render: v => v ? formatDateAR(v) : '—',
     exportValue: v => v ?? '',
   },
@@ -295,9 +295,9 @@ export default function CuentasCorrientes() {
       {!loading && (
         <div className="grid grid-cols-4 gap-3">
           {([
-            { key: 't0_30', label: '0–30 días', color: TRAMO_COLORS.t0_30 },
-            { key: 't31_60', label: '31–60 días', color: TRAMO_COLORS.t31_60 },
-            { key: 't61_90', label: '61–90 días', color: TRAMO_COLORS.t61_90 },
+            { key: 't0_30', label: '0–29 días', color: TRAMO_COLORS.t0_30 },
+            { key: 't31_60', label: '30–59 días', color: TRAMO_COLORS.t31_60 },
+            { key: 't61_90', label: '60–89 días', color: TRAMO_COLORS.t61_90 },
             { key: 't90_mas', label: '+90 días', color: TRAMO_COLORS.t90_mas },
           ] as const).map(({ key, label, color }) => {
             const val = summary[key]

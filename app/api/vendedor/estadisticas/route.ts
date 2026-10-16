@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { fechaISO, hoyISO, sumarDiasISO } from "@/lib/formato"
@@ -82,14 +83,15 @@ export async function GET() {
       .filter((c) => fechaISO(c.created_at).slice(0, 7) === inicioMes)
       .reduce((s, c) => s + Number(c.monto), 0)
 
-    // Deuda de cartera
-    const { data: saldos } = await supabase
-      .from("v_saldo_clientes")
-      .select("saldo_actual")
-      .in("vendedor_id", session.vendedorIds)
-      .gt("saldo_actual", 0)
-    const deudaCartera = (saldos || []).reduce((s, x) => s + Number(x.saldo_actual), 0)
-    const clientesConDeuda = (saldos || []).length
+    // Deuda de cartera: saldo PROYECTADO desde la fuente única (lo que ve el
+    // vendedor en cada cliente), solo los que deben
+    const cartera = await fetchAllRows<{ id: string }>(() =>
+      supabase.from("clientes").select("id").in("vendedor_id", session.vendedorIds),
+    )
+    const saldosCartera = await getSaldosClientes(supabase, cartera.map((c) => c.id))
+    const deudores = [...saldosCartera.values()].filter((s) => s.saldo_proyectado > 0.005)
+    const deudaCartera = Math.round(deudores.reduce((s, x) => s + x.saldo_proyectado, 0) * 100) / 100
+    const clientesConDeuda = deudores.length
 
     return NextResponse.json({
       ventas_por_mes: ventasPorMes,

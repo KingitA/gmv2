@@ -272,6 +272,8 @@ export interface OpViajeEstado { viaje_id: string; estado: "completado" | "en_cu
 export interface ViajeResumen { id: string; nombre: string; estado: string; fecha_inicio: string | null; fecha_fin_estimada: string | null; zonas: Array<{ id: string; nombre: string }> }
 export interface ClienteViaje {
   id: string; nombre: string; localidad: string | null; telefono?: string | null; saldo_actual: number
+  /** Fuente única (lib/cuenta-corriente/saldo.ts); falta en réplicas viejas */
+  saldo_proyectado?: number
   estado_viaje: "pendiente" | "pedido_levantado" | "no_va"
   pedido: { id: string; numero_pedido: string | null; total: number; estado: string } | null
 }

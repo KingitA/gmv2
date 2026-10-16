@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { traerSaldosCliente } from "@/lib/cuenta-corriente/saldos-cliente-fetch"
 
 import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
@@ -89,6 +90,7 @@ export default function ClientesPage() {
   const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null)
   const [sheetBonifs, setSheetBonifs] = useState<any[]>([])
   const [sheetCC, setSheetCC] = useState<number | null>(null)
+  const [sheetProy, setSheetProy] = useState<number | null>(null)
   const [sheetPedidos, setSheetPedidos] = useState<any[]>([])
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isHistorialOpen, setIsHistorialOpen] = useState(false)
@@ -219,17 +221,18 @@ export default function ClientesPage() {
     setSelectedCliente(cliente)
     setSheetBonifs([])
     setSheetCC(null)
+    setSheetProy(null)
     setSheetPedidos([])
     const sb = createClient()
-    const [bonifRes, ccRes, pedidosRes] = await Promise.all([
+    const [bonifRes, saldos, pedidosRes] = await Promise.all([
       sb.from("bonificaciones").select("*").eq("cliente_id", cliente.id).eq("activo", true),
-      sb.from("v_saldo_clientes").select("saldo_actual").eq("cliente_id", cliente.id).maybeSingle(),
+      traerSaldosCliente(cliente.id),
       sb.from("pedidos").select("id, numero_pedido, fecha, estado, total").eq("cliente_id", cliente.id).neq("estado", "eliminado").order("fecha", { ascending: false }).limit(5),
     ])
     setSheetBonifs(bonifRes.data || [])
-    // Saldo desde el libro mayor (fuente única): Σdebe − Σhaber
-    const saldo = Number((ccRes.data as any)?.saldo_actual ?? 0)
-    setSheetCC(saldo)
+    // Saldo desde la fuente única (lib/cuenta-corriente/saldo.ts): real + proyectado
+    setSheetCC(saldos ? saldos.saldo_real : null)
+    setSheetProy(saldos ? saldos.saldo_proyectado : null)
     setSheetPedidos(pedidosRes.data || [])
   }
 
@@ -530,7 +533,7 @@ export default function ClientesPage() {
               sheetCC < 0 ? "bg-green-500/25 border-green-400/40" :
               "bg-white/10 border-white/20"
             }`}>
-              <p className="text-white/50 text-[10px] uppercase tracking-wider font-bold">Cuenta Corriente</p>
+              <p className="text-white/50 text-[10px] uppercase tracking-wider font-bold">Cuenta corriente · saldo real</p>
               <div className="flex items-end justify-between mt-1">
                 <p className={`text-2xl font-bold ${
                   sheetCC === null ? "text-white/30" :
@@ -548,6 +551,11 @@ export default function ClientesPage() {
                   {sheetCC === null ? "cargando" : sheetCC > 0 ? "debe" : sheetCC < 0 ? "a favor" : "al día ✓"}
                 </span>
               </div>
+              {sheetCC !== null && sheetProy !== null && Math.abs(sheetProy - sheetCC) > 0.009 && (
+                <p className="mt-1.5 text-xs text-white/60">
+                  Proyectado: <b className="text-white/90">{sheetProy < 0 ? "a favor " : ""}{moneda(Math.abs(sheetProy), 0)}</b> · si se confirma lo pendiente
+                </p>
+              )}
             </div>
           </div>
 

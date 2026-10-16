@@ -256,6 +256,8 @@ export interface ClienteBusqueda {
   direccion: string | null
   localidad: string | null
   saldo_actual: number
+  /** Fuente única (lib/cuenta-corriente/saldo.ts); falta en réplicas viejas */
+  saldo_proyectado?: number
 }
 export const nombreCliente = (c: { nombre?: string | null; razon_social?: string | null; nombre_razon_social?: string | null } | null | undefined) =>
   c?.nombre_razon_social || c?.razon_social || c?.nombre || "Cliente"

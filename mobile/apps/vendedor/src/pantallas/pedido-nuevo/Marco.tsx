@@ -363,7 +363,7 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
           <p className="text-lg font-bold leading-snug text-gray-900">{cliente.nombre}</p>
           <p className="text-sm text-gray-500">
             {cliente.localidad || ""}
-            {cliente.saldo_actual > 0 ? <span className="font-bold text-red-600"> · debe {formatCurrency(cliente.saldo_actual)}</span> : null}
+            {(cliente.saldo_proyectado ?? cliente.saldo_actual) > 0 ? <span className="font-bold text-red-600"> · debe {formatCurrency(cliente.saldo_proyectado ?? cliente.saldo_actual)}</span> : null}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">

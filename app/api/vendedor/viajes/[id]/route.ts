@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 import { requireVendedor } from "@/lib/vendedor/session"
 
 async function getViajePropio(supabase: any, id: string, vendedorIds: string[]) {
@@ -65,12 +66,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       return out
     }
 
-    const saldos = new Map<string, number>()
+    // Saldos desde la fuente única (vendedor lee el PROYECTADO, regla del dueño 16/10)
+    const saldos = await getSaldosClientes(supabase, clienteIds)
     const noVa = new Set<string>()
     const pedidoDe = new Map<string, any>()
     for (const ids of chunk(clienteIds, 150)) {
-      const [{ data: s }, { data: vc }, { data: peds }] = await Promise.all([
-        supabase.from("v_saldo_clientes").select("cliente_id, saldo_actual").in("cliente_id", ids),
+      const [{ data: vc }, { data: peds }] = await Promise.all([
         supabase.from("viajes_clientes").select("cliente_id, estado").eq("viaje_id", id).in("cliente_id", ids),
         supabase
           .from("pedidos")
@@ -81,7 +82,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
           .is("eliminado_at", null)
           .order("created_at", { ascending: false }),
       ])
-      for (const row of s || []) saldos.set(row.cliente_id, Number(row.saldo_actual) || 0)
       for (const row of vc || []) if (row.estado === "no_va") noVa.add(row.cliente_id)
       for (const p of peds || []) if (!pedidoDe.has(p.cliente_id)) pedidoDe.set(p.cliente_id, p)
     }
@@ -95,7 +95,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
           nombre: c.nombre,
           localidad: c.localidad,
           telefono: c.telefono,
-          saldo_actual: saldos.get(cid) || 0,
+          saldo_actual: saldos.get(cid)?.saldo_real ?? 0,
+          saldo_proyectado: saldos.get(cid)?.saldo_proyectado ?? 0,
           estado_viaje: noVa.has(cid) ? "no_va" : pedido ? "pedido_levantado" : "pendiente",
           pedido,
         }

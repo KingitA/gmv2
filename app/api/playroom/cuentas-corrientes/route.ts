@@ -1,115 +1,45 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { todayArgentina } from '@/lib/utils'
-import { fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
+import { fetchAllRows } from '@/lib/playroom/queries'
 
-// Débitos cobrables: facturas, presupuestos y notas de débito. Antes solo
-// FA/FB/FC — el aging ignoraba PRES/ND y sobreestimaba o subestimaba la deuda
-// vs. el libro mayor y la pantalla de cuenta corriente.
-const TIPOS_DEBITO = ['FA', 'FB', 'FC', 'PRES', 'ND', 'NDA', 'NDB', 'NDC']
-
+// Deuda por antigüedad de Playroom = la MISMA vista que el tablero de Finanzas
+// y Jarvis (v_aging_clientes → cc_deuda_antiguedad_base, migración
+// 20261016_cc_fuente_unica.sql). Antes este reporte tenía su propia cuenta por
+// comprobante, con otros tramos, y no coincidía con la cuenta corriente.
+// Tramos: 0–29 / 30–59 / 60–89 / 90+ días desde la fecha del comprobante.
+// Las claves t0_30/t31_60/… se mantienen por compatibilidad con la pantalla.
 export async function GET() {
   try {
     const supabase = createAdminClient()
+    const aging = await fetchAllRows(() => supabase
+      .from('v_aging_clientes')
+      .select('cliente_id, cliente_nombre, localidad_nombre, vendedor_nombre, corriente, dias_30_59, dias_60_89, mas_90, saldo_total, dias_cobro_promedio, fecha_mas_vieja, debitos_pendientes'), 'cliente_id')
 
-    // Comprobantes con saldo pendiente (paginado). Excluye anulados.
-    const comprobantes = await fetchAllRows(() => supabase
-      .from('comprobantes_venta')
-      .select('id, cliente_id, pedido_id, tipo_comprobante, numero_comprobante, punto_venta, fecha, fecha_vencimiento, total_factura, saldo_pendiente, estado_pago')
-      .in('tipo_comprobante', TIPOS_DEBITO)
-      .is('anulado_en', null)
-      .gt('saldo_pendiente', 0))
-
-    if (!comprobantes.length) return NextResponse.json({ rows: [], summary: { total: 0, t0_30: 0, t31_60: 0, t61_90: 0, t90_mas: 0 } })
-
-    // Vendedor desde pedidos (lookup por tandas)
-    const pedidoIds = [...new Set(comprobantes.map(c => c.pedido_id).filter(Boolean))] as string[]
-    const pedidos = await fetchByIds(chunk => supabase.from('pedidos').select('id, vendedor_id').in('id', chunk), pedidoIds)
-    const pedVendMap = new Map(pedidos.map(p => [p.id, p.vendedor_id]))
-
-    // Clientes, vendedores y saldo real del LIBRO (fuente única de deuda).
-    // El detalle por comprobante no resta la plata a cuenta ni las NC sin
-    // imputar; el saldo del libro sí. Se muestran ambos y el TOTAL sale del libro.
-    const [clientes, vendedores, saldosLibro] = await Promise.all([
-      fetchAllRows(() => supabase.from('clientes').select('id, nombre, nombre_razon_social, localidad, vendedor_id')),
-      fetchAllRows(() => supabase.from('vendedores').select('id, nombre')),
-      fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual'), 'cliente_id'),
-    ])
-    const libroMap = new Map(saldosLibro.map((s: any) => [s.cliente_id, Number(s.saldo_actual) || 0]))
-    const clienteMap = new Map(clientes.map(c => [c.id, c]))
-    const vendedorMap = new Map(vendedores.map(v => [v.id, v.nombre]))
-
-    // Fecha de hoy en Argentina, anclada a mediodía UTC para comparar contra
-    // fechas DATE (que JS parsea como medianoche UTC) sin corrimiento de día
-    const hoy = new Date(todayArgentina() + 'T12:00:00Z')
-
-    // Calcular antigüedad de cada comprobante
-    const withAge = comprobantes.map(c => {
-      const ref = (c.fecha_vencimiento ?? c.fecha)?.slice(0, 10)
-      const dias = Math.floor((hoy.getTime() - new Date(ref + 'T12:00:00Z').getTime()) / (1000 * 60 * 60 * 24))
-      const saldo = Number(c.saldo_pendiente)
-      return { ...c, dias_mora: Math.max(0, dias), saldo }
-    })
-
-    // Agregar por cliente
-    type Agg = {
-      total: number; t0_30: number; t31_60: number; t61_90: number; t90_mas: number
-      comprobante_mas_viejo: string | null; dias_mora_sum: number; vendedor_id: string | null
-      count: number
-    }
-    const aggMap = new Map<string, Agg>()
-
-    for (const c of withAge) {
-      if (!aggMap.has(c.cliente_id)) {
-        aggMap.set(c.cliente_id, { total: 0, t0_30: 0, t31_60: 0, t61_90: 0, t90_mas: 0, comprobante_mas_viejo: null, dias_mora_sum: 0, vendedor_id: null, count: 0 })
-      }
-      const agg = aggMap.get(c.cliente_id)!
-      agg.total += c.saldo
-      agg.count++
-      agg.dias_mora_sum += c.dias_mora
-
-      if (c.dias_mora <= 30) agg.t0_30 += c.saldo
-      else if (c.dias_mora <= 60) agg.t31_60 += c.saldo
-      else if (c.dias_mora <= 90) agg.t61_90 += c.saldo
-      else agg.t90_mas += c.saldo
-
-      const ref = c.fecha_vencimiento ?? c.fecha
-      if (!agg.comprobante_mas_viejo || ref < agg.comprobante_mas_viejo) agg.comprobante_mas_viejo = ref
-      if (!agg.vendedor_id && c.pedido_id) agg.vendedor_id = pedVendMap.get(c.pedido_id) ?? null
-    }
-
-    const rows = [...aggMap.entries()]
-      .map(([clienteId, agg]) => {
-        const cl = clienteMap.get(clienteId)
-        const vendedorId = agg.vendedor_id ?? cl?.vendedor_id ?? null
-        const saldoLibro = libroMap.get(clienteId) ?? 0
-        return {
-          cliente_id: clienteId,
-          nombre: cl?.nombre_razon_social ?? cl?.nombre ?? clienteId,
-          localidad: cl?.localidad ?? '—',
-          vendedor_nombre: vendedorId ? (vendedorMap.get(vendedorId) ?? '—') : '—',
-          // Deuda REAL del libro mayor (fuente única) y detalle por comprobante
-          saldo_libro: saldoLibro,
-          pagos_a_cuenta: Math.max(0, Math.round((agg.total - saldoLibro) * 100) / 100),
-          total_deuda: agg.total,
-          t0_30: agg.t0_30,
-          t31_60: agg.t31_60,
-          t61_90: agg.t61_90,
-          t90_mas: agg.t90_mas,
-          comprobante_mas_viejo: agg.comprobante_mas_viejo,
-          dias_promedio_mora: agg.count > 0 ? Math.round(agg.dias_mora_sum / agg.count) : 0,
-          cantidad_comprobantes: agg.count,
-        }
-      })
+    const n = (v: unknown) => Number(v) || 0
+    const rows = aging
+      .map((a: any) => ({
+        cliente_id: a.cliente_id,
+        nombre: a.cliente_nombre ?? a.cliente_id,
+        localidad: a.localidad_nombre ?? '—',
+        vendedor_nombre: a.vendedor_nombre ?? '—',
+        saldo_libro: n(a.saldo_total),
+        pagos_a_cuenta: 0,
+        total_deuda: n(a.saldo_total),
+        t0_30: n(a.corriente),
+        t31_60: n(a.dias_30_59),
+        t61_90: n(a.dias_60_89),
+        t90_mas: n(a.mas_90),
+        comprobante_mas_viejo: a.fecha_mas_vieja ?? null,
+        dias_promedio_mora: Math.round(n(a.dias_cobro_promedio)),
+        cantidad_comprobantes: n(a.debitos_pendientes),
+      }))
       .sort((a, b) => b.total_deuda - a.total_deuda)
 
-    // Resumen global para KPIs. El TOTAL por cobrar sale del LIBRO (deuda
-    // real); los buckets siguen siendo por comprobante y su suma puede
-    // superar el total cuando hay plata a cuenta sin imputar.
+    const total = rows.reduce((s, r) => s + r.total_deuda, 0)
     const summary = {
-      total: rows.reduce((s, r) => s + r.saldo_libro, 0),
-      total_por_comprobante: rows.reduce((s, r) => s + r.total_deuda, 0),
-      pagos_a_cuenta: rows.reduce((s, r) => s + r.pagos_a_cuenta, 0),
+      total,
+      total_por_comprobante: total,
+      pagos_a_cuenta: 0,
       t0_30: rows.reduce((s, r) => s + r.t0_30, 0),
       t31_60: rows.reduce((s, r) => s + r.t31_60, 0),
       t61_90: rows.reduce((s, r) => s + r.t61_90, 0),

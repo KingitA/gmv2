@@ -147,7 +147,12 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
   for (const { p } of de<OpDevolucion>(viv, "viaje.devolucion").filter((x) => x.p.viaje_id === v.id)) {
     sinEnviar.devoluciones++
     const par = porCliente.get(p.cliente_id)
-    if (par) par.devuelto = r2(par.devuelto + p.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_venta_original), 0))
+    if (par) {
+      const total = r2(p.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_venta_original), 0))
+      par.devuelto = r2(par.devuelto + total)
+      // Lo devuelto en el viaje baja el total a cobrar (misma regla que el servidor: saldoDeParada)
+      par.total_a_cobrar = r2(par.total_a_cobrar - total)
+    }
   }
 
   // Resultado de paradas (valor absoluto: la última manda)

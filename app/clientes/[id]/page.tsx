@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import { traerSaldosCliente } from "@/lib/cuenta-corriente/saldos-cliente-fetch"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { formatDateAR } from "@/lib/utils"
@@ -93,6 +94,7 @@ export default function ClienteDetailPage() {
   const [segMetodo, setSegMetodo] = useState(false)
   const [segDescuentos, setSegDescuentos] = useState(false)
   const [ccBalance, setCcBalance] = useState<number | null>(null)
+  const [ccProyectado, setCcProyectado] = useState<number | null>(null)
   const [pedidosCliente, setPedidosCliente] = useState<any[]>([])
   // Segmentación por proveedor / marca (lista/facturación/descuentos propios → comprobante aparte)
   const [segmentacion, setSegmentacion] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
@@ -190,12 +192,12 @@ export default function ClienteDetailPage() {
       setLoading(false)
       return
     }
-    const [clienteRes, vendRes, locRes, listasRes, ccRes, pedRes] = await Promise.all([
+    const [clienteRes, vendRes, locRes, listasRes, saldos, pedRes] = await Promise.all([
       supabase.from("clientes").select("*, localidades(nombre, zonas(nombre))").eq("id", id).single(),
       supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
       supabase.from("localidades").select("*, zonas(nombre)").order("provincia, nombre"),
       supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).order("nombre"),
-      supabase.from("v_saldo_clientes").select("saldo_actual").eq("cliente_id", id).maybeSingle(),
+      traerSaldosCliente(id),
       supabase.from("pedidos").select("id, numero_pedido, fecha, estado, total").eq("cliente_id", id).order("fecha", { ascending: false }).limit(10),
     ])
 
@@ -234,9 +236,9 @@ export default function ClienteDetailPage() {
     setVendedores(vendRes.data || [])
     setLocalidades(locRes.data || [])
     setListasPrecio(listasRes.data || [])
-    // Saldo desde el libro mayor (fuente única): Σdebe − Σhaber
-    const balance = Number((ccRes.data as any)?.saldo_actual ?? 0)
-    setCcBalance(redondear(balance))
+    // Saldo desde la fuente única (lib/cuenta-corriente/saldo.ts): real + proyectado
+    setCcBalance(saldos ? redondear(saldos.saldo_real) : null)
+    setCcProyectado(saldos ? redondear(saldos.saldo_proyectado) : null)
     setPedidosCliente(pedRes.data || [])
     if (clienteRes.data) {
       const c = clienteRes.data as any
@@ -820,13 +822,19 @@ export default function ClienteDetailPage() {
               "block rounded-xl border p-4 transition-shadow hover:shadow-md",
               ccBalance === null || ccBalance === 0 ? "border-neutro-200 bg-neutro-50" : ccBalance > 0 ? "border-alerta-200 bg-alerta-50" : "border-exito-200 bg-exito-50",
             )}>
-              <p className="text-[13px] font-semibold text-neutro-600">Saldo de cuenta corriente</p>
+              <p className="text-[13px] font-semibold text-neutro-600">Saldo real (confirmado)</p>
               {ccBalance === null ? (
                 <p className="mt-1 text-sm text-neutro-400">Sin datos</p>
               ) : (
                 <>
                   <p className={cn("mt-1 text-2xl font-bold tabular-nums", ccBalance > 0 ? "text-alerta-600" : ccBalance < 0 ? "text-exito-600" : "text-neutro-500")}>{moneda(Math.abs(ccBalance), 0)}</p>
                   <p className="text-xs font-medium text-neutro-500">{ccBalance > 0 ? "Nos debe" : ccBalance < 0 ? "A favor del cliente" : "Al día"}</p>
+                  {ccProyectado !== null && Math.abs(ccProyectado - ccBalance) > 0.009 && (
+                    <p className="mt-2 text-xs text-neutro-600">
+                      Proyectado: <b className="tabular-nums">{ccProyectado < 0 ? "a favor " : ""}{moneda(Math.abs(ccProyectado), 0)}</b>
+                      <span className="block text-neutro-400">si se confirma lo pendiente (cobros y devoluciones)</span>
+                    </p>
+                  )}
                 </>
               )}
               <p className="mt-3 text-xs font-semibold text-azul-600">Ver cuenta corriente →</p>

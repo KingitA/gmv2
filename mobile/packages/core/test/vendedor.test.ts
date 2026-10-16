@@ -152,6 +152,10 @@ describe("Vendedor · overlay de clientes y cuenta corriente", () => {
     ])
     expect(v.devoluciones_pendientes[0]).toMatchObject({ id: "d1", monto_total: 150, restante: 150 })
     expect(v.pagos_recientes).toEqual([])
+    // Regla 16/10: la devolución ya descuenta del proyectado y el cobro anulado vuelve a deberse
+    expect(v.cliente.saldo_proyectado).toBe(1000 + 100 - 150)
+    const lista = clientesVisibles([cliente("c1")], [op("devolucion.registrar", { id: "d1", cliente_id: "c1", items: [{ articulo_id: "a1", cantidad: 3, precio_venta_original: 50 }] })])
+    expect(lista[0]!.saldo_proyectado).toBe(850)
   })
 })
 

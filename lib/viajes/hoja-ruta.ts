@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
+import { getSaldosClientes, saldoDeParada, valorDevolucionesDeViaje } from "@/lib/cuenta-corriente/saldo"
 import { fechaCorta, sumarDiasISO } from "@/lib/formato"
 
 /**
@@ -60,13 +60,13 @@ export interface ParadaHoja {
   pedidos: PedidoHoja[]
   bultos: number
   total_viaje: number      // Σ pedidos de este viaje
-  saldo_anterior: number   // saldo real del cliente SIN lo de este viaje
-  total_a_cobrar: number   // saldo_anterior + total_viaje
+  saldo_anterior: number   // saldo PROYECTADO del cliente SIN lo de este viaje (saldoDeParada)
+  total_a_cobrar: number   // saldo_anterior + total_viaje − devuelto
   minimo_exigido: number   // lo que oficina marcó como "cobrar sí o sí"
   cobrado: number
   cobrado_anterior: number // parte del cobro aplicada a comprobantes anteriores
   cobrado_viaje: number    // parte aplicada a comprobantes de este viaje
-  devuelto: number
+  devuelto: number         // valor de las devoluciones en proceso cargadas en este viaje
   cobro_cumplido: boolean  // cobrado >= minimo_exigido
   pagos: PagoHoja[]
 }
@@ -145,7 +145,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
   if (!v) return null
   const viaje = v as any
 
-  const [{ data: paradasRaw }, { data: pedidosRaw }, { data: pagos, error: pagosErr }, { data: devoluciones }, { data: fondos }, { data: gastos }, { data: historial }] =
+  const [{ data: paradasRaw }, { data: pedidosRaw }, { data: pagos, error: pagosErr }, { data: fondos }, { data: gastos }, { data: historial }] =
     await Promise.all([
       supabase.from("viajes_paradas").select("*").eq("viaje_id", viajeId).order("orden", { ascending: true }),
       supabase
@@ -162,7 +162,6 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
         .eq("viaje_id", viajeId)
         .in("estado", ["pendiente_rendicion", "confirmado"])
         .order("created_at", { ascending: true }),
-      supabase.from("devoluciones").select("cliente_id, monto_total").eq("viaje_id", viajeId),
       supabase.from("viajes_fondos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),
       supabase.from("viajes_gastos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),
       supabase.from("viajes_historial").select("id, usuario_id, accion, cambios, created_at").eq("viaje_id", viajeId).order("created_at", { ascending: false }).limit(100),
@@ -188,7 +187,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     ]),
   ].filter(Boolean) as string[]
 
-  const [{ data: clientes }, { data: comprobantes }, { data: remitos }, { data: usuarios }, saldos, { data: cajas }, { data: bancos }, { data: saldoBill }] =
+  const [{ data: clientes }, { data: comprobantes }, { data: remitos }, { data: usuarios }, saldos, { data: cajas }, { data: bancos }, { data: saldoBill }, devueltoPorCliente] =
     await Promise.all([
       clienteIds.length
         ? supabase
@@ -215,7 +214,8 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       usuarioIds.length
         ? supabase.from("usuarios").select("id, nombre").in("id", usuarioIds)
         : Promise.resolve({ data: [] as any[] }),
-      getSaldosClientes(supabase, clienteIds),
+      // Fuente única: proyectado SIN los cobros/devoluciones de este viaje (se muestran aparte)
+      getSaldosClientes(supabase, clienteIds, { excluirViajeId: viajeId }),
       supabase.from("cajas_financieras").select("id, nombre"),
       supabase.from("cuentas_bancarias").select("id, nombre"),
       viaje.chofer_id
@@ -225,6 +225,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
             .eq("cuenta_tipo", "BILLETERA")
             .eq("cuenta_id", viaje.chofer_id)
         : Promise.resolve({ data: [] as any[] }),
+      valorDevolucionesDeViaje(supabase, viajeId),
     ])
 
   const nombreUsuario = new Map((usuarios || []).map((u: any) => [u.id, u.nombre as string]))
@@ -284,9 +285,6 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     if (!pagosPorCliente.has(p.cliente_id)) pagosPorCliente.set(p.cliente_id, [])
     pagosPorCliente.get(p.cliente_id)!.push(fila)
   }
-  const devueltoPorCliente = new Map<string, number>()
-  for (const d of devoluciones || [])
-    devueltoPorCliente.set(d.cliente_id, (devueltoPorCliente.get(d.cliente_id) || 0) + Number(d.monto_total))
 
   const paradasHoja: ParadaHoja[] = paradas.map((pa) => {
     const c: any = clienteMap.get(pa.cliente_id) || {}
@@ -317,8 +315,13 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     )
     // Lo de este viaje que YA pesa en el libro (saldo de sus comprobantes)
     const propioEnLibro = pedidosHoja.reduce((s, p) => s + p.comprobantes.reduce((x, k) => x + k.saldo, 0), 0)
-    const saldoReal = saldos.get(pa.cliente_id)?.saldo_real ?? 0
-    const saldoAnterior = r2(saldoReal - propioEnLibro)
+    const devuelto = r2(devueltoPorCliente.get(pa.cliente_id) || 0)
+    const { saldo_anterior: saldoAnterior, total_a_cobrar } = saldoDeParada({
+      saldos: saldos.get(pa.cliente_id),
+      propioEnLibro,
+      totalViaje,
+      devueltoViaje: devuelto,
+    })
 
     const cobrado = r2(cobradoPorCliente.get(pa.cliente_id) || 0)
     const pagosCli = pagosPorCliente.get(pa.cliente_id) || []
@@ -351,12 +354,12 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       bultos: pedidosHoja.reduce((s, p) => s + p.bultos, 0),
       total_viaje: totalViaje,
       saldo_anterior: saldoAnterior,
-      total_a_cobrar: r2(saldoAnterior + totalViaje),
+      total_a_cobrar,
       minimo_exigido: minimo,
       cobrado,
       cobrado_anterior: cobradoAnterior,
       cobrado_viaje: cobradoViaje,
-      devuelto: r2(devueltoPorCliente.get(pa.cliente_id) || 0),
+      devuelto,
       cobro_cumplido: cobrado + 0.01 >= minimo,
       pagos: pagosCli,
     }

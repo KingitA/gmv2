@@ -10,7 +10,7 @@
 // queda a cuenta del cliente (su saldo ya bajó al confirmarse el cobro).
 
 import { useEffect, useMemo, useState } from "react"
-import { createClient } from "@/lib/supabase/client"
+import { traerSaldosCliente } from "@/lib/cuenta-corriente/saldos-cliente-fetch"
 import {
   ComprobantesSelector,
   PEDIDO_PREFIX,
@@ -50,12 +50,8 @@ export function ImputarPago({
   const [dialogoFalta, setDialogoFalta] = useState<number | null>(null)
 
   useEffect(() => {
-    createClient()
-      .from("v_saldo_clientes")
-      .select("saldo_actual")
-      .eq("cliente_id", pago.cliente_id)
-      .single()
-      .then(({ data }) => setSaldoCliente(data ? Number(data.saldo_actual) : null))
+    // Fuente única (lib/cuenta-corriente/saldo.ts): saldo real del cliente
+    traerSaldosCliente(pago.cliente_id).then((s) => setSaldoCliente(s ? s.saldo_real : null))
   }, [pago.cliente_id])
 
   const imputaciones = useMemo(
@@ -163,7 +159,7 @@ export function ImputarPago({
           Disponible de este cobro: <b style={NUM}>{moneda(pago.disponible)}</b>
           {saldoCliente != null && (
             <>
-              {" · "}Saldo del cliente:{" "}
+              {" · "}Saldo real del cliente:{" "}
               <b className={saldoCliente > 0 ? "text-red-600" : "text-green-600"} style={NUM}>
                 {moneda(saldoCliente)}
               </b>

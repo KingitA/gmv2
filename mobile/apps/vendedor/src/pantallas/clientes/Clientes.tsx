@@ -24,7 +24,8 @@ function filtrarClientes(clientes: Cliente[], q: string, filtro: string, localid
   return clientes.filter((c) => {
     if (texto && !localMatch(texto, c.nombre, c.razon_social, c.cuit, c.codigo_cliente, c.direccion, c.localidad)) return false
     if (localidad && c.localidad !== localidad) return false
-    if (filtro === "con_deuda" && !(c.saldo_actual > 0)) return false
+    // El vendedor lee el PROYECTADO (regla del dueño 16/10)
+    if (filtro === "con_deuda" && !((c.saldo_proyectado ?? c.saldo_actual) > 0.005)) return false
     if (filtro === "sin_rendir" && !(c.pagos_sin_rendir > 0)) return false
     return true
   })
@@ -119,7 +120,8 @@ export function Clientes() {
                     <p className="truncate text-sm text-gray-500">{[c.direccion, c.localidad, c.condicion_pago].filter(Boolean).join(" · ") || "—"}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className={`font-bold ${c.saldo_actual > 0 ? "text-red-600" : "text-green-600"}`}>{formatCurrency(c.saldo_actual)}</p>
+                    <p className={`font-bold ${(c.saldo_proyectado ?? c.saldo_actual) > 0 ? "text-red-600" : "text-green-600"}`}>{formatCurrency(c.saldo_proyectado ?? c.saldo_actual)}</p>
+                    {Math.abs(c.saldo_actual - (c.saldo_proyectado ?? c.saldo_actual)) > 0.01 && <p className="text-[10px] text-gray-400">real {formatCurrency(c.saldo_actual)}</p>}
                     {c.pagos_sin_rendir > 0 && (
                       <span className="mt-1 inline-block rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-bold text-yellow-700">🟡 {c.pagos_sin_rendir} sin rendir</span>
                     )}

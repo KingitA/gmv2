@@ -114,18 +114,34 @@ function cobradoSinEnviar(ops: ItemOutbox[]): Map<string, { monto: number; canti
 /** Lo que un cobro va a descontar del saldo al confirmarse (= lo que proyecta el servidor). */
 function montoDeCobro(c: any): number {
   const suma = (l: any[] | undefined) => (l || []).reduce((s, x) => s + Number(x.monto || 0), 0)
-  // Servidor: proyectado = real − (monto del pago + 10% contado + ajuste), y el monto del pago es
-  // imputado + anticipos + a cuenta − bonificación − ajuste − créditos − devoluciones ⇒ queda:
+  // Servidor (lib/cuenta-corriente/saldo.ts): proyectado = real − (monto del pago + 10% contado +
+  // ajuste) − devoluciones en proceso. El monto del pago es imputado + anticipos + a cuenta −
+  // bonificación − ajuste − créditos − devoluciones descontadas; la devolución en sí ya baja el
+  // proyectado por su cuenta (una sola vez) ⇒ el cobro baja:
   return r2(suma(c.imputaciones) + suma(c.pedidos) + Number(c.pago_a_cuenta || 0) - suma(c.creditos) - suma(c.devoluciones))
+}
+
+/** Devoluciones cargadas acá sin enviar, por cliente: ya descuentan del proyectado (regla del dueño 16/10). */
+function devueltoSinEnviar(ops: ItemOutbox[]): Map<string, number> {
+  const m = new Map<string, number>()
+  for (const { p } of de<any>(vivas(ops), "devolucion.registrar")) {
+    const total = (p.items || []).reduce((s: number, i: any) => s + Number(i.cantidad || 0) * Number(i.precio_venta_original || 0), 0)
+    m.set(p.cliente_id, r2((m.get(p.cliente_id) || 0) + total))
+  }
+  return m
 }
 
 export function clientesVisibles(filas: Cliente[], ops: ItemOutbox[]): Cliente[] {
   const cobrado = cobradoSinEnviar(ops)
+  const devuelto = devueltoSinEnviar(ops)
   const ids = new Set(filas.map((c) => c.id))
   const out = filas.map((c) => {
-    const e = conEdiciones(c, ops)
+    let e = conEdiciones(c, ops)
     const k = cobrado.get(c.id)
-    return k ? { ...e, saldo_proyectado: r2(e.saldo_proyectado - k.monto), pagos_sin_rendir: e.pagos_sin_rendir + k.cantidad } : e
+    if (k) e = { ...e, saldo_proyectado: r2(e.saldo_proyectado - k.monto), pagos_sin_rendir: e.pagos_sin_rendir + k.cantidad }
+    const d = devuelto.get(c.id)
+    if (d) e = { ...e, saldo_proyectado: r2(e.saldo_proyectado - d) }
+    return e
   })
   for (const { p } of de<any>(vivas(ops), "cliente.crear")) {
     if (ids.has(p.id)) continue
@@ -144,7 +160,14 @@ export function clientesVisibles(filas: Cliente[], ops: ItemOutbox[]): Cliente[]
  */
 export function cuentaVisible(cc: CuentaCliente, ops: ItemOutbox[], marcaContado = "[10% CONTADO]"): CuentaCliente {
   const anulando = new Set(de<OpCobroAnular>(vivas(ops), "cobro.anular").map((x) => x.p.pago_id))
-  let out: CuentaCliente = { ...cc, pagos_recientes: cc.pagos_recientes.filter((p) => !anulando.has(p.id)) }
+  // Un cobro anulado acá deja de bajar el proyectado: el cliente vuelve a deber (aprox. por el
+  // monto; el 10% y el ajuste exactos llegan con la próxima sincronización)
+  const vuelve = cc.pagos_recientes.filter((p) => anulando.has(p.id) && p.estado !== "confirmado").reduce((s, p) => s + Number(p.monto || 0), 0)
+  let out: CuentaCliente = {
+    ...cc,
+    pagos_recientes: cc.pagos_recientes.filter((p) => !anulando.has(p.id)),
+    cliente: vuelve ? { ...cc.cliente, saldo_proyectado: r2(Number(cc.cliente.saldo_proyectado ?? cc.cliente.saldo_actual) + vuelve) } : cc.cliente,
+  }
 
   for (const { op, p } of de<any>(vivas(ops), "cobro.registrar")) {
     for (const c of (p.clientes || []).filter((x: any) => x.cliente_id === cc.id)) {
@@ -174,7 +197,12 @@ export function cuentaVisible(cc: CuentaCliente, ops: ItemOutbox[], marcaContado
   for (const { p } of de<any>(vivas(ops), "devolucion.registrar")) {
     if (p.cliente_id !== cc.id || out.devoluciones_pendientes.some((d) => d.id === p.id)) continue
     const total = r2((p.items || []).reduce((s: number, i: any) => s + Number(i.cantidad || 0) * Number(i.precio_venta_original || 0), 0))
-    out = { ...out, devoluciones_pendientes: [{ id: p.id, numero_devolucion: "Sin enviar", pedido_id: p.pedido_id ?? null, monto_total: total, restante: total }, ...out.devoluciones_pendientes] }
+    out = {
+      ...out,
+      devoluciones_pendientes: [{ id: p.id, numero_devolucion: "Sin enviar", pedido_id: p.pedido_id ?? null, monto_total: total, restante: total }, ...out.devoluciones_pendientes],
+      // Ya descuenta del proyectado (regla del dueño 16/10), igual que en el servidor
+      cliente: { ...out.cliente, saldo_proyectado: r2(Number(out.cliente.saldo_proyectado ?? out.cliente.saldo_actual) - total) },
+    }
   }
   return out
 }

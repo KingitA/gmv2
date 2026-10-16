@@ -239,8 +239,8 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
   // ── Saldo REAL y PROYECTADO: UNA sola fórmula para todas las pantallas
   // (lib/cuenta-corriente/saldo.ts). El proyectado descuenta exactamente lo
   // que los cobros pendientes van a hacer al confirmarse (plata + NC 10%
-  // real + ajuste − débito 10% s/créditos). Las devoluciones en proceso NO
-  // entran (todavía no son documento): se muestran aparte como estimado.
+  // real + ajuste − débito 10% s/créditos) y las devoluciones en proceso (sin
+  // NC todavía) por su valor: regla del dueño 16/10, apenas se cargan ya descuentan.
   const saldos = await getSaldosCliente(supabase, id)
 
   // Vista unificada para la pantalla de cobro: TODOS los pedidos vigentes
@@ -267,7 +267,7 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
       saldo_actual: saldos.saldo_real,
       saldo_proyectado: saldos.saldo_proyectado,
       pendiente_verificacion: saldos.pendiente_verificacion,
-      devoluciones_en_proceso: devolucionesConRestante.reduce((s: number, d: any) => s + Number(d.restante || 0), 0),
+      devoluciones_en_proceso: saldos.devoluciones_en_proceso,
       actualizado_at: actualizadoAt,
       actualizado_por_nombre: actualizadoPorNombre,
     },

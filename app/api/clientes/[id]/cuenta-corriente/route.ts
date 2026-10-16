@@ -164,6 +164,7 @@ export async function GET(
                 saldo_total,
                 saldo_proyectado: saldos.saldo_proyectado,
                 pendiente_verificacion: saldos.pendiente_verificacion,
+                devoluciones_en_proceso: saldos.devoluciones_en_proceso,
                 condicion_iva: cliente.condicion_iva || null,
             },
             comprobantes: allComprobantes.map((comp: any) => ({

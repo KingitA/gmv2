@@ -73,7 +73,8 @@ export async function GET(request: Request) {
       }
     })
 
-    if (filtro === "con_deuda") resultado = resultado.filter((c) => c.saldo_actual > 0)
+    // "Con deuda" = lo que el vendedor ve: el proyectado (regla del dueño 16/10)
+    if (filtro === "con_deuda") resultado = resultado.filter((c) => c.saldo_proyectado > 0.005)
     if (filtro === "sin_rendir") resultado = resultado.filter((c) => c.pagos_sin_rendir > 0)
 
     // Localidades disponibles para los chips de filtro (sobre el total sin filtrar)

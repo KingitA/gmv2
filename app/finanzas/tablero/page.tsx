@@ -109,7 +109,7 @@ export default function TableroTesoreriaPage() {
       a.push({
         tipo: "Verificación",
         nivel: "warn",
-        texto: `Hay cobranzas sin verificar hace ${verif.dias_mas_viejo} días (${verif.sin_verificar} en total por ${fmt(Number(verif.monto_sin_verificar))})`,
+        texto: `Hay cobranzas confirmadas sin segunda firma hace ${verif.dias_mas_viejo} días (${verif.sin_verificar} en total por ${fmt(Number(verif.monto_sin_verificar))})`,
       })
     }
     for (const d of data?.dias_calle || []) {
@@ -161,10 +161,10 @@ export default function TableroTesoreriaPage() {
               </Card>
               <Card>
                 <CardContent className="pt-5">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Cobranzas verificadas</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Cobranzas con segunda firma</p>
                   <p className="text-2xl font-bold tabular-nums">{pctVerificado === null ? "—" : `${pctVerificado}%`}</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {verif ? `${verif.sin_verificar} sin verificar · la más vieja ${verif.dias_mas_viejo ?? 0} días` : "sin datos"}
+                    {verif ? `${verif.sin_verificar} sin segunda firma · la más vieja ${verif.dias_mas_viejo ?? 0} días` : "sin datos"}
                   </p>
                 </CardContent>
               </Card>
@@ -215,7 +215,7 @@ export default function TableroTesoreriaPage() {
               <Card>
                 <CardContent className="pt-5">
                   <p className="text-sm font-semibold mb-3 flex items-center gap-2">
-                    <Wallet className="h-4 w-4 text-muted-foreground" /> Aging de deuda de clientes
+                    <Wallet className="h-4 w-4 text-muted-foreground" /> Deuda de clientes por antigüedad
                     <span className="text-muted-foreground font-normal">· total {fmt(aging?.saldo_total ?? 0)}</span>
                   </p>
                   <div className="space-y-2">

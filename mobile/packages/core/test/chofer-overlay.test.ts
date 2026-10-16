@@ -85,6 +85,8 @@ describe("Chofer · overlay del viaje (hoja de ruta)", () => {
       op("viaje.parada", { viaje_id: V, parada_id: "p1", cliente_id: C1, estado: "entregado_parcial", bultos_entregados: 99, motivo_no_entrega: "cerrado" }),
     ])
     expect(v.paradas[0]!.devuelto).toBe(500)
+    // Lo devuelto baja el total a cobrar de la parada (= servidor, saldoDeParada)
+    expect(v.paradas[0]!.total_a_cobrar).toBe(viaje().paradas[0]!.total_a_cobrar - 500)
     expect(v.paradas[0]!.estado).toBe("entregado_parcial")
     expect(v.paradas[0]!.bultos_entregados).toBe(3) // tope: los bultos de la parada (= servidor)
     expect(v.paradas[0]!.resultadoSinEnviar).toBe(true)

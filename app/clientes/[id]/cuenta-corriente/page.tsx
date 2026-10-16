@@ -114,6 +114,7 @@ interface CuentaCorrienteData {
         saldo_total: number;
         saldo_proyectado?: number;
         pendiente_verificacion?: number;
+        devoluciones_en_proceso?: number;
         condicion_iva?: string | null;
     };
     comprobantes: Comprobante[];
@@ -484,10 +485,11 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                         <p className={`text-3xl font-bold ${data.cliente.saldo_total > 0 ? 'text-red-600' : 'text-green-600'}`}>
                             {moneda(data.cliente.saldo_total)}
                         </p>
-                        {(data.cliente.pendiente_verificacion ?? 0) > 0 && (
+                        {data.cliente.saldo_proyectado != null && Math.abs(data.cliente.saldo_proyectado - data.cliente.saldo_total) > 0.009 && (
                             <p className="text-xs text-amber-600 mt-1">
-                                Pendiente de verificación: {moneda((data.cliente.pendiente_verificacion ?? 0))}
-                                {' · '}Proyectado: {moneda((data.cliente.saldo_proyectado ?? 0))}
+                                {(data.cliente.pendiente_verificacion ?? 0) > 0 && <>Cobros sin verificar: {moneda(data.cliente.pendiente_verificacion ?? 0)}{' · '}</>}
+                                {(data.cliente.devoluciones_en_proceso ?? 0) > 0 && <>Devoluciones en proceso: {moneda(data.cliente.devoluciones_en_proceso ?? 0)}{' · '}</>}
+                                Proyectado: {moneda(data.cliente.saldo_proyectado)}
                             </p>
                         )}
                     </div>
@@ -593,10 +595,20 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                             <TableCell />
                                         </TableRow>
                                     ))}
-                                    {cobrosEnCalle.length > 0 && data.cliente.saldo_proyectado != null && (
+                                    {(data.cliente.devoluciones_en_proceso ?? 0) > 0 && (
+                                        <TableRow className="bg-slate-50/70 text-gray-400 italic">
+                                            <TableCell />
+                                            <TableCell className="whitespace-nowrap">Devoluciones en proceso</TableCell>
+                                            <TableCell>cargadas, sin nota de crédito todavía</TableCell>
+                                            <TableCell />
+                                            <TableCell className="text-right tabular-nums">(−{moneda(data.cliente.devoluciones_en_proceso ?? 0)})</TableCell>
+                                            <TableCell />
+                                        </TableRow>
+                                    )}
+                                    {(cobrosEnCalle.length > 0 || (data.cliente.devoluciones_en_proceso ?? 0) > 0) && data.cliente.saldo_proyectado != null && (
                                         <TableRow className="bg-slate-100">
                                             <TableCell colSpan={5} className="font-semibold text-gray-600">
-                                                Saldo proyectado (si la oficina confirma lo cobrado en calle, con su 10%, créditos y ajustes)
+                                                Saldo proyectado (si se confirma todo lo pendiente: cobros en calle con su 10%, créditos y ajustes, y devoluciones en proceso)
                                             </TableCell>
                                             <TableCell className={`text-right font-bold tabular-nums ${data.cliente.saldo_proyectado > 0 ? "text-red-500" : "text-green-600"}`}>
                                                 {moneda(data.cliente.saldo_proyectado)}

@@ -379,7 +379,7 @@ export function ViajeDetalle() {
                       <p className="truncate font-bold text-gray-900">{c.nombre}</p>
                       <p className="text-sm text-gray-500">
                         {c.localidad || "—"}
-                        {c.saldo_actual > 0 ? <span className="font-bold text-red-600"> · debe {formatCurrency(c.saldo_actual)}</span> : null}
+                        {(c.saldo_proyectado ?? c.saldo_actual) > 0 ? <span className="font-bold text-red-600"> · debe {formatCurrency(c.saldo_proyectado ?? c.saldo_actual)}</span> : null}
                       </p>
                     </div>
                     <div className="flex shrink-0 gap-1.5">
