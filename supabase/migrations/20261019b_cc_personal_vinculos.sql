@@ -6,7 +6,9 @@
 -- Cada UPDATE exige número de cliente Y nombre: si alguno no coincide, no se
 -- aplica (no hay riesgo de vincular la cuenta equivocada).
 -- No toca saldos ni movimientos. IDEMPOTENTE.
--- Faltan (el dueño pasa el número de cliente): PEREYRA HORACIO, GABRIEL AMAN.
+-- PEREYRA HORACIO ya no trabaja con la empresa (dueño, 19/10): su código de
+-- vendedor queda inactivo (no tiene clientes asignados).
+-- Falta: GABRIEL AMAN (usuario GABRIEL) — no tiene cuenta de cliente todavía.
 -- ═══════════════════════════════════════════════════════════════════════
 
 -- Cuentas (EMPLEADO)/(VIAJANTE)/(VENDEDOR)/(SOCIO)/(EMPLEADA) y las de la familia
@@ -57,6 +59,10 @@ FROM (VALUES
 JOIN public.clientes c ON c.codigo_cliente = v.codigo AND upper(c.nombre) = v.nombre
 WHERE ve.id = v.vendedor_id
   AND ve.cuenta_cliente_id IS DISTINCT FROM c.id;
+
+-- PEREYRA HORACIO: código de vendedor inactivo (sin clientes asignados)
+UPDATE public.vendedores SET activo = false
+WHERE id = '8541c650-558c-4f64-9e42-a21401587f20' AND nombre = 'PEREYRA HORACIO' AND activo;
 
 -- Verificación (correr a mano): las 12 cuentas con su usuario y sus códigos
 --   SELECT c.codigo_cliente, c.nombre, c.es_empleado, c.empleado_usuario_id,
