@@ -135,9 +135,11 @@ Lo que se hizo:
 - Devoluciones (migración `20261016c`): `revisarDevolucion` revisa renglón por renglón, solo desde pendiente y sin duplicar stock. La NC solo sale de devoluciones aceptadas y solo por los renglones aceptados. Se sacó la auto-confirmación al rendir el viaje y se registra el usuario real.
 - Bandeja `/pendientes` (`/api/pendientes`): cobros sin confirmar, entregas a cuenta sin decidir, anticipos esperando factura, devoluciones esperando depósito, devoluciones aceptadas sin NC y rendiciones abiertas.
 
-Orden de despliegue: el dueño aplica `20261016b` y `20261016c` **antes** de pasar el código a main.
+Migraciones `20261016b` y `20261016c` APLICADAS por el dueño y verificadas (19/10).
+
+25. Mostrador: un cobro que carga el mostrador queda pendiente hasta que un admin lo confirma en Caja (confirmado por el dueño el 19/10).
+26. Todo cambio que toque las apps va a `docs/CUENTAS-CORRIENTES-APPS.md`, el traspaso para el agente de cada app.
 
 Pendiente:
 - La app de depósito todavía acepta la devolución entera: falta adaptar su pantalla, con el OK del dueño.
 - Una devolución rechazada con plata ya descontada solo se avisa en el momento. Falta mostrarla en la bandeja.
-- El mostrador ahora carga cobros pendientes: hay que confirmarle al dueño que está bien.

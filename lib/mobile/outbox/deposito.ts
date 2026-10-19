@@ -193,7 +193,7 @@ const devolucionRecibir: HandlerDef<{ devolucion_id: string; items_confirmados: 
   async aplicar(ctx, m) {
     const usuario = await getUsuarioActual(ctx.supabase)
     const r = await negocio(() =>
-      confirmarDevolucion(ctx.supabase, m.payload.devolucion_id, m.payload.items_confirmados, usuario.nombre, m.capturado_at),
+      confirmarDevolucion(ctx.supabase, m.payload.devolucion_id, m.payload.items_confirmados, usuario.nombre, m.capturado_at, usuario.id),
     )
     const articulos = [...new Set(m.payload.items_confirmados.map((i) => i.articulo_id).filter(esId))]
     const arts = await cargarArticulosDeposito(ctx.admin, articulos)
