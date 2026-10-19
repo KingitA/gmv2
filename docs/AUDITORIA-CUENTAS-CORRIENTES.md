@@ -180,3 +180,26 @@ Pendiente:
 - El dueño aplica `20261019_cc_personal.sql` antes de main.
 - La oficina vincula cada cuenta en `/personal` y aprieta "Poner al día".
 - APK vendedor (dos cajitas y pantalla de retiro) y APK chofer: ver `docs/CUENTAS-CORRIENTES-APPS.md`.
+
+## Etapa 4 — Puesta a cero y apertura (20/10, en preparación)
+
+Reglas del dueño (20/10):
+
+32. La fecha de corte todavía no está definida.
+33. Los presupuestos y facturas sin CAE emitidos en la prueba también están en el sistema viejo: se borran y vuelven con la apertura.
+34. Finanzas:
+    - Los cheques son de prueba, salvo los echeqs PROPIOS emitidos a proveedores (ENTREGADO_A_PROVEEDOR: 2 a La Mariposa y 1 a Rofina).
+    - Los saldos de bancos son reales pero cambian todos los días: se borran y el dueño los recarga.
+35. La apertura sale del reporte "Comprobantes Impagos de Clientes" del sistema viejo (`.chr`, Windows-1252). Es el mismo archivo con el que se cargaron los clientes de Freije el 01/10.
+
+Simulacro, solo lectura, del 20/10:
+- Los 12 comprobantes con CAE se cancelan entre sí (cada FA con su NCA de anulación; la ND de HEMA con su NC): suman $0 y se conservan.
+- En Finanzas hay 438 cheques; solo 3 son reales.
+
+Hecho:
+- `lib/apertura/parsear-chr.ts`: lector puro del reporte. Probado con el archivo de Freije: 22 renglones, 7 clientes que cuadran contra el saldo del reporte, total $16.018.014,27 igual al del reporte.
+- `lib/apertura/importar.ts`, `POST /api/apertura` y la pantalla `/apertura` (solo admin). La previsualización bloquea si un cliente no existe, si hay un tipo desconocido o si la suma no da el saldo del reporte. La carga se confirma por tandas y es idempotente: la previsualización contra la base real ya reconoce como cargados los 22 renglones de Freije. Sigue las convenciones de la apertura anterior ("APERTURA GM", total_neto = importe final) y guarda la fecha a mediodía de Argentina, para que no se corra de día.
+
+Pendiente:
+- La migración `20261020_cc_puesta_a_cero.sql` (simulacro + copia en el esquema `archivo_pruebas` + borrado; no se ejecuta sola) fue **frenada por el control de permisos** de la PC al escribirla. El dueño tiene que autorizarla.
+- Decisión del dueño sobre las comisiones de los comprobantes del sistema viejo cobrados después del corte. Hoy no generan comisión, porque no tienen kardex.

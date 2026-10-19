@@ -33,6 +33,7 @@ export const ROUTE_RULES: [string, string[]][] = [
   // mostrador (queda pendiente); la Caja (confirmar, imputar) es solo admin.
   ['/pagos-clientes',       ['admin', 'administrativo', 'mostrador']],
   ['/caja',                 ['admin']],
+  ['/apertura',             ['admin']],
   ['/seleccionar-modulo',   ['admin', 'deposito', 'chofer']],
   ['/viajantes',            ['admin']],
   ['/finanzas',             ['admin']],
