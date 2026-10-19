@@ -2,7 +2,8 @@ import { useNavigate } from "react-router"
 import { useContadoresOutbox, useNoEnviados, useOverlay, useRuntime } from "@gm/core"
 import { DS } from "../datasets"
 import { useBorradores } from "../datos/borradores"
-import { rechazosDe, useClientes, useFilaBilletera, useMe, usePedidos, useRefrescarAlEntrar, useYo } from "../datos/hooks"
+import { rechazosDe, useClientes, useMe, usePedidos, useRefrescarAlEntrar, useYo } from "../datos/hooks"
+import { useBilletera } from "../datos/billetera"
 import { usePreciosVencidos } from "../datos/precios"
 import { AvisosBcra, BadgeEstado, fechaConDia, fechaCorta, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinEnviar, useEnterCierraTeclado, useToast } from "../ui"
 
@@ -12,7 +13,7 @@ import { AvisosBcra, BadgeEstado, fechaConDia, fechaCorta, formatCurrency, HojaC
 interface Me {
   usuario: { id: string; nombre: string | null; email: string | null }
   total_clientes: number
-  billetera: { saldo: number; cheques_cantidad: number; comisiones_pendientes: number }
+  billetera: { saldo: number; balance?: number; cheques_cantidad: number; comisiones_pendientes: number }
   proximas_zonas: Array<{ id: string; nombre: string; fecha: string; estado: string; zonas?: { nombre: string; descripcion: string | null } | null; mis_clientes_en_zona: number }>
 }
 
@@ -24,8 +25,13 @@ export function Inicio() {
   // Saldo: la MISMA fila que muestra la pantalla Billetera (un solo número en toda la app).
   // Si la billetera todavía no se descargó en este equipo, el resumen de "me" (mismo cálculo
   // en el servidor: lib/vendedor/billetera-saldo.ts).
-  const { fila: billetera } = useFilaBilletera<{ saldo?: number; balance?: number }>("billetera")
-  const saldoBilletera = billetera?.saldo ?? billetera?.balance ?? me?.billetera?.saldo ?? 0
+  // Dos números, nunca sumados (regla del dueño 19/10): la plata de la EMPRESA en la mano y SU
+  // cuenta personal. Misma fila que la pantalla Billetera (datos/billetera.ts), con los retiros
+  // sin enviar descontados. Sin la billetera descargada, el resumen de "me".
+  const { data: billetera } = useBilletera()
+  const plataEmpresa = billetera?.balance ?? me?.billetera?.balance ?? me?.billetera?.saldo ?? 0
+  const cheques = billetera?.cheques_cantidad ?? me?.billetera?.cheques_cantidad ?? 0
+  const cuenta = billetera?.cuenta_personal ?? null
   const { clientes } = useClientes()
   const { pedidos } = usePedidos()
   const borradores = useBorradores().filter((b) => b.items.length > 0)
@@ -79,15 +85,22 @@ export function Inicio() {
         <button onClick={() => navigate("/billetera")} className="w-full rounded-2xl bg-emerald-700 p-5 text-left text-white shadow-md">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-emerald-200">💰 Saldo en billetera</p>
-              <p className="mt-1 text-3xl font-bold">{formatCurrency(saldoBilletera)}</p>
-              {(me?.billetera?.cheques_cantidad || 0) > 0 && (
-                <p className="mt-0.5 text-xs text-emerald-200">🧾 {me!.billetera.cheques_cantidad} {me!.billetera.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano</p>
+              <p className="text-sm text-emerald-200">💵 Plata de la empresa en tu mano</p>
+              <p className="mt-1 text-3xl font-bold">{formatCurrency(plataEmpresa)}</p>
+              {cheques > 0 && (
+                <p className="mt-0.5 text-xs text-emerald-200">🧾 {cheques} {cheques === 1 ? "cheque" : "cheques"} en mano</p>
               )}
             </div>
             <div className="text-right">
-              <p className="text-sm text-emerald-200">Comisiones pend.</p>
-              <p className="text-lg font-bold">{formatCurrency(me?.billetera?.comisiones_pendientes ?? 0)}</p>
+              <p className="text-sm text-emerald-200">👤 Tu cuenta</p>
+              {cuenta ? (
+                <>
+                  <p className={`text-lg font-bold ${cuenta.a_favor >= 0 ? "" : "text-red-200"}`}>{formatCurrency(Math.abs(cuenta.a_favor))}</p>
+                  <p className="text-[11px] text-emerald-200">{cuenta.a_favor >= 0 ? "a tu favor" : "debés"}</p>
+                </>
+              ) : (
+                <p className="text-lg font-bold">{formatCurrency(me?.billetera?.comisiones_pendientes ?? 0)}<span className="block text-[11px] font-normal text-emerald-200">comisiones pend.</span></p>
+              )}
             </div>
           </div>
         </button>

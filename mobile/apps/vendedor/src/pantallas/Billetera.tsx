@@ -4,6 +4,7 @@ import { useOnline, useParamEstado, useRuntime } from "@gm/core"
 import { fecha } from "@gm/formato"
 import { DS } from "../datasets"
 import { useFilaBilletera, useRefrescarAlEntrar } from "../datos/hooks"
+import { useBilletera } from "../datos/billetera"
 import { fechaCorta, formatCurrency, NecesitaConexion, Pantalla, SinDescargar } from "../ui"
 
 // Billetera del viajante (= app/vendedor/billetera/page.tsx). Todo sale de la réplica
@@ -20,21 +21,6 @@ interface Movimiento {
   monto: number
   concepto: string | null
   fecha: string
-}
-
-interface BilleteraData {
-  balance: number
-  /** Saldo cuenta corriente: efectivo en calle + saldos de rendiciones */
-  saldo?: number
-  desglose: { efectivo: number; cheques: number; transferencias: number }
-  cheques_cantidad?: number
-  pagos_sin_rendir: number
-  en_viaje: { total: number; cantidad: number }
-  deuda_rendiciones?: number
-  faltante_declarado?: number
-  comisiones_pendientes: unknown[]
-  total_pendiente_comisiones: number
-  historial: Movimiento[]
 }
 
 interface PedidoComision {
@@ -108,7 +94,8 @@ export function Billetera() {
   const comTipo: ComTipo = comTipoParam === "vendida" ? "vendida" : "cobrada"
   useRefrescarAlEntrar(DS.billetera)
 
-  const { fila: data, cargando } = useFilaBilletera<BilleteraData>("billetera")
+  // Billetera en dos cajitas (datos/billetera.ts), con los retiros sin enviar ya descontados
+  const { data, cargando } = useBilletera()
   const { fila: comData, cargando: comCargando } = useFilaBilletera<ComisionesData>(`comisiones:${comTipo}`)
 
   return (
@@ -117,13 +104,11 @@ export function Billetera() {
         <SinDescargar que="la billetera" />
       ) : (
         <div className="mx-auto w-full max-w-2xl space-y-4 p-4">
-          {/* Saldo */}
-          <section className="rounded-2xl bg-emerald-700 p-6 text-center text-white shadow-md">
-            <p className="text-sm text-emerald-200">💰 Saldo en billetera</p>
-            <p className="mt-1 text-4xl font-bold">{formatCurrency(data.saldo ?? data.balance)}</p>
-            {Math.abs((data.saldo ?? data.balance) - data.balance) > 0.005 && (
-              <p className="mt-0.5 text-xs text-emerald-200">💵 {formatCurrency(data.balance)} en efectivo en la calle</p>
-            )}
+          {/* ── 1. Plata de la EMPRESA en tu mano (lo que tenés que rendir) ── */}
+          <section className="rounded-2xl bg-emerald-700 p-5 text-white shadow-md">
+            <p className="text-sm text-emerald-200">💵 Plata de la empresa en tu mano</p>
+            <p className="mt-1 text-4xl font-bold">{formatCurrency(data.balance)}</p>
+            <p className="text-xs text-emerald-200">efectivo cobrado{(data.retiros_sin_rendir || 0) > 0.005 ? `, menos ${formatCurrency(data.retiros_sin_rendir)} que retiraste` : ""}</p>
             {(data.cheques_cantidad || 0) > 0 && (
               <p className="mt-1 text-sm font-medium text-emerald-100">
                 🧾 {data.cheques_cantidad} {data.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano
@@ -145,21 +130,45 @@ export function Billetera() {
                 </p>
               </div>
             )}
-            {Math.abs(data.deuda_rendiciones ?? 0) > 0.005 && (
-              <div className={`mt-3 rounded-xl border px-3 py-2 text-sm ${(data.deuda_rendiciones ?? 0) > 0 ? "border-red-300/40 bg-red-400/20" : "border-sky-300/40 bg-sky-400/20"}`}>
-                <p className="text-white">
-                  {(data.deuda_rendiciones ?? 0) > 0 ? (
-                    <>📒 Saldo de rendiciones: <span className="font-bold">{formatCurrency(data.deuda_rendiciones)}</span> en tu cuenta — lo debés a oficina (retenciones y diferencias).</>
-                  ) : (
-                    <>✔ Saldo de rendiciones a tu favor: <span className="font-bold">{formatCurrency(Math.abs(data.deuda_rendiciones ?? 0))}</span> (entregaste de más).</>
-                  )}
-                </p>
-              </div>
-            )}
-            <button onClick={() => navigate("/rendiciones")} className="mt-4 w-full rounded-xl bg-white py-3 font-bold text-emerald-700">
-              🧾 Rendiciones
-            </button>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button onClick={() => navigate("/rendiciones")} className="min-h-12 rounded-xl bg-white font-bold text-emerald-700">🧾 Rendiciones</button>
+              <button onClick={() => navigate("/billetera/retiro")} className="min-h-12 rounded-xl border-2 border-white/70 font-bold text-white">💸 Retirar</button>
+            </div>
             <p className="mt-2 text-xs text-emerald-200">Vos rendís el dinero; oficina lo confirma al recibirlo (doble firma).</p>
+          </section>
+
+          {/* ── 2. TU cuenta (personal): comisiones, retiros, diferencias de rendición, mercadería ── */}
+          <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <p className="text-sm text-gray-500">👤 Tu cuenta</p>
+            {data.cuenta_personal ? (
+              <>
+                <p className={`mt-1 text-3xl font-bold ${data.cuenta_personal.a_favor >= 0 ? "text-green-700" : "text-red-600"}`}>
+                  {formatCurrency(Math.abs(data.cuenta_personal.a_favor))}
+                </p>
+                <p className="text-xs text-gray-500">{data.cuenta_personal.a_favor >= 0 ? "a tu favor" : "debés a la empresa"}</p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-center">
+                  <div className="rounded-xl bg-gray-50 p-2">
+                    <p className="text-[11px] text-gray-500">Comisiones ganadas</p>
+                    <p className="font-bold text-gray-900">{formatCurrency(data.cuenta_personal.comisiones_ganadas)}</p>
+                  </div>
+                  <div className="rounded-xl bg-gray-50 p-2">
+                    <p className="text-[11px] text-gray-500">Retiros</p>
+                    <p className="font-bold text-gray-900">{formatCurrency(data.cuenta_personal.retiros)}</p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 text-sm text-gray-500">Tu cuenta personal todavía no está vinculada: pedile a la oficina que la vincule en Cuentas del personal.</p>
+                {Math.abs(data.deuda_rendiciones ?? 0) > 0.005 && (
+                  <p className={`mt-2 text-sm font-bold ${(data.deuda_rendiciones ?? 0) > 0 ? "text-red-600" : "text-green-700"}`}>
+                    {(data.deuda_rendiciones ?? 0) > 0
+                      ? `📒 Saldo de rendiciones: ${formatCurrency(data.deuda_rendiciones)} — lo debés a oficina`
+                      : `✔ Saldo de rendiciones a tu favor: ${formatCurrency(Math.abs(data.deuda_rendiciones ?? 0))}`}
+                  </p>
+                )}
+              </>
+            )}
           </section>
 
           {/* Tabs */}
@@ -209,8 +218,8 @@ export function Billetera() {
               {comData && (
                 <div className="grid grid-cols-3 gap-2">
                   <div className="rounded-xl bg-emerald-600 p-3 text-center text-white">
-                    <p className="text-[11px] leading-tight text-emerald-100">💰 Para retirar</p>
-                    <p className="mt-1 text-sm font-bold">{formatCurrency(comData.totales.disponible)}</p>
+                    <p className="text-[11px] leading-tight text-emerald-100">{comData.totales.disponible < 0 ? "📒 Debés" : "💰 Para retirar"}</p>
+                    <p className="mt-1 text-sm font-bold">{formatCurrency(Math.abs(comData.totales.disponible))}</p>
                   </div>
                   <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
                     <p className="text-[11px] leading-tight text-gray-500">🕐 Sin cobrar</p>

@@ -13,7 +13,7 @@ void montarApp({
   // Plata y pedidos mueven la billetera, comisiones y el resumen del inicio: son datasets de
   // varias filas (no se pueden parchear de a una) ⇒ se re-leen apenas la operación se aplicó.
   rt.outbox.onAplicado((item) => {
-    if (/^(cobro|pedido)\./.test(item.tipo)) {
+    if (/^(cobro|pedido|retiro)\./.test(item.tipo)) {
       void rt.sync.dataset(DS.billetera).catch(() => {})
       void rt.sync.dataset(DS.me).catch(() => {})
     }

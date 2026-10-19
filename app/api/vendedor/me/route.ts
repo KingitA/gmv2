@@ -90,7 +90,7 @@ export async function GET() {
       vendedores: session.vendedores,
       total_clientes: totalClientes ?? 0,
       ultimos_pedidos: ultimosPedidos || [],
-      billetera: { saldo: billetera.saldo, cheques_cantidad: billetera.cheques_cantidad, comisiones_pendientes: comisionesPendientes },
+      billetera: { saldo: billetera.saldo, balance: billetera.balance, cheques_cantidad: billetera.cheques_cantidad, comisiones_pendientes: comisionesPendientes },
       proximas_zonas: proximasZonas,
     })
   } catch (error: any) {
