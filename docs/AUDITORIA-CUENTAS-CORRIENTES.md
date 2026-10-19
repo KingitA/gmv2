@@ -201,5 +201,5 @@ Hecho:
 - `lib/apertura/importar.ts`, `POST /api/apertura` y la pantalla `/apertura` (solo admin). La previsualización bloquea si un cliente no existe, si hay un tipo desconocido o si la suma no da el saldo del reporte. La carga se confirma por tandas y es idempotente: la previsualización contra la base real ya reconoce como cargados los 22 renglones de Freije. Sigue las convenciones de la apertura anterior ("APERTURA GM", total_neto = importe final) y guarda la fecha a mediodía de Argentina, para que no se corra de día.
 
 Pendiente:
-- La migración `20261020_cc_puesta_a_cero.sql` (simulacro + copia en el esquema `archivo_pruebas` + borrado; no se ejecuta sola) fue **frenada por el control de permisos** de la PC al escribirla. El dueño tiene que autorizarla.
+- La migración `20261020_cc_puesta_a_cero.sql` está escrita (autorizada por el dueño el 20/10). Aplicarla NO borra nada: instala `cc_puesta_a_cero_simulacro()` y `cc_puesta_a_cero('PONER A CERO')`. El simulacro, corrido en solo lectura, conserva 12 comprobantes con CAE (/usr/bin/bash), 12 asientos, 6 imputaciones entre ellos y 3 echeqs.
 - Decisión del dueño sobre las comisiones de los comprobantes del sistema viejo cobrados después del corte. Hoy no generan comisión, porque no tienen kardex.
