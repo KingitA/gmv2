@@ -76,7 +76,7 @@ select pedido_detalle_id, count(*) from picking_items
 group by 1 having count(*) > 1;
 ```
 
-**Falta aplicar (20/10, cuentas corrientes):** `20261020b_cheques_un_papel.sql`. Agrega el estado de cheque EN_VERIFICACION, los triggers de "un cheque = un papel" y el nuevo `cheque_rechazar`. Aplicarla **antes** de desplegar el código de esa fecha: el código del servidor ya crea el cheque compartido.
+**Aplicada y verificada (20/10, cuentas corrientes):** `20261020b_cheques_un_papel.sql`. Agrega el estado de cheque EN_VERIFICACION, los triggers de "un cheque = un papel" y el nuevo `cheque_rechazar`. Aplicarla **antes** de desplegar el código de esa fecha: el código del servidor ya crea el cheque compartido.
 
 **Instalada pero sin ejecutar (a propósito):** `20261020_cc_puesta_a_cero.sql`. Deja listas las funciones de puesta a cero de cuentas corrientes; **no borra nada sola**. Se ejecuta el día del corte (ver §4).
 
@@ -99,7 +99,7 @@ group by 1 having count(*) > 1;
 8. Depósito, tarea aparte: depurar ~1.189 pedidos `impreso` viejos (hay propuesta escrita en MOBILE.md §17; no se toca sin tu OK).
 
 ### Correcciones de servidor
-Las tres primeras las hizo la sesión de cuentas corrientes el 20/10. Están en `main` y falta aplicar `20261020b_cheques_un_papel.sql`:
+Las tres primeras las hizo la sesión de cuentas corrientes el 20/10. Están en `main` y la migración `20261020b_cheques_un_papel.sql` está aplicada:
 1. ~~Un cheque = un papel~~ **Hecho.** El cobro conjunto del chofer y el cobro a varios clientes del vendedor dejan UNA fila en cartera por el total (`lib/cobranzas/cheque-compartido.ts`); cada cliente tiene su parte vinculada. Las billeteras y la hoja de ruta cuentan ese cheque una sola vez. Si rebota, la nota de débito va entera al cliente que lo entregó.
 2. ~~Riesgo de cobro doble en la app chofer~~ **Hecho en el servidor.** La cuenta de cobro del chofer trae `en_cobro` por comprobante (`lib/cobranzas/en-cobro.ts`, misma fórmula que el vendedor). La APK actual ya lo usa: no hace falta compilar para esto.
 3. ~~Cheques de cobros pendientes en cartera / anular cheque compartido~~ **Hecho.** El cheque de un cobro sin confirmar queda EN_VERIFICACION (fuera de cartera y de la proyección de caja; pestaña "En verificación" en Cheques) y pasa a EN_CARTERA al confirmarse. Anular el cobro de un cliente no anula un cheque que otro sigue usando. La cabecera `cobranzas` queda anulada cuando se anulan todos sus pagos.
