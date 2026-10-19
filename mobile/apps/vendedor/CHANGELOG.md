@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.0 (versionCode 9) — 2026-10-19
+
+- Billetera en dos cajitas y retiro de la cuenta personal; 10% contado con la regla del 07/10; Resumen con el proyectado de lo guardado sin enviar; devoluciones valuadas como el servidor; descuento general y contado por pedido; condiciones por proveedor/marca; mercadería por cupo eligiendo artículos; sin precio base no se vende
+
 ## v0.3.1 (versionCode 8) — 2026-10-14
 
 - Resumen de cuenta en Cobrar (igual al ERP); tocar un comprobante abre su PDF para compartir y se pueden compartir varios; cartel Datos al solo si hace mas de 15 min; formatos nuevos de fecha, moneda y CUIT
