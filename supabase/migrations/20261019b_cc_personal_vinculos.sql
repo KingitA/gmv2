@@ -8,7 +8,7 @@
 -- No toca saldos ni movimientos. IDEMPOTENTE.
 -- PEREYRA HORACIO ya no trabaja con la empresa (dueño, 19/10): su código de
 -- vendedor queda inactivo (no tiene clientes asignados).
--- Falta: GABRIEL AMAN (usuario GABRIEL) — no tiene cuenta de cliente todavía.
+-- GABRIEL AMAN: cliente 8, renombrado por el dueño a "AMAN GABRIEL (EMPLEADO)" el 19/10.
 -- ═══════════════════════════════════════════════════════════════════════
 
 -- Cuentas (EMPLEADO)/(VIAJANTE)/(VENDEDOR)/(SOCIO)/(EMPLEADA) y las de la familia
@@ -20,7 +20,8 @@ WHERE (codigo_cliente, upper(nombre)) IN (
   ('613',  'LOPEZ LUIS (VENDEDOR)'),
   ('1002', 'ROSSI FABIAN (SOCIO)'),
   ('194',  'ROSSI JUAN CRUZ'),
-  ('200',  'ROSSI PIA')
+  ('200',  'ROSSI PIA'),
+  ('8',    'AMAN GABRIEL (EMPLEADO)')
 );
 
 -- Usuario dueño de cada cuenta
@@ -33,7 +34,8 @@ FROM (VALUES
   ('194',  'ROSSI JUAN CRUZ',                   'd6ac25bb-8204-474d-9e3c-12c2807ac2b7'::uuid),  -- Juan Cruz
   ('200',  'ROSSI PIA',                         'd604c7f7-4985-407f-8a8e-110a0ab64a60'::uuid),  -- PIA
   ('7',    'ORDIALES RODRIGO (EMPLEADO)',       '6c447a30-77e6-4e66-b685-0a5ede0ec721'::uuid),  -- RODRIGO
-  ('867',  'GARRIDO SERGIO GABRIEL (EMPLEADO)', 'd3246204-b76f-4524-98aa-44483d2f3c63'::uuid)   -- SERGIO
+  ('867',  'GARRIDO SERGIO GABRIEL (EMPLEADO)', 'd3246204-b76f-4524-98aa-44483d2f3c63'::uuid),  -- SERGIO
+  ('8',    'AMAN GABRIEL (EMPLEADO)',           'bde8ec47-ff80-49e8-bcd2-9f6fd06a9efd'::uuid)   -- GABRIEL
 ) AS v(codigo, nombre, usuario)
 WHERE c.codigo_cliente = v.codigo AND upper(c.nombre) = v.nombre
   AND c.empleado_usuario_id IS DISTINCT FROM v.usuario
@@ -64,7 +66,7 @@ WHERE ve.id = v.vendedor_id
 UPDATE public.vendedores SET activo = false
 WHERE id = '8541c650-558c-4f64-9e42-a21401587f20' AND nombre = 'PEREYRA HORACIO' AND activo;
 
--- Verificación (correr a mano): las 12 cuentas con su usuario y sus códigos
+-- Verificación (correr a mano): las 13 cuentas con su usuario y sus códigos
 --   SELECT c.codigo_cliente, c.nombre, c.es_empleado, c.empleado_usuario_id,
 --          (SELECT string_agg(v.nombre, ', ') FROM vendedores v WHERE v.cuenta_cliente_id = c.id) AS codigos
 --   FROM clientes c WHERE c.es_empleado ORDER BY c.nombre;
