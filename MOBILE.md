@@ -1397,6 +1397,45 @@ por revisión de la oficina.
   `apps/vendedor/src/datos/comprobantes-pdf.ts`. Nombre del archivo:
   "Presupuesto 0001-00001234 14-10-2026.pdf".
 
+### v0.4.0: cuentas corrientes y precios pendientes (20/10/2026)
+
+- **10 % contado (regla del 07/10)**: la ficha manda `nc_contado` por comprobante
+  (`bonificacionPendientePorComprobante`, la misma del ERP): la NC es el 10 % del TOTAL, una
+  sola vez, aunque el pago sea parcial. `Cobrar.tsx` la usa; la regla vieja queda solo si el
+  servidor no la manda. Comprados: `bonificado_contado` (ya tuvo su NC → la devolución no la descuenta otra vez).
+- **Resumen**: la fila del saldo proyectado aparece también si lo único en la calle es un cobro
+  o una devolución sin enviar (guardados en el equipo, en gris).
+- **Devolución sin enviar** valuada como el servidor: `valorDevolucion` (`@gm/vendedor`,
+  `lib/cobranzas/valor-devolucion.ts`) al cargarla → `valor_estimado` en el payload; el overlay usa
+  ese valor (antes el bruto).
+- **Billetera en dos cajitas**: "💵 Plata de la empresa en tu mano" (`balance` = efectivo − retiros,
+  cheques como CANTIDAD) y "👤 Tu cuenta" (`cuenta_personal`: a favor / debés, comisiones ganadas,
+  retiros). `cuenta_personal: null` = no vinculada → mensaje + cálculo viejo. Inicio muestra los
+  dos números. `datos/billetera.ts` (`billeteraVisible`).
+- **Retiro** (`/billetera/retiro`): operación de outbox `retiro.registrar` → `registrarRetiro`
+  (`lib/cuenta-corriente/retiro.ts`); sin señal baja `balance` y `a_favor` al instante. La app
+  bloquea sin cuenta personal o si supera el efectivo; el servidor manda `SIN_CUENTA_PERSONAL` /
+  `RETIRO_SUPERA_EFECTIVO` como rechazo de negocio.
+- **Comisiones**: "Para retirar" = `disponible`; en negativo se muestra "📒 Debés".
+- **Un cheque = un papel**: lo resolvió el servidor (20ac463). La app no tiene cobro a varios
+  clientes y la billetera cuenta los cheques del servidor: no hay doble conteo sin señal.
+- **Precios (pendientes del 06/10)**, en 👤 del pedido nuevo:
+  - **Descuento general** por segmento solo para el pedido (columna General) y **contado** (☑ Ctdo,
+    10 % por segmento: no cambia el precio, la NC se hace al facturar). Viajan en `bonif_pedido`
+    con los cuatro tipos completos; si todo coincide con la ficha no viaja nada.
+  - **Condiciones por proveedor/marca** del pedido (`CondicionesProvMarca.tsx`): arranca con las de
+    la ficha; la lista que viaja es la COMPLETA (`condiciones_proveedor`/`condiciones_marca`). El motor
+    ahora respeta esa semántica: si el pedido manda la lista, la ficha no se mezcla (`motor.ts`).
+  - **Mercadería por cupo** (`MercaderiaCupo.tsx`, en el carrito): un cupo por origen
+    (`todo` / `seg:x` / `prov:id` / `marca:id`, `cuposDelPedido` en `datos/condiciones.ts` con los
+    resolvers del motor), monto ≈ % del neto. El vendedor elige QUÉ regalar; las unidades las fija
+    el sistema al cerrar el picking. Viaja en `mercaderia_bonificada`. Un cupo sin artículos queda
+    pendiente. En pedidos ya enviados lo elige la oficina.
+  - **Sin precio base, sin precio**: `calcularPrecioPedido` devuelve 0 si `precio_base` no es > 0
+    (salvo precio especial fijo) y `createPedido`/agregar/repreciar rechazan el renglón con
+    "… no tiene precio de venta". Réplica: las bonificaciones del cliente incluyen `mercaderia` y `contado`.
+- Tests: `mobile/packages/core/test/vendedor-040.test.ts`.
+
 ### Resultados de las pruebas (21/09/2026)
 Mock del ERP (`mobile/scripts/mock-vendedor.mjs`, idempotencia real) con el **catálogo real** de
 solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos escritos en producción.

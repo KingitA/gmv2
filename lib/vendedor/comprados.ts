@@ -53,13 +53,27 @@ export async function cargarComprados(supabase: any, id: string) {
 
   if (!porArticulo.size) return []
 
-  const { data: articulos } = await supabase
-    .from("articulos")
-    .select("id, sku, ean13, descripcion, imagen_url, unidades_por_bulto")
-    .in("id", [...porArticulo.keys()])
+  const [{ data: articulos }, { data: bonifs }] = await Promise.all([
+    supabase
+      .from("articulos")
+      .select("id, sku, ean13, descripcion, imagen_url, unidades_por_bulto")
+      .in("id", [...porArticulo.keys()]),
+    // Facturas con bonificación contado viva (misma detección que lib/cobranzas/valorar-devoluciones.ts):
+    // una devolución de esa mercadería vale 10% menos. La app la valúa igual sin señal.
+    supabase
+      .from("comprobantes_venta")
+      .select("observaciones")
+      .eq("cliente_id", id)
+      .in("tipo_comprobante", ["REV", "NCA", "NCB", "NCC"])
+      .is("anulado_en", null)
+      .neq("estado_pago", "anulado")
+      .ilike("observaciones", "%Bonificación contado%"),
+  ])
+  const bonifObs = (bonifs || []).map((b: any) => String(b.observaciones || ""))
 
   return (articulos || []).map((a: any) => ({
     ...porArticulo.get(a.id)!,
+    bonificado_contado: bonifObs.some((o: string) => o.includes(porArticulo.get(a.id)!.numero_comprobante)),
     sku: a.sku,
     ean13: a.ean13,
     descripcion: a.descripcion,

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
 import { useNoEnviados, useParamEstado } from "@gm/core"
 import { fecha, parseMonto } from "@gm/formato"
+import { valorDevolucion } from "@gm/vendedor"
 import { COND_VACIA, DS, type Articulo, type Comprado } from "../../datasets"
 import { buscarCatalogo } from "../../datos/busqueda"
 import { rechazosDe, useCatalogo, useCliente, useCuenta, useEncolar, uuidv4 } from "../../datos/hooks"
@@ -89,6 +90,16 @@ const Foto = ({ url }: { url: string | null }) =>
   url ? <img src={url} alt="" loading="lazy" className="h-11 w-11 shrink-0 rounded-lg bg-gray-100 object-cover" /> : <div className="h-11 w-11 shrink-0 rounded-lg bg-gray-100" />
 
 // ─── /clientes/:id/devolucion ────────────────────────────────────────────────
+
+/** Valor de la devolución (= servidor, sin percepciones): neto + IVA si la factura original es fiscal, −10% si tuvo contado. */
+function valorEstimado(items: Array<{ cantidad: number; precio_venta_original: number; comprobante_venta_id: string | null }>, comprados: Comprado[]): number {
+  const orig = items.map((i) => comprados.find((c) => c.comprobante_venta_id && c.comprobante_venta_id === i.comprobante_venta_id))
+  return valorDevolucion({
+    renglones: items.map((i) => ({ subtotal: i.cantidad * i.precio_venta_original })),
+    aplica10: orig.some((c) => !!c?.bonificado_contado),
+    conIva: orig.some((c) => !!c && ["FA", "FB", "FC"].includes(c.tipo_comprobante)),
+  }).total
+}
 
 export function Devolucion() {
   const navigate = useNavigate()
@@ -206,6 +217,9 @@ export function Devolucion() {
             fecha_venta_original: i.fecha_venta_original,
           })),
           observaciones: obs || null,
+          // Valor con la regla única del servidor (lib/cobranzas/valor-devolucion.ts) para bajar el
+          // proyectado sin señal; el servidor recalcula el exacto (con percepciones) al sincronizar
+          valor_estimado: valorEstimado(items, cuenta.comprados),
         },
         `Devolución ${cuenta.cliente.nombre} ${formatCurrency(total)}`,
       )

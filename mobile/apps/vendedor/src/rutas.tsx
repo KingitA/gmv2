@@ -2,6 +2,7 @@ import { redirect, type RouteObject } from "react-router"
 import { Inicio } from "./pantallas/Inicio"
 import { Billetera, ComisionPedido } from "./pantallas/Billetera"
 import { Rendiciones } from "./pantallas/Rendiciones"
+import { Retiro } from "./pantallas/Retiro"
 import { Estadisticas } from "./pantallas/Estadisticas"
 import { Precios } from "./pantallas/Precios"
 import { Pedidos } from "./pantallas/pedidos/Pedidos"
@@ -29,6 +30,8 @@ export const rutas: RouteObject[] = [
   // Padre lógico del detalle de comisión (si se abre sin historial, atrás NO va al inicio)
   { path: "/billetera/comisiones", loader: () => redirect("/billetera?tab=comisiones") },
   { path: "/billetera/comisiones/:pedidoId", element: <ComisionPedido /> },
+  // Retiro de efectivo (cuenta personal, 19/10/2026)
+  { path: "/billetera/retiro", element: <Retiro /> },
   { path: "/rendiciones", element: <Rendiciones /> },
   { path: "/estadisticas", element: <Estadisticas /> },
   { path: "/precios", element: <Precios /> },

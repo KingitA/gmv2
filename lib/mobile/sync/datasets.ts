@@ -131,7 +131,10 @@ const preciosClientes: DatasetDef = {
             .from("bonificaciones")
             .select("cliente_id,tipo,segmento,porcentaje")
             .eq("activo", true)
-            .in("tipo", ["general", "viajante"])
+            // mercadería y contado: la app calcula los cupos de mercadería y el contado igual que
+            // el servidor (el motor de precio solo usa general/viajante: filtra por tipo)
+            .in("tipo", ["general", "viajante", "mercaderia", "contado"])
+            .is("proveedor_id", null)
             .in("cliente_id", ch),
         cids,
       ),

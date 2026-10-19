@@ -4,6 +4,7 @@ import { useNoEnviados, useOnline, useOverlay, useRuntime, useSesion } from "@gm
 import { esPedidoEditable, ESTADO_LABEL } from "@gm/vendedor"
 import { fechaHora, numero, parseMonto } from "@gm/formato"
 import { DS, SEG_LABEL, type DetallePedido, type ItemOpPedido, type OpPedido } from "../../datasets"
+import { condDesdePayload } from "../pedido-nuevo/Marco"
 import { almacenBorradores, nuevoBorrador } from "../../datos/borradores"
 import { rechazosDe, useEncolar, usePedido } from "../../datos/hooks"
 import { preciosAl } from "../../datos/precios"
@@ -54,7 +55,7 @@ function PedidoLocal({ vista }: { vista: Vista }) {
     await almacen.guardar(uid, nuevoBorrador(p.cliente_id, p.vista.cliente_nombre, {
       localId: p.local_id,
       items: p.items.map((i) => ({ articuloId: i.articulo_id, cantidad: i.cantidad, art: { descripcion: i.descripcion || "Artículo", sku: i.sku ?? null, unidades_por_bulto: i.unidades_por_bulto ?? null, imagen_url: i.imagen_url ?? null } })),
-      cond: { metodo: p.cond?.metodo_facturacion_pedido || "", lista: p.cond?.lista_precio_pedido_id || "", bonif: p.cond?.bonif_pedido ?? null },
+      cond: condDesdePayload(p.cond),
       obs: p.observaciones || "",
     }))
     const retirada = await rt.outbox.retirar(local.opKey)

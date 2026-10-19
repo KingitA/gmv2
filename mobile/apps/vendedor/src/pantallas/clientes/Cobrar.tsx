@@ -202,6 +202,14 @@ export function Cobrar() {
     for (const cp of comprobantes) {
       const imp = imputaciones[cp.id]
       if (imp === undefined) continue
+      // Regla del 07/10 (= servidor, lib/cobranzas/bonif-pendiente.ts): el 10% del TOTAL del
+      // comprobante, UNA vez, aunque hoy se pague una parte. 0 si ya tiene su NC o si otro
+      // cobro contado sin confirmar ya la va a generar.
+      if (cp.nc_contado !== undefined) {
+        if (imp > 0.005 && !((cp.en_cobro_contado || 0) > 0.005)) bonif += cp.nc_contado
+        continue
+      }
+      // Réplica vieja (sin nc_contado): regla anterior, solo si queda saldado
       const cobrable = saldoCobrable(cp)
       // Completo con plata de HOY…
       const completoHoy = Math.abs(imp - cp.saldo_pendiente) < 0.01
@@ -804,9 +812,7 @@ export function Cobrar() {
                     <span className="font-bold">10% descuento pago contado</span>
                     {bonificacionEstimada > 0 && <span className="text-emerald-700"> — NC proyectada {formatCurrency(bonificacionEstimada)}</span>}
                     <span className="block text-xs text-gray-400">
-                      La NC/REV real la emite la oficina al confirmar el pago. Aplica a comprobantes que quedan completos: con lo de hoy, o sumando
-                      entregas en cobro que también fueron contado.
-                    </span>
+                      La NC/REV real la emite la oficina al confirmar el pago. Es el 10% del TOTAL de cada comprobante, una sola vez, aunque hoy se pague una parte (no se repite si ya tiene su NC o si otro cobro contado la va a generar).</span>
                   </span>
                 </label>
               )}

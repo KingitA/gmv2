@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate, useParams, useSearchParams } from "re
 import { esQrOUrl, lecturaError, lecturaOk, useLector, useOnline, useRuntime } from "@gm/core"
 import { esPedidoEditable } from "@gm/vendedor"
 import { numero, parseMonto } from "@gm/formato"
-import { SEGS, SEG_LABEL, type Articulo, type BonifSeg, type CondPedido, COND_VACIA } from "../../datasets"
+import { SEGS, SEG_LABEL, type Articulo, type BonifSeg, type CondPedido, type OpPedido, COND_VACIA } from "../../datasets"
 import { nuevoBorrador, type Borrador } from "../../datos/borradores"
 import { buscarPorCodigo, eansDe, matchExacto } from "../../datos/busqueda"
 import { useCatalogosFicha, useEncolar, usePedidos } from "../../datos/hooks"
@@ -12,6 +12,9 @@ import { ProveedorPedido, usePedidoEnCurso, useVer } from "./contexto"
 import { clienteListasDe, fichaListasDe, metodoLabel, useSegmentosCliente } from "../../datos/segmentos"
 import { CuadroSegmentos } from "../segmentos-ui"
 import { PanelProspecto } from "./VentaNueva"
+import { TIPOS_DESC, useCondicionesFicha } from "../../datos/condiciones"
+import { CondicionesProvMarca } from "./CondicionesProvMarca"
+import type { CondicionMarca, CondicionProveedor } from "@gm/pricing"
 
 // Marco de TODAS las pantallas del pedido en curso (/pedido/nuevo/:clienteId/*): el
 // borrador, el motor de precios y las hojas que en la web se abrían desde cualquier
@@ -110,7 +113,7 @@ function useRetomarPedido() {
     const pend = candidato.cambios && candidato.cambios.estado !== "rechazado" ? candidato.cambios.payload : null
     p.cargarBorrador(borradorDePedido(p.clienteId, p.cliente.nombre, fila.id, fila.pedido.numero_pedido, fila.pedido.estado, pend
       ? { items: pend.items.map((i) => ({ articuloId: i.articulo_id, cantidad: i.cantidad, detalleId: i.detalle_id ?? null, art: { descripcion: i.descripcion || "Artículo", sku: i.sku ?? null, unidades_por_bulto: i.unidades_por_bulto ?? null, imagen_url: i.imagen_url ?? null } })),
-          cond: { metodo: pend.cond?.metodo_facturacion_pedido || "", lista: pend.cond?.lista_precio_pedido_id || "", bonif: pend.cond?.bonif_pedido ?? null }, obs: pend.observaciones || "" }
+          cond: condDesdePayload(pend.cond), obs: pend.observaciones || "" }
       : {
           items: fila.pedido.pedidos_detalle.filter((d) => !d.es_bonificado).map((d) => ({
             articuloId: d.articulo_id, cantidad: Number(d.cantidad), detalleId: d.id,
@@ -253,7 +256,7 @@ function useHabitual(articuloId: string): number | null {
 
 // ─── Panel del cliente: condiciones del pedido (?ver=cliente) ────────────────
 
-const bonifVacia = (b: CondPedido["bonif"]) => !b || ((!b.viajante || !Object.keys(b.viajante).length) && (!b.mercaderia || !Object.keys(b.mercaderia).length))
+const bonifVacia = (b: CondPedido["bonif"]) => !b || (["general", "viajante", "mercaderia", "contado"] as const).every((t) => !b[t] || !Object.keys(b[t]!).length)
 export const fmtSeg = (s: BonifSeg | null | undefined) => {
   if (!s) return "—"
   const v = SEGS.map((k) => s[k] ?? 0)
@@ -282,15 +285,30 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
   // perfumería 0 salieron en presupuesto).
   const [metodoSel, setMetodoSel] = useState(cond.metodo || "")
   const [listaSel, setListaSel] = useState(cond.lista || "")
+  // Ficha comercial (réplica de precios): general/viajante/mercadería/contado y las condiciones
+  // por proveedor/marca. Mercadería y viajante, si la réplica es vieja, salen de la cartera.
+  const fichaCond = useCondicionesFicha(cliente?.id)
+  const fichaBonif = useMemo(() => ({
+    general: fichaCond?.bonif.general ?? {},
+    viajante: fichaCond ? fichaCond.bonif.viajante : bonifCliente?.viajante ?? {},
+    mercaderia: fichaCond ? fichaCond.bonif.mercaderia : bonifCliente?.mercaderia ?? {},
+    contado: fichaCond?.bonif.contado ?? {},
+  }), [fichaCond, bonifCliente])
   const [bonifSel, setBonifSel] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
-    for (const tipo of ["viajante", "mercaderia"] as const)
+    for (const tipo of TIPOS_DESC)
       for (const s of SEGS) {
-        const v = cond.bonif?.[tipo]?.[s] ?? bonifCliente?.[tipo]?.[s] ?? 0
+        const v = cond.bonif?.[tipo]?.[s] ?? fichaBonif[tipo]?.[s] ?? 0
         init[`${tipo}.${s}`] = v ? numero(v, 0, 2) : ""
       }
     return init
   })
+  const [contadoSel, setContadoSel] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(SEGS.map((s) => [s, (cond.bonif?.contado?.[s] ?? fichaBonif.contado[s] ?? 0) > 0])))
+  // Condiciones por proveedor/marca de este pedido (lista completa; arranca en las de la ficha)
+  const esNuevo = !p.borrador?.pedidoId
+  const [condProvSel, setCondProvSel] = useState<CondicionProveedor[] | null>(cond.condProv ?? null)
+  const [condMarcaSel, setCondMarcaSel] = useState<CondicionMarca[] | null>(cond.condMarca ?? null)
   const fichaLocal = useMemo(
     () => (cliente?.sinEnviar ? clienteListasDe(fichaListasDe(cliente as unknown as Record<string, unknown>)) : null),
     [cliente],
@@ -314,27 +332,35 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
     const n = parseMonto(t) ?? NaN
     return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : NaN
   }
-  const bonifParsed: { viajante: BonifSeg; mercaderia: BonifSeg } = { viajante: {}, mercaderia: {} }
+  const bonifParsed: { general: BonifSeg; viajante: BonifSeg; mercaderia: BonifSeg; contado: BonifSeg } = { general: {}, viajante: {}, mercaderia: {}, contado: {} }
   let bonifValida = true
-  for (const tipo of ["viajante", "mercaderia"] as const)
+  for (const tipo of TIPOS_DESC)
     for (const s of SEGS) {
       const n = parsePct(bonifSel[`${tipo}.${s}`])
       if (Number.isNaN(n)) bonifValida = false
       else bonifParsed[tipo][s] = n
     }
+  for (const s of SEGS) bonifParsed.contado[s] = contadoSel[s] ? 10 : 0
   const fichaViaj = fmtSeg(bonifCliente?.viajante)
   const fichaMerc = fmtSeg(bonifCliente?.mercaderia)
   // Lo que coincide con la ficha NO se guarda como override (queda "hereda de la ficha")
   const fichaMetodo = cliente.metodo_facturacion || ""
   const fichaLista = cliente.lista_precio_id || ""
-  const bonifIgualFicha = (["viajante", "mercaderia"] as const).every((t) => SEGS.every((s) => (bonifParsed[t][s] ?? 0) === (bonifCliente?.[t]?.[s] ?? 0)))
+  // Igual que el ERP (condicionesParaPedido): si nada cambió respecto de la ficha no viaja nada;
+  // si cambió, viajan los cuatro tipos completos (con los 0 explícitos)
+  const bonifIgualFicha = (["general", "viajante", "mercaderia", "contado"] as const).every((t) => SEGS.every((s) => (bonifParsed[t][s] ?? 0) === (fichaBonif[t]?.[s] ?? 0)))
+  const provIgualFicha = !condProvSel || JSON.stringify(condProvSel) === JSON.stringify(fichaCond?.condProv ?? [])
+  const marcaIgualFicha = !condMarcaSel || JSON.stringify(condMarcaSel) === JSON.stringify(fichaCond?.condMarca ?? [])
   const nuevaCond: CondPedido = {
     metodo: metodoOv,
     lista: listaOv,
     bonif: bonifIgualFicha ? null : bonifParsed,
+    ...(esNuevo && !provIgualFicha ? { condProv: condProvSel } : {}),
+    ...(esNuevo && !marcaIgualFicha ? { condMarca: condMarcaSel } : {}),
+    ...(cond.mercaderia ? { mercaderia: cond.mercaderia } : {}),
   }
   const hayCambios = JSON.stringify(nuevaCond) !== JSON.stringify({ ...cond, bonif: bonifVacia(cond.bonif) ? null : cond.bonif })
-  const hayOverride = !!cond.metodo || !!cond.lista || !bonifVacia(cond.bonif)
+  const hayOverride = !!cond.metodo || !!cond.lista || !bonifVacia(cond.bonif) || !!cond.condProv || !!cond.condMarca
   const selCls = "w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
 
   // "Guardar en la ficha": escribe la FICHA (queda para futuros pedidos). Sin señal la
@@ -347,7 +373,7 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
     if (metodoSel && metodoSel !== fichaMetodo) cambios.metodo_facturacion = { antes: cliente.metodo_facturacion ?? null, despues: metodoSel }
     if (puedeLista && !listaImpuesta && listaSel && listaSel !== fichaLista) cambios.lista_precio_id = { antes: cliente.lista_precio_id ?? null, despues: listaSel || null }
     if (Object.keys(cambios).length) await encolar("cliente.editar", { cliente_id: cliente.id, cambios }, `Ficha de ${cliente.nombre}`)
-    if (!bonifIgualFicha) {
+    if ((["viajante", "mercaderia"] as const).some((t) => SEGS.some((s) => (bonifParsed[t][s] ?? 0) !== (fichaBonif[t]?.[s] ?? 0)))) {
       const body: { viajante: BonifSeg; mercaderia: BonifSeg } = { viajante: {}, mercaderia: {} }
       for (const tipo of ["viajante", "mercaderia"] as const) for (const s of SEGS) body[tipo][s] = bonifParsed[tipo][s] ?? 0
       await encolar("cliente.bonificaciones", { cliente_id: cliente.id, ...body }, `Bonificaciones de ${cliente.nombre}`)
@@ -410,40 +436,64 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
               <p className="text-sm font-bold text-gray-700">Descuentos por segmento</p>
               <p className="text-xs text-gray-400">
                 {!bonifVacia(cond.bonif)
-                  ? <>Solo este pedido · viajante {fmtSeg(cond.bonif?.viajante ?? bonifCliente?.viajante)} · mercadería {fmtSeg(cond.bonif?.mercaderia ?? bonifCliente?.mercaderia)}</>
+                  ? <>Solo este pedido · general {fmtSeg(cond.bonif?.general ?? {})} · viajante {fmtSeg(cond.bonif?.viajante ?? bonifCliente?.viajante)} · mercadería {fmtSeg(cond.bonif?.mercaderia ?? bonifCliente?.mercaderia)}</>
                   : <>Ficha · viajante {fichaViaj} · mercadería {fichaMerc}</>}
               </p>
             </div>
-            <div className="grid grid-cols-[1fr_4.5rem_4.5rem] items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-gray-400">
-              <span>Segmento</span><span className="text-center text-orange-600">Viajante</span><span className="text-center text-green-700">Mercad.</span>
+            <div className="grid grid-cols-[1fr_3.6rem_3.6rem_3.6rem_2.6rem] items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-gray-400">
+              <span>Segmento</span><span className="text-center">General</span><span className="text-center text-orange-600">Viajante</span><span className="text-center text-green-700">Mercad.</span><span className="text-center">Ctdo</span>
             </div>
             {SEGS.map((s) => (
-              <div key={s} className="grid grid-cols-[1fr_4.5rem_4.5rem] items-center gap-2">
-                <span className="text-sm text-gray-700">{SEG_LABEL[s]}</span>
-                {(["viajante", "mercaderia"] as const).map((tipo) => (
+              <div key={s} className="grid grid-cols-[1fr_3.6rem_3.6rem_3.6rem_2.6rem] items-center gap-1.5">
+                <span className="text-xs text-gray-700">{SEG_LABEL[s]}</span>
+                {TIPOS_DESC.map((tipo) => (
                   <div key={tipo} className="relative">
                     <input
                       value={bonifSel[`${tipo}.${s}`] ?? ""}
                       onChange={(e) => { const v = e.target.value.replace(/[^\d.,]/g, ""); setBonifSel((prev) => ({ ...prev, [`${tipo}.${s}`]: v })) }}
                       inputMode="decimal" placeholder="0"
-                      className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-2 pr-6 text-right font-bold"
+                      className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-1 pr-4 text-right text-sm font-bold"
                     />
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                    <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-400">%</span>
                   </div>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setContadoSel((prev) => ({ ...prev, [s]: !prev[s] }))}
+                  className={`h-10 rounded-lg border-2 text-lg font-bold ${contadoSel[s] ? "border-emerald-600 bg-emerald-50 text-emerald-700" : "border-gray-200 bg-white text-gray-300"}`}
+                  aria-label={`Pago contado 10% en ${SEG_LABEL[s]}`}
+                >{contadoSel[s] ? "☑" : "☐"}</button>
               </div>
             ))}
             <button
-              onClick={() => setBonifSel((prev) => { const n = { ...prev }; for (const tipo of ["viajante", "mercaderia"] as const) for (const s of SEGS) n[`${tipo}.${s}`] = prev[`${tipo}.limpieza_bazar`] ?? ""; return n })}
+              onClick={() => {
+                setBonifSel((prev) => { const n = { ...prev }; for (const tipo of TIPOS_DESC) for (const s of SEGS) n[`${tipo}.${s}`] = prev[`${tipo}.limpieza_bazar`] ?? ""; return n })
+                setContadoSel((prev) => Object.fromEntries(SEGS.map((s) => [s, !!prev.limpieza_bazar])))
+              }}
               className="min-h-11 text-xs font-bold text-emerald-700"
             >
               ⤓ Mismo % en los tres segmentos (copia la fila Limpieza / Bazar)
             </button>
             <p className="text-xs text-gray-400">
+              <b>General</b>: descuento de la empresa sobre el neto; ya se ve en el precio.{" "}
               <b>Viajante</b>: descuento sobre el neto de cada línea del segmento; sale de tu comisión y ya se ve en el precio.{" "}
+              <b>Ctdo</b>: ese segmento sale con 10% por pago contado (la NC se hace aparte al facturar; no cambia el precio).{" "}
               <b>Mercadería</b>: % del neto del segmento que se entrega en mercadería sin cargo (la arma depósito/ERP; no cambia precios). Ficha: viajante {fichaViaj} · mercadería {fichaMerc}.
             </p>
           </div>
+
+          {esNuevo ? (
+            <CondicionesProvMarca
+              prov={condProvSel ?? fichaCond?.condProv ?? []}
+              marca={condMarcaSel ?? fichaCond?.condMarca ?? []}
+              onProv={setCondProvSel}
+              onMarca={setCondMarcaSel}
+              listas={catFicha?.listas_precio ?? []}
+              puedeLista={puedeLista}
+            />
+          ) : (
+            <p className="rounded-xl bg-gray-50 p-3 text-xs text-gray-500">Las condiciones por proveedor o marca de un pedido ya enviado las cambia la oficina desde el ERP.</p>
+          )}
 
           <div className="sticky bottom-0 space-y-2 border-t border-gray-100 bg-white pb-1 pt-2">
             {!bonifValida && <p className="text-xs font-medium text-red-600">Revisá los porcentajes: hay un valor inválido.</p>}
@@ -603,11 +653,30 @@ function BuscarPorFoto({ onCerrar, onElegir }: { onCerrar: () => void; onElegir:
 }
 
 /** Overrides del pedido que viajan al servidor. Lo que coincide con la ficha replicada no es un override. */
+/** Condiciones de un pedido guardado sin enviar (payload del outbox) → las del pedido en curso. */
+export function condDesdePayload(c: OpPedido["cond"] | null | undefined): CondPedido {
+  const merc: NonNullable<CondPedido["mercaderia"]> = {}
+  for (const e of c?.mercaderia_bonificada ?? []) merc[e.origen] = e.articulo_ids.map((id) => ({ id, descripcion: "", sku: null }))
+  return {
+    metodo: c?.metodo_facturacion_pedido || "",
+    lista: c?.lista_precio_pedido_id || "",
+    bonif: c?.bonif_pedido ?? null,
+    ...(Array.isArray(c?.condiciones_proveedor) ? { condProv: c!.condiciones_proveedor } : {}),
+    ...(Array.isArray(c?.condiciones_marca) ? { condMarca: c!.condiciones_marca } : {}),
+    ...(Object.keys(merc).length ? { mercaderia: merc } : {}),
+  }
+}
+
 export function condParaServidor(cond: CondPedido) {
   const b = cond.bonif
+  const merc = Object.entries(cond.mercaderia ?? {}).filter(([, arts]) => arts.length).map(([origen, arts]) => ({ origen, articulo_ids: arts.map((a) => a.id) }))
   return {
     metodo_facturacion_pedido: cond.metodo || null,
     lista_precio_pedido_id: cond.lista || null,
     bonif_pedido: bonifVacia(b) ? null : b,
+    // v0.4.0 (solo pedidos nuevos; el servidor los ignora al editar)
+    ...(Array.isArray(cond.condProv) ? { condiciones_proveedor: cond.condProv } : {}),
+    ...(Array.isArray(cond.condMarca) ? { condiciones_marca: cond.condMarca } : {}),
+    ...(merc.length ? { mercaderia_bonificada: merc } : {}),
   }
 }

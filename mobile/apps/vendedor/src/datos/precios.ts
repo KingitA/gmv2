@@ -35,11 +35,14 @@ export type Precio = PrecioArticuloCliente
 /** Overrides "solo este pedido" en la forma que entiende el motor (= condToOverrides de la web). */
 export function overridesDe(c: CondPedido): OverridesPedido {
   const b = c.bonif
-  const hayBonif = !!b && ((!!b.viajante && Object.keys(b.viajante).length > 0) || (!!b.mercaderia && Object.keys(b.mercaderia).length > 0))
+  const hayBonif = !!b && (["general", "viajante", "mercaderia", "contado"] as const).some((t) => !!b[t] && Object.keys(b[t]!).length > 0)
   return {
     ...(c.metodo ? { metodo_facturacion_pedido: c.metodo } : {}),
     ...(c.lista ? { lista_precio_pedido_id: c.lista } : {}),
     ...(hayBonif ? { bonif_pedido: b as OverridesPedido["bonif_pedido"] } : {}),
+    // Condiciones por proveedor/marca del pedido: lista completa (el motor reemplaza las de la ficha)
+    ...(Array.isArray(c.condProv) ? { condiciones_proveedor: c.condProv } : {}),
+    ...(Array.isArray(c.condMarca) ? { condiciones_marca: c.condMarca } : {}),
   }
 }
 

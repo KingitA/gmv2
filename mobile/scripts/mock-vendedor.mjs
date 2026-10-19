@@ -73,12 +73,12 @@ function reset() {
   const clientes = f.clientes.map((c) => ({ razon_social: null, cuit: null, codigo_cliente: null, ...c, saldo_proyectado: c.saldo_actual, pagos_sin_rendir: 0, bonificaciones: bonifDe(c.id) }))
   // Cuenta corriente sintética: a los clientes con saldo se les arma una factura por ese saldo
   const cc = new Map(clientes.map((c, k) => [c.id, {
-    comprobantes: c.saldo_actual > 0 ? [{ id: uid(40000 + k), tipo_comprobante: "FA", numero_comprobante: `0001-${String(1000 + k).padStart(8, "0")}`, fecha: "2026-09-01", total_factura: r2(c.saldo_actual), saldo_pendiente: r2(c.saldo_actual), estado_pago: "pendiente", pedido_id: null, en_cobro: 0, en_cobro_contado: 0 }] : [],
+    comprobantes: c.saldo_actual > 0 ? [{ id: uid(40000 + k), tipo_comprobante: "FA", numero_comprobante: `0001-${String(1000 + k).padStart(8, "0")}`, fecha: "2026-09-01", total_factura: r2(c.saldo_actual), saldo_pendiente: r2(c.saldo_actual), estado_pago: "pendiente", pedido_id: null, en_cobro: 0, en_cobro_contado: 0, nc_contado: r2(c.saldo_actual * 0.1) }] : [],
     pagos: [], devoluciones: [],
     comprados: f.articulos.slice(k * 3, k * 3 + 8).map((a) => ({ articulo_id: a.id, sku: a.sku, ean13: a.ean13, descripcion: a.descripcion, imagen_url: a.imagen_url, unidades_por_bulto: a.unidades_por_bulto, ultimo_precio: 1500, ultima_fecha: "2026-08-20", comprobante_venta_id: uid(40000 + k), numero_comprobante: `0001-${String(1000 + k).padStart(8, "0")}`, tipo_comprobante: "FA", cantidad_total: 12 })),
     habituales: f.articulos.slice(k * 5, k * 5 + 12).map((a, j) => ({ articulo_id: a.id, veces_pedido: 12 - j, cantidad_habitual: 6 })),
   }]))
-  S = { seq: 1, f, clientes, cc, pedidos: [], numero: 1600, viajes: [], claves: new Map(), red: true, log: [], alertas: [] }
+  S = { seq: 1, f, clientes, cc, pedidos: [], numero: 1600, viajes: [], claves: new Map(), red: true, log: [], alertas: [], retiros: [] }
 }
 reset()
 
@@ -123,9 +123,11 @@ const filaViaje = (v) => {
 }
 const billetera = () => {
   const pagos = [...S.cc.values()].flatMap((k) => k.pagos).filter((p) => p.estado === "pendiente_rendicion")
+  const retirado = r2(S.retiros.reduce((s, x) => s + x.monto, 0))
   const efectivo = r2(pagos.reduce((s, p) => s + (p.efectivo || 0), 0))
+  const cuenta = { cliente_id: "cuenta-personal", saldo_real: r2(-30000 + retirado), saldo_proyectado: r2(-30000 + retirado), a_favor: r2(30000 - retirado), comisiones_ganadas: 30000, retiros: retirado }
   return [
-    { id: "billetera", balance: efectivo, saldo: efectivo, desglose: { efectivo, cheques: 0, transferencias: r2(pagos.reduce((s, p) => s + p.monto - (p.efectivo || 0), 0)) }, cheques_cantidad: 0, pagos_sin_rendir: pagos.length, en_viaje: { total: 0, cantidad: 0 }, deuda_rendiciones: 0, comisiones_pendientes: [], total_pendiente_comisiones: 0, historial: pagos.map((p) => ({ id: p.id, tipo: "cobro_cliente", medio: p.forma_pago, monto: p.monto, concepto: `Cobro ${p.cliente_nombre}`, fecha: p.fecha_pago, referencia_id: p.id, referencia_tipo: "pago_cliente" })), total: pagos.length, page: 1, per_page: 50 },
+    { id: "billetera", balance: r2(efectivo - retirado), saldo: r2(efectivo - retirado + cuenta.saldo_real), retiros_sin_rendir: retirado, cuenta_personal: cuenta, desglose: { efectivo, cheques: 0, transferencias: r2(pagos.reduce((s, p) => s + p.monto - (p.efectivo || 0), 0)) }, cheques_cantidad: 0, pagos_sin_rendir: pagos.length, en_viaje: { total: 0, cantidad: 0 }, deuda_rendiciones: 0, comisiones_pendientes: [], total_pendiente_comisiones: 0, historial: pagos.map((p) => ({ id: p.id, tipo: "cobro_cliente", medio: p.forma_pago, monto: p.monto, concepto: `Cobro ${p.cliente_nombre}`, fecha: p.fecha_pago, referencia_id: p.id, referencia_tipo: "pago_cliente" })), total: pagos.length, page: 1, per_page: 50 },
     { id: "comisiones:cobrada", tipo: "cobrada", totales: { disponible: 0, sin_cobrar: 0, retirado: 0 }, pedidos: [] },
     { id: "comisiones:vendida", tipo: "vendida", totales: { disponible: 0, sin_cobrar: r2(S.pedidos.reduce((s, p) => s + p.total * 0.05, 0)), retirado: 0 }, pedidos: S.pedidos.filter((p) => p.estado !== "eliminado").map((p) => ({ pedido_id: p.id, numero_pedido: p.numero_pedido, cliente_id: p.cliente_id, cliente_nombre: clienteDe(p.cliente_id)?.nombre || "—", fecha: p.fecha, fecha_cobro: "", total_monto: p.total, total_comision: r2(p.total * 0.05), total_debito_contado: 0, cantidad_skus: p.detalle.length })) },
     ...S.pedidos.map((p) => ({ id: `detalle:vendida:${p.id}`, tipo: "vendida", articulos: p.detalle.map((d) => ({ kardex_id: d.id, articulo_id: d.articulo_id, sku: "—", descripcion: S.f.articulos.find((a) => a.id === d.articulo_id)?.descripcion || "—", categoria: "—", cantidad: d.cantidad, precio_unitario: d.precio_base, subtotal: r2(d.precio_base * d.cantidad), comision_pct: 5, comision_monto: r2(d.precio_base * d.cantidad * 0.05), comision_pactada: r2(d.precio_base * d.cantidad * 0.05), descuento_financiero_pct: 0 })) })),
@@ -198,7 +200,19 @@ function aplicarPedido(p, capturadoAt) {
 
 const COLS_LISTAS = ["lista_precio_id", "metodo_facturacion", "lista_limpieza_id", "metodo_limpieza", "lista_perf0_id", "metodo_perf0", "lista_perf_plus_id", "metodo_perf_plus"]
 
+const HANDLERS_RETIRO = {
+  "retiro.registrar": (u, p) => {
+    const b = billetera()[0]
+    if (!(Number(p.monto) > 0)) throw new Rechazo("El monto del retiro tiene que ser mayor a 0")
+    if (Number(p.monto) > b.balance + 0.005) throw new Rechazo(`Tenés $${b.balance} de efectivo en la mano: no podés retirar $${p.monto}.`)
+    S.retiros.push({ monto: Number(p.monto), observaciones: p.observaciones || null })
+    S.seq++
+    return { retiro_id: randomUUID(), monto: Number(p.monto) }
+  },
+}
+
 const HANDLERS = {
+  ...HANDLERS_RETIRO,
   "pedido.crear": (u, p, m) => aplicarPedido({ ...p, pedido_id: null }, m.capturado_at),
   "pedido.editar": (u, p, m) => aplicarPedido(p, m.capturado_at),
   "pedido.eliminar": (u, p) => {

@@ -107,7 +107,7 @@ const fixture = {
     const { lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, ...ficha } = c
     return { ...ficha, saldo_actual: saldoDe.get(c.id) || 0 }
   }),
-  precios_clientes: clientes.map((c) => ({ id: c.id, cliente: Object.fromEntries(PRECIO_CLIENTE.map((k) => [k, c[k] ?? null])), condicionesProveedor: cp.get(c.id) || [], condicionesMarca: cm.get(c.id) || [], bonificaciones: (bo.get(c.id) || []).filter((b) => b.tipo === "general" || b.tipo === "viajante") })),
+  precios_clientes: clientes.map((c) => ({ id: c.id, cliente: Object.fromEntries(PRECIO_CLIENTE.map((k) => [k, c[k] ?? null])), condicionesProveedor: cp.get(c.id) || [], condicionesMarca: cm.get(c.id) || [], bonificaciones: (bo.get(c.id) || []).filter((b) => ["general", "viajante", "mercaderia", "contado"].includes(b.tipo)) })),
   bonificaciones: Object.fromEntries(clientes.map((c) => [c.id, (bo.get(c.id) || []).filter((b) => b.tipo === "viajante" || b.tipo === "mercaderia")])),
 }
 const salida = resolve(dirname(fileURLToPath(import.meta.url)), ".fixture-vendedor.json")

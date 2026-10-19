@@ -34,24 +34,17 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |
 |---|---|---|---|
-| Vendedor | v0.3.1 (versionCode 8) | 14/10 | Cuentas corrientes etapas 1 a 3 |
+| Vendedor | v0.4.0 (versionCode 9) | 20/10 | — |
 | Chofer | v0.2.2 (versionCode 5) | 01/10 | Cobro contado 07/10, formatos §20, cuentas corrientes etapas 1 a 3, devoluciones a valor |
 | Depósito | v0.2.3 (versionCode 6) | 22/09 | Formatos §20, mercadería por cupo, revisión de devoluciones por renglón |
 
 ---
 
-## App Vendedor → próxima versión v0.4.0
+## App Vendedor → v0.4.0 HECHA (20/10/2026, instalada en el NuStar)
 
-**Ya está en el código de `main` (solo falta compilar):** saldo proyectado como número principal en lista, filtro "con deuda", encabezado del pedido, viajes y estadísticas; overlay de devolución sin enviar y de cobro anulado sin enviar (CUENTAS-CORRIENTES-APPS.md, "App Vendedor").
+Todo lo que estaba pendiente quedó en la v0.4.0 (detalle en MOBILE.md §18, "v0.4.0"): 10 % contado con la regla del 07/10, fila del proyectado en Resumen, devolución sin enviar valuada como el servidor, billetera en dos cajitas, pantalla de retiro (`retiro.registrar`), "Para retirar" en Comisiones, y los precios pendientes del 06/10 (descuento general y contado por pedido, condiciones por proveedor/marca, mercadería por cupo eligiendo artículos, "sin precio base, sin precio" también en el servidor). Un cheque = un papel: verificado, la app no lo duplica sin señal.
 
-**Falta hacer:**
-1. **10 % contado con la regla del 07/10** en `Cobrar.tsx` y `comprobantes-ui.tsx`: la NC es el 10 % del **total** de cada comprobante, una sola vez, aunque el pago sea parcial. Hoy la app estima con la regla vieja y en un pago parcial pide cobrar de más (el excedente queda a cuenta). Validar también `dtos_hechos`.
-2. Pestaña Resumen: no esconder la fila del proyectado cuando el único cobro en calle es uno sin enviar (`comprobantes-ui.tsx:77,131`).
-3. **Billetera en dos cajitas** (etapa 3): "Plata de la empresa en tu mano" (`balance` en efectivo + `cheques_cantidad` como cantidad, nunca monto) y "Tu cuenta" (`cuenta_personal.a_favor`, comisiones ganadas, retiros). `cuenta_personal: null` = no vinculada → cálculo viejo.
-4. **Pantalla de retiro**: `POST /api/vendedor/retiro { monto, observaciones?, idempotency_key }`. Offline: operación de outbox nueva (p. ej. `retiro.registrar`) con handler que llame a `registrarRetiro` (`lib/cuenta-corriente/retiro.ts`); en el overlay el retiro baja `balance` y `a_favor`. Errores: `409 SIN_CUENTA_PERSONAL` ("pedile a la oficina que la vincule"), `422 RETIRO_SUPERA_EFECTIVO`.
-5. Pestaña Comisiones: "Para retirar" = `disponible` (puede ser negativo); "Sin cobrar" sigue siendo estimación.
-6. Pendiente de precios (semana del 13/10, confirmar con el dueño si sigue vigente o ya lo cubrió la v0.3.x): descuento general, condiciones por proveedor/marca, contado al tomar el pedido, elegir artículos de mercadería por cupo, regla "sin precio base, sin precio" en `calculator.ts`. Ver MOBILE.md §10 "Sesión Precios y descuentos".
-7. **Un cheque = un papel**: resuelto en el servidor (20/10). En el cobro a varios clientes queda una sola fila de cheque y la billetera lo cuenta una vez. En la app, solo verificar que no lo muestre dos veces sin señal.
+**Queda para probar en la calle:** un retiro real con la cuenta personal vinculada, y un pedido con cupo de mercadería hasta el picking.
 
 ## App Chofer → próxima versión v0.3.0
 

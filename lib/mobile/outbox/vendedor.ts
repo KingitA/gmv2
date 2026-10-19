@@ -30,7 +30,7 @@ import {
 } from "@/lib/actions/pedidos"
 import { esPedidoEditable, motivoBloqueo } from "@/lib/pedidos/estados"
 import { esErrorReglaPedido, MSG_SIN_LISTA } from "@/lib/pedidos/errores"
-import { limpiarCentinela } from "@/lib/pricing/resolver"
+import { limpiarCentinela, type CondicionMarca, type CondicionProveedor } from "@/lib/pricing/resolver"
 import { faltaListaMetodo, mensajeFaltaListaMetodo, prepararMotorCliente } from "@/lib/pricing/motor"
 import { esApkVendedorVieja, compatOverridesApkVieja, SEGS_COMPAT } from "@/lib/vendedor/compat-apk"
 import { listasPermitidasDe } from "@/lib/vendedor/session"
@@ -43,6 +43,7 @@ import { cargarClientesVendedor, cargarCuentaCliente, cargarPedidosVendedor, car
 import { esUuid } from "../uuid"
 import { fechaISO } from "@/lib/formato"
 import { subirFotosPendientes } from "@/lib/cobranzas/fotos"
+import { ErrorRetiro, registrarRetiro } from "@/lib/cuenta-corriente/retiro"
 import { llamarRuta } from "./rutas"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
 
@@ -123,7 +124,13 @@ interface ItemPedido {
 interface CondPedido {
   metodo_facturacion_pedido?: string | null
   lista_precio_pedido_id?: string | null
+  /** general / viajante / mercadería / contado "solo este pedido" (v0.4.0: también general y contado) */
   bonif_pedido?: BonifPedido | null
+  /** Condiciones por proveedor / marca de ESTE pedido: lista COMPLETA (ausente = las de la ficha). Solo pedidos nuevos */
+  condiciones_proveedor?: CondicionProveedor[] | null
+  condiciones_marca?: CondicionMarca[] | null
+  /** Mercadería a regalar por cupo (origen = "todo" | "seg:x" | "prov:id" | "marca:id"). Solo pedidos nuevos */
+  mercaderia_bonificada?: Array<{ origen: string; articulo_ids: string[] }> | null
 }
 
 interface PayloadPedido {
@@ -170,6 +177,9 @@ const overridesDe = (c?: CondPedido | null) => ({
   ...(c?.metodo_facturacion_pedido ? { metodo_facturacion_pedido: c.metodo_facturacion_pedido } : {}),
   ...(c?.lista_precio_pedido_id ? { lista_precio_pedido_id: c.lista_precio_pedido_id } : {}),
   ...(c?.bonif_pedido ? { bonif_pedido: c.bonif_pedido } : {}),
+  // Lista completa del pedido (igual que el ERP): el motor reemplaza las de la ficha
+  ...(Array.isArray(c?.condiciones_proveedor) ? { condiciones_proveedor: c!.condiciones_proveedor } : {}),
+  ...(Array.isArray(c?.condiciones_marca) ? { condiciones_marca: c!.condiciones_marca } : {}),
 })
 
 /** Neco + las listas que imponen los viajantes del usuario (las únicas que se usan desde la app). */
@@ -318,6 +328,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
         observaciones: p.observaciones || undefined,
         estado_inicial: estadoInicial,
         ...overrides,
+        ...(Array.isArray(p.cond?.mercaderia_bonificada) && p.cond!.mercaderia_bonificada!.length ? { mercaderia_bonificada: p.cond!.mercaderia_bonificada! } : {}),
       })
       pedidoId = pedido.id as string
       // createPedido no es transaccional: si se cortó a mitad, el reintento entra por
@@ -580,9 +591,40 @@ const viajeEstado: HandlerDef<{ viaje_id: string; estado: "completado" | "en_cur
   },
 }
 
+// ─── Retiro de efectivo (cuenta personal, regla del dueño 19/10/2026) ─────────
+
+/**
+ * El vendedor retira efectivo de lo que tiene en la mano (también sin señal). Misma función
+ * que POST /api/vendedor/retiro (lib/cuenta-corriente/retiro.ts): se debita en su cuenta
+ * personal y baja la plata de la empresa que tiene que rendir. Idempotente por la clave de
+ * la operación. Sin cuenta vinculada o pidiendo más efectivo del que tiene: rechazo definitivo.
+ */
+const retiroRegistrar: HandlerDef<{ monto: number; observaciones?: string | null }> = {
+  tipo: "retiro.registrar",
+  roles: ROLES,
+  validar: (p) => (Number(p?.monto) > 0 && Number.isFinite(Number(p?.monto)) ? null : "Monto de retiro inválido"),
+  async aplicar(ctx, m) {
+    const { vendedorIds } = await sesionVendedor(ctx)
+    try {
+      const r = await registrarRetiro(ctx.supabase, {
+        usuarioId: ctx.sesion.user.id,
+        vendedorIds,
+        monto: Number(m.payload.monto),
+        observaciones: m.payload.observaciones || null,
+        idempotencyKey: m.idempotency_key,
+      })
+      return { ...r }
+    } catch (e) {
+      if (e instanceof ErrorRetiro && e.status < 500) throw new RechazoNegocio(e.message, e.codigo)
+      throw e
+    }
+  },
+}
+
 export const HANDLERS_VENDEDOR: HandlerDef[] = [
   pedidoCrear, pedidoEditar, pedidoEliminar,
   clienteCrear, clienteEditar, clienteBonificaciones,
   cobroRegistrar, cobroAnular, devolucionRegistrar,
   viajeCrear, viajeClienteNoVa, viajeEstado,
+  retiroRegistrar,
 ]
