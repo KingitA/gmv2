@@ -10,6 +10,8 @@
 
 ## 0. TL;DR para la próxima sesión
 
+> **Qué falta hacer en cada app (19/10/2026): `docs/PENDIENTES-APPS.md`.** Estado general del sistema: `docs/ESTADO-CONSOLIDADO.md`.
+
 1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (128 tests).
 2. Tu app vive en `mobile/apps/<app>/src`. Todo lo compartido está en
    `mobile/packages/core` (`@gm/core`, `@gm/core/ui`). **No dupliques** lógica: si dos
@@ -474,8 +476,8 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
   Devolución: confirmar idempotente (guarda por `movimientos_stock`).
 - `lib/mobile/sync/deposito.ts` (5 datasets), `lib/mobile/outbox/deposito.ts` (11 handlers),
   `lib/mobile/outbox/tipos.ts`. Motor: `DatasetDef.requiereLogDe` (delta solo si el trigger existe).
-- Migración `supabase/migrations/20260919_mobile_deposito.sql` — **aditiva, idempotente, PENDIENTE
-  de aplicar en producción**: triggers de log en pedidos, pedidos_detalle, ordenes_compra,
+- Migración `supabase/migrations/20260919_mobile_deposito.sql` — **aditiva, idempotente, APLICADA
+  en producción (18/09/2026)**: triggers de log en pedidos, pedidos_detalle, ordenes_compra,
   recepciones, recepciones_items, devoluciones + tabla `deposito_ajustes_movil`. La app funciona
   sin ella (snapshot + refresco periódico de 45 s); con ella la cola se entera en segundos.
 - `typecheck:movil`: `lib/deposito/`, `app/api/deposito/` y `lib/actions/deposito.ts` pasan al alcance en cero.
@@ -733,7 +735,7 @@ Leyenda: ✅ hecho y verificado · 🟡 hecho, sin verificar en real (motivo ind
 | Vendedor viejo v1.1 (`com.gm.vendedor`, otra firma) | ✅ desinstalado del NuStar |
 | **App Depósito completa** (Sesión 3) | ✅ **CERRADA 18/09/2026**: en `main` (merge `3862a9a`), migraciones aplicadas, APK `deposito-v0.2.0` en el NuStar, checklist contra producción superado y base verificada idéntica (§17). Pendientes del mes de prueba: §17 |
 | **App Vendedor completa** (Sesión 1) | ✅ **CERRADA 23/09/2026**: en `main`, migración aplicada, `vendedor-v0.2.2` en el NuStar, checklist contra producción superado (§18) |
-| **App Chofer completa** (Sesión 2) | 🟡 **CÓDIGO LISTO 23/09/2026** en la rama `apk-chofer`: datasets, handlers, pantallas, 16 tests de overlay, prueba de ruta/interrupción/reconexión superada contra el mock, APK `chofer-v0.2.0` firmado con el keystore de la fundación. **Pendiente**: OK del dueño para mergear a `main` (toca `app/api/chofer/*`), deploy, y checklist contra producción en el NuStar (§19) |
+| **App Chofer completa** (Sesión 2) | ✅ **CERRADA 01/10/2026**: en `main` (merge `c7cf303`), `chofer-v0.2.2` en el NuStar, pasada final superada (§19). Historia: 🟡 **CÓDIGO LISTO 23/09/2026** en la rama `apk-chofer`: datasets, handlers, pantallas, 16 tests de overlay, prueba de ruta/interrupción/reconexión superada contra el mock, APK `chofer-v0.2.0` firmado con el keystore de la fundación. **Pendiente**: OK del dueño para mergear a `main` (toca `app/api/chofer/*`), deploy, y checklist contra producción en el NuStar (§19) |
 
 ### Validación en producción (18/09/2026)
 
@@ -1418,7 +1420,7 @@ solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos 
 | Modo avión con el interruptor del equipo | — | 🟡 "sin señal" se simuló cortando el túnel `adb reverse` (servidor inalcanzable de verdad) para no tocar ajustes del equipo. El camino "red caída según Android" es el de la fundación, ya validado con Chofer y Depósito |
 | Backend real (datasets y handlers contra Supabase) | — | 🟡 tipado y tests en verde; **sin ejecutar**: necesita la migración, el deploy en `main` y un usuario vendedor. La re-verificación de precios contra el historial real se ejercita ahí |
 
-### Cheques: foto, OCR y BCRA (23/09/2026 — en `main`, validado en el preview con cheques reales; PENDIENTE DE APK)
+### Cheques: foto, OCR y BCRA (23/09/2026 — en `main`, validado en el preview con cheques reales; en la APK desde v0.3.0)
 
 Retrocompatible con la v0.2.3 instalada (misma ruta de OCR y misma
 `cobro.registrar`; los campos nuevos son opcionales). Sale en la próxima actualización
