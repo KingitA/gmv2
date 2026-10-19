@@ -16,6 +16,8 @@ import { controlarContadoDuplicado } from "@/lib/cobranzas/contado-duplicado"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { claveDelCliente, montoDelPrincipal, repartirMetodos, validarCobroConjunto } from "@/lib/cobranzas/cobro-conjunto"
 import { anularCobranza } from "@/lib/actions/cobranzas"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { asegurarChequeCompartido, liberarChequeSinUso, numeroBaseCheque } from "@/lib/cobranzas/cheque-compartido"
 import { normalizarCuit } from "@/lib/formato"
 import type { User } from "@supabase/supabase-js"
 
@@ -73,6 +75,36 @@ async function cobrarConjunto(user: User, viajeId: string, body: any) {
   const supabase = await createClient()
   const claves = montos.map((_, i) => claveDelCliente(body.idempotency_key, i))
 
+  // UN CHEQUE = UN PAPEL (pedido del dueño 01/10): un cheque que el reparto
+  // partió entre varios clientes queda como UNA fila en cartera por el total;
+  // cada pieza (la parte de cada cliente) se vincula a esa fila.
+  const admin = createAdminClient()
+  const chequesCompartidos: string[] = []
+  try {
+    for (const m of (body.metodos || []) as any[]) {
+      if (m.tipo !== "cheque") continue
+      const esPieza = (p: any) =>
+        p.tipo === "cheque" && numeroBaseCheque(p.numero_cheque) === String(m.numero_cheque || "") &&
+        (p.banco_emisor || "") === (m.banco_emisor || "") && (p.fecha_cheque || "") === (m.fecha_cheque || "")
+      const clientesConPieza = reparto.filter((piezas) => piezas.some(esPieza)).length
+      if (clientesConPieza < 2) continue
+      const chequeId = await asegurarChequeCompartido(admin, {
+        banco: m.banco_emisor || "",
+        numero: String(m.numero_cheque || ""),
+        fecha_vencimiento: m.fecha_cheque || todayArgentina(),
+        fecha_emision: m.fecha_emision || null,
+        monto: Number(m.monto),
+        color: colorOverride(m.color_cheque) || COLOR_PENDIENTE,
+        es_echeq: m.color_cheque === "ECHEQ" || Boolean(m.es_echeq),
+        cliente_origen_id: String(body.cliente_id),
+      })
+      chequesCompartidos.push(chequeId)
+      for (const piezas of reparto) for (const p of piezas) if (esPieza(p)) { p.cheque_id = chequeId; p.numero_cheque = String(m.numero_cheque || "") }
+    }
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message, mensaje: e.message }, { status: 500 })
+  }
+
   // Cabecera: una por envío. En un reintento se reutiliza la del primer pago que ya exista.
   let cobranzaId: string | null = null
   const clavesValidas = claves.filter((k): k is string => !!k)
@@ -94,6 +126,7 @@ async function cobrarConjunto(user: User, viajeId: string, body: any) {
   const pagos: Array<{ cliente_id: string; pago_id: string; monto: number; dedup?: boolean }> = []
   const avisos: string[] = []
   const deshacer = async () => {
+    for (const id of chequesCompartidos) await liberarChequeSinUso(admin, id).catch(() => {})
     for (const pagoId of creados) {
       try {
         await anularCobranza(supabase, { pagoId, usuarioId: user.id, motivo: "Cobro conjunto incompleto: otro cliente del mismo envío fue rechazado" })
@@ -214,7 +247,9 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
         fecha_cheque: metodo.tipo === "cheque" ? metodo.fecha_cheque || null : null,
         cuit_emisor: metodo.tipo === "cheque" ? normalizarCuit(metodo.cuit_emisor) : null,
         color_cheque: metodo.tipo === "cheque" ? colorMetodo : null,
-        cheque: metodo.tipo === "cheque"
+        // Pieza de un cheque compartido: se vincula al papel único (no crea otro)
+        cheque_id: metodo.tipo === "cheque" ? metodo.cheque_id || null : null,
+        cheque: metodo.tipo === "cheque" && !metodo.cheque_id
           ? {
               banco: metodo.banco_emisor || "",
               numero: metodo.numero_cheque || "",

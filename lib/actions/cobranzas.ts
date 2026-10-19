@@ -91,6 +91,22 @@ export async function anularCobranza(
     .eq("anticipo_pago_id", pagoId)
   if (antErr) console.error("[cobranzas] liberar anticipos:", antErr.message)
 
+  // Cabecera del envío (cobro conjunto / varios clientes): si ya no le queda
+  // ningún pago vivo, queda anulada (antes seguía "pendiente" para siempre).
+  try {
+    const { data: pg } = await supabase.from("pagos_clientes").select("cobranza_id").eq("id", pagoId).maybeSingle()
+    if (pg?.cobranza_id) {
+      const { count } = await supabase
+        .from("pagos_clientes")
+        .select("id", { count: "exact", head: true })
+        .eq("cobranza_id", pg.cobranza_id)
+        .not("estado", "in", "(anulado,rechazado)")
+      if (!count) await supabase.from("cobranzas").update({ estado: "anulada" }).eq("id", pg.cobranza_id)
+    }
+  } catch (cabErr: any) {
+    console.error("[cobranzas] cabecera al anular:", cabErr?.message)
+  }
+
   // Comisión: los comprobantes que este cobro saldaba dejan de estar saldados →
   // se revierte la comisión ganada (y se vuelve a ganar si se cobra de nuevo).
   try {

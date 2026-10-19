@@ -157,7 +157,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       supabase
         .from("pagos_clientes")
         .select(`id, cliente_id, monto, estado, observaciones, created_at, creado_por,
-          pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, numero_comprobante_pago),
+          pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, numero_comprobante_pago, cheque_id),
           imputaciones(comprobante_id, monto_imputado, comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante, punto_venta, numero_comprobante, pedido_id))`)
         .eq("viaje_id", viajeId)
         .in("estado", ["pendiente_rendicion", "confirmado"])
@@ -445,7 +445,8 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       gastos_total: gastosTotal,
       cobrado_efectivo: cobradoEfectivo,
       cobrado_cheques: sumaTipo(["cheque"]),
-      cheques_cantidad: detalles.filter((d: any) => d.tipo_pago === "cheque").length,
+      // Un cheque = un papel: un cheque compartido entre clientes cuenta una vez
+      cheques_cantidad: new Set(detalles.filter((d: any) => d.tipo_pago === "cheque").map((d: any, i: number) => d.cheque_id || `suelto-${i}`)).size,
       cobrado_transferencias: sumaTipo(["transferencia", "deposito"]),
       efectivo_en_mano: r2(fondoEntregado + cobradoEfectivo - gastosTotal),
       saldo_billetera_titular: r2(((saldoBill || []) as any[]).reduce((s, x) => s + Number(x.saldo), 0)),

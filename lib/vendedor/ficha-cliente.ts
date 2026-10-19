@@ -4,6 +4,7 @@
 // sin re-autenticar por cliente. Ver MOBILE.md → "Vendedor".
 
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
+import { enCobroPorComprobante } from "@/lib/cobranzas/en-cobro"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
 import { MARCA_CONTADO } from "@/lib/constants"
@@ -70,38 +71,10 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
   // El front las resta del saldo mostrado/seleccionable: sin esto el
   // vendedor puede cobrar dos veces el mismo comprobante.
   const compIds = (comprobantes || []).map((c: any) => c.id)
-  const enCobroPorComp = new Map<string, number>()
+  // Fórmula única con la cuenta de cobro del chofer (lib/cobranzas/en-cobro.ts).
   // Parte del "en cobro" que viajó marcada [10% CONTADO]: si esas entregas
   // más lo de hoy completan el comprobante, el 10% bonifica el total.
-  const enCobroContadoPorComp = new Map<string, number>()
-  if (compIds.length) {
-    const { data: impPend } = await supabase
-      .from("imputaciones")
-      .select("comprobante_id, monto_imputado, pago_id")
-      .in("comprobante_id", compIds)
-      .eq("estado", "pendiente")
-    const pagoIdsPend = [...new Set((impPend || []).map((i: any) => i.pago_id).filter(Boolean))]
-    const estadoPago = new Map<string, string>()
-    const contadoPago = new Set<string>()
-    if (pagoIdsPend.length) {
-      const { data: pgs } = await supabase
-        .from("pagos_clientes")
-        .select("id, estado, observaciones")
-        .in("id", pagoIdsPend)
-      for (const p of pgs || []) {
-        estadoPago.set(p.id, p.estado)
-        if ((p.observaciones || "").includes(MARCA_CONTADO)) contadoPago.add(p.id)
-      }
-    }
-    for (const i of impPend || []) {
-      const est = estadoPago.get(i.pago_id)
-      if (est === "pendiente" || est === "pendiente_rendicion") {
-        enCobroPorComp.set(i.comprobante_id, (enCobroPorComp.get(i.comprobante_id) || 0) + Number(i.monto_imputado))
-        if (contadoPago.has(i.pago_id))
-          enCobroContadoPorComp.set(i.comprobante_id, (enCobroContadoPorComp.get(i.comprobante_id) || 0) + Number(i.monto_imputado))
-      }
-    }
-  }
+  const { enCobro: enCobroPorComp, enCobroContado: enCobroContadoPorComp } = await enCobroPorComprobante(supabase, compIds, MARCA_CONTADO)
   const comprobantesConReserva = (comprobantes || []).map((c: any) => ({
     ...c,
     en_cobro: Math.round((enCobroPorComp.get(c.id) || 0) * 100) / 100,

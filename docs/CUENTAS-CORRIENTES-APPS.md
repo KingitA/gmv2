@@ -164,3 +164,17 @@ Reglas del dueño:
 ### App Depósito
 
 - No cambia nada en la app. Sus empleados tienen cuenta personal: la mercadería que retiran es un pedido normal a su cuenta, y **no aparece en la cola de preparación**.
+
+---
+
+## Arreglos de servidor del 20/10 (cheques y cobro doble)
+
+- **Un cheque = un papel** (`lib/cobranzas/cheque-compartido.ts`). En el cobro conjunto del chofer (`/api/chofer/viaje/[id]/cobro`) y en el cobro a varios clientes del vendedor (`/api/viajante/cobro`), un cheque que cubre a varios clientes es UNA fila en `cheques` por el total. Cada pieza de cliente queda con `pagos_detalle.cheque_id` apuntando a esa fila y sin el sufijo " (2)".
+  - `cheques_cantidad` de la billetera del vendedor, de la del chofer y de la hoja de ruta cuenta el papel una sola vez.
+  - Si rebota, `cheque_rechazar` rechaza todos los cobros sin confirmar que cubría. Si ya había cobros confirmados, la ND va entera al cliente que lo entregó (`cliente_origen_id` = cliente principal).
+- **Cheques de cobros sin confirmar**: estado nuevo `EN_VERIFICACION`.
+  - Quedan fuera de la cartera, de la proyección de caja, de las órdenes de pago y de Jarvis, porque todo eso filtra `EN_CARTERA`.
+  - Pasan a `EN_CARTERA` solos al confirmarse el cobro y a `ANULADO` si el cobro se anula o se rechaza, salvo que otro cliente siga usando el cheque.
+  - Los mueve un trigger de la migración `20261020b_cheques_un_papel.sql`.
+- **`en_cobro` para el chofer**: `cargarCuentaCobro` (la cuenta de cobro del chofer) manda `en_cobro` por comprobante, con la misma fórmula que la ficha del vendedor (`lib/cobranzas/en-cobro.ts`). La APK chofer actual ya lo descuenta en `saldoCobrable`.
+- La cabecera `cobranzas` de un envío queda `anulada` cuando se anulan todos sus pagos.

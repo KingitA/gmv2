@@ -76,6 +76,8 @@ select pedido_detalle_id, count(*) from picking_items
 group by 1 having count(*) > 1;
 ```
 
+**Falta aplicar (20/10, cuentas corrientes):** `20261020b_cheques_un_papel.sql`. Agrega el estado de cheque EN_VERIFICACION, los triggers de "un cheque = un papel" y el nuevo `cheque_rechazar`. Aplicarla **antes** de desplegar el código de esa fecha: el código del servidor ya crea el cheque compartido.
+
 **Instalada pero sin ejecutar (a propósito):** `20261020_cc_puesta_a_cero.sql`. Deja listas las funciones de puesta a cero de cuentas corrientes; **no borra nada sola**. Se ejecuta el día del corte (ver §4).
 
 **Instaladas a medias por diseño (no hay que hacer nada):** `20260427_kardex_precio_bruto` (columna que el sistema no usa), `20260515_kardex_v3_reorder` y `20260730_comisiones_kardex_sync` (reemplazadas por migraciones posteriores).
@@ -89,17 +91,18 @@ group by 1 having count(*) > 1;
 ### Para vos (decisiones o acciones)
 1. Aplicar `20260827_picking_preparadores.sql` (con el control de arriba) y, si querés, `20260826_v_articulos_ventas.sql`.
 2. **Fecha de corte de cuentas corrientes.** Ese día, en orden: `SELECT * FROM cc_puesta_a_cero_simulacro();` → `SELECT cc_puesta_a_cero('PONER A CERO');` → cargar la apertura en `/apertura` → saldos de caja y bancos → `/personal` "Poner al día". Las comisiones de comprobantes viejos se liquidan en el sistema viejo.
-3. **Vincular cuentas del personal** que faltan: GARRIDO SERGIO GABRIEL (¿usuario SERGIO o GABRIEL?) y vendedores sin cuenta (EBERLE, LAUMANN, LOPEZ, PEREYRA, ROSSI x3).
+3. ~~Vincular cuentas del personal~~ **Hecho 19/10**: las 17 cuentas quedaron vinculadas (`20261019b`, más Gabriel Aman en el cliente 8); Pereyra Horacio quedó inactivo. Ningún vendedor con comisión ni ningún chofer o empleado de depósito queda sin cuenta.
 4. Decidir el stash de localidades (§1, punto 2).
 5. Rediseño, decisiones abiertas: ¿un solo botón de guardar en la ficha de cliente? ¿borrar el Dashboard viejo? OK para borrar "Revisión de pagos" y "Cobranza nueva".
 6. CUIT con dígito inválido a corregir a mano: MAXIKIOSCO GUIDI, WALE'S, SEBILLE (proveedor), un cheque.
 7. Jarvis: verificar que `CRON_SECRET` exista en Vercel (si no, la revisión de las 8:00 no corre); clasificar el resto del catálogo con el botón (≈ USD 0,12); revisar la parada de Li Yutao del viaje ALTO VALLE 16/10 ("cobrar lo anterior" marcado).
 8. Depósito, tarea aparte: depurar ~1.189 pedidos `impreso` viejos (hay propuesta escrita en MOBILE.md §17; no se toca sin tu OK).
 
-### Correcciones de servidor pendientes (las hace un agente, con tu OK)
-1. **Un cheque = un papel.** En el cobro conjunto del chofer y en el cobro a varios clientes del vendedor (`app/api/viajante/cobro`), un cheque se parte en una fila por cliente con sufijo " (2)". Debe quedar una sola fila en cartera y el reparto en las imputaciones. Obligatorio según tu pedido del 01/10.
-2. **Riesgo de cobro doble en la app chofer**: el selector de cobro no sabe qué comprobantes ya están "en cobro" por el vendedor. Hay que mandar `en_cobro` desde el servidor (ver PENDIENTES-APPS.md).
-3. Cheques de cobros pendientes nacen EN_CARTERA (cartera y proyección de caja incluyen plata no confirmada); `cobranza_anular` anula un cheque compartido para todos los clientes. Reportado en la auditoría, sin confirmar.
+### Correcciones de servidor
+Las tres primeras las hizo la sesión de cuentas corrientes el 20/10. Están en `main` y falta aplicar `20261020b_cheques_un_papel.sql`:
+1. ~~Un cheque = un papel~~ **Hecho.** El cobro conjunto del chofer y el cobro a varios clientes del vendedor dejan UNA fila en cartera por el total (`lib/cobranzas/cheque-compartido.ts`); cada cliente tiene su parte vinculada. Las billeteras y la hoja de ruta cuentan ese cheque una sola vez. Si rebota, la nota de débito va entera al cliente que lo entregó.
+2. ~~Riesgo de cobro doble en la app chofer~~ **Hecho en el servidor.** La cuenta de cobro del chofer trae `en_cobro` por comprobante (`lib/cobranzas/en-cobro.ts`, misma fórmula que el vendedor). La APK actual ya lo usa: no hace falta compilar para esto.
+3. ~~Cheques de cobros pendientes en cartera / anular cheque compartido~~ **Hecho.** El cheque de un cobro sin confirmar queda EN_VERIFICACION (fuera de cartera y de la proyección de caja; pestaña "En verificación" en Cheques) y pasa a EN_CARTERA al confirmarse. Anular el cobro de un cliente no anula un cheque que otro sigue usando. La cabecera `cobranzas` queda anulada cuando se anulan todos sus pagos.
 4. Seguridad: `ai_emails`, `ai_email_attachments` y `ai_classifications` tienen acceso público total. Arreglar cuando se retome el lector de mails.
 5. Pantalla de administración de equipos (`mobile_dispositivos`, revocar) y de alertas de integridad.
 

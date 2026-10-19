@@ -187,6 +187,32 @@ export async function POST(request: NextRequest) {
       cobranzaId = cab.id
     }
 
+    // UN CHEQUE = UN PAPEL (pedido del dueño 01/10): con varios clientes, cada
+    // cheque queda como UNA fila en cartera por el total y cada cliente lleva su
+    // parte vinculada a esa fila (antes se creaba un cheque por cliente).
+    // Se crea recién cuando hace falta (antes del primer pago), para no dejar un
+    // papel suelto si el cobro se rechaza por una validación.
+    const chequeDeMetodo = new Map<number, string>()
+    const chequeCompartido = async (mi: number): Promise<string | null> => {
+      const m = metodos[mi]
+      if (clientes.length < 2 || m?.tipo !== "cheque") return null
+      if (!chequeDeMetodo.has(mi)) {
+        const { createAdminClient } = await import("@/lib/supabase/admin")
+        const { asegurarChequeCompartido } = await import("@/lib/cobranzas/cheque-compartido")
+        chequeDeMetodo.set(mi, await asegurarChequeCompartido(createAdminClient(), {
+          banco: m.banco || "S/D",
+          numero: m.numero_cheque || "S/N",
+          fecha_vencimiento: m.fecha_cheque || todayArgentina(),
+          fecha_emision: todayArgentina(),
+          monto: Number(m.monto),
+          color: colorOverride(m.color) || COLOR_PENDIENTE,
+          es_echeq: Boolean(m.es_echeq),
+          cliente_origen_id: clientes[0].cliente_id,
+        }))
+      }
+      return chequeDeMetodo.get(mi)!
+    }
+
     const pagosCreados: any[] = []
     let billeteraVendedorId: string | null = null
     let restanteMetodos = clientes.map((c: any) => montoCliente(c))
@@ -265,7 +291,9 @@ export async function POST(request: NextRequest) {
 
       const proporcion = montoPago / totalMetodos
       const detalles: DetalleInput[] = []
-      for (const m of metodos) {
+      for (let mi = 0; mi < metodos.length; mi++) {
+        const m = metodos[mi]
+        const chequeCompartidoId = await chequeCompartido(mi)
         const montoDetalle =
           clientes.length === 1
             ? Number(m.monto)
@@ -281,7 +309,8 @@ export async function POST(request: NextRequest) {
           referencia: m.referencia_transferencia || null,
           cuenta_bancaria_id: m.cuenta_bancaria_id || null,
           color_cheque: m.tipo === "cheque" ? colorOverride(m.color) || colorCliente : null,
-          cheque: m.tipo === "cheque"
+          cheque_id: chequeCompartidoId,
+          cheque: m.tipo === "cheque" && !chequeCompartidoId
             ? {
                 banco: m.banco || "S/D",
                 numero: m.numero_cheque || "S/N",

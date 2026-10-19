@@ -28,10 +28,10 @@ Verificado = comprobado en la base o leyendo el código. Reportado = lo encontra
 | 9 | Cobros de chofer trabados en pendiente_rendicion desde el 23/09: LACOMBE $1.921.830 y YAN JIAOMEI $5.502.800. | Verificado |
 | 10 | App vendedor: la lista de clientes muestra el saldo real; la ficha, la pantalla de pago y cobrar muestran el proyectado. El filtro "con deuda" usa el real. | Reportado |
 | 11 | Overlay offline del vendedor: una devolución descontada dentro de un cobro sin enviar muestra un saldo mayor que el del ERP (`mobile/.../overlay.ts:115-120`). Anular un cobro sin señal no restituye el saldo proyectado. | Reportado |
-| 12 | Selector de cobro del chofer sin `en_cobro` del servidor: puede cobrar un comprobante que el vendedor ya tiene en cobro pendiente (riesgo de cobro doble). | Reportado |
+| 12 | Selector de cobro del chofer sin `en_cobro` del servidor: puede cobrar un comprobante que el vendedor ya tiene en cobro pendiente (riesgo de cobro doble). | **Resuelto 20/10** (`lib/cobranzas/en-cobro.ts`) |
 | 13 | Las apps calculan el 10 % contado con la regla vieja (solo si se paga completo); el servidor aplica la nueva (07/10). El vendedor no valida `dtos_hechos`. | Reportado |
 | 14 | El chofer ve las devoluciones a valor bruto (`monto_total`); el servidor descuenta `valor_cobro` (neto de 10 %, ya descontado). | Reportado |
-| 15 | Los cheques de cobros pendientes nacen EN_CARTERA, así que cartera y proyección de caja incluyen plata no confirmada. `cobranza_anular` anula un cheque compartido para todos los clientes. | Reportado |
+| 15 | Los cheques de cobros pendientes nacen EN_CARTERA, así que cartera y proyección de caja incluyen plata no confirmada. `cobranza_anular` anula un cheque compartido para todos los clientes. | **Resuelto 20/10** (EN_VERIFICACION + un cheque = un papel, migración 20261020b) |
 | 16 | "Pendiente de verificación" significa dos cosas: en `saldo.ts` es cobro sin confirmar; en `v_verificacion_pendiente` es confirmado sin segunda firma. | Verificado |
 | 17 | Los cobros cargados desde la oficina se confirman en el acto (`confirmar` por defecto true): no pasan por una segunda persona. Los endpoints de confirmación solo piden estar logueado (`requireAuth`), sin rol. | Reportado |
 | 18 | No hay control de límite de crédito (`lib/services/reglas-negocio.ts` está muerto). | Reportado |

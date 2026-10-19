@@ -24,7 +24,7 @@ export async function GET() {
       viajeIds.length
         ? supabase
             .from("pagos_clientes")
-            .select("id, viaje_id, cliente_id, monto, estado, created_at, clientes(nombre, razon_social, nombre_razon_social), pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, color_cheque)")
+            .select("id, viaje_id, cliente_id, monto, estado, created_at, clientes(nombre, razon_social, nombre_razon_social), pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, color_cheque, cheque_id)")
             .in("viaje_id", viajeIds)
             .in("estado", ["pendiente_rendicion", "confirmado"])
             .order("created_at", { ascending: false })
@@ -54,6 +54,8 @@ export async function GET() {
 
     let efectivo = 0
     let chequesCantidad = 0
+    // Un cheque = un papel: un cheque compartido entre varios clientes se cuenta UNA vez
+    const papeles = new Set<string>()
     let chequesMonto = 0
     let transferencias = 0
     let enViaje = 0
@@ -76,7 +78,11 @@ export async function GET() {
           const t = (d.tipo_pago || "").toLowerCase()
           // Echeq = canal digital (como la transferencia): no es papel en mano
           if (t === "efectivo") efectivo += Number(d.monto)
-          else if (t === "cheque" && d.color_cheque !== "ECHEQ") { chequesCantidad += 1; chequesMonto += Number(d.monto) }
+          else if (t === "cheque" && d.color_cheque !== "ECHEQ") {
+            if (!d.cheque_id || !papeles.has(d.cheque_id)) chequesCantidad += 1
+            if (d.cheque_id) papeles.add(d.cheque_id)
+            chequesMonto += Number(d.monto)
+          }
           else transferencias += Number(d.monto)
         }
       } else if (sinRendir && declarado) enViaje += Number(p.monto)

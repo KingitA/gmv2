@@ -58,7 +58,7 @@ export async function resumenBilletera(
   const [{ data: pagosSinRendir, error: e1 }, { data: abiertas, error: e2 }, { data: difs, error: e3 }, { data: retiros, error: e4 }] = await Promise.all([
     supabase
       .from("pagos_clientes")
-      .select("id, monto, forma_pago, pagos_detalle(tipo_pago, monto, color_cheque)")
+      .select("id, monto, forma_pago, pagos_detalle(tipo_pago, monto, color_cheque, cheque_id)")
       .in("vendedor_id", vendedorIds)
       .eq("estado", "pendiente_rendicion"),
     supabase.from("rendiciones").select("id").in("cobrador_id", vendedorIds).eq("estado", "abierta"),
@@ -95,6 +95,8 @@ export async function resumenBilletera(
   let efectivo = 0
   let cheques = 0
   let chequesCantidad = 0
+  // Un cheque = un papel: un cheque compartido entre varios clientes se cuenta UNA vez
+  const papeles = new Set<string>()
   let transferencias = 0
   for (const p of enCalle) {
     const detalles: any[] = p.pagos_detalle || []
@@ -104,7 +106,11 @@ export async function resumenBilletera(
         // Echeq = canal DIGITAL (como la transferencia): no es un papel en mano.
         if (tipo === "cheque" && d.color_cheque === "ECHEQ") { transferencias += Number(d.monto); continue }
         if (tipo === "efectivo") efectivo += Number(d.monto)
-        else if (tipo === "cheque") { cheques += Number(d.monto); chequesCantidad += 1 }
+        else if (tipo === "cheque") {
+          cheques += Number(d.monto)
+          if (!d.cheque_id || !papeles.has(d.cheque_id)) chequesCantidad += 1
+          if (d.cheque_id) papeles.add(d.cheque_id)
+        }
         else transferencias += Number(d.monto)
       }
     } else {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { ESTADOS_DEVOLUCION_EN_PROCESO, getSaldosCliente, saldoDeParada } from "@/lib/cuenta-corriente/saldo"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
+import { enCobroPorComprobante } from "@/lib/cobranzas/en-cobro"
 
 // Ficha de UN cliente dentro de un viaje de reparto: lo que ve el chofer al bajar
 // del camión (pedido con renglones, comprobantes pendientes, devoluciones y cobros
@@ -230,7 +231,7 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
 
 export interface CuentaCobro {
   /** Débitos cobrables (FA/FB/FC/PRES/ND*), pendientes o parciales, no anulados */
-  comprobantes: Array<{ id: string; tipo_comprobante: string; numero_comprobante: string; fecha: string; total_neto: number; total_factura: number; saldo_pendiente: number; estado_pago: string; pedido_id: string | null }>
+  comprobantes: Array<{ id: string; tipo_comprobante: string; numero_comprobante: string; fecha: string; total_neto: number; total_factura: number; saldo_pendiente: number; estado_pago: string; pedido_id: string | null; /** Ya tomado por cobros sin confirmar (vendedor u otro viaje): no se puede cobrar de nuevo */ en_cobro: number }>
   /** Pedidos vivos del cliente (para agrupar comprobantes y anticipar los sin facturar) */
   pedidos: Array<{ id: string; numero_pedido: string; fecha: string; total: number; estado: string; pago_contado_10?: boolean | null; anticipo_pago_id?: string | null }>
   /** Pedidos que ya tienen algún comprobante (facturados), tengan o no saldo */
@@ -265,7 +266,10 @@ export async function cargarCuentaCobro(supabase: SupabaseClient, clienteId: str
       .order("fecha", { ascending: true }),
     supabase.from("comprobantes_venta").select("pedido_id").eq("cliente_id", clienteId).not("pedido_id", "is", null),
   ])
-  const lista = (comps || []).map((c: any) => ({ ...c, total_neto: Number(c.total_neto) || 0, total_factura: Number(c.total_factura) || 0, saldo_pendiente: Number(c.saldo_pendiente) || 0 }))
+  // EN COBRO desde el servidor (misma fórmula que la ficha del vendedor): sin esto el
+  // chofer podía cobrar un comprobante que el vendedor ya cobró y la oficina no confirmó.
+  const { enCobro } = await enCobroPorComprobante(supabase, (comps || []).map((c: any) => c.id))
+  const lista = (comps || []).map((c: any) => ({ ...c, total_neto: Number(c.total_neto) || 0, total_factura: Number(c.total_factura) || 0, saldo_pendiente: Number(c.saldo_pendiente) || 0, en_cobro: enCobro.get(c.id) || 0 }))
   const ncsObs = (ncs || []).map((n: any) => String(n.observaciones || ""))
   const dtos = lista.filter((c) => ncsObs.some((o) => o.includes(c.numero_comprobante))).map((c) => c.id)
   return {

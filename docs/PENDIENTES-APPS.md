@@ -32,20 +32,20 @@ Documento único para los agentes de las APK. Junta lo que quedó repartido entr
 4. **Pantalla de retiro**: `POST /api/vendedor/retiro { monto, observaciones?, idempotency_key }`. Offline: operación de outbox nueva (p. ej. `retiro.registrar`) con handler que llame a `registrarRetiro` (`lib/cuenta-corriente/retiro.ts`); en el overlay el retiro baja `balance` y `a_favor`. Errores: `409 SIN_CUENTA_PERSONAL` ("pedile a la oficina que la vincule"), `422 RETIRO_SUPERA_EFECTIVO`.
 5. Pestaña Comisiones: "Para retirar" = `disponible` (puede ser negativo); "Sin cobrar" sigue siendo estimación.
 6. Pendiente de precios (semana del 13/10, confirmar con el dueño si sigue vigente o ya lo cubrió la v0.3.x): descuento general, condiciones por proveedor/marca, contado al tomar el pedido, elegir artículos de mercadería por cupo, regla "sin precio base, sin precio" en `calculator.ts`. Ver MOBILE.md §10 "Sesión Precios y descuentos".
-7. Coordinar con el arreglo de servidor **"un cheque = un papel"** (abajo): el cobro a varios clientes no debe partir el cheque.
+7. **Un cheque = un papel**: resuelto en el servidor (20/10). En el cobro a varios clientes queda una sola fila de cheque y la billetera lo cuenta una vez. En la app, solo verificar que no lo muestre dos veces sin señal.
 
 ## App Chofer → próxima versión v0.3.0
 
 **Ya está en el código de `main` (solo falta compilar):** saldo de la parada con una sola fórmula (`saldoDeParada`), hoja de ruta viva durante el viaje, `chofer_clientes` con `saldo_proyectado`, overlay de devolución sin enviar, formatos §20 en las pantallas que tocó la sesión de formatos.
 
 **Falta hacer:**
-1. **Riesgo de cobro doble**: `SelectorCuenta` / `cargarCuentaCobro` no reciben lo que ya está "en cobro" (cobros pendientes del vendedor o de otro viaje sobre el mismo comprobante). Agregar `en_cobro` desde el servidor, igual que `lib/vendedor/ficha-cliente.ts`, y descontarlo en la app.
+1. ~~Riesgo de cobro doble~~ **Resuelto en el servidor (20/10):** `cargarCuentaCobro` ya manda `en_cobro` por comprobante y la app ya lo descuenta (`saldoCobrable`). Solo hay que verificarlo en el equipo con un comprobante que el vendedor tenga en cobro.
 2. "Neto a cobrar" de la ficha (`Cliente.tsx`) y `resumenCuenta` (`cuenta-cobro.ts:83`): usar `valor_cobro` de la devolución, no `monto_total` bruto.
 3. **10 % contado con la regla del 07/10** (`datos/cuenta-cobro.ts:73-79`): igual que vendedor.
 4. **Formatos §20**: revisar que todas las pantallas usen `@gm/formato` y `MontoInput` / `FechaInput` / `CuitInput`, con el aviso de CUIT repetido. MOBILE.md §20 dice "falta chofer".
 5. Billetera (etapa 3): "Plata del viaje" como hoy + "Tu cuenta" (`saldo_cuenta_corriente` / `cuenta_personal`). El chofer no tiene comisiones.
-6. Correctivo del primer batch (01/10): **un cheque = un papel** (ver servidor, abajo). La app tiene que mostrar un solo cheque aunque cubra a varios clientes.
-7. Menores anotados en la pasada final (MOBILE.md §19): lo cobrado se ve duplicado 2–10 s al sincronizar un cobro conjunto; la cabecera `cobranzas` queda `pendiente` con todos sus pagos anulados; el "debe" del buscador de clientes no se refresca; un rechazo de negocio reintenta 3 veces.
+6. **Un cheque = un papel**: el servidor ya deja una sola fila (20/10) y `cheques_cantidad` de la hoja y de la billetera cuenta el cheque una vez. En la app hay que verificar que el overlay sin señal no lo muestre dos veces. `repartirMetodos` todavía agrega el sufijo " (2)" a las piezas locales; el servidor lo saca al vincularlas.
+7. Menores anotados en la pasada final (MOBILE.md §19): lo cobrado se ve duplicado 2–10 s al sincronizar un cobro conjunto; el "debe" del buscador de clientes no se refresca; un rechazo de negocio reintenta 3 veces. (La cabecera `cobranzas` que quedaba `pendiente` con todos sus pagos anulados ya la resuelve el servidor desde el 20/10.)
 
 ## App Depósito → próxima versión v0.3.0 (con OK del dueño)
 
@@ -62,9 +62,9 @@ Documento único para los agentes de las APK. Junta lo que quedó repartido entr
 
 | # | Arreglo | Apps | Detalle |
 |---|---|---|---|
-| 1 | **Un cheque = un papel** | Chofer y vendedor | `lib/cobranzas/cobro-conjunto.ts` (`repartirMetodos`, sufijo " (2)") y `app/api/viajante/cobro/route.ts` crean un cheque por cliente. Debe quedar UNA fila en cartera por el total y el reparto en imputaciones/detalles. Pedido obligatorio del dueño (01/10). |
-| 2 | `en_cobro` en la cuenta de cobro del chofer | Chofer | Ver chofer, punto 1. |
-| 3 | Cheques de cobros pendientes nacen EN_CARTERA; `cobranza_anular` anula un cheque compartido para todos | Chofer y vendedor | Reportado en la auditoría (AUDITORIA-CUENTAS-CORRIENTES.md #15), confirmar antes de tocar. |
+| 1 | ~~Un cheque = un papel~~ **Hecho 20/10** | Chofer y vendedor | `lib/cobranzas/cheque-compartido.ts`: una fila en cartera por el total, cada cliente vinculado. Si rebota, la ND va entera a quien lo entregó. Migración `20261020b_cheques_un_papel.sql`. |
+| 2 | ~~`en_cobro` en la cuenta de cobro del chofer~~ **Hecho 20/10** | Chofer | `lib/cobranzas/en-cobro.ts` (fórmula única con el vendedor). La APK actual ya lo usa. |
+| 3 | ~~Cheques de cobros pendientes en cartera / anular cheque compartido~~ **Hecho 20/10** | Chofer y vendedor | Estado EN_VERIFICACION hasta confirmar el cobro; un cheque compartido no se anula mientras otro cliente lo use. |
 | 4 | Pantalla admin de `mobile_dispositivos` (revocar equipo) y `mobile_alertas_integridad` | Las 3 | MOBILE.md §10. |
 
 ## Lo que NO hay que rehacer (ya está resuelto)

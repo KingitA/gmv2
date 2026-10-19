@@ -122,6 +122,9 @@ export default function ChequesPage() {
   }
 
   const cartera = cheques.filter((c) => c.estado === "EN_CARTERA")
+  // Cheques de cobros que la oficina todavía no confirmó (los tiene el vendedor
+  // o el chofer, o esperan control): NO son cartera hasta confirmar el cobro.
+  const enVerificacion = cheques.filter((c) => c.estado === "EN_VERIFICACION")
   const depositados = cheques.filter((c) => c.estado === "DEPOSITADO")
   const historial = cheques.filter((c) => ["COBRADO", "RECHAZADO", "ANULADO", "ENTREGADO_A_PROVEEDOR"].includes(c.estado))
 
@@ -173,8 +176,42 @@ export default function ChequesPage() {
             <TabsTrigger value="depositados">
               <Landmark className="h-4 w-4 mr-2" /> Depositados ({depositados.length})
             </TabsTrigger>
+            <TabsTrigger value="verificacion">En verificación ({enVerificacion.length})</TabsTrigger>
             <TabsTrigger value="historial">Historial ({historial.length})</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="verificacion" className="mt-4">
+            <p className="mb-2 text-xs text-muted-foreground">
+              Cheques de cobros sin confirmar: los tiene el vendedor o el chofer, o esperan el control de la oficina.
+              No cuentan como cartera. Pasan a cartera solos cuando se confirma el cobro.
+            </p>
+            {enVerificacion.length === 0 ? (
+              <Card><CardContent className="py-12 text-center text-muted-foreground">No hay cheques en verificación</CardContent></Card>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Banco</TableHead><TableHead>Número</TableHead>
+                    <TableHead>Cliente</TableHead><TableHead>Vencimiento</TableHead>
+                    <TableHead>Monto</TableHead><TableHead>Color</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {enVerificacion.map((c) => (
+                    <TableRow key={c.id}>
+                      {filaBase(c)}
+                      <TableCell className="text-right">
+                        <Button size="sm" variant="ghost" className="text-red-600" onClick={() => abrirAccion("rechazar", c)}>
+                          Rechazar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </TabsContent>
 
           <TabsContent value="cartera" className="mt-4">
             {cartera.length === 0 ? (
