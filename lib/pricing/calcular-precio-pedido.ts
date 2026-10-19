@@ -55,12 +55,28 @@ export interface PrecioCalculado {
 
 function round2(n: number) { return Math.round(n * 100) / 100 }
 
+/** Artículo sin precio base: no tiene precio de venta (todo en 0). */
+function sinPrecio(): PrecioCalculado {
+  return {
+    precioAlCliente: 0, precioNeto: 0, ivaUnitario: 0, ivaIncluido: false, vaEnComprobante: "presupuesto",
+    precioLista: 0, bonifGeneralPct: 0, bonifViajantePct: 0, precioConDescuento: 0,
+    esListaEspecial: false, ofertaEspecialPct: 0, precioBrutoEspecial: 0,
+  }
+}
+
 export function calcularPrecioPedido(
   articulo: ArticuloPrecioInput,
   listaDatos: DatosLista,
   metodoFacturacion: MetodoFacturacion,
   bonif: { generalPct?: number; viajantePct?: number } = {},
 ): PrecioCalculado {
+  // Regla del dueño (06/10/2026, aplicada 20/10): "sin precio base, sin precio". Un artículo
+  // sin precio_base cargado NO se vende con un precio calculado desde el costo: vale 0 y las
+  // pantallas lo tratan como "sin precio" (createPedido lo rechaza). La Lista Especial tiene
+  // su precio fijo propio. (calcularPrecioBase sigue calculando desde el costo para mostrar el
+  // precio sugerido en la pantalla de Artículos: esto es solo el precio de venta.)
+  const esEspecialFijo = (listaDatos.lista_codigo || "").toLowerCase() === "especial" && (articulo.precio_lista_especial || 0) > 0
+  if (!esEspecialFijo && !(Number(articulo.precio_base) > 0)) return sinPrecio()
   const datosArticulo = articuloToDatosArticulo(articulo as any, articulo.descuentos)
   const resultado = calcularPrecioFinal(datosArticulo, listaDatos, metodoFacturacion, bonif)
 

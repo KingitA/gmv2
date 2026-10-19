@@ -30,7 +30,7 @@ import {
 } from "@/lib/actions/pedidos"
 import { esPedidoEditable, motivoBloqueo } from "@/lib/pedidos/estados"
 import { esErrorReglaPedido, MSG_SIN_LISTA } from "@/lib/pedidos/errores"
-import { limpiarCentinela } from "@/lib/pricing/resolver"
+import { limpiarCentinela, type CondicionMarca, type CondicionProveedor } from "@/lib/pricing/resolver"
 import { faltaListaMetodo, mensajeFaltaListaMetodo, prepararMotorCliente } from "@/lib/pricing/motor"
 import { esApkVendedorVieja, compatOverridesApkVieja, SEGS_COMPAT } from "@/lib/vendedor/compat-apk"
 import { listasPermitidasDe } from "@/lib/vendedor/session"
@@ -124,7 +124,13 @@ interface ItemPedido {
 interface CondPedido {
   metodo_facturacion_pedido?: string | null
   lista_precio_pedido_id?: string | null
+  /** general / viajante / mercadería / contado "solo este pedido" (v0.4.0: también general y contado) */
   bonif_pedido?: BonifPedido | null
+  /** Condiciones por proveedor / marca de ESTE pedido: lista COMPLETA (ausente = las de la ficha). Solo pedidos nuevos */
+  condiciones_proveedor?: CondicionProveedor[] | null
+  condiciones_marca?: CondicionMarca[] | null
+  /** Mercadería a regalar por cupo (origen = "todo" | "seg:x" | "prov:id" | "marca:id"). Solo pedidos nuevos */
+  mercaderia_bonificada?: Array<{ origen: string; articulo_ids: string[] }> | null
 }
 
 interface PayloadPedido {
@@ -171,6 +177,9 @@ const overridesDe = (c?: CondPedido | null) => ({
   ...(c?.metodo_facturacion_pedido ? { metodo_facturacion_pedido: c.metodo_facturacion_pedido } : {}),
   ...(c?.lista_precio_pedido_id ? { lista_precio_pedido_id: c.lista_precio_pedido_id } : {}),
   ...(c?.bonif_pedido ? { bonif_pedido: c.bonif_pedido } : {}),
+  // Lista completa del pedido (igual que el ERP): el motor reemplaza las de la ficha
+  ...(Array.isArray(c?.condiciones_proveedor) ? { condiciones_proveedor: c!.condiciones_proveedor } : {}),
+  ...(Array.isArray(c?.condiciones_marca) ? { condiciones_marca: c!.condiciones_marca } : {}),
 })
 
 /** Neco + las listas que imponen los viajantes del usuario (las únicas que se usan desde la app). */
@@ -319,6 +328,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
         observaciones: p.observaciones || undefined,
         estado_inicial: estadoInicial,
         ...overrides,
+        ...(Array.isArray(p.cond?.mercaderia_bonificada) && p.cond!.mercaderia_bonificada!.length ? { mercaderia_bonificada: p.cond!.mercaderia_bonificada! } : {}),
       })
       pedidoId = pedido.id as string
       // createPedido no es transaccional: si se cortó a mitad, el reintento entra por

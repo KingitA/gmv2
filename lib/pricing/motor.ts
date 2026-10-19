@@ -128,12 +128,15 @@ export function prepararMotorCliente(insumos: InsumosCliente, overrides: Overrid
     }
     return d
   }
+  // Condiciones por proveedor/marca "solo este pedido": si vienen, son la lista COMPLETA del
+  // pedido (sacar una = el pedido sin esa condición), igual que createPedido
+  // (insumosConCondicionesDelPedido). Antes se mezclaban con las de la ficha.
   const condProv = mergeCondicionesProveedor(
-    new Map(insumos.condicionesProveedor.map((c) => [c.proveedor_id, c])),
+    new Map(Array.isArray(overrides.condiciones_proveedor) ? [] : insumos.condicionesProveedor.map((c) => [c.proveedor_id, c])),
     overrides.condiciones_proveedor,
   )
   const condMarca = mergeCondicionesMarca(
-    new Map(insumos.condicionesMarca.map((c) => [c.marca_id, c])),
+    new Map(Array.isArray(overrides.condiciones_marca) ? [] : insumos.condicionesMarca.map((c) => [c.marca_id, c])),
     overrides.condiciones_marca,
   )
   const { general, viajante } = bonifGeneralViajanteDesdeFilas(insumos.bonificaciones, overrides.bonif_pedido)

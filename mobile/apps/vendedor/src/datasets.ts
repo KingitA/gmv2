@@ -226,13 +226,20 @@ export interface PedidoVendedor {
 
 // ─── Operaciones del outbox (servidor: lib/mobile/outbox/vendedor.ts) ────────
 
+import type { CondicionMarca, CondicionProveedor } from "@gm/pricing"
+
 export interface CondPedido {
   /** "" = método del cliente */
   metodo: string
   /** "" = lista del cliente */
   lista: string
-  /** null = bonificaciones de la ficha */
-  bonif: { viajante?: BonifSeg | null; mercaderia?: BonifSeg | null } | null
+  /** null = bonificaciones de la ficha. general/contado: v0.4.0 (contado = 10 | 0 por segmento) */
+  bonif: { general?: BonifSeg | null; viajante?: BonifSeg | null; mercaderia?: BonifSeg | null; contado?: BonifSeg | null } | null
+  /** Condiciones por proveedor/marca SOLO este pedido: lista COMPLETA (ausente = las de la ficha). Solo pedidos nuevos */
+  condProv?: CondicionProveedor[] | null
+  condMarca?: CondicionMarca[] | null
+  /** Mercadería a regalar por cupo: origen ("todo" | "seg:x" | "prov:id" | "marca:id") → artículos. Solo pedidos nuevos */
+  mercaderia?: Record<string, Array<{ id: string; descripcion: string; sku: string | null }>> | null
 }
 export const COND_VACIA: CondPedido = { metodo: "", lista: "", bonif: null }
 
@@ -256,7 +263,11 @@ export interface OpPedido {
   pedido_id?: string | null
   cliente_id: string
   items: ItemOpPedido[]
-  cond: { metodo_facturacion_pedido?: string | null; lista_precio_pedido_id?: string | null; bonif_pedido?: CondPedido["bonif"] } | null
+  cond: {
+    metodo_facturacion_pedido?: string | null; lista_precio_pedido_id?: string | null; bonif_pedido?: CondPedido["bonif"]
+    condiciones_proveedor?: CondicionProveedor[]; condiciones_marca?: CondicionMarca[]
+    mercaderia_bonificada?: Array<{ origen: string; articulo_ids: string[] }>
+  } | null
   observaciones: string | null
   precios_al: string | null
   /** false = solo guardar renglones, sin confirmar (edición desde el detalle del pedido) */

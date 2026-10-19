@@ -15,6 +15,7 @@ import { condParaServidor, fmtSeg } from "./Marco"
 import { mensajeFaltaListaMetodo } from "@gm/pricing"
 import { CuadroSegmentos, textoSegmentos } from "../segmentos-ui"
 import { BarraComparar, CeldasComparar } from "./VentaNueva"
+import { MercaderiaCupo } from "./MercaderiaCupo"
 import { agruparEnArbol, BuscadorLocal, CatalogoArbol, claveSubcategoria, FilaArticulo, OrdenSelector, posicionSubcategorias } from "./piezas"
 
 type Filtro = "novedades" | "ofertas" | "habituales"
@@ -545,15 +546,18 @@ export function Carrito() {
               </>)}
               {!p.prospecto && <p className="mt-1 text-xs text-gray-400">Elegir un método acá lo aplica a TODO el pedido (todos los segmentos) y recalcula los precios al instante.</p>}
               {p.segmentos && <div className="mt-2"><CuadroSegmentos resumen={p.segmentos} titulo="Cómo se factura este pedido" /></div>}
-              {(p.cond.lista || (bonif && (Object.keys(bonif.viajante || {}).length || Object.keys(bonif.mercaderia || {}).length))) ? (
+              {(p.cond.lista || (bonif && (["general", "viajante", "mercaderia", "contado"] as const).some((k) => Object.keys(bonif[k] || {}).length))) ? (
                 <p className="mt-2 text-xs font-medium text-amber-700">
                   Solo este pedido:
                   {p.cond.lista ? ` lista ${catFicha?.listas_precio.find((l) => l.id === p.cond.lista)?.nombre || "—"}` : ""}
+                  {bonif?.general && Object.keys(bonif.general).length ? ` · general ${fmtSeg(bonif.general)}` : ""}
                   {bonif?.viajante && Object.keys(bonif.viajante).length ? ` · viajante ${fmtSeg(bonif.viajante)}` : ""}
-                  {bonif?.mercaderia && Object.keys(bonif.mercaderia).length ? ` · mercadería ${fmtSeg(bonif.mercaderia)}` : ""} (se cambia desde 👤)
+                  {bonif?.mercaderia && Object.keys(bonif.mercaderia).length ? ` · mercadería ${fmtSeg(bonif.mercaderia)}` : ""}
+                  {bonif?.contado && Object.keys(bonif.contado).length ? ` · contado ${fmtSeg(bonif.contado)}` : ""} (se cambia desde 👤)
                 </p>
               ) : null}
             </div>
+            <MercaderiaCupo />
             <div>
               <label className="mb-1 block text-sm text-gray-500">Observaciones</label>
               <textarea value={p.borrador?.obs || ""} onChange={(e) => p.setObs(e.target.value)} rows={2} className="w-full rounded-xl border border-gray-300 px-4 py-3" placeholder="Opcional..." />

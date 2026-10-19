@@ -812,9 +812,7 @@ export function Cobrar() {
                     <span className="font-bold">10% descuento pago contado</span>
                     {bonificacionEstimada > 0 && <span className="text-emerald-700"> — NC proyectada {formatCurrency(bonificacionEstimada)}</span>}
                     <span className="block text-xs text-gray-400">
-                      La NC/REV real la emite la oficina al confirmar el pago. Aplica a comprobantes que quedan completos: con lo de hoy, o sumando
-                      entregas en cobro que también fueron contado.
-                    </span>
+                      La NC/REV real la emite la oficina al confirmar el pago. Es el 10% del TOTAL de cada comprobante, una sola vez, aunque hoy se pague una parte (no se repite si ya tiene su NC o si otro cobro contado la va a generar).</span>
                   </span>
                 </label>
               )}

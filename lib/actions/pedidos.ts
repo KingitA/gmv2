@@ -179,6 +179,10 @@ async function fetchListaYMetodo(
   return { listaDatos, metodo }
 }
 
+/** "Sin precio base, sin precio" (regla del dueño 06/10/2026): el artículo no se puede vender. */
+const msgSinPrecio = (a: { sku?: string | null; descripcion?: string | null }) =>
+  `${a.sku ? `${a.sku} · ` : ""}${a.descripcion || "Un artículo"} no tiene precio base cargado: no se puede vender hasta que la oficina le cargue el precio.`
+
 // Campos de override de segmento que guarda el pedido (para resolver al agregar ítems en edición).
 const SEGMENTO_PEDIDO_COLS =
   "metodo_facturacion_pedido,lista_precio_pedido_id," +
@@ -813,6 +817,7 @@ export async function createPedido(data: {
     const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
     const metodo = toMetodoFacturacion(metodoRaw)
     const precio = calcularPrecioPedido(articulo, listaDatos, metodo, { generalPct, viajantePct })
+    if (!(precio.precioAlCliente > 0)) throw new ErrorReglaPedido(msgSinPrecio(articulo))
     // Lista especial: la oferta es oferta_lista_especial (no la oferta común descuento_propio).
     const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
     const ofertaPropia = esEspecial ? (articulo.oferta_lista_especial || 0) : (articulo.descuento_propio || 0)
@@ -1430,6 +1435,7 @@ async function agregarItemPedidoEnContexto(
 
   const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
   const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, bonif)
+  if (!(precio.precioAlCliente > 0)) throw new ErrorReglaPedido(msgSinPrecio(articuloConDescuentos))
 
   const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
   const ofertaPct = esEspecial ? (articuloConDescuentos.oferta_lista_especial || 0) : (articuloConDescuentos.descuento_propio || 0)
@@ -1763,6 +1769,7 @@ async function repreciarItemsPedido(supabase: any, pedido: any, pedidoId: string
 
       const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
       const precio = calcularPrecioPedido(articulo, listaDatos, metodo, bonif)
+      if (!(precio.precioAlCliente > 0)) throw new ErrorReglaPedido(msgSinPrecio(articulo))
       const ofertaPct = esEspecial ? (articulo.oferta_lista_especial || 0) : (articulo.descuento_propio || 0)
       const precioListaBruto = ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista
 
