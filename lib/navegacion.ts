@@ -26,7 +26,7 @@ export const SECCIONES: Seccion[] = [
     href: "/clientes-pedidos",
     prefijos: [
       "/clientes-pedidos", "/clientes", "/viajes", "/comprobantes-venta", "/revision-devoluciones", "/pendientes",
-      "/pagos-clientes", "/viajantes", "/transportes", "/mostrador", "/imports",
+      "/pagos-clientes", "/viajantes", "/transportes", "/mostrador", "/imports", "/personal",
     ],
     accesos: [
       { label: "Pedidos y viajes", href: "/clientes-pedidos" },
@@ -37,6 +37,7 @@ export const SECCIONES: Seccion[] = [
       { label: "Revisión de devoluciones", href: "/revision-devoluciones" },
       { label: "Cobros", href: "/pagos-clientes", roles: ["admin", "administrativo", "mostrador"] },
       { label: "Viajantes", href: "/viajantes", roles: ["admin"] },
+      { label: "Cuentas del personal", href: "/personal", roles: ["admin", "administrativo"] },
       { label: "Transportes", href: "/transportes" },
     ],
   },

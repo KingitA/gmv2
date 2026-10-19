@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { todayArgentina } from '@/lib/utils'
 import { fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
+import { idsClientesEmpleados } from '@/lib/personal/empleados'
 
 const TIPO_LABELS: Record<string, string> = {
   FA: 'Fact. A', FB: 'Fact. B', FC: 'Fact. C',
@@ -68,7 +69,10 @@ export async function GET(req: NextRequest) {
 
     // Clientes (lookup por tandas)
     const clienteIds = [...new Set(comprobantes.map(c => c.cliente_id).filter(Boolean))] as string[]
-    const clientes = await fetchByIds(chunk => supabase.from('clientes').select('id, nombre, nombre_razon_social, cuit, condicion_iva, provincia').in('id', chunk), clienteIds)
+    const [clientes, empleados] = await Promise.all([
+      fetchByIds(chunk => supabase.from('clientes').select('id, nombre, nombre_razon_social, cuit, condicion_iva, provincia').in('id', chunk), clienteIds),
+      idsClientesEmpleados(supabase),
+    ])
     const clienteMap = new Map(clientes.map(c => [c.id, c]))
 
     const rows = comprobantes.map(c => {
@@ -97,7 +101,9 @@ export async function GET(req: NextRequest) {
         total: Number(c.total_factura ?? 0),
         total_neto: Number(c.total_neto ?? 0),
         total_iva: Number(c.total_iva ?? 0),
-        saldo_pendiente: Number(c.saldo_pendiente ?? 0),
+        // El comprobante sigue en el libro de IVA; lo que debe un empleado no
+        // suma al "saldo pendiente" de clientes (cuenta personal, ver /personal).
+        saldo_pendiente: empleados.has(c.cliente_id) ? 0 : Number(c.saldo_pendiente ?? 0),
         estado_pago: c.estado_pago ?? '—',
         // ARCA fields
         neto1: Number(c.total_neto ?? 0),

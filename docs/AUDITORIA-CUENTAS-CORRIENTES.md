@@ -143,3 +143,40 @@ Migraciones `20261016b` y `20261016c` APLICADAS por el dueño y verificadas (19/
 Pendiente:
 - La app de depósito todavía acepta la devolución entera: falta adaptar su pantalla, con el OK del dueño.
 - Una devolución rechazada con plata ya descontada solo se avisa en el momento. Falta mostrarla en la bandeja.
+
+## Etapa 3 — Comisiones y cuenta personal (19/10, en la rama; falta la migración del dueño y el OK para main)
+
+Reglas del dueño (19/10):
+
+27. La comisión se gana cuando el comprobante del cliente queda **saldado del todo**. Si el cliente pagó a cuenta, se gana al imputar. Se usa el % de la venta y va al vendedor original del cliente.
+28. La cuenta personal del empleado **es su cuenta de cliente**. Entra todo:
+    - mercadería que retira (pedido normal que no va a preparación, pero sí cuenta como venta y baja stock);
+    - pagos que hace;
+    - comisiones;
+    - retiros;
+    - diferencias de rendición;
+    - ajustes.
+29. El chofer tiene la cuenta del viaje; solo la diferencia, de más o de menos, va a su cuenta personal, con fecha y rendición. Depósito solo tiene mercadería y pagos.
+30. El retiro lo hace el vendedor solo, de lo que tiene en la mano. Alcanza con el control en la rendición.
+31. Las cuentas de empleados no cuentan como deuda de clientes y se ven en un listado aparte.
+
+Lo que se hizo:
+
+- Migración `20261019_cc_personal.sql`:
+  - `clientes.es_empleado` (marca las 9 cuentas "(EMPLEADO)"/"(VIAJANTE)"), `empleado_usuario_id` y `vendedores.cuenta_cliente_id`.
+  - `cuenta_empleado_de()`.
+  - Trigger que copia las diferencias de rendición de la billetera a la cuenta personal.
+  - `rendicion_crear` v4 (descuenta los retiros) y `rendicion_devolver` v2 (revierte todo y libera los retiros; arregla el hallazgo 19).
+  - Antigüedad sin empleados.
+  - Arreglo de los triggers de comisión (hallazgo 7).
+- `lib/comisiones/liquidar.ts`: motor único. Reconcilia lo que corresponde contra lo ya posteado, así que no duplica, y si se anula un cobro revierte la comisión. Lo usan la post-confirmación, la anulación de cobro, la NC de devolución, la anulación de comprobante y los ajustes que saldan un comprobante.
+- Se dejaron de escribir las comisiones 'cobrada', el débito del 10 % y las comisiones negativas de NC y de anulación.
+- `lib/cuenta-corriente/cuenta-personal.ts` y `retiro.ts`; `POST /api/vendedor/retiro`.
+- La billetera del vendedor y la del chofer leen la cuenta personal. `/api/viajantes/[id]/retiro|movimiento` quedaron dados de baja (410).
+- Pantalla `/personal` (vincular usuario y códigos de vendedor, botón "Poner al día") y recuadro en la ficha del cliente.
+- Los reportes de deuda (estadísticas del vendedor, Playroom) excluyen a los empleados, y la cola de preparación de depósito (web y app) no muestra sus pedidos.
+
+Pendiente:
+- El dueño aplica `20261019_cc_personal.sql` antes de main.
+- La oficina vincula cada cuenta en `/personal` y aprieta "Poner al día".
+- APK vendedor (dos cajitas y pantalla de retiro) y APK chofer: ver `docs/CUENTAS-CORRIENTES-APPS.md`.

@@ -13,6 +13,7 @@ import { cargarTiposArticulo } from "@/lib/catalogos/tipos-articulo"
 import { enTandas, porTandas } from "@/lib/deposito/cola"
 import { ESTADOS_PREPARABLES } from "@/lib/deposito/picking"
 import { cargarOrdenesPendientes } from "@/lib/deposito/recepciones"
+import { idsClientesEmpleados } from "@/lib/personal/empleados"
 import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
 import { GET as devolucionesGET } from "@/app/api/deposito/devoluciones/route"
 import type { FilaReplica } from "../contrato"
@@ -64,9 +65,15 @@ export async function cargarPedidosDeposito(supabase: any, ids?: string[]): Prom
     if (enCurso.length) partes.push(`id.in.(${enCurso.join(",")})`)
     return q.in("estado", ESTADOS_PREPARABLES).or(partes.join(","))
   }
-  const pedidos: any[] = ids
-    ? await fetchByIds((chunk) => alcance(supabase.from("pedidos").select(PEDIDO_COLS)).in("id", chunk), ids, 100)
-    : await fetchAllRows(() => alcance(supabase.from("pedidos").select(PEDIDO_COLS)))
+  const [leidos, empleados] = await Promise.all([
+    ids
+      ? fetchByIds((chunk) => alcance(supabase.from("pedidos").select(PEDIDO_COLS)).in("id", chunk), ids, 100)
+      : fetchAllRows(() => alcance(supabase.from("pedidos").select(PEDIDO_COLS))),
+    idsClientesEmpleados(supabase),
+  ])
+  // Pedidos de cuentas de empleados (clientes.es_empleado): no van a la cola,
+  // se los preparan ellos mismos. En delta llegan como borrados.
+  const pedidos: any[] = (leidos as any[]).filter((p) => !empleados.has(p.clientes?.id))
   if (pedidos.length === 0) return []
 
   const { data: especial } = await supabase.from("listas_precio").select("id").eq("codigo", "especial").maybeSingle()

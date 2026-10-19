@@ -7,7 +7,8 @@ Documento vivo de traspaso para los agentes de las apps (vendedor, chofer, depó
 | Etapa | Estado |
 |---|---|
 | 1 · Fuente única del saldo | En main (8dbedb9) |
-| 2 · Verificación, roles, devoluciones por renglón | En la rama `cuentas-corrientes-auditoria` (las migraciones ya están aplicadas) |
+| 2 · Verificación, roles, devoluciones por renglón | En main (54a34cd) |
+| 3 · Comisiones y cuenta personal | En la rama; falta aplicar `20261019_cc_personal.sql` |
 
 ---
 
@@ -102,3 +103,63 @@ Documento vivo de traspaso para los agentes de las apps (vendedor, chofer, depó
 | Emitir comprobantes (facturas, NC, reversas) | admin, administrativo |
 
 Los endpoints de las apps (`/api/viajante/*`, `/api/chofer/*`, `/api/vendedor/*`) no cambiaron de permisos. Depósito, chofer y vendedor no entran al ERP salvo que también tengan rol admin o administrativo.
+
+---
+
+## Etapa 3 · Comisiones y cuenta personal (19/10, en la rama)
+
+Reglas del dueño:
+- La **cuenta personal** de cada empleado (vendedor, chofer, depósito) **es su cuenta de cliente** (`clientes.es_empleado`).
+  - Se vincula con su usuario (`clientes.empleado_usuario_id`) y, para las comisiones, con cada código de vendedor (`vendedores.cuenta_cliente_id`).
+  - Ahí entran: comisiones, retiros, diferencias de rendición, mercadería que retira (pedido normal) y pagos que hace.
+- **Comisión**:
+  - se gana cuando el comprobante del cliente queda **saldado del todo**;
+  - se calcula sobre la **plata** que pagó (el 10 % contado y las devoluciones la reducen solas);
+  - usa el % de la venta y es del vendedor original del cliente;
+  - motor: `lib/comisiones/liquidar.ts`.
+- **Retiro**:
+  - lo hace el vendedor solo, de la plata que tiene en la mano;
+  - se debita en su cuenta y baja lo que tiene que rendir;
+  - la oficina lo controla en la rendición.
+- **Diferencias de rendición** (de más o de menos) → a la cuenta del empleado, con fecha y rendición. Lo hace el trigger `billetera_a_cuenta_empleado`.
+- Las cuentas de empleados **no cuentan como deuda de clientes**. Los pedidos de empleados **no aparecen para preparar**, pero cuentan como venta y bajan stock.
+
+### Servidor (ya hecho)
+
+- `GET /api/vendedor/billetera` y `GET /api/vendedor/me`:
+  - `balance` = **plata de la empresa en la mano**: efectivo cobrado − retiros sin rendir.
+  - Campos nuevos: `retiros_sin_rendir` y `cuenta_personal: { cliente_id, saldo_real, saldo_proyectado, a_favor, comisiones_ganadas, retiros } | null`. `null` significa que la oficina todavía no la vinculó, y entonces vale el cálculo viejo.
+  - `deuda_rendiciones` sale de la cuenta personal cuando está vinculada.
+  - `saldo` (balance + deuda) sigue existiendo por compatibilidad.
+- `GET /api/vendedor/comisiones`: con la cuenta vinculada, `disponible` = lo que tiene a favor en su cuenta y `retirado` = la suma de sus retiros. `sin_cobrar` sigue siendo la estimación del kardex.
+- **Nuevo** `POST /api/vendedor/retiro` `{ monto, observaciones?, idempotency_key? }`:
+  - `409 SIN_CUENTA_PERSONAL` si no está vinculada;
+  - `422 RETIRO_SUPERA_EFECTIVO` si pide más efectivo del que tiene en la mano;
+  - es idempotente por `idempotency_key`.
+- `GET /api/chofer/billetera`: `saldo_cuenta_corriente` sale de su cuenta personal cuando está vinculada (positivo = a favor) y trae `cuenta_personal`.
+- `rendicion_crear` v4 descuenta los retiros sin rendir de lo esperado y lo informa en `retiros`. `rendicion_devolver` v2 los libera.
+
+### App Vendedor — qué tiene que hacer el agente
+
+1. **Billetera en dos cajitas** (regla del dueño):
+   - "Plata de la empresa en tu mano": `balance` en efectivo + `cheques_cantidad` como **cantidad**, nunca como monto.
+   - "Tu cuenta": `cuenta_personal.a_favor` (si es negativo, "debés"), con comisiones ganadas y retiros.
+   - Mostrar `saldo` como un número único ya no corresponde.
+2. **Pantalla de retiro**: monto (con el componente de monto de la app) y observación.
+   - Llama a `POST /api/vendedor/retiro` con un `idempotency_key` generado en el equipo.
+   - Offline: agregar una operación de outbox (por ejemplo `retiro.registrar`) con un handler de servidor que llame a `registrarRetiro` (`lib/cuenta-corriente/retiro.ts`). En el overlay, el retiro baja `balance` y `a_favor` hasta que sincronice.
+   - Mensajes: si no hay cuenta vinculada, "pedile a la oficina que la vincule"; si el monto supera el efectivo en mano, avisarlo.
+3. La pestaña Comisiones: "Para retirar" = `disponible` (puede ser negativo si debe). "Sin cobrar" sigue siendo una estimación.
+4. **Armar una APK nueva.**
+
+### App Chofer — qué tiene que hacer el agente
+
+1. Billetera:
+   - "Plata del viaje" (efectivo, fondos, gastos y cheques como cantidad), como hoy.
+   - "Tu cuenta": `saldo_cuenta_corriente` / `cuenta_personal` (diferencias de rendición, mercadería, pagos).
+   - El chofer no tiene comisiones.
+2. **Armar una APK nueva.**
+
+### App Depósito
+
+- No cambia nada en la app. Sus empleados tienen cuenta personal: la mercadería que retiran es un pedido normal a su cuenta, y **no aparece en la cola de preparación**.

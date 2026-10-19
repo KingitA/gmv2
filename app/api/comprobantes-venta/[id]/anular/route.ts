@@ -420,33 +420,12 @@ export async function POST(
       if (ccAviso) advertencias.push(ccAviso)
     }
 
-    // ─── 13. Comisiones negativas si el original tenía comisión ───
+    // ─── 13. Comisión: el original anulado deja de estar saldado → se revierte ───
     try {
-      const { data: comisiones } = await supabase
-        .from('comisiones')
-        .select('id, monto, porcentaje, viajante_id, articulo_id, segmento, cantidad, precio_neto_unitario')
-        .eq('pedido_id', original.pedido_id ?? '')
-        .eq('comprobante_venta_id', original.id)
-
-      if (comisiones && comisiones.length > 0) {
-        const negativas = comisiones.map((c: any) => ({
-          viajante_id:              c.viajante_id,
-          pedido_id:                original.pedido_id,
-          comprobante_venta_id:     inverso.id,
-          tipo:                     'cobrada',
-          articulo_id:              c.articulo_id,
-          segmento:                 c.segmento,
-          cantidad:                 -(Math.abs(c.cantidad ?? 0)),
-          precio_neto_unitario:     c.precio_neto_unitario,
-          porcentaje:               c.porcentaje,
-          monto:                    -(Math.abs(c.monto)),
-          comprobante_cobrado:      false,
-          pagado:                   false,
-        }))
-        await supabase.from('comisiones').insert(negativas)
-      }
+      const { liquidarComisiones } = await import('@/lib/comisiones/liquidar')
+      await liquidarComisiones(supabase, [original.id], auth.user.id)
     } catch (e) {
-      console.error('[Anular] Error revirtiendo comisiones:', e)
+      console.error('[Anular] Error reconciliando comisiones:', e)
     }
 
     // ─── PDF del comprobante inverso (con QR de ARCA) ───

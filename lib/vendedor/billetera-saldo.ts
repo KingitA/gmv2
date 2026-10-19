@@ -1,5 +1,15 @@
 import { deudaCuentaCorriente, TIPOS_CC_BILLETERA } from "../cobranzas/billetera-cc"
 
+/** Resumen de la cuenta personal (lo arma lib/cuenta-corriente/cuenta-personal.ts en el servidor). */
+export interface CuentaPersonalResumen {
+  cliente_id: string
+  saldo_real: number
+  saldo_proyectado: number
+  a_favor: number
+  comisiones_ganadas: number
+  retiros: number
+}
+
 /**
  * Saldo de la billetera del vendedor: UN solo cálculo para el inicio de la app
  * (/api/vendedor/me) y la pantalla Billetera (/api/vendedor/billetera).
@@ -27,12 +37,25 @@ export interface ResumenBilletera {
   en_viaje: { total: number; cantidad: number }
   /** Cuenta corriente de rendiciones/ajustes (positivo = debe, negativo = a favor) */
   deuda_rendiciones: number
+  /** Retiros de efectivo todavía no rendidos (ya bajaron el efectivo en la calle) */
+  retiros_sin_rendir: number
+  /**
+   * Cuenta personal del vendedor (regla del dueño 19/10): su cuenta de cliente
+   * con comisiones, retiros, diferencias de rendición, mercadería y ajustes.
+   * null = la oficina todavía no la vinculó (se usa la cuenta vieja de la billetera).
+   */
+  cuenta_personal: CuentaPersonalResumen | null
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
-export async function resumenBilletera(supabase: any, vendedorIds: string[]): Promise<ResumenBilletera> {
-  const [{ data: pagosSinRendir, error: e1 }, { data: abiertas, error: e2 }, { data: difs, error: e3 }] = await Promise.all([
+export async function resumenBilletera(
+  supabase: any,
+  vendedorIds: string[],
+  /** Cuenta personal ya resuelta (null = no vinculada todavía) */
+  cuenta: CuentaPersonalResumen | null = null,
+): Promise<ResumenBilletera> {
+  const [{ data: pagosSinRendir, error: e1 }, { data: abiertas, error: e2 }, { data: difs, error: e3 }, { data: retiros, error: e4 }] = await Promise.all([
     supabase
       .from("pagos_clientes")
       .select("id, monto, forma_pago, pagos_detalle(tipo_pago, monto, color_cheque)")
@@ -44,9 +67,17 @@ export async function resumenBilletera(supabase: any, vendedorIds: string[]): Pr
       .select("monto, referencia_tipo")
       .in("viajante_id", vendedorIds)
       .in("referencia_tipo", [...TIPOS_CC_BILLETERA]),
+    // Retiros de efectivo que el vendedor hizo y todavía no rindió (la próxima
+    // rendición los descuenta de lo que tiene que entregar: rendicion_crear v4)
+    supabase
+      .from("billetera_movimientos")
+      .select("monto")
+      .in("viajante_id", vendedorIds)
+      .eq("referencia_tipo", "retiro_efectivo")
+      .is("rendicion_id", null),
   ])
   // Sin datos no hay saldo: mejor un error (la app conserva el último bueno) que un número inventado
-  for (const e of [e1, e2, e3]) if (e) throw e
+  for (const e of [e1, e2, e3, e4]) if (e) throw e
 
   const declarados = new Set<string>()
   if (abiertas?.length) {
@@ -85,8 +116,13 @@ export async function resumenBilletera(supabase: any, vendedorIds: string[]): Pr
     }
   }
 
-  const balance = r2(efectivo)
-  const deuda = deudaCuentaCorriente(difs ?? [])
+  const retirosSinRendir = r2((retiros ?? []).reduce((s: number, m: any) => s - Number(m.monto || 0), 0))
+  // Plata de la EMPRESA en la mano: efectivo cobrado − lo que ya retiró para sí
+  const balance = r2(efectivo - retirosSinRendir)
+
+  // Su cuenta personal (si la oficina la vinculó) reemplaza a la cuenta vieja de
+  // rendiciones de la billetera: las diferencias de rendición ya se copian ahí.
+  const deuda = cuenta ? cuenta.saldo_real : deudaCuentaCorriente(difs ?? [])
   return {
     saldo: r2(balance + deuda),
     balance,
@@ -95,5 +131,7 @@ export async function resumenBilletera(supabase: any, vendedorIds: string[]): Pr
     pagos_sin_rendir: enCalle.length,
     en_viaje: { total: enViaje.reduce((s: number, p: any) => s + Number(p.monto), 0), cantidad: enViaje.length },
     deuda_rendiciones: deuda,
+    retiros_sin_rendir: retirosSinRendir,
+    cuenta_personal: cuenta,
   }
 }

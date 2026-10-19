@@ -1,56 +1,20 @@
-import { createClient } from "@/lib/supabase/server"
-import { NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { nowArgentina } from "@/lib/utils"
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+// 19/10/2026 (regla del dueño): la billetera es SOLO la plata de la empresa en
+// la mano. Comisiones, retiros, sueldos y ajustes van a la CUENTA PERSONAL del
+// empleado (su cuenta de cliente; lib/cuenta-corriente/cuenta-personal.ts). El
+// camino viejo (retiro marcando comisiones pagadas / movimiento manual de
+// billetera) mezclaba las dos cosas y quedó dado de baja. Historial en git.
+export async function POST() {
   const auth = await requireAuth()
   if (auth.error) return auth.error
-
-  // Movimientos manuales de billetera: SOLO admin (decisión del dueño 02/10).
-  // FIX 02/10: el chequeo viejo consultaba columnas inexistentes
-  // (usuarios_roles.rol / user_id — el esquema real es usuario_id + rol_id →
-  // roles.nombre): la query fallaba siempre y el 403 rebotaba a TODOS,
-  // administradores incluidos. Patrón correcto = el de lib/actions/auth.ts.
-  const { data: rolesData } = await (await createClient())
-    .from("usuarios_roles")
-    .select("roles(nombre)")
-    .eq("usuario_id", auth.user.id)
-  const roles = (rolesData || []).map((r: any) => r.roles?.nombre).filter(Boolean)
-  if (!roles.includes("admin")) {
-    return NextResponse.json({ error: "Solo administradores pueden registrar movimientos manuales" }, { status: 403 })
-  }
-
-  try {
-    const supabase = await createClient()
-    const { id } = await params
-    const { tipo, monto, concepto, medio } = await request.json()
-
-    if (!tipo || !monto || !concepto) {
-      return NextResponse.json({ error: "tipo, monto y concepto son requeridos" }, { status: 400 })
-    }
-    if (!["debito", "credito"].includes(tipo)) {
-      return NextResponse.json({ error: "tipo debe ser 'debito' o 'credito'" }, { status: 400 })
-    }
-
-    // Débito = monto negativo, crédito = monto positivo
-    const montoFinal = tipo === "debito" ? -Math.abs(Number(monto)) : Math.abs(Number(monto))
-
-    const { data, error } = await supabase.from("billetera_movimientos").insert({
-      viajante_id: id,
-      tipo,
-      medio: medio ?? null,
-      monto: montoFinal,
-      concepto,
-      referencia_tipo: "manual",
-      fecha: nowArgentina(),
-      creado_por: auth.user.id,
-    }).select().single()
-
-    if (error) throw error
-
-    return NextResponse.json({ success: true, movimiento: data })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  return NextResponse.json(
+    {
+      error:
+        "Los retiros, sueldos y ajustes del personal ahora se cargan en su CUENTA PERSONAL (Clientes → Cuentas del personal → cuenta corriente → Ajuste). La billetera queda solo para la plata de la empresa en la mano.",
+      error_code: "USAR_CUENTA_PERSONAL",
+    },
+    { status: 410 },
+  )
 }

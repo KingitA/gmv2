@@ -93,6 +93,7 @@ describe("Billetera · un solo saldo para el inicio y la pantalla Billetera", ()
           select: () => q,
           in: (col: string, vals: any[]) => { filas = filas.filter((f) => col in f ? vals.includes(f[col]) : true); return q },
           eq: (col: string, v: any) => { filas = filas.filter((f) => f[col] === v); return q },
+          is: (col: string, v: any) => { filas = filas.filter((f) => (f[col] ?? null) === v); return q },
           then: (ok: any, err: any) => Promise.resolve({ data: filas, error: null }).then(ok, err),
         }
         return q
@@ -135,6 +136,34 @@ describe("Billetera · un solo saldo para el inicio y la pantalla Billetera", ()
     expect(r.desglose.transferencias).toBe(700)
     expect(r.en_viaje).toEqual({ total: 999, cantidad: 1 })
     expect(r.pagos_sin_rendir).toBe(3)
+  })
+
+  // Regla del dueño 19/10: dos cajitas — plata de la empresa en la mano y cuenta personal
+  it("un retiro sin rendir baja la plata de la empresa en la mano; uno ya rendido no", async () => {
+    const sb = supabaseFalso({
+      pagos_clientes: [{ id: "p1", vendedor_id: "V1", estado: "pendiente_rendicion", monto: 100000, pagos_detalle: [{ tipo_pago: "efectivo", monto: 100000 }] }],
+      rendiciones: [],
+      billetera_movimientos: [
+        { viajante_id: "V1", monto: -50000, referencia_tipo: "retiro_efectivo", rendicion_id: null },
+        { viajante_id: "V1", monto: -9999, referencia_tipo: "retiro_efectivo", rendicion_id: "r-vieja" },
+      ],
+    })
+    const r = await resumenBilletera(sb, ["V1"])
+    expect(r.balance).toBe(50000)
+    expect(r.retiros_sin_rendir).toBe(50000)
+    expect(r.cuenta_personal).toBeNull()
+  })
+
+  it("con cuenta personal vinculada, la deuda sale de su cuenta (no de la billetera vieja)", async () => {
+    const sb = supabaseFalso({
+      pagos_clientes: [],
+      rendiciones: [],
+      billetera_movimientos: [{ viajante_id: "V1", monto: 200, referencia_tipo: "rendicion_diferencia" }],
+    })
+    const cuenta = { cliente_id: "C-EMP", saldo_real: -30000, saldo_proyectado: -30000, a_favor: 30000, comisiones_ganadas: 80000, retiros: 50000 }
+    const r = await resumenBilletera(sb, ["V1"], cuenta)
+    expect(r.deuda_rendiciones).toBe(-30000)
+    expect(r.cuenta_personal?.a_favor).toBe(30000)
   })
 })
 

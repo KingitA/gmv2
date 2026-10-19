@@ -23,6 +23,7 @@ import { normalizarCodigo, esCodigoDuplicado } from "@/lib/codigos"
 type InfoCodigo = { sugerido: string; codigo: string | null; disponible: boolean; ocupado_por: { id: string; nombre: string; activo: boolean } | null }
 import { InputMonto } from "@/components/ui/input-monto"
 import { InputCUIT } from "@/components/ui/input-cuit"
+import { CuentaEmpleadoFicha } from "@/components/personal/cuenta-empleado-ficha"
 
 function normalizeEnum(v: string | null | undefined, map: Record<string, string>, fallback: string): string {
   if (!v) return fallback
@@ -863,6 +864,7 @@ export default function ClienteDetailPage() {
               )}
             </div>
           </div>
+          <CuentaEmpleadoFicha clienteId={id} />
         </FichaSeccion>
         )}
       </FichaCuerpo>

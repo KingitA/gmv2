@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
-import { resumenBilletera } from "@/lib/vendedor/billetera-saldo"
+import { billeteraConCuentaPersonal } from "@/lib/cuenta-corriente/cuenta-personal"
 
 // GET /api/vendedor/billetera?page=
 // Billetera del vendedor autenticado. "Plata en la calle" = suma de los pagos
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
 
     // Saldo, efectivo en la calle, cheques, en viaje y cuenta corriente: el MISMO
     // cálculo que el inicio de la app (lib/vendedor/billetera-saldo.ts).
-    const resumen = await resumenBilletera(supabase, session.vendedorIds)
+    const resumen = await billeteraConCuentaPersonal(supabase, session.vendedorIds, session.user.id)
 
     const comisionesPendientes = await fetchAllRows(() =>
       supabase

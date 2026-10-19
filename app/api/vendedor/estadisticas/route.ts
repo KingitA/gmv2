@@ -4,6 +4,7 @@ import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { fechaISO, hoyISO, sumarDiasISO } from "@/lib/formato"
+import { idsClientesEmpleados } from "@/lib/personal/empleados"
 
 // GET /api/vendedor/estadisticas
 // KPIs del vendedor autenticado: ventas por mes (últimos 6), top clientes
@@ -84,10 +85,15 @@ export async function GET() {
       .reduce((s, c) => s + Number(c.monto), 0)
 
     // Deuda de cartera: saldo PROYECTADO desde la fuente única (lo que ve el
-    // vendedor en cada cliente), solo los que deben
-    const cartera = await fetchAllRows<{ id: string }>(() =>
-      supabase.from("clientes").select("id").in("vendedor_id", session.vendedorIds),
-    )
+    // vendedor en cada cliente), solo los que deben. Sin las cuentas de
+    // empleados (clientes.es_empleado): no son deuda de clientes.
+    const [carteraTodos, empleados] = await Promise.all([
+      fetchAllRows<{ id: string }>(() =>
+        supabase.from("clientes").select("id").in("vendedor_id", session.vendedorIds),
+      ),
+      idsClientesEmpleados(supabase),
+    ])
+    const cartera = carteraTodos.filter((c) => !empleados.has(c.id))
     const saldosCartera = await getSaldosClientes(supabase, cartera.map((c) => c.id))
     const deudores = [...saldosCartera.values()].filter((s) => s.saldo_proyectado > 0.005)
     const deudaCartera = Math.round(deudores.reduce((s, x) => s + x.saldo_proyectado, 0) * 100) / 100

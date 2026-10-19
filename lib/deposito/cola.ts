@@ -14,6 +14,7 @@
 
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { ESTADOS_PREPARABLES } from "./picking"
+import { idsClientesEmpleados } from "@/lib/personal/empleados"
 
 const PEDIDO_COLS = "id, numero_pedido, estado, fecha, prioridad, observaciones, created_at, clientes(id, nombre, razon_social, direccion, localidad)"
 
@@ -38,9 +39,15 @@ export async function porTandas<T, R>(tandas: T[][], simultaneas: number, fn: (t
  * eran el 97 % del peso. El detalle se pide al abrir el pedido (POST /picking).
  */
 export async function cargarColaResumen(supabase: any) {
-  const pedidos: any[] = await fetchAllRows(() =>
-    supabase.from("pedidos").select(PEDIDO_COLS).in("estado", ESTADOS_PREPARABLES).order("created_at", { ascending: true }),
-  )
+  const [todos, empleados] = await Promise.all([
+    fetchAllRows(() =>
+      supabase.from("pedidos").select(PEDIDO_COLS).in("estado", ESTADOS_PREPARABLES).order("created_at", { ascending: true }),
+    ),
+    idsClientesEmpleados(supabase),
+  ])
+  // Pedidos de cuentas de empleados: no van a la cola (se los preparan ellos
+  // mismos). Siguen siendo pedidos normales para stock y ventas.
+  const pedidos: any[] = (todos as any[]).filter((p) => !empleados.has(p.clientes?.id))
   if (pedidos.length === 0) return []
 
   const totales = new Map<string, number>()

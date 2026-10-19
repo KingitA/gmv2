@@ -112,7 +112,14 @@ export async function GET() {
     // una prueba) y los ajustes 'manual' del admin. El chofer suma además sus
     // gastos de viaje rechazados.
     const { deudaCuentaCorriente } = await import("@/lib/cobranzas/billetera-cc")
-    const saldoCC = -deudaCuentaCorriente(movimientos || [], ["viaje_gasto_rechazado"])
+    // Regla del dueño (19/10): con la cuenta personal vinculada (su cuenta de
+    // cliente), el saldo sale de ahí — las diferencias de rendición y los gastos
+    // rechazados se copian solos (trigger de 20261019_cc_personal.sql) y además
+    // tiene la mercadería que retiró y los pagos que hizo.
+    const { cuentaPersonalDe, resumenCuentaPersonal } = await import("@/lib/cuenta-corriente/cuenta-personal")
+    const cuentaId = await cuentaPersonalDe(supabase, { usuarioId: userId })
+    const cuentaPersonal = cuentaId ? await resumenCuentaPersonal(supabase, cuentaId) : null
+    const saldoCC = cuentaPersonal ? cuentaPersonal.a_favor : -deudaCuentaCorriente(movimientos || [], ["viaje_gasto_rechazado"])
 
     return NextResponse.json({
       efectivo: efectivoEnMano,
@@ -126,6 +133,7 @@ export async function GET() {
       },
       cheques_cantidad: chequesCantidad,
       saldo_cuenta_corriente: saldoCC,
+      cuenta_personal: cuentaPersonal,
       cobros,
       gastos: (gastos || []).map((g: any) => ({ ...g, viaje: nombreViaje.get(g.viaje_id) || "" })),
       fondos: (fondos || []).map((f: any) => ({ ...f, viaje: nombreViaje.get(f.viaje_id) || "" })),

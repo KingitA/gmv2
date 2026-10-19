@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
-import { resumenBilletera } from "@/lib/vendedor/billetera-saldo"
+import { billeteraConCuentaPersonal } from "@/lib/cuenta-corriente/cuenta-personal"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { hoyISO } from "@/lib/formato"
 
@@ -36,7 +36,7 @@ export async function GET() {
     // Saldo de la billetera: el MISMO cálculo que la pantalla Billetera
     // (lib/vendedor/billetera-saldo.ts). Antes había una copia acá que quedó vieja
     // y el inicio mostraba −$674.500 con la billetera en $0 (Freije, 09/10/2026).
-    const billetera = await resumenBilletera(supabase, session.vendedorIds)
+    const billetera = await billeteraConCuentaPersonal(supabase, session.vendedorIds, session.user.id)
 
     const { data: comisiones } = await supabase
       .from("comisiones")
@@ -44,7 +44,11 @@ export async function GET() {
       .in("viajante_id", session.vendedorIds)
       .eq("tipo", "cobrada")
       .eq("pagado", false)
-    const comisionesPendientes = (comisiones || []).reduce((s, c) => s + Number(c.monto), 0)
+    // Con cuenta personal vinculada, lo pendiente es lo que tiene a favor en su
+    // cuenta (comisiones ganadas − retiros − mercadería − …). Si no, la vieja suma.
+    const comisionesPendientes = billetera.cuenta_personal
+      ? billetera.cuenta_personal.a_favor
+      : (comisiones || []).reduce((s, c) => s + Number(c.monto), 0)
 
     // Próximas zonas: viajes vigentes (hoy en adelante o en curso) con la
     // cantidad de clientes del vendedor en cada zona (vía localidades)

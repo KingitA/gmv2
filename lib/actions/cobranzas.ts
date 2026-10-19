@@ -91,6 +91,19 @@ export async function anularCobranza(
     .eq("anticipo_pago_id", pagoId)
   if (antErr) console.error("[cobranzas] liberar anticipos:", antErr.message)
 
+  // Comisión: los comprobantes que este cobro saldaba dejan de estar saldados →
+  // se revierte la comisión ganada (y se vuelve a ganar si se cobra de nuevo).
+  try {
+    const { data: imps } = await supabase.from("imputaciones").select("comprobante_id").eq("pago_id", pagoId)
+    const comps = [...new Set((imps || []).map((i: any) => i.comprobante_id).filter(Boolean))] as string[]
+    if (comps.length) {
+      const { liquidarComisiones } = await import("@/lib/comisiones/liquidar")
+      await liquidarComisiones(supabase, comps, usuarioId)
+    }
+  } catch (comErr: any) {
+    console.error("[cobranzas] comisiones al anular:", comErr?.message)
+  }
+
   return {
     yaAnulado: Boolean(data?.ya_anulado),
     estabaConfirmado: Boolean(data?.estaba_confirmado),

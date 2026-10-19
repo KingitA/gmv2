@@ -163,6 +163,11 @@ export default function BilleteraViajante({ vendedor }: { vendedor: Vendedor }) 
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">
+      <div className="rounded-xl border border-amber-400/40 bg-amber-500/15 p-4 text-sm text-amber-100">
+        Desde el 19/10 las comisiones ganadas, los retiros, sueldos y ajustes van a la <b>cuenta personal</b> del vendedor (su cuenta de cliente).
+        {" "}<Link href="/personal" className="font-semibold underline">Ir a Cuentas del personal →</Link>
+        <span className="block text-amber-100/70 mt-1">Esta pantalla queda como historial de la billetera vieja.</span>
+      </div>
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/viajantes" className="text-white/40 hover:text-white/80 transition-colors">

@@ -6,12 +6,14 @@ import type { Bloque, Comparacion } from "@/lib/playroom/bloques"
 import { pesosCorto } from "@/lib/playroom/bloques"
 import { CATALOGO_TABLERO } from "@/lib/playroom/catalogo-tablero"
 import { fechaISO, porcentaje } from "@/lib/formato"
+import { idsClientesEmpleados, listaNotIn } from "@/lib/personal/empleados"
 
 // Indicadores fijos de Playroom (las tarjetas del tablero). Los usa la pantalla
 // (/api/playroom/tablero) y Jarvis (herramienta indicadores_tablero), así el chat
 // y el tablero nunca dicen números distintos. Nada de esto modifica datos.
 // Ventas = pedidos tomados (no eliminados): coincide con el kardex de ventas y se
-// consulta mucho más rápido. Deuda = libro mayor (v_saldo_clientes).
+// consulta mucho más rápido. Deuda = libro mayor (v_saldo_clientes), SIN las
+// cuentas de empleados (clientes.es_empleado): no son deuda de clientes.
 
 const sumar = (xs: any[], f: (x: any) => number) => xs.reduce((t, x) => t + (Number(f(x)) || 0), 0)
 const pct = (a: number, b: number) => (b > 0 ? ((a - b) / b) * 100 : null)
@@ -63,6 +65,17 @@ export async function calcularIndicadores(sb: SupabaseClient, idsPedidos: string
   const articulos = necesitaArticulos
     ? fetchAllRows(() => sb.rpc("playroom_articulos_vendidos", { p_from: P.inicio, p_to: P.fin, p_prev_from: P.prevInicio, p_prev_to: P.prevFin }), "articulo_id")
     : Promise.resolve([] as any[])
+  // Cuentas de empleados: fuera de la deuda y de la cola de preparación (las ventas sí cuentan)
+  const empleados = quiere("deuda_clientes", "clientes_mas_deben", "pedidos_preparar")
+    ? idsClientesEmpleados(sb)
+    : Promise.resolve(new Set<string>())
+  const saldosClientes = async () => {
+    const [s, emp] = await Promise.all([
+      fetchAllRows(() => sb.from("v_saldo_clientes").select("cliente_id, saldo_actual"), "cliente_id"),
+      empleados,
+    ])
+    return s.filter((x: any) => !emp.has(x.cliente_id))
+  }
   const vendedores = quiere("ventas_por_viajante")
     ? fetchAllRows(() => sb.from("vendedores").select("id, nombre"))
     : Promise.resolve([] as any[])
@@ -159,7 +172,7 @@ export async function calcularIndicadores(sb: SupabaseClient, idsPedidos: string
       return { tipo: "numero", titulo: "Cobrado del mes", valor: a, formato: "pesos", comparacion: comparar(a, b, `vs. ${P.mesPrev}`) }
     },
     async deuda_clientes() {
-      const s = await fetchAllRows(() => sb.from("v_saldo_clientes").select("cliente_id, saldo_actual"), "cliente_id")
+      const s = await saldosClientes()
       const deben = s.filter((x: any) => Number(x.saldo_actual) > 0.5)
       return {
         tipo: "numero", titulo: "Deuda de clientes", valor: sumar(deben, x => x.saldo_actual), formato: "pesos",
@@ -174,7 +187,7 @@ export async function calcularIndicadores(sb: SupabaseClient, idsPedidos: string
       }
     },
     async clientes_mas_deben() {
-      const s = (await fetchAllRows(() => sb.from("v_saldo_clientes").select("cliente_id, saldo_actual"), "cliente_id"))
+      const s = (await saldosClientes())
         .filter((x: any) => Number(x.saldo_actual) > 0.5)
         .sort((a: any, b: any) => Number(b.saldo_actual) - Number(a.saldo_actual)).slice(0, 5)
       const { data: cs } = await sb.from("clientes").select("id, nombre, nombre_razon_social").in("id", s.map((x: any) => x.cliente_id))
@@ -186,10 +199,13 @@ export async function calcularIndicadores(sb: SupabaseClient, idsPedidos: string
       }
     },
     async pedidos_preparar() {
-      const [{ count: total }, { count: prio }] = await Promise.all([
-        sb.from("pedidos").select("id", { count: "exact", head: true }).in("estado", ESTADOS_PREPARABLES),
-        sb.from("pedidos").select("id", { count: "exact", head: true }).in("estado", ESTADOS_PREPARABLES).gt("prioridad", 0),
-      ])
+      // Misma cola que el depósito: sin los pedidos de cuentas de empleados
+      const fuera = listaNotIn(await empleados)
+      const cola = () => {
+        const q = sb.from("pedidos").select("id", { count: "exact", head: true }).in("estado", ESTADOS_PREPARABLES)
+        return fuera ? q.not("cliente_id", "in", fuera) : q
+      }
+      const [{ count: total }, { count: prio }] = await Promise.all([cola(), cola().gt("prioridad", 0)])
       return { tipo: "numero", titulo: "Pedidos para preparar", valor: total ?? 0, formato: "numero", comparacion: { texto: `${prio ?? 0} con prioridad`, tono: "neutro" } }
     },
     async viajes_calle() {

@@ -134,6 +134,14 @@ export async function POST(
       // El ajuste llega DESPUÉS de que el pago se confirmó: si recién ahora el
       // comprobante quedó saldado, la post-confirmación (idempotente) completa
       // lo que faltó — típicamente la comisión 'cobrada' de ese comprobante.
+      if (!pago_id && saldoTargetId) {
+        try {
+          const { liquidarComisiones } = await import("@/lib/comisiones/liquidar")
+          await liquidarComisiones(admin, [saldoTargetId], auth.user.id)
+        } catch (comErr: any) {
+          console.error("[clientes/ajustes] comisiones tras ajuste:", comErr?.message)
+        }
+      }
       if (pago_id) {
         try {
           await procesarPostConfirmacion(supabase, admin, {

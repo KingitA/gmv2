@@ -4,6 +4,7 @@ import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { getPrecioNeto } from "@/lib/comisiones/calcular"
 import { fechaISO } from "@/lib/formato"
+import { cuentaPersonalDe, resumenCuentaPersonal } from "@/lib/cuenta-corriente/cuenta-personal"
 
 // GET /api/vendedor/comisiones?tipo=cobrada|vendida
 // Comisiones del vendedor. REGLA DE ORO: el vendedor solo ve plata que
@@ -63,6 +64,14 @@ export async function GET(req: NextRequest) {
     for (const c of comisionesRows) {
       if (c.pagado) retirado += Number(c.monto || 0)
       else disponible += Number(c.monto || 0)
+    }
+    // Regla del dueño (19/10): con la cuenta personal vinculada, "para retirar" es
+    // lo que tiene a favor en su cuenta y "retirado" la suma de sus retiros.
+    const cuentaId = await cuentaPersonalDe(supabase, { usuarioId: session.user.id, vendedorIds: session.vendedorIds })
+    const cuenta = cuentaId ? await resumenCuentaPersonal(supabase, cuentaId) : null
+    if (cuenta) {
+      disponible = cuenta.a_favor
+      retirado = cuenta.retiros
     }
 
     // Devengado sin cobrar: estimado máximo desde kardex (el débito contado

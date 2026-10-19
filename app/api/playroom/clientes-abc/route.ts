@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { getPreviousPeriod, getSameLastYear, fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
 import { todayArgentina } from '@/lib/utils'
+import { idsClientesEmpleados } from '@/lib/personal/empleados'
 
 const TIPOS_VENTA = ['FA', 'FB', 'FC']
 const TIPOS_NC = ['NCA', 'NCB', 'NCC']
@@ -35,10 +36,11 @@ export async function GET(req: NextRequest) {
     const pedVendMap = new Map(pedidos.map(p => [p.id, p.vendedor_id]))
 
     // Clientes, vendedores y saldo real del LIBRO (fuente única de deuda)
-    const [clientes, vendedores, saldosLibro] = await Promise.all([
+    const [clientes, vendedores, saldosLibro, empleados] = await Promise.all([
       fetchAllRows(() => supabase.from('clientes').select('id, nombre, nombre_razon_social, localidad, vendedor_id, tipo_canal')),
       fetchAllRows(() => supabase.from('vendedores').select('id, nombre')),
       fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual'), 'cliente_id'),
+      idsClientesEmpleados(supabase),
     ])
     const clienteMap = new Map(clientes.map(c => [c.id, c]))
     const vendedorMap = new Map(vendedores.map(v => [v.id, v.nombre]))
@@ -111,7 +113,10 @@ export async function GET(req: NextRequest) {
           cantidad_comprobantes: agg.count,
           // Deuda real del libro mayor (fuente única), no la suma de saldos
           // de comprobantes del período (que ignora plata a cuenta y NC sueltas)
-          saldo_pendiente: libroMap.get(clienteId) ?? 0,
+          // Cuentas de empleados: sus compras son ventas (quedan en el ranking),
+          // pero su saldo no es deuda de clientes (se ve en /personal).
+          saldo_pendiente: empleados.has(clienteId) ? 0 : libroMap.get(clienteId) ?? 0,
+          es_empleado: empleados.has(clienteId),
           ultima_compra: agg.ultimaCompra,
           estado,
           clasificacion: 'C' as 'A' | 'B' | 'C',

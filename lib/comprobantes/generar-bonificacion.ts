@@ -722,10 +722,8 @@ export async function generarBonificacionContado(
   const idsBonificados = comprobantes.map(c => c.id)
   await actualizarDescuentoFinancieroKardex(supabase, idsBonificados)
 
-  // Débito de comisión por financiero ya cobrado: si la comisión del comprobante ya
-  // estaba "cobrada", el 10% financiero reduce la venta real → se debita el 10% de la
-  // comisión al vendedor ("debía cobrar 90, cobró 100, nos debe 10").
-  await debitarComisionPorFinanciero(supabase, idsBonificados)
+  // La comisión ya NO se debita aparte: se calcula sobre la plata que el cliente
+  // pagó (lib/comisiones/liquidar.ts), así que el 10% la reduce solo.
 
   return {
     total_bonificacion: r2(totalBonificacion),
@@ -740,6 +738,7 @@ export async function generarBonificacionContado(
  * Exportada: la post-confirmación la llama DESPUÉS de generar las comisiones
  * (acá adentro corría antes de que existieran y no debitaba nada).
  */
+/** @deprecated 19/10/2026 — reemplazada por lib/comisiones/liquidar.ts; no se usa. */
 export async function debitarComisionPorFinanciero(supabase: any, comprobante_ids: string[]) {
   if (!comprobante_ids?.length) return
   const MOTIVO = "Débito por NC financiera 10% (descuento contado) sobre comisión ya cobrada"
