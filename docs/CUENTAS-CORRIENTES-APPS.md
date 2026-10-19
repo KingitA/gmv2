@@ -8,7 +8,7 @@ Documento vivo de traspaso para los agentes de las apps (vendedor, chofer, depó
 |---|---|
 | 1 · Fuente única del saldo | En main (8dbedb9) |
 | 2 · Verificación, roles, devoluciones por renglón | En main (54a34cd) |
-| 3 · Comisiones y cuenta personal | En la rama; falta aplicar `20261019_cc_personal.sql` |
+| 3 · Comisiones y cuenta personal | En main (migración `20261019_cc_personal.sql` aplicada) |
 
 ---
 
