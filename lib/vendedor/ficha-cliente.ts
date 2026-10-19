@@ -5,6 +5,7 @@
 
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
 import { enCobroPorComprobante } from "@/lib/cobranzas/en-cobro"
+import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
 import { MARCA_CONTADO } from "@/lib/constants"
@@ -75,10 +76,17 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
   // Parte del "en cobro" que viajó marcada [10% CONTADO]: si esas entregas
   // más lo de hoy completan el comprobante, el 10% bonifica el total.
   const { enCobro: enCobroPorComp, enCobroContado: enCobroContadoPorComp } = await enCobroPorComprobante(supabase, compIds, MARCA_CONTADO)
+  // 10% contado que TODAVÍA le queda a cada comprobante (regla 07/10: 10% del TOTAL, una sola
+  // vez; 0 si ya tiene su NC/REV de bonificación o si no bonifica). Misma función que usa el
+  // servidor al registrar el cobro (lib/cobranzas/bonif-pendiente.ts): la app estima igual.
+  const ncPendiente = compIds.length
+    ? await bonificacionPendientePorComprobante(supabase, id, (comprobantes || []).map((c: any) => ({ comprobante_id: c.id, monto_imputado: 0 })))
+    : {}
   const comprobantesConReserva = (comprobantes || []).map((c: any) => ({
     ...c,
     en_cobro: Math.round((enCobroPorComp.get(c.id) || 0) * 100) / 100,
     en_cobro_contado: Math.round((enCobroContadoPorComp.get(c.id) || 0) * 100) / 100,
+    nc_contado: ncPendiente[c.id] ?? 0,
   }))
 
   // Pedidos cobrables sin facturar (anticipo, mismo criterio que el ERP):

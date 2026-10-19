@@ -74,7 +74,10 @@ export function ResumenCuenta({ cuenta, avisar }: { cuenta: CuentaCliente; avisa
   const sel = useSeleccionCompartir()
   const extracto = useMemo(() => armarExtracto(cuenta.movimientos ?? []).reverse(), [cuenta.movimientos])
   const comprobantes = useMemo(() => extracto.map(comprobanteDe).filter((c): c is ComprobantePdf => !!c), [extracto])
-  const enCalle = cuenta.pagos_recientes.filter((p) => p.estado === "pendiente" || p.estado === "pendiente_rendicion")
+  // Cobros sin verificar (también los cargados acá y todavía sin enviar) y devoluciones sin enviar:
+  // explican la diferencia entre el saldo real y el proyectado
+  const enCalle = cuenta.pagos_recientes.filter((p) => p.estado === "pendiente" || p.estado === "pendiente_rendicion" || p.estado === "sin_enviar")
+  const devSinEnviar = cuenta.devoluciones_pendientes.filter((d) => d.id && d.numero_devolucion === "Sin enviar")
   const saldo = cuenta.cliente.saldo_actual
   const proyectado = cuenta.cliente.saldo_proyectado ?? saldo
 
@@ -124,11 +127,18 @@ export function ResumenCuenta({ cuenta, avisar }: { cuenta: CuentaCliente; avisa
         {enCalle.map((p) => (
           <div key={`calle-${p.id}`} className="flex min-h-12 items-center gap-2 border-b border-gray-100 bg-slate-50/70 px-3 py-2 italic text-gray-400">
             <span className="w-6 shrink-0" />
-            <span className="min-w-0 flex-1 text-sm">Cobro en calle — sin verificar<span className="block text-xs">{fecha(p.fecha_pago)} · {p.estado === "pendiente_rendicion" ? "pendiente de rendición" : "pendiente de confirmación"}</span></span>
+            <span className="min-w-0 flex-1 text-sm">Cobro en calle — sin verificar<span className="block text-xs">{fecha(p.fecha_pago)} · {p.estado === "sin_enviar" ? "guardado en el equipo, sin enviar" : p.estado === "pendiente_rendicion" ? "pendiente de rendición" : "pendiente de confirmación"}</span></span>
             <span className="shrink-0 text-sm">(−{formatCurrency(p.monto)})</span>
           </div>
         ))}
-        {enCalle.length > 0 && (
+        {devSinEnviar.map((d) => (
+          <div key={`dev-${d.id}`} className="flex min-h-12 items-center gap-2 border-b border-gray-100 bg-slate-50/70 px-3 py-2 italic text-gray-400">
+            <span className="w-6 shrink-0" />
+            <span className="min-w-0 flex-1 text-sm">Devolución — sin enviar<span className="block text-xs">guardada en el equipo</span></span>
+            <span className="shrink-0 text-sm">(−{formatCurrency(d.monto_total)})</span>
+          </div>
+        ))}
+        {(enCalle.length > 0 || devSinEnviar.length > 0 || Math.abs(proyectado - saldo) > 0.005) && (
           <div className="flex items-center justify-between border-b border-gray-200 bg-slate-100 px-3 py-2 text-sm">
             <span className="font-semibold text-gray-600">Saldo proyectado</span>
             <span className={`font-bold ${proyectado > 0.005 ? "text-red-500" : "text-green-600"}`}>{formatCurrency(proyectado)}</span>

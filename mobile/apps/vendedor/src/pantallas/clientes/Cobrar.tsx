@@ -202,6 +202,14 @@ export function Cobrar() {
     for (const cp of comprobantes) {
       const imp = imputaciones[cp.id]
       if (imp === undefined) continue
+      // Regla del 07/10 (= servidor, lib/cobranzas/bonif-pendiente.ts): el 10% del TOTAL del
+      // comprobante, UNA vez, aunque hoy se pague una parte. 0 si ya tiene su NC o si otro
+      // cobro contado sin confirmar ya la va a generar.
+      if (cp.nc_contado !== undefined) {
+        if (imp > 0.005 && !((cp.en_cobro_contado || 0) > 0.005)) bonif += cp.nc_contado
+        continue
+      }
+      // Réplica vieja (sin nc_contado): regla anterior, solo si queda saldado
       const cobrable = saldoCobrable(cp)
       // Completo con plata de HOY…
       const completoHoy = Math.abs(imp - cp.saldo_pendiente) < 0.01

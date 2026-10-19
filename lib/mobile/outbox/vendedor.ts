@@ -43,6 +43,7 @@ import { cargarClientesVendedor, cargarCuentaCliente, cargarPedidosVendedor, car
 import { esUuid } from "../uuid"
 import { fechaISO } from "@/lib/formato"
 import { subirFotosPendientes } from "@/lib/cobranzas/fotos"
+import { ErrorRetiro, registrarRetiro } from "@/lib/cuenta-corriente/retiro"
 import { llamarRuta } from "./rutas"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
 
@@ -580,9 +581,40 @@ const viajeEstado: HandlerDef<{ viaje_id: string; estado: "completado" | "en_cur
   },
 }
 
+// ─── Retiro de efectivo (cuenta personal, regla del dueño 19/10/2026) ─────────
+
+/**
+ * El vendedor retira efectivo de lo que tiene en la mano (también sin señal). Misma función
+ * que POST /api/vendedor/retiro (lib/cuenta-corriente/retiro.ts): se debita en su cuenta
+ * personal y baja la plata de la empresa que tiene que rendir. Idempotente por la clave de
+ * la operación. Sin cuenta vinculada o pidiendo más efectivo del que tiene: rechazo definitivo.
+ */
+const retiroRegistrar: HandlerDef<{ monto: number; observaciones?: string | null }> = {
+  tipo: "retiro.registrar",
+  roles: ROLES,
+  validar: (p) => (Number(p?.monto) > 0 && Number.isFinite(Number(p?.monto)) ? null : "Monto de retiro inválido"),
+  async aplicar(ctx, m) {
+    const { vendedorIds } = await sesionVendedor(ctx)
+    try {
+      const r = await registrarRetiro(ctx.supabase, {
+        usuarioId: ctx.sesion.user.id,
+        vendedorIds,
+        monto: Number(m.payload.monto),
+        observaciones: m.payload.observaciones || null,
+        idempotencyKey: m.idempotency_key,
+      })
+      return { ...r }
+    } catch (e) {
+      if (e instanceof ErrorRetiro && e.status < 500) throw new RechazoNegocio(e.message, e.codigo)
+      throw e
+    }
+  },
+}
+
 export const HANDLERS_VENDEDOR: HandlerDef[] = [
   pedidoCrear, pedidoEditar, pedidoEliminar,
   clienteCrear, clienteEditar, clienteBonificaciones,
   cobroRegistrar, cobroAnular, devolucionRegistrar,
   viajeCrear, viajeClienteNoVa, viajeEstado,
+  retiroRegistrar,
 ]

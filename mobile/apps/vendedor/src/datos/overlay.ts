@@ -121,11 +121,15 @@ function montoDeCobro(c: any): number {
   return r2(suma(c.imputaciones) + suma(c.pedidos) + Number(c.pago_a_cuenta || 0) - suma(c.creditos) - suma(c.devoluciones))
 }
 
+/** Valor de una devolución sin enviar: el que calculó el equipo al cargarla (regla del servidor); APK viejas: bruto. */
+const valorDevolucionLocal = (p: any) =>
+  p.valor_estimado != null ? r2(Number(p.valor_estimado)) : r2((p.items || []).reduce((s: number, i: any) => s + Number(i.cantidad || 0) * Number(i.precio_venta_original || 0), 0))
+
 /** Devoluciones cargadas acá sin enviar, por cliente: ya descuentan del proyectado (regla del dueño 16/10). */
 function devueltoSinEnviar(ops: ItemOutbox[]): Map<string, number> {
   const m = new Map<string, number>()
   for (const { p } of de<any>(vivas(ops), "devolucion.registrar")) {
-    const total = (p.items || []).reduce((s: number, i: any) => s + Number(i.cantidad || 0) * Number(i.precio_venta_original || 0), 0)
+    const total = valorDevolucionLocal(p)
     m.set(p.cliente_id, r2((m.get(p.cliente_id) || 0) + total))
   }
   return m
@@ -196,7 +200,7 @@ export function cuentaVisible(cc: CuentaCliente, ops: ItemOutbox[], marcaContado
   }
   for (const { p } of de<any>(vivas(ops), "devolucion.registrar")) {
     if (p.cliente_id !== cc.id || out.devoluciones_pendientes.some((d) => d.id === p.id)) continue
-    const total = r2((p.items || []).reduce((s: number, i: any) => s + Number(i.cantidad || 0) * Number(i.precio_venta_original || 0), 0))
+    const total = valorDevolucionLocal(p)
     out = {
       ...out,
       devoluciones_pendientes: [{ id: p.id, numero_devolucion: "Sin enviar", pedido_id: p.pedido_id ?? null, monto_total: total, restante: total }, ...out.devoluciones_pendientes],

@@ -144,6 +144,8 @@ export interface ComprobanteCC {
   pedido_id: string | null
   en_cobro: number
   en_cobro_contado: number
+  /** 10% contado que todavía le queda (regla 07/10: del TOTAL, una vez; 0 = ya tiene su NC o no bonifica). Falta en réplicas viejas */
+  nc_contado?: number
 }
 export interface PedidoCobro { id: string; numero_pedido: string; fecha: string; estado: string; total: number; pago_contado_10: boolean; anticipo_pago_id: string | null; facturado: boolean; cobrable: boolean }
 export interface DevolucionPendiente { id: string; numero_devolucion: string; pedido_id: string | null; monto_total: number; created_at?: string; descontado?: number; restante: number }
@@ -153,6 +155,8 @@ export interface PagoReciente { id: string; fecha_pago: string; monto: number; e
 export interface Comprado {
   articulo_id: string; sku: string | null; descripcion: string; imagen_url: string | null; ean13?: string | string[] | null
   ultimo_precio: number; ultima_fecha: string; comprobante_venta_id: string | null; numero_comprobante: string; tipo_comprobante: string; cantidad_total: number
+  /** La factura tuvo bonificación contado (la devolución vale 10% menos). Falta en réplicas viejas */
+  bonificado_contado?: boolean
 }
 
 /** = GET /api/vendedor/cliente/[id] + comprados + habituales. id = cliente.id */
