@@ -11,6 +11,25 @@ Documento único para los agentes de las APK. Junta lo que quedó repartido entr
 5. Nunca push a `main` sin OK explícito del dueño. Pruebas contra producción: solo datos TEST-…, con foto antes/después; nada que emita comprobantes con CAE.
 6. Al terminar, **actualizá este documento** (tachá lo hecho, con fecha y versión) y el CHANGELOG de la app, en el mismo commit.
 
+## Quién hace qué (tablero — leer ANTES de empezar cualquier tarea)
+
+Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (worktree); NO todos en la misma rama, porque se pisarían los cambios a medio hacer. Para no hacer dos veces lo mismo:
+
+1. **Antes de empezar** una tarea: `git fetch` y mirar `origin/main`. Si la tarea está en la tabla de abajo con otro dueño, **no la toques**: coordiná a través del dueño (Juan).
+2. **Al tomar** una tarea: anotala acá en la tabla, con tu nombre (área) y "en curso", y subí ese cambio a `main` **antes** de programar. Es un cambio de documentación solo: no necesita el OK del dueño.
+3. **Al terminar**: pasala a "hecho" con la fecha y el commit, en el mismo commit del trabajo.
+4. **Límites por área.** El servidor de cobros, cheques, cuentas corrientes, comisiones y billeteras (`lib/cobranzas`, `lib/cuenta-corriente`, `lib/comisiones`, `app/api/viajante/cobro`, `app/api/chofer/viaje/*/cobro`, migraciones de esos temas) es de **cuentas corrientes**. Las pantallas de cada APK (`mobile/apps/<app>`) son del agente de esa app. Si una app necesita algo del servidor de cobros, lo pide; no lo cambia.
+
+| Tarea | Área dueña | Estado |
+|---|---|---|
+| Un cheque = un papel (servidor) | Cuentas corrientes | Hecho 20/10 (20ac463), migración 20261020b aplicada |
+| `en_cobro` del chofer (servidor) | Cuentas corrientes | Hecho 20/10 (20ac463) |
+| Cheques en verificación / anular cheque compartido | Cuentas corrientes | Hecho 20/10 (20ac463) |
+| Puesta a cero y apertura | Cuentas corrientes | Instalado; se ejecuta el día del corte |
+| App Vendedor v0.4.0 (dos cajitas, retiro, 10 % contado, Resumen) | App Vendedor | Pendiente |
+| App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único) | App Chofer | Pendiente |
+| App Depósito v0.3.0 (devolución por renglón, formatos, mercadería por cupo) | App Depósito | Pendiente (con OK del dueño) |
+
 ## Versiones instaladas hoy
 
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |
