@@ -190,6 +190,7 @@ Reglas del dueño (20/10):
 34. Finanzas:
     - Los cheques son de prueba, salvo los echeqs PROPIOS emitidos a proveedores (ENTREGADO_A_PROVEEDOR: 2 a La Mariposa y 1 a Rofina).
     - Los saldos de bancos son reales pero cambian todos los días: se borran y el dueño los recarga.
+36. Las comisiones de los comprobantes del sistema viejo se siguen liquidando en el sistema viejo hasta que se salden (decisión del dueño, 20/10). En gmv2 los comprobantes de apertura no generan comisión, porque no tienen renglones de kardex.
 35. La apertura sale del reporte "Comprobantes Impagos de Clientes" del sistema viejo (`.chr`, Windows-1252). Es el mismo archivo con el que se cargaron los clientes de Freije el 01/10.
 
 Simulacro, solo lectura, del 20/10:
@@ -201,5 +202,5 @@ Hecho:
 - `lib/apertura/importar.ts`, `POST /api/apertura` y la pantalla `/apertura` (solo admin). La previsualización bloquea si un cliente no existe, si hay un tipo desconocido o si la suma no da el saldo del reporte. La carga se confirma por tandas y es idempotente: la previsualización contra la base real ya reconoce como cargados los 22 renglones de Freije. Sigue las convenciones de la apertura anterior ("APERTURA GM", total_neto = importe final) y guarda la fecha a mediodía de Argentina, para que no se corra de día.
 
 Pendiente:
-- La migración `20261020_cc_puesta_a_cero.sql` está escrita (autorizada por el dueño el 20/10). Aplicarla NO borra nada: instala `cc_puesta_a_cero_simulacro()` y `cc_puesta_a_cero('PONER A CERO')`. El simulacro, corrido en solo lectura, conserva 12 comprobantes con CAE (/usr/bin/bash), 12 asientos, 6 imputaciones entre ellos y 3 echeqs.
-- Decisión del dueño sobre las comisiones de los comprobantes del sistema viejo cobrados después del corte. Hoy no generan comisión, porque no tienen kardex.
+- La migración `20261020_cc_puesta_a_cero.sql` está escrita (autorizada por el dueño el 20/10; APLICADA y verificada: funciones instaladas, nada borrado). Aplicarla NO borra nada: instala `cc_puesta_a_cero_simulacro()` y `cc_puesta_a_cero('PONER A CERO')`. El simulacro, corrido en solo lectura, conserva 12 comprobantes con CAE (/usr/bin/bash), 12 asientos, 6 imputaciones entre ellos y 3 echeqs.
+
