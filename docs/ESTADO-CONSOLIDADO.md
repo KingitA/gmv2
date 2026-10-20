@@ -53,6 +53,7 @@ Resultado:
 | Jarvis (cerebro de Playroom) + calendario de viajes | En main | 15/10 |
 | Cuentas corrientes, etapas 1 a 4 | En main | 19/10 |
 | Selección/exportación del extracto de cuenta corriente | En main | 19/10 |
+| Artículos dados de baja: matching sin bajas, reactivar desde Artículos/Depósito, historial de quién | En main (570cc2c); app Depósito falta APK | 20/10 |
 
 ---
 
@@ -77,6 +78,8 @@ group by 1 having count(*) > 1;
 ```
 
 **Aplicada y verificada (20/10, cuentas corrientes):** `20261020b_cheques_un_papel.sql`. Agrega el estado de cheque EN_VERIFICACION, los triggers de "un cheque = un papel" y el nuevo `cheque_rechazar`. Aplicarla **antes** de desplegar el código de esa fecha: el código del servidor ya crea el cheque compartido.
+
+**Aplicadas y verificadas (20/10, artículos dados de baja):** `20261020_pedidos_articulo_real.sql` (pedido 001831 pasó de "062216" dado de baja a "62216") y `20261020b_articulos_bajas.sql` (tabla `articulos_estado_historial`, RPC `articulo_cambiar_estado`, trigger `trg_articulos_estado_historial` y `match_articulos` solo activos).
 
 **Instalada pero sin ejecutar (a propósito):** `20261020_cc_puesta_a_cero.sql`. Deja listas las funciones de puesta a cero de cuentas corrientes; **no borra nada sola**. Se ejecuta el día del corte (ver §4).
 

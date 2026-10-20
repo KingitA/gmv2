@@ -10,6 +10,7 @@ import {
 } from "@/lib/actions/deposito"
 import { opcionesCon, TIPOS_BULTO_DEFAULT, TIPOS_FRACCION_DEFAULT } from "@/lib/catalogos/tipos-articulo"
 import { localMatch } from "@/lib/search/local-match"
+import { AvisoDadoDeBaja, type ArticuloDadoDeBaja } from "@/components/deposito/aviso-dado-de-baja"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 import { esQrOUrl } from "@/lib/utils/scan-guard"
 import { scanError } from "@/lib/utils/scan-feedback"
@@ -41,6 +42,9 @@ export default function ModificacionArticulosPage() {
   // ── Búsqueda libre ────────────────────────────────────
   const [busqueda, setBusqueda] = useState("")
   const [resultados, setResultados] = useState<Articulo[]>([])
+  // Código que no está entre los activos pero es de un artículo DADO DE BAJA → se ofrece reactivar
+  const [dadoDeBaja, setDadoDeBaja] = useState<ArticuloDadoDeBaja | null>(null)
+  const [refrescar, setRefrescar] = useState(0)
   const [buscando, setBuscando] = useState(false)
   const [errorBusqueda, setErrorBusqueda] = useState<string | null>(null)
   const [articulo, setArticulo] = useState<Articulo | null>(null)
@@ -156,12 +160,13 @@ export default function ModificacionArticulosPage() {
         })
         if (res.error) setErrorBusqueda(res.error)
         setResultados(res.data as Articulo[])
+        setDadoDeBaja(res.dadoDeBaja ?? null)
       } catch (e: any) {
         setResultados([]); setErrorBusqueda(e?.message || "Error al buscar")
       } finally { setBuscando(false) }
     }, 250)
     return () => clearTimeout(debounce.current)
-  }, [busqueda, filtroProveedor, filtroCategoria])
+  }, [busqueda, filtroProveedor, filtroCategoria, refrescar])
 
   // ── Helpers lista ─────────────────────────────────────
   const cargarLista = async (filtro: ListaFiltro, label: string, reset = true) => {
@@ -691,7 +696,12 @@ export default function ModificacionArticulosPage() {
               ))}
             </div>
           )}
-          {!buscando && resultados.length === 0 && !errorBusqueda && (
+          {!buscando && resultados.length === 0 && !errorBusqueda && dadoDeBaja && (
+            <div style={{ padding: 12 }}>
+              <AvisoDadoDeBaja articulo={dadoDeBaja} onReactivado={() => { setDadoDeBaja(null); setRefrescar((n) => n + 1) }} />
+            </div>
+          )}
+          {!buscando && resultados.length === 0 && !errorBusqueda && !dadoDeBaja && (
             <div style={C.empty}><span>Sin resultados{busqueda ? ` para "${busqueda}"` : ""}{ hayFiltroActivo ? " con filtros activos" : ""}</span></div>
           )}
         </>

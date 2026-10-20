@@ -54,9 +54,10 @@ export function ManualMatchDialog({ open, onOpenChange, onSelect, itemName, prov
                 .select(`
                     articulo_id,
                     codigo_proveedor,
-                    articulos (id, descripcion, sku, ean13)
+                    articulos!inner (id, descripcion, sku, ean13, activo)
                 `)
                 .eq('proveedor_id', providerId)
+                .eq('articulos.activo', true)
                 .or(`codigo_proveedor.ilike.%${orQuery}%,descripcion_proveedor.ilike.%${orQuery}%`) // Removed space
                 .limit(5);
 

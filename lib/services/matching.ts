@@ -60,9 +60,11 @@ export async function matchItems(
             codigo_proveedor,
             veces_usado,
             unidad_factura,
-            factor_conversion
+            factor_conversion,
+            articulos!inner ( activo )
         `)
-        .eq("proveedor_id", proveedorId);
+        .eq("proveedor_id", proveedorId)
+        .eq("articulos.activo", true); // las equivalencias hacia un artículo dado de baja no cuentan
 
     // 2. Fetch active articles for this provider to ensure we only match active stuff
     // Optimization: We could fetch ALL articles for provider, or just rely on mappings + a verify step.

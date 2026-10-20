@@ -6,6 +6,7 @@ import { buscarPorCodigo, lineaInfo, sufijoMarca } from "../../datos/busqueda"
 import { useArticulos, useDevoluciones, useEncolar, useRefrescarAlEntrar } from "../../datos/hooks"
 import { C, dejarAviso, Marco, Rechazos, useAvisoEntrante, useToast, useVolver } from "../../ui"
 import { PanelBuscar } from "../comunes/Buscar"
+import { useDadoDeBaja } from "../comunes/DadoDeBaja"
 
 // Rutas por vista (en la web: `vista` = home | scanner | resultados | confirmar):
 //   /devoluciones                  listado + botón buscar
@@ -17,17 +18,19 @@ const DATASET = DS.devoluciones
 const numero = (d: Devolucion) => d.numero_devolucion || `DEV-${d.id.slice(0, 6)}`
 const cliente = (d: Devolucion) => d.clientes?.razon_social || d.clientes?.nombre
 
-/** Gatillo del lector: va directo a las devoluciones que traen ese artículo. */
+/** Gatillo del lector: va directo a las devoluciones que traen ese artículo (o, si está dado de baja, ofrece reactivarlo). */
 function useEscaneoDevolucion(mostrar: (m: string, t?: "ok" | "err") => void, replace = false) {
   const { indice } = useArticulos()
   const navigate = useNavigate()
-  return (codigo: string) => {
+  const baja = useDadoDeBaja(mostrar)
+  const escanear = (codigo: string) => {
     if (esQrOUrl(codigo)) { lecturaError(); mostrar("QR ignorado — escaneá el código de barras", "err"); return }
     const art = buscarPorCodigo(indice, codigo)[0]
-    if (!art) { lecturaError(); mostrar(`No se encontró el código ${codigo}`, "err"); return }
+    if (!art) { void baja.noEncontrado(codigo); return }
     lecturaOk()
     navigate(`/devoluciones/articulo/${art.id}`, { replace })
   }
+  return { escanear, baja }
 }
 
 export function Devoluciones() {
@@ -37,7 +40,8 @@ export function Devoluciones() {
   const { toast, mostrar } = useToast()
   useAvisoEntrante(mostrar)
   useRefrescarAlEntrar(DATASET)
-  useLector({ onCodigo: useEscaneoDevolucion(mostrar) })
+  const { escanear, baja } = useEscaneoDevolucion(mostrar)
+  useLector({ onCodigo: escanear })
   const rechazados = ops.filter((o) => o.estado === "rechazado" && o.tipo === "devolucion.recibir")
 
   return (
@@ -87,6 +91,7 @@ export function Devoluciones() {
           })}
         </div>
       </div>
+      {baja.hoja}
     </Marco>
   )
 }
@@ -95,7 +100,7 @@ export function DevolucionesBuscar() {
   const navigate = useNavigate()
   const volver = useVolver()
   const { toast, mostrar } = useToast()
-  const escanear = useEscaneoDevolucion(mostrar, true)
+  const { escanear, baja } = useEscaneoDevolucion(mostrar, true)
   return (
     <Marco titulo="Buscar artículo">
       {toast}
@@ -106,7 +111,9 @@ export function DevolucionesBuscar() {
         // replace: desde los resultados, atrás vuelve al listado; "Buscar otro" vuelve acá
         onElegir={(art) => navigate(`/devoluciones/articulo/${art.id}`, { replace: true })}
         onCodigo={escanear}
+        dadoDeBaja={baja}
       />
+      {baja.hoja}
       <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px" }}>
         <button onClick={() => volver()} style={{ width: "100%", background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "17px 0", borderRadius: 16, border: `1.5px solid ${C.border}` }}>📋 Ver listado de devoluciones</button>
       </div>
@@ -121,7 +128,8 @@ export function DevolucionesArticulo() {
   const { indice } = useArticulos()
   const { toast, mostrar } = useToast()
   useAvisoEntrante(mostrar)
-  useLector({ onCodigo: useEscaneoDevolucion(mostrar, true) })
+  const { escanear, baja } = useEscaneoDevolucion(mostrar, true)
+  useLector({ onCodigo: escanear })
   const art = artId ? indice.porId.get(artId) : undefined
   const coincidencias = devoluciones.flatMap((dev) => dev.devoluciones_detalle.filter((det) => det.articulos?.id === artId).map((detalle) => ({ dev, detalle })))
 
@@ -167,6 +175,7 @@ export function DevolucionesArticulo() {
         )}
         <button onClick={() => navigate("/devoluciones/buscar", { replace: true })} style={{ width: "100%", background: C.white, color: C.text, fontWeight: 700, fontSize: 16, padding: 17, borderRadius: 18, border: `1.5px solid ${C.border}`, marginTop: 16 }}>← Buscar otro artículo</button>
       </div>
+      {baja.hoja}
     </Marco>
   )
 }

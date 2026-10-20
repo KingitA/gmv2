@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label"
 import {
   Search, Save, ChevronLeft, ChevronRight, Trash2, Download, GripVertical,
   Plus, Upload, ShoppingCart, TrendingUp, Package, ChevronDown, Check,
-  FileDown, FileUp, SlidersHorizontal, X, Pencil, ArrowUpDown, ArrowUp, ArrowDown,
+  FileDown, FileUp, RotateCcw, SlidersHorizontal, X, Pencil, ArrowUpDown, ArrowUp, ArrowDown,
 } from "lucide-react"
 import { ImportArticulosDialog, articulosFieldLabel, articulosValueFormat } from "@/components/articulos/ImportArticulosDialog"
 import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
@@ -149,6 +149,8 @@ export default function ArticulosPage() {
   // Hubo cambios guardados desde esta pantalla: la próxima lista se pide sin caché
   const sucio = useRef(false)
   const [filtros,setFiltros] = useState<Filtros>({})
+  // Activos / Dados de baja / Todos (los dados de baja se pueden reactivar)
+  const [estado,setEstado] = useState<"activos"|"bajas"|"todos">("activos")
   const [facetas,setFacetas] = useState<Record<string,OpcionFiltro[]>>({})
   const [provs,setProvs] = useState<any[]>([])
   const [marcas,setMarcas] = useState<any[]>([])
@@ -266,7 +268,7 @@ export default function ArticulosPage() {
     })()
   },[])
   useEffect(()=>{ const t=setTimeout(()=>{setSd(st);setPg(0)},400); return()=>clearTimeout(t) },[st])
-  useEffect(()=>{ load() },[pf,sd,pg,sortCol,sortDir,filtros])
+  useEffect(()=>{ load() },[pf,sd,pg,sortCol,sortDir,filtros,estado])
 
   // Close panels on outside click
   useEffect(()=>{
@@ -300,7 +302,7 @@ export default function ArticulosPage() {
   // pedido. Lo resuelve /api/articulos/listado (que también devuelve las opciones de
   // cada filtro con su cantidad). Se guarda en `listado` y se reutiliza al paginar.
   const pedirListado=async(forzar=false):Promise<string[]>=>{
-    const cuerpo={q:sd.trim(),proveedor:pf!=="todos"?pf:null,filtros,orden:sortCol?{col:sortCol,dir:sortDir}:null}
+    const cuerpo={q:sd.trim(),proveedor:pf!=="todos"?pf:null,filtros,orden:sortCol?{col:sortCol,dir:sortDir}:null,estado}
     const key=JSON.stringify(cuerpo)
     if(!forzar&&!sucio.current&&listado.current?.key===key) return listado.current.ids
     const fresco=forzar||sucio.current; sucio.current=false
@@ -549,12 +551,26 @@ export default function ArticulosPage() {
     toast.success(`${ok} artículo(s) actualizados`)
   }
 
+  // Dar de baja / reactivar: por el servidor, que registra quién lo hizo (historial de altas y bajas)
+  const cambiarEstado = async (ids:string[], activo:boolean):Promise<number|null> => {
+    const res = await fetch("/api/articulos/estado",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids,activo,origen:"articulos"})})
+    const d = await res.json().catch(()=>({}))
+    if(!res.ok){ toast.error(d.error||"No se pudo cambiar el estado"); return null }
+    return d.cambiados ?? 0
+  }
   const bulkDelete = async () => {
     if(sel.size===0) return
     if(!confirm(`¿Dar de baja ${sel.size} artículo(s) seleccionados? Quedarán inactivos y no aparecerán en búsquedas ni pedidos.`)) return
-    let ok=0
-    for(const id of sel){ const{error}=await sb.from("articulos").update({activo:false}).eq("id",id); if(!error) ok++ }
+    const ok = await cambiarEstado([...sel], false)
+    if(ok===null) return
     clearSel(); await load(true); toast.success(`${ok} artículo(s) dado(s) de baja`)
+  }
+  const reactivar = async (ids:string[]) => {
+    if(!ids.length) return
+    if(!confirm(`¿Reactivar ${ids.length} artículo(s)? Vuelven a aparecer en búsquedas, pedidos y en las apps.`)) return
+    const ok = await cambiarEstado(ids, true)
+    if(ok===null) return
+    clearSel(); await load(true); toast.success(`${ok} artículo(s) reactivado(s)`)
   }
 
   const toggleBulkField = (f:string, defaultVal:any=null) => {
@@ -625,6 +641,15 @@ export default function ArticulosPage() {
 
       {/* ═══ FILTER BAR ════════════════════════════════════════════════════════ */}
       <div className="bg-white border-b px-4 py-2.5 sm:px-6 flex gap-3 items-center flex-wrap flex-shrink-0">
+        {/* Estado: activos / dados de baja / todos */}
+        <div className="inline-flex overflow-hidden rounded-md border text-[13px] font-medium">
+          {([["activos","Activos"],["bajas","Dados de baja"],["todos","Todos"]] as const).map(([v,t])=>(
+            <button key={v} type="button" onClick={()=>{setEstado(v);setPg(0);clearSel()}}
+              className={`px-3 py-1.5 transition-colors ${estado===v?(v==="bajas"?"bg-red-600 text-white":"bg-azul-700 text-white"):"bg-white text-neutro-600 hover:bg-neutro-50"}`}>
+              {t}
+            </button>
+          ))}
+        </div>
         {/* Proveedor */}
         <div className="flex items-center gap-1.5">
           <span className="text-[13px] font-semibold text-neutro-600">Proveedor</span>
@@ -742,9 +767,16 @@ export default function ArticulosPage() {
           <Button size="sm" variant="ghost" className="h-7 text-xs text-white hover:bg-white/20 gap-1.5" onClick={()=>setShowBulkEdit(true)}>
             <Pencil className="h-3.5 w-3.5"/>Editar seleccionados
           </Button>
-          <Button size="sm" variant="ghost" className="h-7 text-xs text-white hover:bg-red-500/70 gap-1.5" onClick={bulkDelete}>
-            <Trash2 className="h-3.5 w-3.5"/>Eliminar seleccionados
-          </Button>
+          {arts.some(a=>sel.has(a.id)&&a.activo===false)&&(
+            <Button size="sm" variant="ghost" className="h-7 text-xs text-white hover:bg-white/20 gap-1.5" onClick={()=>reactivar(arts.filter(a=>sel.has(a.id)&&a.activo===false).map(a=>a.id))}>
+              <RotateCcw className="h-3.5 w-3.5"/>Reactivar seleccionados
+            </Button>
+          )}
+          {estado!=="bajas"&&(
+            <Button size="sm" variant="ghost" className="h-7 text-xs text-white hover:bg-red-500/70 gap-1.5" onClick={bulkDelete}>
+              <Trash2 className="h-3.5 w-3.5"/>Eliminar seleccionados
+            </Button>
+          )}
           <button onClick={clearSel} className="ml-1 p-1 rounded-full hover:bg-white/20 transition-colors">
             <X className="h-4 w-4"/>
           </button>
@@ -871,9 +903,15 @@ export default function ArticulosPage() {
                     {isVis("desc")&&(
                       <td className="px-2.5 py-0 sticky left-9 z-10 border-r border-neutro-100 overflow-hidden shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]" style={{width:cw.desc,maxWidth:cw.desc,background:stickyBg}}>
                         <button onClick={()=>ofa(a)} className="text-left block w-full overflow-hidden group">
-                          <div className="font-semibold text-[13px] leading-tight truncate text-azul-900 group-hover:text-azul-600 transition-colors" title={a.descripcion}>{a.descripcion}</div>
+                          <div className={`font-semibold text-[13px] leading-tight truncate group-hover:text-azul-600 transition-colors ${a.activo===false?"text-neutro-400 line-through":"text-azul-900"}`} title={a.descripcion}>{a.descripcion}</div>
                           {!isVis("sku")&&<div className="text-xs text-neutro-400 font-mono truncate leading-tight">{a.sku}</div>}
                         </button>
+                        {a.activo===false&&(
+                          <div className="flex items-center gap-1.5 leading-tight">
+                            <span className="rounded bg-red-100 px-1.5 text-[10px] font-semibold text-red-700">dado de baja</span>
+                            <button type="button" onClick={()=>reactivar([a.id])} className="text-[11px] font-semibold text-azul-700 underline">Reactivar</button>
+                          </div>
+                        )}
                       </td>
                     )}
                     {isVis("sku")&&<td className="px-2 py-0 border-r border-slate-100 font-mono text-[13px] text-neutro-600 overflow-hidden truncate" style={{width:cw.sku,maxWidth:cw.sku}}>{a.sku}</td>}

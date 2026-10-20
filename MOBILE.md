@@ -456,6 +456,7 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
 | GET/POST `devoluciones` | devoluciones(_detalle), articulos, movimientos_stock | R `deposito_devoluciones` · O `devolucion.recibir` (idempotente) |
 | server actions `lib/actions/deposito` (stock, datos, INEXISTENTE, listados, adyacente) | articulos | R `deposito_articulos` + O `stock.ajustar` / `articulo.datos` (CAS por campo) / `articulo.inexistente`; listados y anterior/siguiente calculados localmente |
 | GET/POST `ajustes-stock`, POST `recepciones/documento` | — | no los usa ninguna pantalla web hoy: sin portar |
+| `/api/articulos/estado` (GET dado de baja por código · POST reactivar) | articulos, articulos_estado_historial | **L** `GET /api/mobile/deposito/articulo-baja` · O `articulo.reactivar` (idempotente, origen `app_deposito`) |
 
 ---
 
@@ -913,6 +914,26 @@ la entrada (atrás vuelve a la lista, no a la ficha).
   artículo que nunca se vio con WiFi no muestra la foto offline (el WebView solo cachea lo
   ya visto); si molesta, habría que guardar las fotos en la réplica.
 
+### Artículo dado de baja: "¿Reactivarlo?" (regla del dueño, 20/10/2026)
+La réplica `deposito_articulos` solo trae artículos **activos**. Cuando el operario escanea o
+tipea un código (SKU con o sin ceros, EAN o código de bulto) que no tiene ningún activo, y
+hay señal, la app pregunta al servidor — `GET /api/mobile/deposito/articulo-baja?codigo=`
+(online-only, rol depósito, `buscarDadoDeBajaPorCodigo` de `lib/articulos/estado.ts`) — si es
+de un artículo **dado de baja**. Si lo es: hoja `?ver=baja` "Este artículo está dado de baja:
+<SKU> <descripción>. ¿Reactivarlo?" (atrás la cierra). Confirmar encola
+**`articulo.reactivar` `{ articulo_id }`** (handler en `lib/mobile/outbox/deposito.ts`): llama a
+`cambiarEstadoArticulos(admin, [id], true, <usuario de la sesión del equipo>, "app_deposito")`
+(el RPC/trigger guardan quién y desde dónde), es idempotente (si ya está activo no cambia
+nada) y devuelve el parche de réplica, así el artículo aparece enseguida; en Modificación de
+artículos se abre solo en cuanto llega. Sin señal: el aviso de siempre "No se encontró el
+código …" + "(sin señal no se puede ver si está dado de baja)".
+- Dónde: escaneo en Modificación de artículos, Recepción (lista, buscar, faltantes) y
+  Devoluciones; lo **tipeado** en el buscador de esas pantallas (si parece un código y ningún
+  activo lo tiene exacto, consulta tras 600 ms y muestra un aviso con "¿Reactivarlo?").
+  **No** en picking: ahí se busca un renglón del pedido, no un artículo del catálogo.
+- Código: `pantallas/comunes/DadoDeBaja.tsx` (`useDadoDeBaja`, `AvisoBaja`), `pareceCodigo` /
+  `hayActivoConCodigo` en `datos/busqueda.ts` (tests: `test/deposito-baja.test.ts`).
+
 ### Lector
 `useLector` en toda pantalla donde hoy se identifica un artículo. En la lista del
 pedido / recepción el gatillo abre la cantidad del renglón; **un segundo gatillo sobre
@@ -947,6 +968,7 @@ un segundo escaneo dejaba la cantidad en 0). Cantidades de 7+ cifras se rechazan
 | Listado navegable | `/articulos/lista?rec=…` | Modificación de artículos |
 | Editor de artículo | `/articulos/:id?rec=…` (`?tab=` y Anterior/Siguiente = replace) | Listado (o búsqueda), con autoguardado de datos |
 | Enviar a INEXISTENTE (hoja) | `?ver=inexistente` | cierra la hoja |
+| Artículo dado de baja, ¿reactivar? (hoja) | `?ver=baja` (artículos, recepción, devoluciones) | cierra la hoja |
 | Operaciones pendientes | `/pendientes` | la pantalla anterior |
 
 ### Usuarios y turnos
@@ -2011,6 +2033,12 @@ existe ahí): las operaciones igual quedan en cola y salen al restaurarla.
 - Un código de un registro dado de baja sigue ocupado.
 - Trigger `trg_codigo_unico`: si un alta llega sin código, la base asigna el primer libre
   (con lock para altas simultáneas). Lógica en `lib/codigos.ts` y `GET /api/codigos`.
+
+### Artículos dados de baja (20/10/2026)
+
+- Las réplicas traen **solo artículos activos** (snapshot filtrado; en el delta, uno dado de baja llega como borrado). Ninguna app debe ofrecer, buscar ni matchear un artículo dado de baja.
+- Reactivar un artículo es **solo** desde `/articulos`, el depósito web y la **app Depósito** (op `articulo.reactivar`, §17 "Artículo dado de baja"). Siempre por `cambiarEstadoArticulos` (`lib/articulos/estado.ts`), que registra usuario y origen en `articulos_estado_historial`. No hacer `update({ activo })` directo.
+- El matching del servidor (importación de pedidos, listas de precios, proveedores, búsqueda por IA) ya excluye los dados de baja: no hace falta nada en las APK de vendedor y chofer.
 
 ### Pendiente en los celulares
 

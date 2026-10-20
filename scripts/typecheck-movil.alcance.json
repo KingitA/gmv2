@@ -3,6 +3,7 @@
   "rutas": [
     "lib/pricing/",
     "lib/mobile/",
+    "lib/articulos/estado.ts",
     "lib/supabase/",
     "lib/actions/pedidos.ts",
     "app/api/mobile/",

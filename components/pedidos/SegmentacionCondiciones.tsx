@@ -85,7 +85,7 @@ export function SegmentacionCondiciones({
       .then(({ data }: any) => setProveedores((data || []).filter((p: any) => p.nombre)))
     sb.from("marcas").select("id,descripcion").eq("activo", true).order("descripcion")
       .then(({ data }: any) => setMarcas((data || []).map((m: any) => ({ id: m.id, nombre: m.descripcion })).filter((m: Opcion) => m.nombre)))
-    sb.from("articulos").select("proveedor_id, marca_id").not("precio_lista_especial", "is", null)
+    sb.from("articulos").select("proveedor_id, marca_id").eq("activo", true).not("precio_lista_especial", "is", null)
       .then(({ data }: any) => {
         const ps = new Set<string>(); const ms = new Set<string>()
         for (const a of (data || [])) { if (a.proveedor_id) ps.add(a.proveedor_id); if (a.marca_id) ms.add(a.marca_id) }

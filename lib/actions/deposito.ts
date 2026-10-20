@@ -5,6 +5,8 @@ import { padEan13 } from "@/lib/utils/ean"
 import { hybridSearchIds } from "@/lib/search/hybrid"
 import { buscarConFiltros } from "@/lib/search/buscar-con-filtros"
 import { cargarTiposArticulo } from "@/lib/catalogos/tipos-articulo"
+import { createClient } from "@/lib/supabase/server"
+import { buscarDadoDeBajaPorCodigo, cambiarEstadoArticulos, type ArticuloBaja } from "@/lib/articulos/estado"
 import { aplicarAjusteStock, enviarArticuloAInexistente, normalizarDatosArticulo, proveedorInexistenteId } from "@/lib/deposito/articulos"
 
 /** Opciones de Tipo de bulto / Tipo de fracción (tablas tipos_bulto / tipos_fraccion) para los selects de depósito. */
@@ -16,6 +18,34 @@ const SELECT_SEARCH = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_b
 const SELECT_FULL   = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id, marca:marca_id(descripcion)"
 
 export async function buscarArticulosDeposito(
+  query: string,
+  opciones?: { proveedorId?: string; categoria?: string }
+): Promise<{ data: any[]; error?: string; dadoDeBaja?: ArticuloBaja | null }> {
+  const r = await buscarArticulosDepositoActivos(query, opciones)
+  // Un código (SKU / EAN / bulto) que no aparece entre los activos: ¿es de un artículo
+  // DADO DE BAJA? Depósito ofrece reactivarlo (decisión del dueño 20/10/2026).
+  const q = query.trim()
+  if (!r.error && r.data.length === 0 && /^[A-Za-z0-9\-_.]{3,20}$/.test(q)) {
+    const dadoDeBaja = await buscarDadoDeBajaPorCodigo(createAdminClient(), q).catch(() => null)
+    if (dadoDeBaja) return { ...r, dadoDeBaja }
+  }
+  return r
+}
+
+/** Reactiva un artículo dado de baja desde depósito, registrando quién lo hizo. */
+export async function reactivarArticuloDeposito(articuloId: string): Promise<{ ok: boolean; error?: string }> {
+  const sb = await createClient()
+  const { data: { user } } = await sb.auth.getUser()
+  if (!user) return { ok: false, error: "Sesión vencida: volvé a ingresar." }
+  try {
+    await cambiarEstadoArticulos(createAdminClient(), [articuloId], true, user.id, "deposito")
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "No se pudo reactivar" }
+  }
+}
+
+async function buscarArticulosDepositoActivos(
   query: string,
   opciones?: { proveedorId?: string; categoria?: string }
 ): Promise<{ data: any[]; error?: string }> {

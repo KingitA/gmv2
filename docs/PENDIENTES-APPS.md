@@ -28,7 +28,8 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | Puesta a cero y apertura | Cuentas corrientes | Instalado; se ejecuta el día del corte |
 | App Vendedor v0.4.0 (dos cajitas, retiro, 10 % contado, Resumen) | App Vendedor | Pendiente |
 | App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único) | App Chofer | Pendiente |
-| App Depósito v0.3.0 (devolución por renglón, formatos, mercadería por cupo) | App Depósito | Pendiente (con OK del dueño) |
+| App Depósito v0.3.0 (devolución por renglón, formatos, mercadería por cupo, **reactivar artículos dados de baja**) | App Depósito | Pendiente (con OK del dueño) |
+| Artículos dados de baja: matching sin bajas, reactivar desde Artículos/Depósito, historial de quién | Servidor (sesión búsquedas/formatos) | Hecho 20/10 (bef0ecd + 570cc2c), migraciones `20261020_pedidos_articulo_real` y `20261020b_articulos_bajas` aplicadas |
 
 ## Versiones instaladas hoy
 
@@ -36,7 +37,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 |---|---|---|---|
 | Vendedor | v0.4.0 (versionCode 9) | 20/10 | — |
 | Chofer | v0.2.2 (versionCode 5) | 01/10 | Cobro contado 07/10, formatos §20, cuentas corrientes etapas 1 a 3, devoluciones a valor |
-| Depósito | v0.2.3 (versionCode 6) | 22/09 | Formatos §20, mercadería por cupo, revisión de devoluciones por renglón |
+| Depósito | v0.2.3 (versionCode 6) | 22/09 | Formatos §20, mercadería por cupo, revisión de devoluciones por renglón, reactivar artículos dados de baja (20/10) |
 
 ---
 
@@ -66,7 +67,11 @@ Todo lo que estaba pendiente quedó en la v0.4.0 (detalle en MOBILE.md §18, "v0
 3. **Mercadería por cupo**: la app muestra la estimación vieja (`calcularBonificados`); pasar a `calcularBonificadosPorCupo` para que coincida con el servidor (que es el que manda).
 4. Pedidos de empleados (cuenta personal) no aparecen en la cola de preparación: lo filtra el servidor, solo verificar.
 5. Pendientes del mes de prueba (MOBILE.md §17): pantalla de fotos de recepción con documentos reales, devoluciones con el flujo real del chofer, gestos con el dedo, lista chica con el teclado abierto en Buscar, "⇪ N sin enviar" partido en dos líneas.
-6. **Base de datos**: la migración `20260827_picking_preparadores.sql` **no está aplicada** en producción. El código de picking supone el índice `ux_picking_items_renglon` ("Ya lo preparó X"). Avisarle al dueño antes de probar picking concurrente; el control previo está en ESTADO-CONSOLIDADO.md §3.
+6. **Reactivar artículos dados de baja (20/10/2026) — YA ESTÁ EN EL CÓDIGO de `main` (570cc2c), solo compilar y probar.** Regla del dueño: si se escanea o tipea un código (SKU con o sin ceros, EAN, bulto) que no está entre los activos pero es de un artículo **dado de baja**, la app dice "Este artículo está dado de baja: <SKU> <descripción>. ¿Reactivarlo?" y lo reactiva, registrando quién.
+   - Servidor: `GET /api/mobile/deposito/articulo-baja?codigo=` (online, `requireMobile`) y operación de outbox `articulo.reactivar { articulo_id }` (`lib/mobile/outbox/deposito.ts`, idempotente; usa `cambiarEstadoArticulos(…, "app_deposito")` de `lib/articulos/estado.ts`). El historial (`articulos_estado_historial`) guarda usuario, fecha y origen.
+   - App: `pantallas/comunes/DadoDeBaja.tsx` (hoja `?ver=baja`), usada en Artículos, Recepción y Devoluciones. Sin señal: "no se encontró (sin señal no se puede ver si está dado de baja)". El artículo reaparece al sincronizar (sin overlay optimista).
+   - Falta: probar en el NuStar o contra el mock (escanear un código de un artículo dado de baja, reactivar, ver que aparezca) y publicar la APK. Detalle en MOBILE.md §17 "Artículo dado de baja".
+7. **Base de datos**: la migración `20260827_picking_preparadores.sql` **no está aplicada** en producción. El código de picking supone el índice `ux_picking_items_renglon` ("Ya lo preparó X"). Avisarle al dueño antes de probar picking concurrente; el control previo está en ESTADO-CONSOLIDADO.md §3.
 
 ---
 
@@ -78,6 +83,7 @@ Todo lo que estaba pendiente quedó en la v0.4.0 (detalle en MOBILE.md §18, "v0
 | 2 | ~~`en_cobro` en la cuenta de cobro del chofer~~ **Hecho 20/10** | Chofer | `lib/cobranzas/en-cobro.ts` (fórmula única con el vendedor). La APK actual ya lo usa. |
 | 3 | ~~Cheques de cobros pendientes en cartera / anular cheque compartido~~ **Hecho 20/10** | Chofer y vendedor | Estado EN_VERIFICACION hasta confirmar el cobro; un cheque compartido no se anula mientras otro cliente lo use. |
 | 4 | Pantalla admin de `mobile_dispositivos` (revocar equipo) y `mobile_alertas_integridad` | Las 3 | MOBILE.md §10. |
+| 5 | ~~Artículos dados de baja en matching e importaciones~~ **Hecho 20/10** | Las 3 (sin APK, salvo depósito) | Importación de pedidos (el "062216" dado de baja tapaba al "62216"), listas de precios (mail y Excel), facturas/recepciones de proveedor, OC, vincular a mano, chat de IA y búsqueda por IA (`match_articulos` filtra activos en la base): **solo activos**. Excel de artículos con SKU dado de baja: se actualiza sin reactivar y avisa. Búsqueda por foto del vendedor por EAN corregida (servidor). |
 
 ## Lo que NO hay que rehacer (ya está resuelto)
 
@@ -85,3 +91,4 @@ Todo lo que estaba pendiente quedó en la v0.4.0 (detalle en MOBILE.md §18, "v0
 - Bug de `cobranza_anular` que anulaba el 10 % de otro pago: corregido en la v7 (01/10).
 - Migraciones de las apps (`20260918`, `20260919`, `20260921`), formatos, códigos, en_revisión y cuentas corrientes 1 a 3: **aplicadas**.
 - La rama local `apk-deposito` con "CAJA: sobrante en el cobro": ya está en `main` (8c7d3f1).
+- **Artículos dados de baja (20/10):** las réplicas de las 3 apps ya traen solo activos (en el delta un artículo dado de baja llega como borrado), y el matching del servidor ya los excluye. **No** agregar filtros propios ni "reactivar" en vendedor/chofer: reactivar es solo desde `/articulos`, el depósito web y la app Depósito, siempre por `cambiarEstadoArticulos` (registra quién). Migraciones `20261020_pedidos_articulo_real` y `20261020b_articulos_bajas`: **aplicadas**.

@@ -239,7 +239,8 @@ async function buildERPContext(db: ReturnType<typeof getSupabaseAdmin>, userMess
     if (lowerMsg.includes('stock') || lowerMsg.includes('artículo') || lowerMsg.includes('producto')) {
         const { data: articles } = await db
             .from('articulos')
-            .select('id, descripcion, stock, precio_venta')
+            .select('id, descripcion, stock: stock_actual, precio_venta: precio_base')
+            .eq('activo', true)
             .limit(10)
 
         if (articles?.length) {
