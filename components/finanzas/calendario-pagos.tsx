@@ -68,6 +68,22 @@ const MES_NOMBRES = [
 const DOW = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
 const formaDe = (v: Vencimiento) => v.forma_pago || "sin_forma"
+
+// Grupos para filtrar por tipo en FINANZAS (ahí se ven todos los pagos: proveedores,
+// sueldos, impuestos, servicios…). Un pago con proveedor cuenta como "Proveedores".
+const GRUPOS_TIPO: { key: string; label: string; soloAdmin?: boolean }[] = [
+    { key: "proveedores", label: "Proveedores" },
+    { key: "sueldos", label: "Sueldos", soloAdmin: true },
+    { key: "cargas_sociales", label: "Cargas sociales" },
+    { key: "impuestos", label: "Impuestos" },
+    { key: "servicios", label: "Servicios" },
+    { key: "socios", label: "Socios", soloAdmin: true },
+    { key: "honorarios", label: "Honorarios" },
+    { key: "seguros", label: "Seguros" },
+    { key: "otro", label: "Otros" },
+]
+const grupoDe = (v: Vencimiento) =>
+    v.proveedor_id ? "proveedores" : GRUPOS_TIPO.some((g) => g.key === v.tipo) ? v.tipo : "otro"
 const hoyISO = () => todayArgentina()
 const fmtCorta = (iso: string) => fechaCorta(iso)
 
@@ -77,12 +93,21 @@ export function CalendarioPagos({
     showCheques = false,
     onDataChanged,
     conSemana = false,
+    ambito = "todos",
+    conTipos = false,
+    lateral = "cinta",
 }: {
     /** Mostrar los cheques en cartera como entradas verdes (solo /finanzas) */
     showCheques?: boolean
     onDataChanged?: () => void
     /** Ofrecer la vista semana (por defecto) además del mes (PROVEEDORES) */
     conSemana?: boolean
+    /** "proveedores": solo pagos a proveedores (PROVEEDORES). "todos": todo (FINANZAS) */
+    ambito?: "proveedores" | "todos"
+    /** Filtro por tipo de pago (proveedores, sueldos, impuestos…) — FINANZAS */
+    conTipos?: boolean
+    /** Columna de la derecha: la cinta de pagos, o los atrasados (la cinta aparece igual al seleccionar) */
+    lateral?: "cinta" | "atrasados"
 }) {
     const [vencimientos, setVencimientos] = useState<Vencimiento[]>([])
     const [cheques, setCheques] = useState<ChequeCartera[]>([])
@@ -104,6 +129,9 @@ export function CalendarioPagos({
     const [verCheques, setVerCheques] = useState(false)
     const [verEmitidos, setVerEmitidos] = useState(true)
     const [verSaldados, setVerSaldados] = useState(false)
+    // Tipos activos (vacío = todos)
+    const [tiposActivos, setTiposActivos] = useState<Set<string>>(new Set())
+    const toggleTipo = (k: string) => setTiposActivos((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })
 
     // Vista semana / mes (solo donde se pide: PROVEEDORES). En la URL (?cal=mes&dia=…)
     const url = useUrlParams()
@@ -145,7 +173,9 @@ export function CalendarioPagos({
                 reqs.push(fetch("/api/cheques?estado=ENTREGADO_A_PROVEEDOR&tipo=PROPIO").then((r) => r.json()))
             }
             const [vencs, chq, emit] = await Promise.all(reqs)
-            setVencimientos(Array.isArray(vencs) ? vencs.filter((v: Vencimiento) => v.estado !== "cancelado") : [])
+            setVencimientos(Array.isArray(vencs)
+                ? vencs.filter((v: Vencimiento) => v.estado !== "cancelado" && (ambito !== "proveedores" || !!v.proveedor_id))
+                : [])
             if (showCheques) {
                 setCheques(chq?.cheques || [])
                 setEmitidos(emit?.cheques || [])
@@ -157,7 +187,7 @@ export function CalendarioPagos({
             cargadoRef.current = true
             setLoading(false)
         }
-    }, [showCheques])
+    }, [showCheques, ambito])
 
     useEffect(() => { load() }, [load])
 
@@ -168,8 +198,9 @@ export function CalendarioPagos({
     const pasaFiltros = useCallback(
         (v: Vencimiento) =>
             formasActivas.has(formaDe(v)) &&
-            (filtroModalidad === "todas" || v.modalidad === filtroModalidad),
-        [formasActivas, filtroModalidad]
+            (filtroModalidad === "todas" || v.modalidad === filtroModalidad) &&
+            (tiposActivos.size === 0 || tiposActivos.has(grupoDe(v))),
+        [formasActivas, filtroModalidad, tiposActivos]
     )
 
     // Pendientes (operables: se seleccionan, se marcan pagados)
@@ -605,6 +636,21 @@ export function CalendarioPagos({
 
     return (
         <div className="space-y-4">
+            {/* Tipo de pago (solo FINANZAS) */}
+            {conTipos && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                    <button type="button" onClick={() => setTiposActivos(new Set())}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${tiposActivos.size === 0 ? "border-azul-300 bg-azul-50 text-azul-700" : "border-neutro-200 bg-white text-neutro-600 hover:bg-neutro-50"}`}>
+                        Todo
+                    </button>
+                    {GRUPOS_TIPO.filter((g) => !g.soloAdmin || soyAdmin).map((g) => (
+                        <button key={g.key} type="button" onClick={() => toggleTipo(g.key)}
+                            className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${tiposActivos.has(g.key) ? "border-azul-300 bg-azul-50 text-azul-700" : "border-neutro-200 bg-white text-neutro-600 hover:bg-neutro-50"}`}>
+                            {g.label}
+                        </button>
+                    ))}
+                </div>
+            )}
             {/* Filtros + alta */}
             <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mr-1">
@@ -833,8 +879,40 @@ export function CalendarioPagos({
                     )}
                 </div>
 
-                {/* Cinta de pagos */}
+                {/* Cinta de pagos (o atrasados, en FINANZAS) */}
                 <div className="lg:sticky lg:top-20 space-y-3">
+                    {lateral === "atrasados" && (() => {
+                        const hoy = hoyISO()
+                        const atrasados = visibles.filter((v) => v.fecha_vencimiento < hoy).sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))
+                        const total = atrasados.reduce((a, v) => a + Number(v.monto), 0)
+                        return (
+                            <div className="rounded-2xl border border-neutro-200 bg-white shadow-sm">
+                                <div className="flex items-baseline justify-between gap-2 border-b border-neutro-100 px-4 py-3">
+                                    <h3 className="text-[15px] font-bold text-azul-900">Atrasados</h3>
+                                    {atrasados.length > 0 && <span className="text-xs font-semibold text-error-600">{atrasados.length} · {formatCurrency(total)}</span>}
+                                </div>
+                                {atrasados.length === 0 ? (
+                                    <p className="px-4 py-6 text-center text-sm text-neutro-500">No hay pagos atrasados.</p>
+                                ) : (
+                                    <ul className="max-h-[52vh] divide-y divide-neutro-100 overflow-auto">
+                                        {atrasados.map((v) => (
+                                            <li key={v.id}>
+                                                <button type="button" onClick={() => abrirEdicion(v)} title="Editar, generar orden de pago o marcar pagado"
+                                                    className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-neutro-50">
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block truncate text-[13px] font-semibold text-neutro-800">{v.proveedores?.nombre || v.concepto}</span>
+                                                        <span className="block text-xs text-error-600">venció {fmtCorta(v.fecha_vencimiento)}</span>
+                                                    </span>
+                                                    <span className="shrink-0 text-[13px] font-bold tabular-nums text-neutro-900">{formatCurrency(Number(v.monto))}</span>
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+                        )
+                    })()}
+                    {(lateral === "cinta" || seleccionados.length > 0) && (
                     <div className="rounded-xl border bg-amber-50/60 p-4 shadow-sm">
                         <h3 className="text-center text-[11px] font-bold uppercase tracking-[0.14em] text-amber-800/70">
                             Cinta de pagos
@@ -915,6 +993,7 @@ export function CalendarioPagos({
                             </Button>
                         )}
                     </div>
+                    )}
                     <div className="rounded-xl border bg-white p-3 text-[11px] leading-relaxed text-muted-foreground shadow-sm">
                         <p>
                             Total visible con estos filtros: <b className="font-mono">{formatCurrency(totalVisible)}</b>.

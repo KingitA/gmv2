@@ -136,6 +136,11 @@
     "app/viajes/planificar/",
     "lib/viajes/use-calendario-laboral.ts",
     "app/api/viajes/calendario-laboral/",
-    "components/viajes/viaje-datos.tsx"
+    "components/viajes/viaje-datos.tsx",
+    "app/finanzas/page.tsx",
+    "app/api/finanzas/panel/",
+    "app/finanzas/cheques/page.tsx",
+    "app/api/cheques/manual/",
+    "components/finanzas/cheque-manual-dialog.tsx"
   ]
 }

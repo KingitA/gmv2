@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel de Finanzas · maqueta</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--azul-900:#1B1D4E;--azul-700:#2B2E7A;--azul-600:#33369A;--azul-500:#4549B5;--azul-100:#CFD0E4;--azul-50:#EEEEF6;
+    --exito-600:#15805A;--exito-50:#E6F4EE;--error-600:#D2364B;--error-50:#FBEBED;--ambar-700:#B47C0F;--ambar-50:#FFF7E6;--alerta-600:#C8641A;--alerta-50:#FDF0E6;
+    --n-900:#1E2030;--n-700:#3A3D55;--n-600:#545871;--n-500:#6E7290;--n-400:#9295AE;--n-300:#CDD0DF;--n-200:#E3E5EF;--n-100:#F0F1F7;--n-50:#F7F8FC;--fondo:#F4F5FA}
+  *{box-sizing:border-box}body{margin:0;font-family:Archivo,system-ui,sans-serif;background:var(--fondo);color:var(--n-900);font-feature-settings:"tnum" 1}
+  .nav{background:#16182B;color:#fff;display:flex;align-items:center;gap:6px;padding:0 16px;height:52px;font-size:14px;font-weight:600}
+  .nav .logo{font-weight:800;margin-right:14px}.nav span{padding:8px 14px;opacity:.75}.nav span.on{background:var(--fondo);color:var(--azul-900);opacity:1;border-radius:10px 10px 0 0;margin-top:10px;padding-bottom:16px}
+  .sub{background:#fff;border-bottom:1px solid var(--n-200);padding:8px 16px;display:flex;gap:4px;font-size:13px;flex-wrap:wrap}
+  .sub b{background:var(--azul-900);color:#fff;border-radius:99px;padding:3px 12px;font-weight:600}.sub i{font-style:normal;padding:3px 12px;color:var(--n-600)}
+  .wrap{max-width:1700px;margin:0 auto;padding:18px 24px 30px}
+  h1{font-size:28px;margin:0;color:var(--azul-900);letter-spacing:-.02em}
+  .top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .top p{margin:2px 0 0;color:var(--n-500);font-size:14px}
+  .btn{border:1px solid var(--n-200);background:#fff;border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;font-weight:600;color:var(--azul-700)}
+  .btn.pri{background:var(--azul-600);color:#fff;border-color:var(--azul-600)}
+  /* Saldos */
+  .saldos{margin-top:14px;background:#fff;border:1px solid var(--n-200);border-radius:16px;padding:12px 16px;display:flex;gap:22px;align-items:center;flex-wrap:wrap}
+  .saldos .tot{padding-right:22px;border-right:1px solid var(--n-200)}
+  .saldos .tot small,.saldos .c small{display:block;font-size:12px;color:var(--n-500);font-weight:600}
+  .saldos .tot b{font-size:26px;color:var(--azul-900);letter-spacing:-.02em}
+  .saldos .c b{font-size:16px;color:var(--n-900)}
+  .saldos .c.off{opacity:.4}
+  .saldos .upd{margin-left:auto;font-size:12px;color:var(--n-400);text-align:right}
+  /* Grilla principal */
+  .main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;margin-top:16px}
+  @media(max-width:1200px){.main{grid-template-columns:1fr}}
+  .card{background:#fff;border:1px solid var(--n-200);border-radius:16px}
+  .cal-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--n-100);flex-wrap:wrap}
+  .cal-h h2{margin:0;font-size:16px;color:var(--azul-900);margin-right:6px}
+  .seg{display:inline-flex;background:var(--n-100);border-radius:9px;padding:2px;font-size:12.5px;font-weight:600}
+  .seg span{padding:4px 10px;border-radius:7px;color:var(--n-500)}.seg span.on{background:#fff;color:var(--azul-700);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--n-100)}
+  .chip{font-size:12px;font-weight:600;border:1px solid var(--n-200);border-radius:99px;padding:3px 10px;color:var(--n-600);background:#fff}
+  .chip.on{background:var(--azul-50);border-color:var(--azul-100);color:var(--azul-700)}
+  .semana{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+  .dia{border-right:1px solid var(--n-100);min-height:300px;display:flex;flex-direction:column}.dia:last-child{border-right:0}
+  .dia .dh{padding:8px 8px 6px;font-size:12px;font-weight:700;color:var(--n-500);display:flex;justify-content:space-between}
+  .dia.hoy{background:#FAFAFE}.dia.hoy .dh{color:var(--azul-600)}
+  .dia .items{padding:0 6px;display:flex;flex-direction:column;gap:5px;flex:1}
+  .pago{border:1px solid var(--n-200);border-left:3px solid var(--azul-500);border-radius:8px;padding:5px 7px;background:#fff;font-size:12px;line-height:1.3}
+  .pago b{display:block;font-size:12.5px;color:var(--n-900);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pago span{color:var(--n-600);font-weight:700}
+  .pago.imp{border-left-color:#22A9C9}.pago.sue{border-left-color:#B47C0F}.pago.chq{border-left-color:#6E7290;border-style:dashed}.pago.srv{border-left-color:#7C7FD0}
+  .dia .df{padding:7px 8px;border-top:1px solid var(--n-100);font-size:12px;color:var(--n-500);display:flex;justify-content:space-between}
+  .dia .df b{color:var(--n-900)}
+  /* Lateral */
+  .side .sh{padding:12px 14px;border-bottom:1px solid var(--n-100);display:flex;justify-content:space-between;align-items:center}
+  .side h3{margin:0;font-size:15px;color:var(--azul-900)}
+  .grupo{padding:6px 14px 2px;font-size:12px;font-weight:700;color:var(--n-500)}
+  .grupo.mal{color:var(--error-600)}
+  .fila{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:13px;border-top:1px solid var(--n-100)}
+  .fila input{width:16px;height:16px;accent-color:var(--azul-600)}
+  .fila .q{flex:1;min-width:0}.fila .q b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}.fila .q small{color:var(--n-500);font-size:11.5px}
+  .fila .m{font-weight:700;white-space:nowrap}
+  .sel{margin:10px 14px 14px;background:var(--azul-900);color:#fff;border-radius:12px;padding:10px 12px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .sel b{font-size:15px}.sel .btn{margin-left:auto;padding:6px 10px}
+  /* Liquidez */
+  .liq{margin-top:16px;padding:14px 16px}
+  .liq-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .liq-h h2{margin:0;font-size:16px;color:var(--azul-900);margin-right:6px}
+  .bols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  @media(max-width:900px){.bols{grid-template-columns:1fr}}
+  .bol{border:1px solid var(--n-200);border-radius:12px;padding:12px}
+  .bol .t{font-size:13px;font-weight:700;color:var(--n-600)}
+  .bol .r{display:flex;justify-content:space-between;font-size:13px;margin-top:6px;color:var(--n-600)}
+  .bol .r b{color:var(--n-900)}.bol .r .e{color:var(--exito-600)}.bol .r .s{color:var(--error-600)}
+  .bol .q{margin-top:8px;padding-top:8px;border-top:1px solid var(--n-200);display:flex;justify-content:space-between;align-items:baseline}
+  .bol .q b{font-size:20px}.ok{color:var(--exito-600)}.no{color:var(--error-600)}
+  .bol .msg{font-size:12px;margin-top:6px;border-radius:8px;padding:6px 8px}
+  .nota{font-size:11px;color:var(--n-400);text-align:center;margin-top:18px}
+</style>
+</head>
+<body>
+<div class="nav"><div class="logo">GM</div><span>Clientes</span><span>Proveedores</span><span>Artículos</span><span class="on">Finanzas</span><span>Playroom</span><span>Ajustes</span></div>
+<div class="sub"><b>Panel</b><i>Caja del día</i><i>Cheques</i><i>Rendiciones</i><i>Conciliación</i><i>Cierre de caja</i><i>Cuentas</i><i>Control de cuentas corrientes</i></div>
+
+<div class="wrap">
+  <div class="top">
+    <div><h1>Panel de Finanzas</h1><p>Lo que hay, lo que hay que pagar y si alcanza</p></div>
+    <div style="display:flex;gap:8px"><button class="btn">+ Nuevo gasto</button><button class="btn pri">Generar orden de pago</button></div>
+  </div>
+
+  <!-- 1. Saldos -->
+  <div class="saldos">
+    <div class="tot"><small>Disponible hoy</small><b>$ 48,2 M</b></div>
+    <div class="c"><small>Caja chica</small><b>$ 1,6 M</b></div>
+    <div class="c"><small>Caja grande</small><b>$ 9,4 M</b></div>
+    <div class="c"><small>Credicoop</small><b>$ 21,3 M</b></div>
+    <div class="c"><small>Nación</small><b>$ 8,9 M</b></div>
+    <div class="c"><small>Provincia</small><b>$ 2,1 M</b></div>
+    <div class="c"><small>Mercado Pago</small><b>$ 4,9 M</b></div>
+    <div class="c off" title="No suma al disponible"><small>Bolsa (24-48 h)</small><b>$ 15,0 M</b></div>
+    <div class="upd">Cargados a mano · hoy 9:40<br><a href="#" style="color:var(--azul-600);font-weight:600">Actualizar saldos</a></div>
+  </div>
+
+  <div class="main">
+    <!-- 2. Calendario de pagos -->
+    <div class="card">
+      <div class="cal-h">
+        <h2>Pagos de la semana</h2>
+        <span class="seg"><span class="on">Semana</span><span>Mes</span></span>
+        <button class="btn" style="padding:4px 9px">‹</button><span style="font-size:13px;font-weight:600;color:var(--n-600)">20 al 26 de octubre</span><button class="btn" style="padding:4px 9px">›</button>
+        <span style="margin-left:auto;font-size:13px;color:var(--n-500)">Sale en la semana <b style="color:var(--n-900)">$ 31,7 M</b></span>
+      </div>
+      <div class="chips">
+        <span class="chip on">Todo</span><span class="chip">Proveedores</span><span class="chip">Sueldos</span><span class="chip">Cargas sociales</span><span class="chip">Impuestos</span><span class="chip">Servicios</span><span class="chip">Socios</span><span class="chip">Cheques propios</span><span class="chip">Otros</span>
+      </div>
+      <div class="semana">
+        <div class="dia hoy"><div class="dh"><span>Lun 20</span><span>hoy</span></div><div class="items">
+          <div class="pago"><b>Kenvue Argentina</b><span>$ 4.812.300</span> · transf.</div>
+          <div class="pago imp"><b>IIBB ARBA</b><span>$ 1.240.000</span></div>
+        </div><div class="df">Total <b>$ 6,1 M</b></div></div>
+        <div class="dia"><div class="dh"><span>Mar 21</span></div><div class="items">
+          <div class="pago chq"><b>Cheque propio #4402</b><span>$ 2.000.000</span> · pueden debitarlo</div>
+        </div><div class="df">Total <b>$ 2,0 M</b></div></div>
+        <div class="dia"><div class="dh"><span>Mié 22</span></div><div class="items">
+          <div class="pago srv"><b>Edes (luz)</b><span>$ 412.500</span></div>
+          <div class="pago"><b>Virulana SA</b><span>$ 3.118.000</span> · cheque</div>
+        </div><div class="df">Total <b>$ 3,5 M</b></div></div>
+        <div class="dia"><div class="dh"><span>Jue 23</span></div><div class="items">
+          <div class="pago sue"><b>Sueldos octubre</b><span>$ 16.500.000</span></div>
+        </div><div class="df">Total <b>$ 16,5 M</b></div></div>
+        <div class="dia"><div class="dh"><span>Vie 24</span></div><div class="items">
+          <div class="pago imp"><b>F931 cargas sociales</b><span>$ 3.600.000</span></div>
+        </div><div class="df">Total <b>$ 3,6 M</b></div></div>
+        <div class="dia"><div class="dh"><span>Sáb 25</span></div><div class="items"></div><div class="df">—</div></div>
+        <div class="dia"><div class="dh"><span>Dom 26</span></div><div class="items"></div><div class="df">—</div></div>
+      </div>
+      <div style="padding:8px 14px;font-size:12px;color:var(--n-400);border-top:1px solid var(--n-100)">Arrastrá un pago a otro día para cambiar la fecha · tocalo para editarlo, generar la orden de pago o marcarlo pagado</div>
+    </div>
+
+    <!-- 3. Pendientes al costado -->
+    <div class="card side">
+      <div class="sh"><h3>Pendientes</h3><span class="seg"><span class="on">Todos</span><span>Solo prov.</span></span></div>
+      <div class="grupo mal">Atrasados · 3 · $ 5,4 M</div>
+      <div class="fila"><input type="checkbox" checked><div class="q"><b>Kenvue Argentina</b><small>venció 14/10 · factura A 0003-0012</small></div><span class="m">$ 2.410.000</span></div>
+      <div class="fila"><input type="checkbox" checked><div class="q"><b>Kenvue Argentina</b><small>venció 17/10 · factura A 0003-0019</small></div><span class="m">$ 1.880.500</span></div>
+      <div class="fila"><input type="checkbox"><div class="q"><b>Seguro La Caja</b><small>venció 15/10 · seguros</small></div><span class="m">$ 1.495.800</span></div>
+      <div class="grupo">Esta semana · 7 · $ 31,7 M</div>
+      <div class="fila"><input type="checkbox"><div class="q"><b>Virulana SA</b><small>22/10 · cheque</small></div><span class="m">$ 3.118.000</span></div>
+      <div class="fila"><input type="checkbox"><div class="q"><b>Sueldos octubre</b><small>23/10 · efectivo + transf.</small></div><span class="m">$ 16.500.000</span></div>
+      <div class="grupo">Semana que viene · 5 · $ 12,2 M</div>
+      <div class="fila"><input type="checkbox"><div class="q"><b>Electropereira 22</b><small>28/10 · transferencia</small></div><span class="m">$ 2.990.000</span></div>
+      <div class="sel">2 seleccionados · <b>$ 4.290.500</b><button class="btn">Generar OP a Kenvue</button></div>
+    </div>
+  </div>
+
+  <!-- 4. ¿Llego a pagar? -->
+  <div class="card liq">
+    <div class="liq-h"><h2>¿Llego a pagar todo hasta el…?</h2>
+      <span class="seg"><span>7 días</span><span class="on">15 días</span><span>30 días</span></span>
+      <span style="font-size:13px;color:var(--n-500)">hasta el <b style="color:var(--n-900)">04/11</b></span>
+    </div>
+    <div class="bols">
+      <div class="bol"><div class="t">Efectivo</div>
+        <div class="r">Tengo hoy <b>$ 11,0 M</b></div>
+        <div class="r">Entra (rendiciones) <b class="e">+ $ 3,2 M</b></div>
+        <div class="r">Sale <b class="s">− $ 18,0 M</b></div>
+        <div class="q"><span>Me queda</span><b class="no">− $ 3,8 M</b></div>
+        <div class="msg" style="background:var(--error-50);color:var(--error-600)">Faltan $ 3,8 M para sueldos del 23/10: retirá del banco.</div></div>
+      <div class="bol"><div class="t">Bancos</div>
+        <div class="r">Tengo hoy <b>$ 37,2 M</b></div>
+        <div class="r">Entra (cheques depositados, 72 h) <b class="e">+ $ 6,5 M</b></div>
+        <div class="r">Sale <b class="s">− $ 24,9 M</b></div>
+        <div class="q"><span>Me queda</span><b class="ok">$ 18,8 M</b></div></div>
+      <div class="bol"><div class="t">Cheques en cartera</div>
+        <div class="r">Tengo hoy <b>$ 9,7 M</b></div>
+        <div class="r">Se hacen cobrables <b class="e">+ $ 4,1 M</b></div>
+        <div class="r">Comprometidos <b class="s">− $ 3,1 M</b></div>
+        <div class="q"><span>Me queda</span><b class="ok">$ 6,6 M</b></div></div>
+    </div>
+  </div>
+
+  <div class="nota">Maqueta de diseño · números de ejemplo</div>
+</div>
+</body>
+</html>

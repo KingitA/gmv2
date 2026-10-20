@@ -1,150 +1,84 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
-import { createClient } from "@/lib/supabase/client"
-import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend,
-} from "recharts"
-import { ArrowLeft, Pencil, FileSpreadsheet, TrendingUp, ChevronDown, ChevronRight } from "lucide-react"
+// Panel de Finanzas: lo que hay (efectivo, bancos, cheques y bolsa), lo que hay que pagar
+// (calendario de la semana con los atrasados al costado) y si alcanza ("¿Llego a pagar?").
+// Diseño acordado con el dueño (20/10/2026). Mismos cálculos de antes: solo cambia cómo se ve.
+//  - Los saldos se cambian tocándolos (queda quién, cuándo y el motivo, en el kardex).
+//  - Los pagos se editan, se mueven, se pagan o generan la OP desde su tarjeta del calendario.
+//  - La cartera de cheques, la importación del Excel y los cheques propios están en Finanzas → Cheques.
+
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts"
+import { LineChart as IconoGrafico, Pencil, Plus, ArrowRight } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
 import { AjustarSaldoDialog, type CuentaAjustable } from "@/components/finanzas/ajustar-saldo-dialog"
-import { ActualizarSaldosDialog } from "@/components/finanzas/actualizar-saldos-dialog"
-import { ImportChequesDialog } from "@/components/finanzas/import-cheques-dialog"
-import { ChequesEmitidosPanel, type ChequeEmitido } from "@/components/finanzas/cheques-emitidos-panel"
-import { VencimientoEditDialog, type VencimientoEditable } from "@/components/finanzas/vencimiento-edit-dialog"
 import { NuevoGastoDialog } from "@/components/finanzas/nuevo-gasto-dialog"
 import { FechaInput } from "@/components/finanzas/fecha-input"
-import { todayArgentina } from "@/lib/utils"
-import { fecha, fechaCorta, fechaHora, fechaISO, hora, moneda, numero, sumarDiasISO } from "@/lib/formato"
-import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { cn } from "@/lib/utils"
+import { fecha, fechaCorta, fechaHora, fechaISO, hora, hoyISO, moneda, numero, sumarDiasISO } from "@/lib/formato"
 
-// ─── Estructura de cajas ─────────────────────────────────────────────────────
+// ─── Tipos ───────────────────────────────────────────────────────────────────
 
-type CajaKey =
-  | "caja_chica" | "caja_grande"
-  | "credicoop" | "nacion" | "provincia" | "mercadopago"
-  | "acciones" | "fondos_comunes" | "cauciones" | "cedears" | "obligaciones"
-
-type GroupKey = "efectivo" | "bancos" | "bolsa"
-
-interface CajaDef {
-  key: CajaKey
-  label: string
-  group: GroupKey
-  color: string
-}
-
-const CAJAS: CajaDef[] = [
-  { key: "caja_chica",     label: "Caja Chica",     group: "efectivo", color: "#f59e0b" },
-  { key: "caja_grande",    label: "Caja Grande",    group: "efectivo", color: "#ef4444" },
-  { key: "credicoop",      label: "Credicoop",      group: "bancos",   color: "#6366f1" },
-  { key: "nacion",         label: "Nación",         group: "bancos",   color: "#818cf8" },
-  { key: "provincia",      label: "Provincia",      group: "bancos",   color: "#a5b4fc" },
-  { key: "mercadopago",    label: "Mercado Pago",   group: "bancos",   color: "#4338ca" },
-  { key: "fondos_comunes", label: "FCI",            group: "bolsa",    color: "#10b981" },
-  { key: "cauciones",      label: "Cauciones",      group: "bolsa",    color: "#059669" },
-  { key: "acciones",       label: "Acciones",       group: "bolsa",    color: "#34d399" },
-  { key: "cedears",        label: "CEDEARs",        group: "bolsa",    color: "#047857" },
-  { key: "obligaciones",   label: "Obl. Negoc.",    group: "bolsa",    color: "#065f46" },
-]
-
-const ALL_KEYS = CAJAS.map(c => c.key)
-
-// Mapeo caja_key legacy → nombre de cuenta en el sistema de cajas (kardex).
-const LIVE_NOMBRE: Partial<Record<CajaKey, string>> = {
-  caja_chica: "Caja Chica",
-  caja_grande: "Caja Grande",
-  credicoop: "Credicoop",
-  nacion: "Nación",
-  provincia: "Provincia",
-  mercadopago: "MercadoPago",
-  acciones: "Bolsa - Acciones",
-  fondos_comunes: "Bolsa - FCI",
-  cauciones: "Bolsa - Cauciones",
-  cedears: "Bolsa - CEDEARs",
-  obligaciones: "Bolsa - Obligaciones Negociables",
-}
-
+type Cuenta = CuentaAjustable & { grupo?: string; updated_at?: string | null }
 type Cartera = "BLANCO" | "NEGRO" | "ECHEQ"
-const CARTERA_DEF: Record<Cartera, { label: string; dot: string }> = {
-  BLANCO: { label: "Blanco", dot: "#e2e8f0" },
-  NEGRO: { label: "Negro", dot: "#1f2937" },
-  ECHEQ: { label: "Echeq", dot: "#8b5cf6" },
-}
+interface Cheque { id: string; numero: string; monto: number; fecha_vencimiento: string; color: string; es_echeq: boolean }
+interface Ajuste { fecha: string; usuario: string | null; motivo: string | null }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const CARTERAS: { key: Cartera; label: string }[] = [
+  { key: "BLANCO", label: "Blanco" },
+  { key: "NEGRO", label: "Negro" },
+  { key: "ECHEQ", label: "Echeq" },
+]
+// Colores de las líneas de la evolución (orden fijo)
+const COLORES_SERIE = ["#4549B5", "#22A9C9", "#B47C0F", "#15805A", "#C8641A", "#7C7FD0", "#545871", "#D2364B"]
 
-const fmt = (n: number) => moneda(n)
-// Abreviado para ejes y KPIs: "$1,5 M" · "$12 K" · "$500"
-const fmtShort = (n: number) => {
-  const signo = n < 0 ? "-" : ""
-  const a = Math.abs(n)
-  if (a >= 1_000_000) return `${signo}$${numero(a / 1_000_000, 1)} M`
-  if (a >= 1_000) return `${signo}$${numero(a / 1_000, 0)} K`
+const claveCuenta = (c: { cuenta_tipo: string; cuenta_id: string }) => `${c.cuenta_tipo}:${c.cuenta_id}`
+const saldoDe = (c: Cuenta) => Number(c.saldos?.BLANCO ?? 0) + Number(c.saldos?.NEGRO ?? 0)
+const carteraDe = (c: { color: string; es_echeq: boolean }): Cartera => (c.es_echeq ? "ECHEQ" : c.color === "NEGRO" ? "NEGRO" : "BLANCO")
+/** "$1,5 M" · "$12 K" para ejes */
+const corto = (n: number) => {
+  const a = Math.abs(n), s = n < 0 ? "-" : ""
+  if (a >= 1_000_000) return `${s}$${numero(a / 1_000_000, 1)} M`
+  if (a >= 1_000) return `${s}$${numero(a / 1_000, 0)} K`
   return moneda(n, 0)
 }
-const today = () => todayArgentina()
-const addDias = sumarDiasISO
-const DIAS_SEMANA = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"]
-const fmtDiaCorto = (iso: string) => {
-  const d = new Date(iso.slice(0, 10) + "T12:00:00Z")
-  return `${DIAS_SEMANA[d.getUTCDay()]} ${iso.slice(8, 10)}`
-}
-const fmtFechaAR = (iso: string) => fecha(iso)
-const NUM: React.CSSProperties = { fontFamily: "Bahnschrift, 'Segoe UI Variable Display', 'Segoe UI', sans-serif", fontVariantNumeric: "tabular-nums" }
 
-const MEDIO_BADGE: Record<string, { label: string; cls: string }> = {
-  transferencia: { label: "TRANSFERENCIA", cls: "bg-sky-100 text-sky-800" },
-  cheque: { label: "CHEQUE", cls: "bg-amber-100 text-amber-800" },
-  efectivo: { label: "EFECTIVO", cls: "bg-emerald-100 text-emerald-800" },
-  debito: { label: "DÉBITO ECHEQ", cls: "bg-slate-100 text-slate-600" },
-}
-
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Página ──────────────────────────────────────────────────────────────────
 
 export default function FinanzasPage() {
-  const sb = createClient()
-
+  const hoy = hoyISO()
   const [loading, setLoading] = useState(true)
-  const [saldos, setSaldos] = useState<Array<{ caja_key: string; monto: number; fecha: string }>>([])
-  const [liveMap, setLiveMap] = useState<Record<string, number>>({})
-  const [cuentas, setCuentas] = useState<(CuentaAjustable & { updated_at?: string | null })[]>([])
-  const [cheques, setCheques] = useState<Array<{ id: string; numero: string; monto: number; fecha_vencimiento: string; color: string; es_echeq: boolean }>>([])
-  const [depositados, setDepositados] = useState<Array<{ monto: number }>>([])
+  const [cuentas, setCuentas] = useState<Cuenta[]>([])
+  const [cheques, setCheques] = useState<Cheque[]>([])
+  const [depositados, setDepositados] = useState<{ monto: number }[]>([])
   const [vencs, setVencs] = useState<any[]>([])
-  const [emitidos, setEmitidos] = useState<ChequeEmitido[]>([])
-  // Retención de Ganancias proyectada por vencimiento (R4): el neto real a pagar
+  const [emitidos, setEmitidos] = useState<{ monto: number; fecha_vencimiento: string }[]>([])
   const [proyRet, setProyRet] = useState<Record<string, { retencion: number; neto: number }>>({})
   const [evolucion, setEvolucion] = useState<{ serie: any[]; cuentas: string[] }>({ serie: [], cuentas: [] })
+  const [extra, setExtra] = useState<{ ultimos_ajustes: Record<string, Ajuste>; en_calle: number; en_calle_detalle: { nombre: string; monto: number }[]; cobros_por_verificar: { cantidad: number; monto: number } }>({
+    ultimos_ajustes: {}, en_calle: 0, en_calle_detalle: [], cobros_por_verificar: { cantidad: 0, monto: 0 },
+  })
 
-  // Selección
-  const [selected, setSelected] = useState<Set<CajaKey>>(new Set(ALL_KEYS.filter(k => CAJAS.find(c => c.key === k)!.group !== "bolsa")))
+  // Cuentas y carteras que entran en "¿Llego a pagar?" (por defecto: efectivo, bancos y las 3 carteras)
+  const [excluidas, setExcluidas] = useState<Set<string>>(new Set())
   const [carterasSel, setCarterasSel] = useState<Set<Cartera>>(new Set(["BLANCO", "NEGRO", "ECHEQ"]))
 
-  // Matriz
-  const [dispoDias, setDispoDias] = useState<7 | 15 | 30 | 0>(15)
-  const [dispoFecha, setDispoFecha] = useState(addDias(today(), 15))
+  // "¿Llego a pagar?"
+  const [dias, setDias] = useState<7 | 15 | 30 | 0>(15)
+  const [hasta, setHasta] = useState(sumarDiasISO(hoy, 15))
 
-  // Pagos
-  const [horizonte, setHorizonte] = useState<30 | 60 | 90 | 0>(30)
-  const [mesesAbiertos, setMesesAbiertos] = useState<Set<string>>(new Set())
-  const [vencEdit, setVencEdit] = useState<VencimientoEditable | null>(null)
-
-  // Secciones plegables / diálogos
-  const [vistaPagos, setVistaPagos] = useState<"lista" | "calendario">("lista")
+  // Diálogos
+  const [cuentaEdit, setCuentaEdit] = useState<Cuenta | null>(null)
   const [nuevoGastoOpen, setNuevoGastoOpen] = useState(false)
-  const [showEvolucion, setShowEvolucion] = useState(false)
-  const [cuentaEdit, setCuentaEdit] = useState<CuentaAjustable | null>(null)
-  const [saldosDiaOpen, setSaldosDiaOpen] = useState(false)
-  const [importOpen, setImportOpen] = useState(false)
-  const [importCartera, setImportCartera] = useState<"AUTO" | Cartera>("AUTO")
+  const [graficoOpen, setGraficoOpen] = useState(false)
+  const [bolsaAbierta, setBolsaAbierta] = useState(false)
   const [calKey, setCalKey] = useState(0)
 
   const load = async () => {
-    setLoading(true)
-    const [{ data }, liveRes, chequesRes, depRes, vencsRes, emitidosRes, evoRes, proyRes] = await Promise.all([
-      sb.from("finanzas_saldos").select("caja_key, monto, fecha").order("fecha", { ascending: true }),
+    const [cajasRes, chequesRes, depRes, vencsRes, emitidosRes, evoRes, proyRes, extraRes] = await Promise.all([
       fetch("/api/finanzas/cajas").then(r => r.json()).catch(() => ({ cuentas: [] })),
       fetch("/api/cheques?estado=EN_CARTERA&tipo=TERCERO").then(r => r.json()).catch(() => ({ cheques: [] })),
       fetch("/api/cheques?estado=DEPOSITADO&tipo=TERCERO").then(r => r.json()).catch(() => ({ cheques: [] })),
@@ -152,600 +86,273 @@ export default function FinanzasPage() {
       fetch("/api/cheques?estado=ENTREGADO_A_PROVEEDOR&tipo=PROPIO").then(r => r.json()).catch(() => ({ cheques: [] })),
       fetch("/api/finanzas/evolucion").then(r => r.json()).catch(() => ({ serie: [], cuentas: [] })),
       fetch("/api/finanzas/proyeccion-retenciones").then(r => r.json()).catch(() => ({ proyeccion: {} })),
+      fetch("/api/finanzas/panel").then(r => r.json()).catch(() => null),
     ])
-    setSaldos((data || []) as any)
-    const live: Record<string, number> = {}
-    for (const c of liveRes.cuentas || []) {
-      live[c.nombre] = Number(c.saldos?.BLANCO ?? 0) + Number(c.saldos?.NEGRO ?? 0)
-    }
-    setLiveMap(live)
-    setCuentas((liveRes.cuentas || []).filter((c: any) => c.cuenta_tipo !== "BILLETERA"))
+    setCuentas((cajasRes.cuentas || []).filter((c: any) => c.cuenta_tipo !== "BILLETERA"))
     setCheques(chequesRes.cheques || [])
     setDepositados(depRes.cheques || [])
     setVencs(Array.isArray(vencsRes) ? vencsRes : [])
     setEmitidos(emitidosRes.cheques || [])
     setEvolucion(evoRes.serie ? evoRes : { serie: [], cuentas: [] })
     setProyRet(proyRes.proyeccion || {})
+    if (extraRes && !extraRes.error) setExtra(extraRes)
     setLoading(false)
   }
-
   useEffect(() => { load() }, [])
+  const recargar = () => { load(); setCalKey(k => k + 1) }
 
-  const reloadAll = () => { load(); setCalKey(k => k + 1) }
+  // ── Cuentas por grupo ─────────────────────────────────────────────────────
+  const efectivo = cuentas.filter(c => c.grupo === "EFECTIVO")
+  const bancos = cuentas.filter(c => c.grupo === "BANCOS")
+  const bolsa = cuentas.filter(c => c.grupo === "BOLSA")
+  const suma = (xs: Cuenta[], soloIncluidas = false) => xs.filter(c => !soloIncluidas || !excluidas.has(claveCuenta(c))).reduce((t, c) => t + saldoDe(c), 0)
+  const efectivoSel = suma(efectivo, true)
+  const bancosSel = suma(bancos, true)
 
-  // ── Saldos por cuenta ──────────────────────────────────────────────────────
-  const latestMap = useMemo(() => {
-    const m: Record<string, number> = {}
-    for (const s of saldos) m[s.caja_key] = s.monto
-    return m
-  }, [saldos])
-
-  const latestOf = (key: CajaKey) => {
-    const nombre = LIVE_NOMBRE[key]
-    if (nombre && nombre in liveMap) return liveMap[nombre]
-    return latestMap[key] ?? 0
-  }
-  const cuentaLive = (key: CajaKey): (CuentaAjustable & { updated_at?: string | null }) | null => {
-    const nombre = LIVE_NOMBRE[key]
-    if (!nombre) return null
-    return cuentas.find(c => c.nombre === nombre) ?? null
-  }
-
-  const sumGroup = (g: GroupKey, soloSeleccionadas = false) =>
-    CAJAS.filter(c => c.group === g && (!soloSeleccionadas || selected.has(c.key)))
-      .reduce((s, c) => s + latestOf(c.key), 0)
-
-  const efectivoSel = sumGroup("efectivo", true)
-  const bancosSel = sumGroup("bancos", true)
-  const bolsaTotal = sumGroup("bolsa")
-  const grandTotal = CAJAS.reduce((s, c) => s + latestOf(c.key), 0)
-
-  // ── Cheques por cartera ────────────────────────────────────────────────────
-  const carteraDe = (c: { color: string; es_echeq: boolean }): Cartera =>
-    c.es_echeq ? "ECHEQ" : c.color === "NEGRO" ? "NEGRO" : "BLANCO"
-  const carteras = useMemo(() => {
-    const m: Record<Cartera, { total: number; count: number }> = {
-      BLANCO: { total: 0, count: 0 }, NEGRO: { total: 0, count: 0 }, ECHEQ: { total: 0, count: 0 },
-    }
+  // ── Cheques en cartera por vencimiento ────────────────────────────────────
+  const tramos = useMemo(() => {
+    const d30 = sumarDiasISO(hoy, 30), d60 = sumarDiasISO(hoy, 60)
+    const t = { alDia: 0, a30: 0, a60: 0, mas60: 0, total: 0, cantidad: 0 }
     for (const c of cheques) {
-      const k = carteraDe(c)
-      m[k].total += Number(c.monto)
-      m[k].count++
+      const m = Number(c.monto)
+      t.total += m; t.cantidad++
+      if (c.fecha_vencimiento <= hoy) t.alDia += m
+      else if (c.fecha_vencimiento <= d30) t.a30 += m
+      else if (c.fecha_vencimiento <= d60) t.a60 += m
+      else t.mas60 += m
     }
-    return m
-  }, [cheques])
-  const chequesSel = useMemo(() => cheques.filter(c => carterasSel.has(carteraDe(c))), [cheques, carterasSel])
-  const chequesSelTotal = chequesSel.reduce((s, c) => s + Number(c.monto), 0)
-  const cobrablesHoy = chequesSel.filter(c => c.fecha_vencimiento <= today()).reduce((s, c) => s + Number(c.monto), 0)
+    return t
+  }, [cheques, hoy])
+  const chequesSel = cheques.filter(c => carterasSel.has(carteraDe(c)))
+  const chequesSelTotal = chequesSel.reduce((t, c) => t + Number(c.monto), 0)
+  const cobrablesHoy = chequesSel.filter(c => c.fecha_vencimiento <= hoy).reduce((t, c) => t + Number(c.monto), 0)
 
-  // ── Emitidos (propios) comprometidos ──────────────────────────────────────
-  const emitidosHasta = (fecha: string) =>
-    emitidos
-      .filter(c => c.fecha_vencimiento <= fecha && addDias(c.fecha_vencimiento, 30) >= today())
-      .reduce((s, c) => s + Number(c.monto), 0)
+  // ── "¿Llego a pagar?" (mismo cálculo de siempre + la plata por rendir como entrada de efectivo) ──
+  const elegirDias = (d: 7 | 15 | 30) => { setDias(d); setHasta(sumarDiasISO(hoy, d)) }
+  const netoVenc = (v: any) => (proyRet[v.id] ? proyRet[v.id].neto : Number(v.monto)) // neto de la retención de Ganancias proyectada
+  const vencsHasta = vencs.filter(v => v.fecha_vencimiento <= hasta)
+  const salePor = (formas: string[]) => vencsHasta.filter(v => formas.includes(v.forma_pago || "transferencia")).reduce((t, v) => t + netoVenc(v), 0)
+  const emitidosHasta = (f: string) => emitidos.filter(c => c.fecha_vencimiento <= f && sumarDiasISO(c.fecha_vencimiento, 30) >= hoy).reduce((t, c) => t + Number(c.monto), 0)
 
-  // ── Matriz de liquidez ─────────────────────────────────────────────────────
-  const setDias = (d: 7 | 15 | 30) => { setDispoDias(d); setDispoFecha(addDias(today(), d)) }
-  const vencsHasta = vencs.filter(v => v.fecha_vencimiento <= dispoFecha)
-  // Neto proyectado (R4): si hay retención de Ganancias proyectada, lo que sale
-  // de la caja es el neto — la retención se ingresa después por SICORE.
-  const montoNetoVenc = (v: any) => (proyRet[v.id] ? proyRet[v.id].neto : Number(v.monto))
-  const salePorForma = (formas: string[]) =>
-    vencsHasta.filter(v => formas.includes(v.forma_pago || "transferencia")).reduce((s, v) => s + montoNetoVenc(v), 0)
-
-  const saleEfectivo = salePorForma(["efectivo"])
-  const saleBancos = salePorForma(["transferencia"]) + emitidosHasta(dispoFecha)
-  const saleCheques = salePorForma(["cheque"])
-  const entraBancos = depositados.reduce((s, c) => s + Number(c.monto), 0)
-  const cobrablesHasta = chequesSel.filter(c => c.fecha_vencimiento <= dispoFecha).reduce((s, c) => s + Number(c.monto), 0)
-
-  const quedaEfectivo = efectivoSel - saleEfectivo
-  const quedaBancos = bancosSel + entraBancos - saleBancos
-  const quedaCheques = chequesSelTotal - saleCheques
-
-  const sale30 = vencs.filter(v => v.fecha_vencimiento <= addDias(today(), 30)).reduce((s, v) => s + montoNetoVenc(v), 0)
-    + emitidosHasta(addDias(today(), 30))
-
-  const proxEfectivo = vencsHasta.filter(v => (v.forma_pago || "") === "efectivo").sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))[0]
-
-  // ── Lista de pagos ─────────────────────────────────────────────────────────
-  const hoy = today()
-  const finSemana = useMemo(() => {
-    const d = new Date(hoy + "T12:00:00Z")
-    const dow = d.getUTCDay() === 0 ? 7 : d.getUTCDay()
-    return addDias(hoy, 7 - dow)
-  }, [hoy])
-  const finProxSemana = addDias(finSemana, 7)
-  const limiteHorizonte = horizonte === 0 ? "9999-12-31" : addDias(hoy, horizonte)
-
-  type ItemPago = { tipo: "venc" | "emitido"; fecha: string; venc?: any; emitido?: ChequeEmitido }
-  const items: ItemPago[] = useMemo(() => {
-    const arr: ItemPago[] = [
-      ...vencs.map(v => ({ tipo: "venc" as const, fecha: v.fecha_vencimiento, venc: v })),
-      ...emitidos
-        .filter(c => addDias(c.fecha_vencimiento, 30) >= hoy)
-        .map(c => ({ tipo: "emitido" as const, fecha: c.fecha_vencimiento, emitido: c })),
-    ]
-    return arr.filter(i => i.fecha <= limiteHorizonte).sort((a, b) => a.fecha.localeCompare(b.fecha))
-  }, [vencs, emitidos, limiteHorizonte, hoy])
-
-  const grupos = useMemo(() => {
-    const semana: ItemPago[] = []
-    const proxima: ItemPago[] = []
-    const porMes = new Map<string, ItemPago[]>()
-    for (const i of items) {
-      if (i.fecha <= finSemana) semana.push(i)
-      else if (i.fecha <= finProxSemana) proxima.push(i)
-      else {
-        const mes = i.fecha.slice(0, 7)
-        if (!porMes.has(mes)) porMes.set(mes, [])
-        porMes.get(mes)!.push(i)
-      }
-    }
-    return { semana, proxima, meses: [...porMes.entries()].sort() }
-  }, [items, finSemana, finProxSemana])
-
-  const nombreMes = (ym: string) => {
-    const [y, m] = ym.split("-")
-    const nombres = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-    return `${nombres[Number(m) - 1]} ${y}`
+  const entraEfectivo = extra.en_calle
+  const entraBancos = depositados.reduce((t, c) => t + Number(c.monto), 0)
+  const entraCheques = chequesSel.filter(c => c.fecha_vencimiento > hoy && c.fecha_vencimiento <= hasta).reduce((t, c) => t + Number(c.monto), 0)
+  const saleEfectivo = salePor(["efectivo"])
+  const saleBancos = salePor(["transferencia"]) + emitidosHasta(hasta)
+  const saleCheques = salePor(["cheque"])
+  const queda = {
+    efectivo: efectivoSel + entraEfectivo - saleEfectivo,
+    bancos: bancosSel + entraBancos - saleBancos,
+    cheques: chequesSelTotal - saleCheques,
   }
-  const montoDe = (i: ItemPago) => Number(i.tipo === "venc" ? i.venc.monto : i.emitido!.monto)
+  const proxEfectivo = vencsHasta.filter(v => v.forma_pago === "efectivo").sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))[0]
 
-  // ── Evolución (kardex) ────────────────────────────────────────────────────
-  const colorDeCuenta = (nombre: string) => {
-    const key = (Object.entries(LIVE_NOMBRE) as [CajaKey, string][]).find(([, n]) => n === nombre)?.[0]
-    return CAJAS.find(c => c.key === key)?.color ?? "#94a3b8"
-  }
+  // ── Último cambio de saldos (el más reciente de todas las cuentas) ─────────
+  const ultimoCambio = useMemo(() => {
+    const todos = Object.values(extra.ultimos_ajustes)
+    if (!todos.length) return null
+    return todos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0]
+  }, [extra.ultimos_ajustes])
+  const cuandoFue = (iso: string) => (fechaISO(iso) === hoy ? `hoy ${hora(iso)}` : fechaHora(iso))
 
-  const ultimaAct = useMemo(() => {
-    const fechas = cuentas.map(c => c.updated_at).filter(Boolean).sort() as string[]
-    if (!fechas.length) return null
-    const ult = fechas[fechas.length - 1]
-    return fechaISO(ult) === hoy ? `hoy ${hora(ult)}` : fechaHora(ult)
-  }, [cuentas, hoy])
-
-  // ── Sub-componentes ────────────────────────────────────────────────────────
-
-  const Ficha = ({ caja }: { caja: CajaDef }) => {
-    const val = latestOf(caja.key)
-    const isSel = selected.has(caja.key)
-    const editable = cuentaLive(caja.key)
+  // ── Piezas ────────────────────────────────────────────────────────────────
+  const FilaCuenta = ({ c }: { c: Cuenta }) => {
+    const k = claveCuenta(c)
+    const incluida = !excluidas.has(k)
+    const aj = extra.ultimos_ajustes[k]
     return (
-      <button
-        onClick={() => setSelected(prev => { const n = new Set(prev); n.has(caja.key) ? n.delete(caja.key) : n.add(caja.key); return n })}
-        className={`inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm shadow-sm transition-all ${
-          isSel ? "border-indigo-500 ring-1 ring-indigo-500" : "border-slate-200 opacity-70 hover:opacity-100"
-        }`}
-      >
-        <span className={`flex h-4 w-4 items-center justify-center rounded border-2 text-[10px] ${isSel ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-300"}`}>
-          {isSel ? "✓" : ""}
-        </span>
-        <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ background: caja.color }} />
-        <span className="text-slate-600">{caja.label}</span>
-        <span className="font-semibold text-slate-800" style={NUM}>{loading ? "—" : fmt(val)}</span>
-        {editable && (
-          <span
-            role="button"
-            title="Actualizar saldo"
-            onClick={(e) => { e.stopPropagation(); setCuentaEdit(editable) }}
-            className="text-slate-300 hover:text-slate-600"
-          >
-            <Pencil className="h-3 w-3" />
-          </span>
-        )}
-      </button>
-    )
-  }
-
-  const PagoRow = ({ item }: { item: ItemPago }) => {
-    if (item.tipo === "emitido") {
-      const c = item.emitido!
-      return (
-        <div className="flex items-center gap-3 px-2 py-2.5 text-[15px] border-t border-slate-100 first:border-t-0">
-          <span className="w-14 shrink-0 text-xs font-semibold text-slate-400">{fmtDiaCorto(item.fecha)}</span>
-          <span className="flex-1 font-medium text-slate-700">
-            Cheque propio #{c.numero}
-            <span className="ml-2 text-xs text-slate-400 font-normal">pueden debitarlo desde este día</span>
-          </span>
-          <span className={`rounded-md px-2 py-0.5 text-[10.5px] font-bold tracking-wide ${MEDIO_BADGE.debito.cls}`}>{MEDIO_BADGE.debito.label}</span>
-          <span className="font-semibold text-slate-800" style={NUM}>{fmt(Number(c.monto))}</span>
-          <span className="w-3" />
-        </div>
-      )
-    }
-    const v = item.venc
-    const medio = MEDIO_BADGE[v.forma_pago || "transferencia"] ?? MEDIO_BADGE.transferencia
-    return (
-      <div
-        onClick={() => setVencEdit(v)}
-        className="flex items-center gap-3 px-2 py-2.5 text-[15px] border-t border-slate-100 first:border-t-0 cursor-pointer rounded-lg hover:bg-indigo-50/60"
-        title="Tocá para editar este pago"
-      >
-        <span className="w-14 shrink-0 text-xs font-semibold text-slate-400">{fmtDiaCorto(item.fecha)}</span>
-        <span className="flex-1 font-medium text-slate-700 truncate">
-          {v.proveedores?.nombre || v.concepto || "Pago"}
-          {v.es_estimado && <span className="ml-2 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10.5px] font-bold text-amber-800">≈ ESTIMADO</span>}
-          {v.modalidad === "entrega" && <span className="ml-2 text-xs text-slate-400 font-normal">lo retiran por caja</span>}
-          {v.descuentos_aplicados === false && <span className="ml-2 text-xs font-bold text-red-600">⚠ sin descuentos aplicados</span>}
-        </span>
-        <span className={`rounded-md px-2 py-0.5 text-[10.5px] font-bold tracking-wide ${medio.cls}`}>{medio.label}</span>
-        <span className="text-right">
-          <span className="font-semibold text-slate-800 block" style={NUM}>{fmt(proyRet[v.id] ? proyRet[v.id].neto : Number(v.monto))}</span>
-          {proyRet[v.id] && (
-            <span className="text-[10.5px] text-orange-700 block" style={NUM}>
-              neto de ret. Gcias ≈ {fmt(proyRet[v.id].retencion)} (bruto {fmt(Number(v.monto))})
-            </span>
-          )}
-        </span>
-        <ChevronRight className="h-4 w-4 text-slate-300" />
+      <div className="group flex items-center gap-2 py-1">
+        <input type="checkbox" checked={incluida} title="Entra en «¿Llego a pagar?»"
+          onChange={() => setExcluidas(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })}
+          className="size-3.5 shrink-0 accent-azul-600" />
+        <span className={cn("min-w-0 flex-1 truncate text-[13px]", incluida ? "text-neutro-700" : "text-neutro-400 line-through")}>{c.nombre}</span>
+        <button type="button" onClick={() => setCuentaEdit(c)}
+          title={aj ? `Último cambio: ${aj.usuario ?? "—"}, ${cuandoFue(aj.fecha)}${aj.motivo ? ` · ${aj.motivo}` : ""}\nTocá para cambiar el saldo` : "Tocá para cambiar el saldo"}
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[13px] font-semibold tabular-nums text-neutro-900 hover:bg-azul-50 hover:text-azul-700">
+          {moneda(saldoDe(c), 0)}
+          <Pencil className="h-3 w-3 text-neutro-300 group-hover:text-azul-500" />
+        </button>
       </div>
     )
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  const Grande = ({ titulo, valor, children, nota }: { titulo: string; valor: number; children?: React.ReactNode; nota?: React.ReactNode }) => (
+    <div className="min-w-0 rounded-2xl border border-neutro-200 bg-white p-4">
+      <div className="text-[13px] font-semibold text-neutro-500">{titulo}</div>
+      <div className="mt-0.5 text-[28px] font-extrabold leading-tight tracking-tight text-azul-900 tabular-nums">{loading ? "—" : moneda(valor, 0)}</div>
+      {nota && <div className="text-xs text-neutro-400">{nota}</div>}
+      {children && <div className="mt-2 border-t border-neutro-100 pt-2">{children}</div>}
+    </div>
+  )
+
+  const Tramo = ({ label, monto }: { label: string; monto: number }) => (
+    <div className="flex items-center justify-between py-1 text-[13px]">
+      <span className="text-neutro-600">{label}</span>
+      <span className="font-semibold tabular-nums text-neutro-900">{moneda(monto, 0)}</span>
+    </div>
+  )
+
+  const Bolsillo = ({ titulo, tengo, entra, entraLabel, sale, saleLabel, q, aviso }: {
+    titulo: string; tengo: number; entra: number; entraLabel: string; sale: number; saleLabel: string; q: number; aviso: React.ReactNode
+  }) => (
+    <div className="rounded-xl border border-neutro-200 p-3.5">
+      <div className="text-[13px] font-bold text-neutro-600">{titulo}</div>
+      <div className="mt-1.5 space-y-1 text-[13px]">
+        <div className="flex justify-between text-neutro-600"><span>Tengo hoy</span><b className="tabular-nums text-neutro-900">{moneda(tengo, 0)}</b></div>
+        <div className="flex justify-between text-neutro-600"><span>{entraLabel}</span><b className="tabular-nums text-exito-600">{entra > 0 ? `+ ${moneda(entra, 0)}` : "—"}</b></div>
+        <div className="flex justify-between text-neutro-600"><span>{saleLabel}</span><b className="tabular-nums text-error-600">{sale > 0 ? `− ${moneda(sale, 0)}` : "—"}</b></div>
+      </div>
+      <div className="mt-2 flex items-baseline justify-between border-t border-neutro-200 pt-2">
+        <span className="text-[13px] font-semibold text-neutro-700">Me queda</span>
+        <b className={cn("text-xl tabular-nums", q < 0 ? "text-error-600" : "text-exito-600")}>{moneda(q, 0)}</b>
+      </div>
+      <p className={cn("mt-2 rounded-lg px-2.5 py-1.5 text-xs", q < 0 ? "bg-error-50 text-error-700" : "bg-exito-50 text-exito-700")}>{aviso}</p>
+    </div>
+  )
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
-
-      {/* ── Header ── */}
-      <div className="bg-white border-b px-6 py-3 shadow-sm sticky top-0 z-10">
-        <div className="flex items-center gap-4 flex-wrap">
-          <Link href="/">
-            <button className="text-slate-400 hover:text-slate-700 transition-colors"><ArrowLeft className="h-5 w-5" /></button>
-          </Link>
-          <h1 className="text-lg font-bold text-slate-800 tracking-wide" style={{ fontFamily: "Bahnschrift, 'Segoe UI', sans-serif" }}>FINANZAS</h1>
-          <div className="flex items-center gap-2 flex-wrap">
-            {[
-              { href: "/caja", label: "Caja del día" },
-              { href: "/finanzas/tablero", label: "Tablero" },
-              { href: "/finanzas/cierres", label: "Cierre de caja" },
-              { href: "/finanzas/cajas", label: "Operar cajas" },
-              { href: "/finanzas/pendiente-rendir", label: "Rendiciones" },
-              { href: "/finanzas/conciliacion", label: "Conciliación" },
-              { href: "/finanzas/cheques", label: "Cheques" },
-              { href: "/finanzas/egresos", label: "Egresos" },
-            ].map((l) => (
-              <Link key={l.href} href={l.href}>
-                <button className="text-xs font-semibold text-slate-600 hover:text-indigo-700 border border-slate-200 hover:border-indigo-300 bg-white rounded-full px-3.5 py-1.5 transition-colors shadow-sm">
-                  {l.label}
-                </button>
-              </Link>
-            ))}
-          </div>
-          <div className="ml-auto text-right">
-            <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Patrimonio total</div>
-            <div className="text-base font-bold text-slate-800" style={NUM}>{fmt(grandTotal + chequesSelTotal)}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-6xl mx-auto px-4 py-5 space-y-5">
-
-        {/* ── Modo manual ── */}
-        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 flex-wrap">
-          <span>✍️</span>
-          <span>
-            <b>Saldos cargados a mano</b>
-            {ultimaAct ? <> — última actualización: {ultimaAct}.</> : "."} Cuando conectemos las APIs bancarias esto se actualiza solo.
-          </span>
-          <button
-            onClick={() => setSaldosDiaOpen(true)}
-            className="ml-auto rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition-colors"
-          >
-            Actualizar saldos de hoy
-          </button>
-        </div>
-
-        {/* ── HOY: 4 números ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="rounded-2xl bg-slate-800 p-4 shadow">
-            <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Disponible ya · efectivo y bancos</div>
-            <div className="text-[26px] font-semibold text-white leading-tight mt-0.5" style={NUM}>{loading ? "—" : moneda(efectivoSel + bancosSel, 0)}</div>
-            <div className="text-xs text-slate-400 mt-0.5" style={NUM}>Efectivo {fmt(efectivoSel)} · Bancos {fmt(bancosSel)}</div>
-          </div>
-          <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
-            <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Cheques en cartera · por cobrar</div>
-            <div className="text-[26px] font-semibold text-slate-800 leading-tight mt-0.5" style={NUM}>{loading ? "—" : moneda(chequesSelTotal, 0)}</div>
-            <div className="text-xs text-slate-400 mt-0.5" style={NUM}>{chequesSel.length} cheques · {fmt(cobrablesHoy)} ya cobrables</div>
-          </div>
-          <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
-            <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Sale en los próximos 30 días</div>
-            <div className="text-[26px] font-semibold text-red-700 leading-tight mt-0.5" style={NUM}>{loading ? "—" : moneda(sale30, 0)}</div>
-            <div className="text-xs text-slate-400 mt-0.5">{vencs.filter(v => v.fecha_vencimiento <= addDias(hoy, 30)).length} pagos pendientes</div>
-          </div>
-          <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
-            <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">En la bolsa · rescate en 24-48 h</div>
-            <div className="text-[26px] font-semibold text-slate-800 leading-tight mt-0.5" style={NUM}>{loading ? "—" : moneda(bolsaTotal, 0)}</div>
-            <div className="text-xs text-slate-400 mt-0.5" style={NUM}>FCI {fmtShort(latestOf("fondos_comunes"))} · Cauciones {fmtShort(latestOf("cauciones"))}</div>
-          </div>
-        </div>
-
-        {/* ── MATRIZ DE LIQUIDEZ ── */}
-        <div className="rounded-2xl border-2 border-indigo-500/70 bg-white p-5 shadow-sm">
-          <div className="flex items-center gap-2 flex-wrap mb-3">
-            <h2 className="text-[16px] font-bold text-slate-800">¿Llego a pagar todo hasta el…?</h2>
-            {([7, 15, 30] as const).map(d => (
-              <button key={d} onClick={() => setDias(d)}
-                className={`rounded-full px-3.5 py-1 text-xs font-semibold border transition-colors ${
-                  dispoDias === d ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"
-                }`}>{d} días</button>
-            ))}
-            <FechaInput
-              value={dispoFecha}
-              onChange={(iso) => { if (iso) { setDispoFecha(iso); setDispoDias(0) } }}
-              containerClassName="w-[130px]"
-              className={`rounded-full px-3 py-1 text-xs border ${dispoDias === 0 ? "border-indigo-600" : "border-slate-200"}`}
-            />
-            <span className="ml-auto text-xs text-slate-400">hasta el <b className="text-slate-700">{fmtFechaAR(dispoFecha)}</b></span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[15px] min-w-[640px]">
-              <thead>
-                <tr>
-                  <th className="text-left py-1.5 px-3"></th>
-                  {["EFECTIVO", "BANCOS", "CHEQUES"].map(h => (
-                    <th key={h} className="text-right py-1.5 px-3 text-[13px] font-bold text-slate-700 tracking-wide" style={{ fontFamily: "Bahnschrift, 'Segoe UI', sans-serif" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-t border-slate-100">
-                  <td className="py-2 px-3 text-[13px] font-semibold text-slate-400">Tengo hoy</td>
-                  <td className="py-2 px-3 text-right" style={NUM}>{fmt(efectivoSel)}</td>
-                  <td className="py-2 px-3 text-right" style={NUM}>{fmt(bancosSel)}</td>
-                  <td className="py-2 px-3 text-right" style={NUM}>{fmt(chequesSelTotal)}</td>
-                </tr>
-                <tr className="border-t border-slate-100">
-                  <td className="py-2 px-3 text-[13px] font-semibold text-slate-400">Entra hasta esa fecha</td>
-                  <td className="py-2 px-3 text-right text-slate-400 text-sm">nada previsto</td>
-                  <td className="py-2 px-3 text-right text-emerald-700" style={NUM}>{entraBancos > 0 ? <>▲ {fmt(entraBancos)} <span className="text-[11px] text-slate-400">cheques depositados</span></> : <span className="text-slate-400 text-sm">nada previsto</span>}</td>
-                  <td className="py-2 px-3 text-right text-emerald-700" style={NUM}>▲ {fmt(cobrablesHasta)} <span className="text-[11px] text-slate-400">se hacen cobrables</span></td>
-                </tr>
-                <tr className="border-t border-slate-100">
-                  <td className="py-2 px-3 text-[13px] font-semibold text-slate-400">Sale hasta esa fecha</td>
-                  <td className="py-2 px-3 text-right text-red-700" style={NUM}>▼ {fmt(saleEfectivo)}</td>
-                  <td className="py-2 px-3 text-right text-red-700" style={NUM}>▼ {fmt(saleBancos)}</td>
-                  <td className="py-2 px-3 text-right text-red-700" style={NUM}>▼ {fmt(saleCheques)} <span className="text-[11px] text-slate-400">comprometidos</span></td>
-                </tr>
-                <tr className="border-t-2 border-slate-200">
-                  <td className="py-2.5 px-3 text-sm font-bold text-slate-800">Me queda</td>
-                  {[quedaEfectivo, quedaBancos, quedaCheques].map((q, i) => (
-                    <td key={i} className="py-2.5 px-3 text-right">
-                      <span className={`text-lg font-bold ${q < 0 ? "text-red-700" : "text-emerald-700"}`} style={NUM}>{fmt(q)}</span>
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div className="flex gap-2.5 mt-3 flex-wrap">
-            {quedaEfectivo < 0 ? (
-              <div className="flex-1 min-w-[230px] rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13.5px] text-red-900">
-                <b className="block text-[11px] uppercase tracking-wide">Efectivo · atención</b>
-                Faltan {fmt(-quedaEfectivo)}{proxEfectivo ? ` para "${proxEfectivo.proveedores?.nombre || proxEfectivo.concepto}" (${fmtFechaAR(proxEfectivo.fecha_vencimiento)})` : ""}. Retirá del banco o esperá una rendición.
-              </div>
-            ) : (
-              <div className="flex-1 min-w-[230px] rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-[13.5px] text-emerald-900">
-                <b className="block text-[11px] uppercase tracking-wide">Efectivo · cubierto</b>
-                {saleEfectivo > 0 ? `Quedan ${fmt(quedaEfectivo)} después de los pagos por caja.` : "No hay pagos en efectivo en la ventana."}
-              </div>
-            )}
-            {quedaBancos < 0 ? (
-              <div className="flex-1 min-w-[230px] rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13.5px] text-red-900">
-                <b className="block text-[11px] uppercase tracking-wide">Bancos · atención</b>
-                Faltan {fmt(-quedaBancos)}. Depositá cheques cobrables ({fmt(cobrablesHoy)} disponibles) o rescatá del FCI.
-              </div>
-            ) : (
-              <div className="flex-1 min-w-[230px] rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-[13.5px] text-emerald-900">
-                <b className="block text-[11px] uppercase tracking-wide">Bancos · cubierto</b>
-                Quedan {fmt(quedaBancos)} después de transferencias, VEP y débitos de cheques propios.
-              </div>
-            )}
-            {quedaCheques < 0 ? (
-              <div className="flex-1 min-w-[230px] rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13.5px] text-red-900">
-                <b className="block text-[11px] uppercase tracking-wide">Cheques · atención</b>
-                Comprometiste {fmt(-quedaCheques)} más de lo que hay en cartera.
-              </div>
-            ) : (
-              <div className="flex-1 min-w-[230px] rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-[13.5px] text-emerald-900">
-                <b className="block text-[11px] uppercase tracking-wide">Cheques · cubierto</b>
-                {saleCheques > 0 ? `Los comprometidos con proveedores están apartados.` : "No hay pagos con cheque en la ventana."}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── FICHAS ── */}
+    <div className="mx-auto w-full max-w-[1700px] space-y-5 px-4 py-5 sm:px-6">
+      {/* ── Encabezado ── */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">
-            Cuentas — tocá para incluir o excluir del cálculo · el lápiz actualiza el saldo
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {CAJAS.filter(c => c.group !== "bolsa").map(c => <Ficha key={c.key} caja={c} />)}
-          </div>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {CAJAS.filter(c => c.group === "bolsa").map(c => <Ficha key={c.key} caja={c} />)}
-          </div>
-          <div className="flex items-center gap-3 mt-4 mb-2 flex-wrap">
-            <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Cheques en cartera — también se tocan</span>
-            <button
-              onClick={() => { setImportCartera("AUTO"); setImportOpen(true) }}
-              className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-100 transition-colors"
-            >
-              <FileSpreadsheet className="h-3 w-3" /> Importar Excel único (detecta E / - / /)
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {(Object.keys(CARTERA_DEF) as Cartera[]).map(k => {
-              const isSel = carterasSel.has(k)
-              return (
-                <span key={k} className={`inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm shadow-sm transition-all ${isSel ? "border-indigo-500 ring-1 ring-indigo-500" : "border-slate-200 opacity-70"}`}>
-                  <button
-                    onClick={() => setCarterasSel(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })}
-                    className="inline-flex items-center gap-2"
-                  >
-                    <span className={`flex h-4 w-4 items-center justify-center rounded border-2 text-[10px] ${isSel ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-300"}`}>{isSel ? "✓" : ""}</span>
-                    <span className="h-2.5 w-2.5 rounded-sm shrink-0 border border-slate-300" style={{ background: CARTERA_DEF[k].dot }} />
-                    <span className="text-slate-600">{CARTERA_DEF[k].label}</span>
-                    <span className="font-semibold text-slate-800" style={NUM}>{fmt(carteras[k].total)}</span>
-                    <span className="text-[11px] text-slate-400">{carteras[k].count} cheques</span>
-                  </button>
-                  <span
-                    role="button"
-                    title={`Importar Excel de cartera ${CARTERA_DEF[k].label}`}
-                    onClick={() => { setImportCartera(k); setImportOpen(true) }}
-                    className="text-amber-500 hover:text-amber-700 cursor-pointer"
-                  >
-                    <FileSpreadsheet className="h-3.5 w-3.5" />
-                  </span>
-                </span>
-              )
-            })}
-          </div>
-          <div className="mt-3">
-            <ChequesEmitidosPanel emitidos={emitidos} loading={loading} onChanged={reloadAll} />
-          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Panel de Finanzas</h1>
+          <p className="text-sm text-neutro-500">Lo que hay, lo que hay que pagar y si alcanza</p>
         </div>
-
-        {/* ── LO QUE HAY QUE PAGAR ── */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center gap-2 flex-wrap mb-1">
-            <h2 className="text-[16px] font-bold text-slate-800">Lo que hay que pagar</h2>
-            <button
-              onClick={() => setNuevoGastoOpen(true)}
-              className="rounded-full bg-indigo-600 px-3.5 py-1 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors"
-            >
-              + Nuevo gasto
-            </button>
-            {vistaPagos === "lista" && (
-              <>
-                {([30, 60, 90] as const).map(h => (
-                  <button key={h} onClick={() => setHorizonte(h)}
-                    className={`rounded-full px-3.5 py-1 text-xs font-semibold border transition-colors ${
-                      horizonte === h ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"
-                    }`}>{h} días</button>
-                ))}
-                <button onClick={() => setHorizonte(0)}
-                  className={`rounded-full px-3.5 py-1 text-xs font-semibold border transition-colors ${
-                    horizonte === 0 ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"
-                  }`}>Todo</button>
-              </>
-            )}
-            <div className="ml-auto flex rounded-full border border-slate-200 bg-slate-100 p-0.5">
-              {(["lista", "calendario"] as const).map(v => (
-                <button key={v} onClick={() => setVistaPagos(v)}
-                  className={`rounded-full px-4 py-1 text-xs font-semibold capitalize transition-colors ${
-                    vistaPagos === v ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                  }`}>{v}</button>
-              ))}
-            </div>
-          </div>
-          <p className="text-xs text-slate-400 mb-2">Tocá un pago para editarlo (monto, fecha, forma de pago, eliminar).</p>
-
-          {vistaPagos === "calendario" ? (
-            <div className="mt-2">
-              <CalendarioPagos key={calKey} showCheques onDataChanged={load} />
-            </div>
-          ) : loading ? (
-            <CargaProgreso compacto mensajes={MENSAJES.vencimientos} className="mx-auto max-w-sm py-10" />
-          ) : !items.length ? (
-            <div className="py-10 text-center text-slate-400 text-sm">No hay pagos pendientes en este horizonte. 🎉</div>
-          ) : (
-            <>
-              {grupos.semana.length > 0 && (
-                <>
-                  <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mt-3 mb-1">Esta semana</div>
-                  {grupos.semana.map((i, x) => <PagoRow key={x} item={i} />)}
-                </>
-              )}
-              {grupos.proxima.length > 0 && (
-                <>
-                  <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mt-4 mb-1">Semana que viene</div>
-                  {grupos.proxima.map((i, x) => <PagoRow key={x} item={i} />)}
-                </>
-              )}
-              {grupos.meses.map(([mes, lista]) => {
-                const abierto = mesesAbiertos.has(mes)
-                const total = lista.reduce((s, i) => s + montoDe(i), 0)
-                return (
-                  <div key={mes} className="mt-3">
-                    <button
-                      onClick={() => setMesesAbiertos(prev => { const n = new Set(prev); n.has(mes) ? n.delete(mes) : n.add(mes); return n })}
-                      className="flex w-full items-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-[13.5px] text-slate-500 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
-                    >
-                      {abierto ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      <span className="capitalize font-semibold">{nombreMes(mes)}</span>
-                      <span>· {lista.length} pago{lista.length > 1 ? "s" : ""} por</span>
-                      <span className="font-semibold text-slate-700" style={NUM}>{fmt(total)}</span>
-                    </button>
-                    {abierto && <div className="mt-1">{lista.map((i, x) => <PagoRow key={x} item={i} />)}</div>}
-                  </div>
-                )
-              })}
-            </>
-          )}
-        </div>
-
-        {/* ── Evolución (kardex, plegada) ── */}
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <button onClick={() => setShowEvolucion(s => !s)} className="flex w-full items-center gap-2 px-5 py-3.5 text-left">
-            <TrendingUp className="h-4 w-4 text-indigo-500" />
-            <span className="text-sm font-bold text-slate-700">Evolución de saldos</span>
-            <span className="text-xs text-slate-400">dato vivo del kardex — desde julio 2026</span>
-            {showEvolucion ? <ChevronDown className="ml-auto h-4 w-4 text-slate-400" /> : <ChevronRight className="ml-auto h-4 w-4 text-slate-400" />}
-          </button>
-          {showEvolucion && (
-            <div className="px-5 pb-5">
-              {!evolucion.serie.length ? (
-                <p className="py-6 text-center text-sm text-slate-400">Todavía no hay serie del kardex.</p>
-              ) : (
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={evolucion.serie} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-                    <XAxis dataKey="fecha" tick={{ fontSize: 11 }} tickFormatter={d => fechaCorta(d)} />
-                    <YAxis tick={{ fontSize: 11 }} tickFormatter={fmtShort} width={60} />
-                    <Tooltip formatter={(val: number, name: string) => [fmt(val), name]} labelFormatter={d => fmtFechaAR(String(d))} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {evolucion.cuentas.map(nombre => (
-                      <Line key={nombre} type="stepAfter" dataKey={nombre} stroke={colorDeCuenta(nombre)} strokeWidth={2} dot={false} connectNulls />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          )}
-        </div>
+        <Button onClick={() => setNuevoGastoOpen(true)} className="gap-1.5"><Plus className="h-4 w-4" />Nuevo gasto</Button>
       </div>
+
+      {extra.cobros_por_verificar.cantidad > 0 && (
+        <Link href="/caja" className="flex items-center gap-2 rounded-xl border border-ambar-200 bg-ambar-50 px-4 py-2.5 text-sm text-ambar-800 hover:bg-ambar-100">
+          <b>{extra.cobros_por_verificar.cantidad} cobro{extra.cobros_por_verificar.cantidad === 1 ? "" : "s"} por verificar en Caja</b>
+          <span>· {moneda(extra.cobros_por_verificar.monto, 0)}</span>
+          <ArrowRight className="ml-auto h-4 w-4" />
+        </Link>
+      )}
+
+      {/* ── Lo que hay ── */}
+      <section>
+        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h2 className="text-lg font-bold tracking-tight text-azul-900">Lo que hay</h2>
+          <span className="text-xs text-neutro-400">
+            Saldos cargados a mano · tocá un saldo para cambiarlo
+            {ultimoCambio && <> · último cambio: <b className="font-semibold text-neutro-600">{ultimoCambio.usuario ?? "—"}</b>, {cuandoFue(ultimoCambio.fecha)}</>}
+          </span>
+          <button type="button" onClick={() => setGraficoOpen(true)} className="ml-auto inline-flex items-center gap-1.5 text-sm font-semibold text-azul-600 hover:underline">
+            <IconoGrafico className="h-4 w-4" />Ver gráfico
+          </button>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Grande titulo="Efectivo" valor={suma(efectivo)}>
+            {efectivo.map(c => <FilaCuenta key={claveCuenta(c)} c={c} />)}
+          </Grande>
+          <Grande titulo="Bancos" valor={suma(bancos)}>
+            {bancos.map(c => <FilaCuenta key={claveCuenta(c)} c={c} />)}
+          </Grande>
+          <Grande titulo="Cheques en cartera" valor={tramos.total} nota={`${tramos.cantidad} cheque${tramos.cantidad === 1 ? "" : "s"} de terceros`}>
+            <Tramo label="Al día" monto={tramos.alDia} />
+            <Tramo label="Próximos 30 días" monto={tramos.a30} />
+            <Tramo label="De 31 a 60 días" monto={tramos.a60} />
+            <Tramo label="Más de 60 días" monto={tramos.mas60} />
+            <Link href="/finanzas/cheques" className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-azul-600 hover:underline">Ver cheques <ArrowRight className="h-3 w-3" /></Link>
+          </Grande>
+          <Grande titulo="Bolsa" valor={suma(bolsa)} nota="Rescate en 24-48 h · no suma al disponible">
+            <button type="button" onClick={() => setBolsaAbierta(a => !a)} className="text-xs font-semibold text-azul-600 hover:underline">
+              {bolsaAbierta ? "Ocultar cuentas" : "Cambiar un saldo"}
+            </button>
+            {bolsaAbierta && bolsa.map(c => (
+              <div key={claveCuenta(c)} className="group flex items-center gap-2 py-1">
+                <span className="min-w-0 flex-1 truncate text-[13px] text-neutro-700">{c.nombre}</span>
+                <button type="button" onClick={() => setCuentaEdit(c)} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[13px] font-semibold tabular-nums hover:bg-azul-50">
+                  {moneda(saldoDe(c), 0)}<Pencil className="h-3 w-3 text-neutro-300" />
+                </button>
+              </div>
+            ))}
+          </Grande>
+        </div>
+      </section>
+
+      {/* ── Lo que hay que pagar ── */}
+      <section>
+        <h2 className="mb-2 text-lg font-bold tracking-tight text-azul-900">Lo que hay que pagar</h2>
+        <p className="mb-3 text-xs text-neutro-400">Tocá un pago para sumarlo a la cinta; el lápiz lo edita (fecha, monto, forma de pago, generar orden de pago o marcarlo pagado). Arrastralo para cambiarle el día.</p>
+        <CalendarioPagos key={calKey} showCheques conSemana conTipos lateral="atrasados" onDataChanged={load} />
+      </section>
+
+      {/* ── ¿Llego a pagar? ── */}
+      <section className="rounded-2xl border border-neutro-200 bg-white p-4 sm:p-5">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <h2 className="mr-1 text-lg font-bold tracking-tight text-azul-900">¿Llego a pagar todo hasta el…?</h2>
+          <div className="inline-flex rounded-lg bg-neutro-100 p-0.5 text-[13px] font-semibold">
+            {([7, 15, 30] as const).map(d => (
+              <button key={d} type="button" onClick={() => elegirDias(d)}
+                className={cn("rounded-md px-3 py-1", dias === d ? "bg-white text-azul-700 shadow-sm" : "text-neutro-500 hover:text-neutro-800")}>{d} días</button>
+            ))}
+          </div>
+          <FechaInput value={hasta} onChange={(iso) => { if (iso) { setHasta(iso); setDias(0) } }} containerClassName="w-[130px]" />
+          <span className="text-sm text-neutro-500">hasta el <b className="text-neutro-800">{fecha(hasta)}</b></span>
+          <div className="ml-auto flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-neutro-500">Cheques que cuento:</span>
+            {CARTERAS.map(c => (
+              <button key={c.key} type="button"
+                onClick={() => setCarterasSel(p => { const n = new Set(p); n.has(c.key) ? n.delete(c.key) : n.add(c.key); return n })}
+                className={cn("rounded-full border px-2.5 py-0.5 font-semibold", carterasSel.has(c.key) ? "border-azul-300 bg-azul-50 text-azul-700" : "border-neutro-200 text-neutro-400 line-through")}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <Bolsillo titulo="Efectivo" tengo={efectivoSel} entra={entraEfectivo} entraLabel="Entra (rendiciones)"
+            sale={saleEfectivo} saleLabel="Sale (pagos en efectivo)" q={queda.efectivo}
+            aviso={queda.efectivo < 0
+              ? <>Faltan {moneda(-queda.efectivo, 0)}{proxEfectivo ? ` para «${proxEfectivo.proveedores?.nombre || proxEfectivo.concepto}» (${fechaCorta(proxEfectivo.fecha_vencimiento)})` : ""}. Retirá del banco o esperá una rendición.</>
+              : saleEfectivo > 0 ? "Alcanza para los pagos en efectivo." : "No hay pagos en efectivo hasta esa fecha."} />
+          <Bolsillo titulo="Bancos" tengo={bancosSel} entra={entraBancos} entraLabel="Entra (cheques depositados, 72 h)"
+            sale={saleBancos} saleLabel="Sale (transferencias y cheques propios)" q={queda.bancos}
+            aviso={queda.bancos < 0
+              ? <>Faltan {moneda(-queda.bancos, 0)}. Depositá cheques cobrables ({moneda(cobrablesHoy, 0)} disponibles) o rescatá de la bolsa.</>
+              : "Alcanza para las transferencias, los VEP y los débitos de cheques propios."} />
+          <Bolsillo titulo="Cheques" tengo={chequesSelTotal} entra={entraCheques} entraLabel="Se hacen cobrables"
+            sale={saleCheques} saleLabel="Comprometidos con proveedores" q={queda.cheques}
+            aviso={queda.cheques < 0
+              ? <>Comprometiste {moneda(-queda.cheques, 0)} más de lo que hay en cartera.</>
+              : saleCheques > 0 ? "Los cheques comprometidos están cubiertos." : "No hay pagos con cheque hasta esa fecha."} />
+        </div>
+        {saleEfectivo + saleBancos > 0 && Object.keys(proyRet).length > 0 && (
+          <p className="mt-2 text-xs text-neutro-400">Los pagos con retención de Ganancias proyectada cuentan por lo que realmente sale (el neto).</p>
+        )}
+      </section>
 
       {/* ── Diálogos ── */}
-      <AjustarSaldoDialog
-        cuenta={cuentaEdit}
-        open={!!cuentaEdit}
-        onOpenChange={(o) => { if (!o) setCuentaEdit(null) }}
-        onSaved={reloadAll}
-      />
-      <ActualizarSaldosDialog
-        cuentas={cuentas}
-        open={saldosDiaOpen}
-        onOpenChange={setSaldosDiaOpen}
-        onSaved={reloadAll}
-      />
-      <ImportChequesDialog
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        carteraInicial={importCartera}
-        onImported={reloadAll}
-      />
-      <VencimientoEditDialog
-        venc={vencEdit}
-        open={!!vencEdit}
-        onOpenChange={(o) => { if (!o) setVencEdit(null) }}
-        onSaved={reloadAll}
-      />
-      <NuevoGastoDialog
-        open={nuevoGastoOpen}
-        onOpenChange={setNuevoGastoOpen}
-        onSaved={reloadAll}
-      />
+      <AjustarSaldoDialog cuenta={cuentaEdit} open={!!cuentaEdit} onOpenChange={(o) => { if (!o) setCuentaEdit(null) }} onSaved={recargar} />
+      <NuevoGastoDialog open={nuevoGastoOpen} onOpenChange={setNuevoGastoOpen} onSaved={recargar} />
+      <Dialog open={graficoOpen} onOpenChange={setGraficoOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Evolución de saldos</DialogTitle>
+            <DialogDescription>Saldo de cada cuenta día por día (dato del kardex, desde julio 2026)</DialogDescription>
+          </DialogHeader>
+          {!evolucion.serie.length ? (
+            <p className="py-10 text-center text-sm text-neutro-400">Todavía no hay datos para el gráfico.</p>
+          ) : (
+            <div className="h-[380px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={evolucion.serie} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+                  <CartesianGrid stroke="#E3E5EF" vertical={false} />
+                  <XAxis dataKey="fecha" tick={{ fontSize: 11, fill: "#6E7290" }} tickFormatter={d => fechaCorta(d)} tickLine={false} axisLine={{ stroke: "#E3E5EF" }} minTickGap={20} />
+                  <YAxis tick={{ fontSize: 11, fill: "#6E7290" }} tickFormatter={corto} width={64} tickLine={false} axisLine={false} />
+                  <Tooltip formatter={(v: number, n: string) => [moneda(v), n]} labelFormatter={d => fecha(String(d))}
+                    contentStyle={{ background: "#fff", border: "1px solid #E3E5EF", borderRadius: 8, fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  {evolucion.cuentas.map((n, i) => (
+                    <Line key={n} type="stepAfter" dataKey={n} stroke={COLORES_SERIE[i % COLORES_SERIE.length]} strokeWidth={2} dot={false} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

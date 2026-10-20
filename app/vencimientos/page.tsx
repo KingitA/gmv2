@@ -112,7 +112,8 @@ export default function VencimientosPage() {
 
             const res = await fetch(url)
             const data = await res.json()
-            setVencimientos(Array.isArray(data) ? data : [])
+            // PROVEEDORES ve solo pagos a proveedores; sueldos, impuestos, servicios, etc. están en FINANZAS
+            setVencimientos(Array.isArray(data) ? data.filter((v: any) => !!v.proveedor_id) : [])
         } catch (e) {
             console.error(e)
         } finally {
@@ -213,7 +214,7 @@ export default function VencimientosPage() {
             <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Pagos y vencimientos</h1>
-                    <p className="text-sm text-neutro-500">Facturas de proveedores, servicios, impuestos y gastos</p>
+                    <p className="text-sm text-neutro-500">Lo que hay que pagarle a cada proveedor. Sueldos, impuestos, servicios y demás gastos están en Finanzas.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Button variant="outline" asChild><Link href="/ordenes-compra?nueva=1"><Plus className="h-4 w-4" /> Orden de compra</Link></Button>
@@ -221,7 +222,7 @@ export default function VencimientosPage() {
                 </div>
             </div>
 
-            <CalendarioPagos showCheques={false} conSemana onDataChanged={loadVencimientos} />
+            <CalendarioPagos showCheques={false} conSemana ambito="proveedores" onDataChanged={loadVencimientos} />
 
             <section className="space-y-4">
                 <h2 className="text-lg font-bold text-azul-900">Lista de vencimientos</h2>

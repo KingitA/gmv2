@@ -72,6 +72,12 @@ export const SECCIONES: Seccion[] = [
     accesos: [
       { label: "Panel", href: "/finanzas", roles: ["admin"] },
       { label: "Caja del día", href: "/caja", roles: ["admin"] },
+      { label: "Cheques", href: "/finanzas/cheques", roles: ["admin"] },
+      { label: "Conciliación", href: "/finanzas/conciliacion", roles: ["admin"] },
+      { label: "Cierre de caja", href: "/finanzas/cierres", roles: ["admin"] },
+      { label: "Cuentas", href: "/finanzas/cajas", roles: ["admin"] },
+      { label: "Control de cuentas corrientes", href: "/finanzas/reconciliacion", roles: ["admin"] },
+      { label: "Tablero de tesorería", href: "/finanzas/tablero", roles: ["admin"] },
     ],
   },
   {
