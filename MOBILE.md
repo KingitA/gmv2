@@ -203,10 +203,21 @@ transitorio frena a los siguientes) · O4 rechazo no bloquea · O5 single-flight
 O6 crash en "enviando" ⇒ pendiente (reenvío resuelto como duplicado) · O7 sin sesión
 no envía · O8 cada item solo se envía con la sesión del usuario que lo capturó
 (la activa, o la suya **aparcada** tras un cambio de turno: §7) · O9 el parche de
-réplica (`resultado.replica`) se aplica ANTES de marcar el item enviado. El FIFO es
+réplica (`resultado.replica`) se aplica ANTES de marcar el item enviado · **O10 tope de
+reintentos** (20/10/2026): con 30 fallos en que el servidor CONTESTÓ con 5xx **y** más de
+24 h desde el primero, el item pasa a "rechazado" (deja de frenar la fila; el usuario lo ve
+y lo descarta). Los cortes de red no cuentan, así que el trabajo hecho sin señal nunca se
+rechaza, y una caída de producción de horas tampoco. El FIFO es
 **por usuario**. `enviar({forzar:true})` ignora el backoff: lo usa el sincronizador
 cuando sabe que el servidor responde (volvió la red / primer plano / el sondeo
-contestó), así lo acumulado sin señal sale en segundos y no en "hasta 5 min".
+contestó), así lo acumulado sin señal sale en segundos y no en "hasta 5 min". Un item que
+ya llegó a 30 fallos de servidor respeta el backoff aunque se fuerce (O10).
+
+> **Por qué existe O10.** Del 18/09 al 20/10/2026 una recepción "faltante" del NuStar falló
+> 1.156 veces (la base rechazaba el valor, ver §17 "v0.3.0") y se reenviaba **cada 15 s**
+> por el `forzar` del sondeo. Como era "transitorio", no se podía descartar y trabó la fila
+> un mes entero, incluido un "Abrir pedido" urgente. Afecta a las TRES apps (está en
+> `@gm/core`): vendedor y chofer lo reciben en su próxima APK.
 
 Servidor (`app/api/mobile/outbox/route.ts`): reserva la clave en `mobile_idempotencia`
 (`procesando`) → handler → `aplicado|rechazado` guardando el resultado; error
@@ -1087,6 +1098,51 @@ Aprendido en la prueba: crear un pedido desde el ERP escribe 3 filas "venta" en 
 **no** descuenta `stock_actual`; crear una OC escribe una fila "compra" en estado pendiente
 ligada por `orden_compra_id` (hay que contarlas al limpiar datos de prueba).
 
+### v0.3.0 (20/10/2026): devoluciones por renglón, cupo, tope de reintentos y el "faltante" de recepción
+
+**1. Recepción: la base rechazaba "faltante" (encontrado en los logs de Vercel).** La regla
+`recepciones_items_estado_linea_check` (de `scripts/036`, julio) solo aceptaba `pendiente`,
+`ok`, `diferencia_cantidad` y `no_pedido`; todo el código escribe `faltante`. Consecuencias:
+- **Web**: "Marcar faltante" decía "Marcado como faltante" y **no se guardaba nada** (`patchItem`
+  no miraba la respuesta). En toda la tabla había 0 líneas `faltante`; las recepciones de
+  OC-000007 (29/07) y OC-000008 (04/08) quedaron abiertas con todo en pendiente.
+- **APK**: la operación del 18/09 falló 1.156 veces, cada 15 s, y trabó la fila (ver O10, §4.2).
+- No lo agarró el checklist del 18/09: probó contar y finalizar, nunca marcar un faltante en recepción.
+- Arreglo: migración **`20261020d_recepciones_estado_faltante.sql`** (agrega `faltante`;
+  superconjunto, idempotente) y la web ahora muestra el error si el servidor no guardó.
+- Limpieza del NuStar (con OK del dueño): antes de aplicar la migración se sacaron de la cola
+  las 3 operaciones trabadas (2 recepciones "faltante" del 18/09 y "Abrir pedido 001576" del
+  22/09, que al destrabarse habría pasado ese pedido de `impreso` a `en_preparacion` un mes
+  tarde). Método: red cortada, build `--devtools` con la misma firma (v0.2.4), borrado por
+  clave en IndexedDB vía CDP (§13), red restaurada.
+
+**2. Revisión de devoluciones por renglón** (contrato en `docs/CUENTAS-CORRIENTES-APPS.md`).
+Sin pantalla nueva, a pedido del dueño: la tarjeta de cada artículo queda igual que antes
+(Vendible / No vendible de un toque, el caso normal) y un **✏️ Editar** despliega dentro de la
+misma tarjeta *Aceptar / Rechazar*, *Cantidad aceptada* (`inputMode="decimal"` + `parseMonto`)
+y *Motivo*. Un renglón rechazado se ve tachado; uno parcial muestra "2 de 3". Pie: "N de M
+aceptados"; si se rechaza todo, el botón pasa a **⛔ Rechazar devolución**. Se valida antes de
+encolar con la misma regla que el servidor (no más de lo devuelto).
+- Operación nueva **`devolucion.revisar { devolucion_id, renglones: [{ id, aceptar,
+  cantidad_aceptada, es_vendible, motivo }] }`** → `revisarDevolucion` (la misma función que
+  la web). `devolucion.recibir` sigue para las APKs anteriores.
+- Si la devolución ya no está pendiente (409 `devolucion_no_pendiente`: la resolvió la oficina
+  u otro equipo) se trata como **hecha** (sale de la lista), no como error del operario.
+- Editar es un despliegue dentro de la tarjeta, no una pantalla: igual que los botones de
+  vendible, no agrega entrada al historial.
+
+**3. Mercadería por cupo.** El equipo calculaba los bonificados con el % único viejo; ahora,
+igual que el servidor (`lib/pedidos/mercaderia-bonificada.ts`), si el pedido tiene cupos
+(`bonif_merc_origen`) calcula cada cupo por separado (`calcularBonificadosPorCupo`) y si no,
+la regla vieja. La réplica `deposito_pedidos` manda `bonif_merc_origen` / `bonif_merc_pct` y
+pasa a **`version: 2`** (sin eso los equipos con cursor no recibirían las columnas, §4.1).
+
+**4. Tope de reintentos (O10)** en `@gm/core`: ver §4.2.
+
+**Pruebas:** typecheck, 338 tests (3 nuevos de O10, 1 de cupo, revisión en devoluciones) y la
+pantalla contra el mock (parcial 2 de 3 + rechazado + validación de "más de lo devuelto":
+1 operación aplicada 1 vez, stock +2 solo en lo aceptado vendible, devolución `confirmado`).
+
 ### PENDIENTES DEL MES DE PRUEBA (no bloquean el uso)
 1. ~~**Gatillo del lector físico.**~~ ✅ **Resuelto 23/09/2026**: el dueño confirmó que el NuStar
    tiene lector físico y funciona dentro de la app Depósito. Si algún equipo de reemplazo usara
@@ -1095,7 +1151,11 @@ ligada por `orden_compra_id` (hay que contarlas al limpiar datos de prueba).
    (cámara del equipo), OCR, abrir con el ojito (URL firmada al servir) y eliminar. La OC de
    prueba no tenía documentos; la firma de URLs se verificó en la web (9 de 12 fotos abren; las
    otras 3 no tienen archivo).
-3. **Devoluciones con el flujo real de chofer** (ver abajo).
+3. **Devoluciones con el flujo real de chofer** (ver abajo), ahora con la revisión por renglón
+   de la v0.3.0 (parcial, rechazo, motivo).
+3b. **Riesgo del equipo, no de la app**: cuando Android actualiza el WebView (pasó el 13/10),
+   los procesos nuevos quedan en pantalla blanca hasta reiniciar el equipo (§13). Si el
+   operario la ve, reiniciar el NuStar.
 4. Gestos con el dedo (swipe, objetivos táctiles): los prueba el depósito; acá se hicieron por adb.
    Incluye el TOQUE que abre la ficha del artículo y que el swipe siga saliendo natural.
 5. Detalles vistos en el equipo: en Buscar, con el teclado abierto, la lista de resultados queda

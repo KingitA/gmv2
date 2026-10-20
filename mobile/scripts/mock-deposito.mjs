@@ -189,6 +189,31 @@ const HANDLERS = {
     }
     return { ok: true, replica: [{ dataset: "deposito_devoluciones", upserts: [], deletes: [d.id] }] }
   },
+  // Revisión por renglón (v0.3.0): misma regla que lib/deposito/devoluciones.ts → revisarDevolucion
+  "devolucion.revisar": (u, p) => {
+    const d = S.devoluciones.find((x) => x.id === p.devolucion_id)
+    if (!d) throw new Rechazo("Devolución no encontrada")
+    if (d.estado !== "pendiente") return { ok: true, ya_resuelta: true, replica: [{ dataset: "deposito_devoluciones", upserts: [], deletes: [d.id] }] }
+    const pedidos = new Map(p.renglones.map((r) => [r.id, r]))
+    const decisiones = d.devoluciones_detalle.map((det) => {
+      const r = pedidos.get(det.id)
+      const cantidad = r ? (r.aceptar === false ? 0 : r.cantidad_aceptada ?? det.cantidad) : det.cantidad
+      if (cantidad > det.cantidad) throw new Rechazo(`No se puede aceptar más de lo devuelto (${det.cantidad}).`)
+      return { det, cantidad, vendible: r?.es_vendible ?? det.es_vendible, motivo: r?.motivo ?? null }
+    })
+    for (const x of decisiones) {
+      const a = S.articulos.find((y) => y.id === x.det.articulos.id)
+      if (a && x.vendible && x.cantidad > 0) a.stock_actual += x.cantidad
+      x.det.cantidad_original = x.det.cantidad
+      x.det.cantidad = x.cantidad
+      x.det.es_vendible = x.vendible
+      x.det.estado_renglon = x.cantidad > 0 ? "aceptado" : "rechazado"
+      x.det.motivo_revision = x.motivo
+    }
+    d.estado = decisiones.some((x) => x.cantidad > 0) ? "confirmado" : "rechazado"
+    d.revisado_por = u.nombre
+    return { ok: true, estado: d.estado, replica: [{ dataset: "deposito_devoluciones", upserts: [], deletes: [d.id] }] }
+  },
   "stock.ajustar": (u, p) => {
     const a = S.articulos.find((x) => x.id === p.articulo_id)
     if (!a) throw new Rechazo("El artículo ya no existe: el ajuste no se aplicó.")

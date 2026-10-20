@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.0 (versionCode 8) — 2026-10-20
+
+- Revision de devoluciones por renglon (Editar: cantidad aceptada, rechazar, motivo); mercaderia por cupo como el servidor; tope de reintentos del outbox (O10); reactivar articulos dados de baja
+
 ## v0.2.4 (versionCode 7) — 2026-10-20
 
 - Build de DIAGNÓSTICO (DevTools abierto), instalado solo en el NuStar para sacar de la cola

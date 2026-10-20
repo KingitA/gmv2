@@ -17,7 +17,7 @@ import {
   type TipoAjusteStock,
 } from "@/lib/deposito/articulos"
 import { cambiarEstadoArticulos } from "@/lib/articulos/estado"
-import { confirmarDevolucion, type ItemDevolucionConfirmado } from "@/lib/deposito/devoluciones"
+import { confirmarDevolucion, revisarDevolucion, type ItemDevolucionConfirmado, type RenglonRevision } from "@/lib/deposito/devoluciones"
 import { abrirPicking, aplicarPickingItem, cerrarPicking, ErrorDeposito } from "@/lib/deposito/picking"
 import { getUsuarioActual } from "@/lib/deposito/preparadores"
 import {
@@ -208,6 +208,59 @@ const devolucionRecibir: HandlerDef<{ devolucion_id: string; items_confirmados: 
   },
 }
 
+interface PayloadRevision {
+  devolucion_id: string
+  /** Solo los renglones que el operario cambió; los demás se aceptan tal cual (contrato de revisarDevolucion). */
+  renglones: RenglonRevision[]
+  motivo?: string | null
+}
+
+const renglonValido = (r: any) =>
+  esId(r?.id) &&
+  typeof r.aceptar === "boolean" &&
+  (r.cantidad_aceptada == null || (typeof r.cantidad_aceptada === "number" && r.cantidad_aceptada >= 0)) &&
+  (r.es_vendible == null || typeof r.es_vendible === "boolean")
+
+/**
+ * Revisión renglón por renglón (v0.3.0, la misma que la web /deposito/devoluciones):
+ * aceptar o rechazar, cantidad aceptada, vendible o no, motivo. `devolucion.recibir`
+ * queda para las APKs anteriores (acepta todo).
+ * Si la devolución ya no está pendiente (409: la resolvió la oficina u otro equipo),
+ * se trata como HECHA: no es un error del operario y no tiene sentido reintentar.
+ */
+const devolucionRevisar: HandlerDef<PayloadRevision> = {
+  tipo: "devolucion.revisar",
+  roles: ROLES,
+  validar: (p) =>
+    esId(p?.devolucion_id) && Array.isArray(p?.renglones) && p.renglones.every(renglonValido) ? null : "Revisión de devolución inválida",
+  async aplicar(ctx, m) {
+    const usuario = await getUsuarioActual(ctx.supabase)
+    const sacarDeLaLista: ParcheReplica = { dataset: "deposito_devoluciones", upserts: [], deletes: [m.payload.devolucion_id] }
+    let r
+    try {
+      r = await revisarDevolucion(ctx.supabase, {
+        devolucionId: m.payload.devolucion_id,
+        usuarioId: usuario.id,
+        usuarioNombre: usuario.nombre,
+        renglones: m.payload.renglones,
+        motivoGeneral: m.payload.motivo ?? null,
+        fecha: m.capturado_at,
+      })
+    } catch (e) {
+      if (e instanceof ErrorDeposito && e.extra.codigo === "devolucion_no_pendiente") {
+        return { ok: true, ya_resuelta: true, mensaje: e.message, replica: [sacarDeLaLista] }
+      }
+      return negocio(() => Promise.reject(e))
+    }
+    const articulos = [...new Set(r.renglones.filter((x) => x.stock_sumado > 0).map((x) => x.articulo_id).filter(esId))]
+    const arts = articulos.length ? await cargarArticulosDeposito(ctx.admin, articulos) : []
+    return {
+      ...r,
+      replica: [sacarDeLaLista, { dataset: "deposito_articulos", upserts: arts, deletes: [] }] satisfies ParcheReplica[],
+    }
+  },
+}
+
 // ─── Stock y datos de artículo ───────────────────────────────────────────────
 
 interface PayloadAjuste {
@@ -359,6 +412,7 @@ export const HANDLERS_DEPOSITO: HandlerDef[] = [
   recepcionItem,
   recepcionCerrar,
   devolucionRecibir,
+  devolucionRevisar,
   stockAjustar,
   articuloDatos,
   articuloInexistente,

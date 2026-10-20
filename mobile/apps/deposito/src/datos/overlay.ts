@@ -7,7 +7,7 @@
 // ya actualizada (parche de réplica) y el overlay de esa operación desaparece.
 
 import type { ItemOutbox } from "@gm/core"
-import { calcularBonificados, estadoItemPicking, estadoLineaRecepcion } from "@gm/deposito"
+import { calcularBonificados, calcularBonificadosPorCupo, estadoItemPicking, estadoLineaRecepcion, usaCupos } from "@gm/deposito"
 import type {
   Articulo, DetallePedido, Devolucion, EstadoItem, EstadoLinea, OpDatos, OpPickingItem, OpRecepcionItem, OpStock,
   OrdenRecepcion, PedidoDeposito, Preparador,
@@ -64,9 +64,11 @@ export function vistaPedido(p: PedidoDeposito, ops: ItemOutbox[]): PedidoVista {
     if (!d.es_bonificado) recalcular = true
   }
 
-  // Misma cuenta que hace el servidor después de cada renglón (lib/deposito/bonificados.ts)
+  // Misma cuenta que hace el servidor después de cada renglón (lib/pedidos/mercaderia-bonificada.ts):
+  // pedido con cupos (renglones con bonif_merc_origen) → un cálculo por cupo; pedido viejo → un solo %.
   if (recalcular) {
-    for (const b of calcularBonificados(p.bonif_mercaderia_pct, detalle)) {
+    const calculados = usaCupos(detalle) ? calcularBonificadosPorCupo(detalle).calculados : calcularBonificados(p.bonif_mercaderia_pct, detalle)
+    for (const b of calculados) {
       if (!b.cambia) continue
       const d = porId.get(b.id)!
       d.cantidad = b.cantidad
@@ -193,10 +195,13 @@ export function vistaRecepcion(o: OrdenRecepcion, ops: ItemOutbox[], articulo: (
 
 // ─── Devoluciones ────────────────────────────────────────────────────────────
 
+/** Operaciones que resuelven una devolución: la de APKs viejas (acepta todo) y la revisión por renglón. */
+export const OPS_DEVOLUCION = ["devolucion.recibir", "devolucion.revisar"]
+
 /** Devoluciones que el operario ya confirmó en el equipo (salen de la lista aunque no se hayan enviado). */
 export function devolucionesConfirmadasLocal(ops: ItemOutbox[]): Set<string> {
   const s = new Set<string>()
-  for (const op of ops) if (op.tipo === "devolucion.recibir" && enCola(op)) s.add((op.payload as { devolucion_id: string }).devolucion_id)
+  for (const op of ops) if (OPS_DEVOLUCION.includes(op.tipo) && enCola(op)) s.add((op.payload as { devolucion_id: string }).devolucion_id)
   return s
 }
 
