@@ -2034,6 +2034,12 @@ existe ahí): las operaciones igual quedan en cola y salen al restaurarla.
 - Trigger `trg_codigo_unico`: si un alta llega sin código, la base asigna el primer libre
   (con lock para altas simultáneas). Lógica en `lib/codigos.ts` y `GET /api/codigos`.
 
+### Artículos dados de baja (20/10/2026)
+
+- Las réplicas traen **solo artículos activos** (snapshot filtrado; en el delta, uno dado de baja llega como borrado). Ninguna app debe ofrecer, buscar ni matchear un artículo dado de baja.
+- Reactivar un artículo es **solo** desde `/articulos`, el depósito web y la **app Depósito** (op `articulo.reactivar`, §17 "Artículo dado de baja"). Siempre por `cambiarEstadoArticulos` (`lib/articulos/estado.ts`), que registra usuario y origen en `articulos_estado_historial`. No hacer `update({ activo })` directo.
+- El matching del servidor (importación de pedidos, listas de precios, proveedores, búsqueda por IA) ya excluye los dados de baja: no hace falta nada en las APK de vendedor y chofer.
+
 ### Pendiente en los celulares
 
 - **Vendedor: HECHO** en v0.3.1 (14/10/2026, instalada en el NuStar). Falta **chofer y depósito**: hasta
