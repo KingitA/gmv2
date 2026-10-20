@@ -50,6 +50,10 @@ export interface ItemOutbox {
   usuarioId: string | null
   /** Texto para la UI ("Pedido Almacén Don José") */
   etiqueta: string | null
+  /** Reintentos en que el SERVIDOR contestó con error (5xx). Los cortes de red no cuentan (O10). */
+  fallosServidor?: number
+  /** Cuándo empezó a fallar en el servidor (ISO). Junto con fallosServidor decide el tope (O10). */
+  primerFalloServidorAt?: string | null
 }
 
 interface GmDb extends DBSchema {

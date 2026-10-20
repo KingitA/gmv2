@@ -32,7 +32,7 @@ async function llamarGET(handler: () => Promise<Response>): Promise<any> {
 
 const PEDIDO_COLS = "id, numero_pedido, estado, fecha, prioridad, observaciones, created_at, bonif_mercaderia_pct, clientes(id, nombre, razon_social, direccion, localidad)"
 const DETALLE_COLS =
-  "id, pedido_id, cantidad, articulo_id, cantidad_preparada, estado_item, es_bonificado, precio_base, lista_precio_id, articulos(id, sku, descripcion, ean13, codigo_bulto, unidades_por_bulto, orden_deposito, proveedores(nombre), marca:marca_id(descripcion))"
+  "id, pedido_id, cantidad, articulo_id, cantidad_preparada, estado_item, es_bonificado, precio_base, lista_precio_id, bonif_merc_origen, bonif_merc_pct, articulos(id, sku, descripcion, ean13, codigo_bulto, unidades_por_bulto, orden_deposito, proveedores(nombre), marca:marca_id(descripcion))"
 
 /**
  * ALCANCE de la cola que se replica en el handheld (decidido por el dueño el 18/09/2026,
@@ -119,6 +119,9 @@ const depositoPedidos: DatasetDef = {
   roles: ROLES,
   tablas: ["pedidos", "pedidos_detalle"],
   requiereLogDe: ["pedidos"], // trigger de 20260919_mobile_deposito.sql
+  // v2 (20/10/2026): bonif_merc_origen / bonif_merc_pct para calcular la mercadería por cupo
+  // en el equipo. Al ser delta, sin subir la versión los equipos con cursor no las recibirían.
+  version: 2,
   cargar: (ctx, ids) => cargarPedidosDeposito(ctx.supabase, ids),
 }
 

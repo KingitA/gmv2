@@ -29,6 +29,17 @@ export interface ContadoresOutbox {
 /** Retención de enviados para el historial visible */
 const RETENCION_ENVIADOS_MS = 7 * 24 * 3600_000
 
+/**
+ * Tope de reintentos (O10). Una operación que el servidor no puede aplicar nunca
+ * (ej. la recepción "faltante" que la base rechazó del 18/09 al 20/10/2026: 1.156
+ * intentos cada 15 s) frenaba la fila FIFO para siempre y no se podía descartar.
+ * Pasa a "rechazado" recién con las DOS condiciones: muchos fallos en que el
+ * servidor contestó Y más de un día fallando. Así una caída de producción de unas
+ * horas nunca rechaza una operación válida.
+ */
+export const TOPE_FALLOS_SERVIDOR = 30
+export const TOPE_FALLOS_MS = 24 * 3600_000
+
 export function backoffMs(intentos: number, azar = Math.random()): number {
   const base = Math.min(5 * 60_000, 2_000 * 2 ** Math.max(0, intentos - 1))
   return Math.round(base * (0.75 + azar * 0.5))
@@ -56,6 +67,10 @@ export function backoffMs(intentos: number, azar = Math.random()): number {
  *      por usuario: lo trabado de uno no frena lo de otro.
  *  O9. Los callbacks onAplicado (parche de réplica) corren ANTES de marcar el
  *      item "enviado": la UI nunca ve el item enviado sin su efecto en la réplica.
+ * O10. Tope de reintentos: con TOPE_FALLOS_SERVIDOR fallos 5xx Y más de TOPE_FALLOS_MS
+ *      desde el primero, el item pasa a "rechazado" (deja de frenar la fila; el
+ *      usuario lo ve y lo descarta). Ya con el tope de fallos, `forzar` respeta el
+ *      backoff: no se le pega al servidor cada 15 s con algo que no va a entrar.
  */
 export class Outbox {
   private emisor = new Emisor()
@@ -205,7 +220,8 @@ export class Outbox {
       const siguiente = (await this.noEnviados()).find((i) => i.estado === "pendiente" && !frenados.has(i.usuarioId ?? ""))
       if (!siguiente) return
       const duenio = siguiente.usuarioId ?? ""
-      if (!forzar && siguiente.proximoIntentoAt > this.ahora()) {
+      const insistente = (siguiente.fallosServidor ?? 0) >= TOPE_FALLOS_SERVIDOR // O10
+      if ((!forzar || insistente) && siguiente.proximoIntentoAt > this.ahora()) {
         frenados.add(duenio) // O3: espera su backoff
         continue
       }
@@ -277,10 +293,32 @@ export class Outbox {
         return true // O4
       }
       const intentos = it.intentos + 1
+      // O10: solo cuentan los fallos en que el servidor contestó (5xx), no los cortes de red
+      const delServidor = e instanceof ErrorHttp && e.status >= 500
+      const fallosServidor = (it.fallosServidor ?? 0) + (delServidor ? 1 : 0)
+      const primerFalloServidorAt = it.primerFalloServidorAt ?? (delServidor ? new Date(this.ahora()).toISOString() : null)
+      if (
+        delServidor &&
+        fallosServidor >= TOPE_FALLOS_SERVIDOR &&
+        primerFalloServidorAt &&
+        this.ahora() - Date.parse(primerFalloServidorAt) >= TOPE_FALLOS_MS
+      ) {
+        await this.db.put("outbox", {
+          ...it,
+          estado: "rechazado",
+          intentos,
+          fallosServidor,
+          primerFalloServidorAt,
+          error: `El servidor no pudo aplicarla en ${fallosServidor} intentos durante más de un día (${e.message}). Avisá a la oficina y descartala.`,
+        })
+        return true // O10: deja de frenar a los siguientes
+      }
       await this.db.put("outbox", {
         ...it,
         estado: "pendiente",
         intentos,
+        fallosServidor,
+        primerFalloServidorAt,
         error: e instanceof ErrorSesion ? "Sesión vencida: se enviará al volver a ingresar" : e?.message || String(e),
         proximoIntentoAt: e instanceof ErrorSesion ? 0 : this.ahora() + backoffMs(intentos),
       })

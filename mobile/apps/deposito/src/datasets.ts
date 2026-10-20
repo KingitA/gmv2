@@ -46,6 +46,9 @@ export interface DetallePedido {
   es_bonificado?: boolean | null
   precio_base?: number | null
   excluye_bonif?: boolean
+  /** Cupo de mercadería bonificada al que aporta ("todo", "seg:…", "prov:…", "marca:…"); null = pedido viejo */
+  bonif_merc_origen?: string | null
+  bonif_merc_pct?: number | null
   articulos: ArticuloDePedido | null
 }
 
@@ -125,6 +128,11 @@ export interface OrdenRecepcion {
 export interface DetalleDevolucion {
   id: string
   cantidad: number
+  /** Lo que cargó el chofer/vendedor antes de cualquier revisión (tope de lo aceptable) */
+  cantidad_original?: number | null
+  precio_venta_original?: number | null
+  condicion?: string | null
+  estado_renglon?: string | null
   motivo?: string | null
   es_vendible: boolean
   articulos: { id: string; sku: string; descripcion: string; ean13?: string[] | string | null }
@@ -150,3 +158,5 @@ export interface OpPickingItem { pedido_id: string; pedido_detalle_id: string; c
 export interface OpRecepcionItem { orden_compra_id: string; articulo_id: string; cantidad_fisica: number }
 export interface OpStock { articulo_id: string; tipo: "correccion" | "entrada" | "salida"; cantidad: number; motivo?: string | null; stock_visto: number | null }
 export interface OpDatos { articulo_id: string; cambios: Record<string, { antes: unknown; despues: unknown }> }
+export interface RenglonRevisionOp { id: string; aceptar: boolean; cantidad_aceptada: number; es_vendible: boolean; motivo: string | null }
+export interface OpRevisionDevolucion { devolucion_id: string; renglones: RenglonRevisionOp[] }

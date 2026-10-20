@@ -111,6 +111,60 @@ describe("Outbox", () => {
     expect((await ob.item(it.key))!.estado).toBe("enviado")
   })
 
+  it("O10: un 5xx eterno pasa a rechazado recién con 30 fallos Y más de un día, y libera la fila", async () => {
+    const db = await dbNueva()
+    const srv = servidor({ fallar: (_n, body) => (body.payload.orden === 1 ? 503 : null) })
+    const { ob, reloj } = crear(db, srv.manejador)
+    const a = await ob.encolar({ tipo: "t", payload: { orden: 1 } })
+    const b = await ob.encolar({ tipo: "t", payload: { orden: 2 } })
+    // 40 fallos en menos de un día (cada 15 s, como el sondeo): sigue pendiente
+    for (let i = 0; i < 40; i++) {
+      reloj.t += 15_000
+      await ob.enviar({ forzar: true })
+      reloj.t += 6 * 60_000 // pasa el backoff
+    }
+    expect((await ob.item(a.key))!.estado).toBe("pendiente")
+    expect((await ob.item(b.key))!.estado).toBe("pendiente")
+    // Pasado el día, el próximo fallo la rechaza y la fila sigue
+    reloj.t += 24 * 3600_000
+    await ob.enviar()
+    const ra = (await ob.item(a.key))!
+    expect(ra.estado).toBe("rechazado")
+    expect(ra.error).toContain("descartala")
+    expect((await ob.item(b.key))!.estado).toBe("enviado")
+  })
+
+  it("O10: los cortes de red no cuentan para el tope (nunca se rechaza trabajo hecho sin señal)", async () => {
+    const db = await dbNueva()
+    const { ob, reloj } = crear(db, servidor({ fallar: () => "red" }).manejador)
+    const a = await ob.encolar({ tipo: "t", payload: {} })
+    for (let i = 0; i < 60; i++) {
+      reloj.t += 3600_000 // 60 horas sin señal
+      await ob.enviar()
+    }
+    const it = (await ob.item(a.key))!
+    expect(it.estado).toBe("pendiente")
+    expect(it.fallosServidor ?? 0).toBe(0)
+  })
+
+  it("O10: con el tope de fallos alcanzado, forzar respeta el backoff (no golpea cada 15 s)", async () => {
+    const db = await dbNueva()
+    const srv = servidor({ fallar: () => 503 })
+    const { ob, reloj } = crear(db, srv.manejador)
+    await ob.encolar({ tipo: "t", payload: {} })
+    for (let i = 0; i < 30; i++) {
+      await ob.enviar({ forzar: true })
+      reloj.t += 6 * 60_000
+    }
+    await ob.enviar({ forzar: true }) // fallo 31: queda con backoff pendiente
+    const n = srv.requests
+    reloj.t += 15_000
+    await ob.enviar({ forzar: true })
+    reloj.t += 15_000
+    await ob.enviar({ forzar: true })
+    expect(srv.requests).toBe(n)
+  })
+
   it("O5: envíos concurrentes no duplican requests", async () => {
     const db = await dbNueva()
     const srv = servidor()

@@ -84,6 +84,26 @@ describe("Depósito · overlay de picking", () => {
     expect(calcularBonificados(10, v.pedidos_detalle).find((x) => x.id === "b")).toEqual({ id: "b", cantidad: 2, cambia: false })
   })
 
+  it("mercadería por cupo: cada cupo por separado, igual que el servidor (no el % único viejo)", () => {
+    // Cupo "seg:perf" 10 % sobre lo preparado del renglón 1 (10 × 100 = 1.000 → 100 → 100/50 = 2 u).
+    // El renglón 2 aporta a otro cupo sin bonificado elegido: no suma al primero.
+    // El % único del pedido (50) NO se usa cuando hay cupos.
+    const p = pedido({
+      bonif_mercaderia_pct: 50,
+      pedidos_detalle: [
+        det("1", 10, { precio_base: 100, bonif_merc_origen: "seg:perf", bonif_merc_pct: 10 }),
+        det("2", 5, { precio_base: 200, bonif_merc_origen: "prov:x", bonif_merc_pct: 5 }),
+        det("b", 0, { es_bonificado: true, precio_base: 50, bonif_merc_origen: "seg:perf" }),
+      ],
+    })
+    const v = vistaPedido(p, [
+      op("picking.item", { pedido_id: "p1", pedido_detalle_id: "1", cantidad_preparada: 10, es_faltante: false }),
+      op("picking.item", { pedido_id: "p1", pedido_detalle_id: "2", cantidad_preparada: 5, es_faltante: false }),
+    ])
+    const b = v.pedidos_detalle.find((d) => d.id === "b")!
+    expect([b.cantidad, b.cantidad_preparada, b.estado_item]).toEqual([2, 2, "COMPLETO"])
+  })
+
   it("sin % de bonificación no se toca lo que cargó el usuario", () => {
     const p = pedido({ pedidos_detalle: [det("1", 10), det("b", 3, { es_bonificado: true })] })
     const v = vistaPedido(p, [op("picking.item", { pedido_id: "p1", pedido_detalle_id: "1", cantidad_preparada: 10, es_faltante: false })])
@@ -138,6 +158,9 @@ describe("Depósito · overlay de recepción, stock y devoluciones", () => {
   it("una devolución confirmada en el equipo sale de la lista", () => {
     const devs: any[] = [{ id: "d1", created_at: "2" }, { id: "d2", created_at: "1" }]
     expect(devolucionesVisibles(devs, [op("devolucion.recibir", { devolucion_id: "d1", items_confirmados: [] })]).map((d) => d.id)).toEqual(["d2"])
+    // La revisión por renglón (v0.3.0) también la saca; una rechazada por el servidor no
+    expect(devolucionesVisibles(devs, [op("devolucion.revisar", { devolucion_id: "d2", renglones: [] })]).map((d) => d.id)).toEqual(["d1"])
+    expect(devolucionesVisibles(devs, [op("devolucion.revisar", { devolucion_id: "d2", renglones: [] }, "rechazado")]).map((d) => d.id)).toEqual(["d2", "d1"])
   })
 })
 

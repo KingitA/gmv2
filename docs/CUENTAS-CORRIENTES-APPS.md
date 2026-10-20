@@ -91,6 +91,8 @@ Documento vivo de traspaso para los agentes de las apps (vendedor, chofer, depó
 2. Agregar al outbox una operación nueva, por ejemplo `devolucion.revisar` con `renglones`, que llame a `revisarDevolucion`. Hay que mantener `devolucion.recibir` para las APK viejas.
 3. Respuesta de error: `409` si la devolución ya no está pendiente. El outbox lo tiene que tratar como "ya resuelta", no reintentar para siempre.
 
+**Hecho 20/10/2026 (APK Depósito v0.3.0).** Los tres puntos: la tarjeta de cada renglón queda igual y un "✏️ Editar" despliega aceptar/rechazar, cantidad aceptada y motivo; operación `devolucion.revisar { devolucion_id, renglones: [{ id, aceptar, cantidad_aceptada, es_vendible, motivo }] }` en `lib/mobile/outbox/deposito.ts`; el 409 `devolucion_no_pendiente` devuelve "ya resuelta" y saca la devolución de la lista. Detalle en MOBILE.md §17 "v0.3.0".
+
 ---
 
 ## Roles (etapa 2) — afecta a quién puede usar qué

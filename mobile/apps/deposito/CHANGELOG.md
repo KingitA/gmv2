@@ -3,6 +3,16 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.0 (versionCode 8) — 2026-10-20
+
+- Revision de devoluciones por renglon (Editar: cantidad aceptada, rechazar, motivo); mercaderia por cupo como el servidor; tope de reintentos del outbox (O10); reactivar articulos dados de baja
+
+## v0.2.4 (versionCode 7) — 2026-10-20
+
+- Build de DIAGNÓSTICO (DevTools abierto), instalado solo en el NuStar para sacar de la cola
+  3 operaciones del 18–22/09 que no podían aplicarse nunca (recepción "faltante" rechazada
+  por la base, ver migración 20261020d). Mismo código que `main`; no se distribuye.
+
 ## v0.2.3 (versionCode 6) — 2026-09-22
 
 - Foto del articulo en la ficha: el catalogo vuelve a bajar completo tras el cambio de version del dataset
