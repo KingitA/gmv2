@@ -135,12 +135,18 @@ export default function RecibirMercaderiaDetallePage() {
     }, 300)
   }, [])
 
+  // Si el servidor no guardó, tira: la pantalla NO debe mostrar un cambio que no quedó en la base
+  // (pasó con "Marcar faltante" hasta el 20/10/2026: decía "Marcado" y no se guardaba nada).
   const patchItem = async (articulo_id:string, cantidad_fisica:number) => {
     if (!recepcion) return
-    await fetch("/api/deposito/recepciones", {
+    const res = await fetch("/api/deposito/recepciones", {
       method:"PATCH", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ recepcion_id: recepcion.id, articulo_id, cantidad_fisica }),
     })
+    if (!res.ok) {
+      const body = await res.json().catch(()=>null)
+      throw new Error(body?.error || `No se guardó (error ${res.status})`)
+    }
   }
 
   const seleccionarDeBusqueda = (art:ArticuloFound) => {
@@ -188,7 +194,7 @@ export default function RecibirMercaderiaDetallePage() {
       })
       showToast(esFaltante?"Marcado como faltante":"✓ Guardado","ok")
       setArticuloSel(null); setItemActivo(null); setCantidadInput("")
-    } catch { showToast("Error al guardar","err") }
+    } catch (e:any) { showToast(e?.message || "Error al guardar","err") }
     finally { setSaving(false) }
   }
 
@@ -198,7 +204,8 @@ export default function RecibirMercaderiaDetallePage() {
       await patchItem(item.articulo_id, 0)
       setItems(prev=>prev.map(i=>i.articulo_id===item.articulo_id?{...i, cantidad_fisica:0, estado_linea:"faltante"}:i))
       showToast("Marcado como faltante","ok")
-    } finally { setSaving(false) }
+    } catch (e:any) { showToast(e?.message || "No se guardó","err") }
+    finally { setSaving(false) }
   }
 
   const devolverAPendiente = async (item:RecepcionItem) => {
@@ -207,7 +214,8 @@ export default function RecibirMercaderiaDetallePage() {
       await patchItem(item.articulo_id, -1)
       setItems(prev=>prev.map(i=>i.articulo_id===item.articulo_id?{...i, cantidad_fisica:0, estado_linea:"pendiente"}:i))
       showToast("Devuelto a pendientes","ok")
-    } finally { setSaving(false) }
+    } catch (e:any) { showToast(e?.message || "No se guardó","err") }
+    finally { setSaving(false) }
   }
 
   const [verDocumentos, setVerDocumentos] = useState(false)
