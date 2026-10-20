@@ -153,10 +153,12 @@ export class MatchingEngine {
                 .from('articulos_proveedores')
                 .select(`
                   articulo_id,
-                  articulos ( id, descripcion, sku )
+                  articulos!inner ( id, descripcion, sku, activo )
                 `)
                 .eq('proveedor_id', providerId)
                 .eq('descripcion_proveedor_norm', normDesc)
+                .eq('articulos.activo', true) // una equivalencia aprendida no revive un artículo dado de baja
+                .limit(1)
                 .maybeSingle();
 
             if (data && data.articulos) {

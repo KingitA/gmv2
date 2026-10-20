@@ -9,6 +9,7 @@ import { useArticulos, useCatalogos, useEncolar, useVistaArticulos } from "../..
 import { cmpOrdenDeposito, cmpSinCodigo, type ArticuloVista } from "../../datos/overlay"
 import { C, Marco, Rechazos, SinEnviar, useToast, useVolver } from "../../ui"
 import { PanelBuscar } from "../comunes/Buscar"
+import { useDadoDeBaja } from "../comunes/DadoDeBaja"
 import { useRecorrido } from "./recorrido"
 
 const DATASET = DS.articulos
@@ -38,6 +39,8 @@ export function Articulos() {
   const pickerCat = useOverlay("cat")
   const [filtroPicker, setFiltroPicker] = useState("")
   const [reinicio, setReinicio] = useState(0)
+  // Código de un artículo dado de baja ⇒ "¿Reactivarlo?"; reactivado y sincronizado, se abre
+  const baja = useDadoDeBaja(mostrar, (id) => navigate(`/articulos/${id}`))
 
   // Retomar donde quedó (la web hace lo mismo al recargar): solo al ENTRAR, no al volver
   useEffect(() => {
@@ -120,11 +123,13 @@ export function Articulos() {
         onElegir={(a) => abrir(a.id)}
         onCodigo={(c) => {
           const a = buscarPorCodigo(indice, c)[0]
-          if (!a) { lecturaError(); mostrar(`No se encontró el código ${c}`, "err"); return }
+          if (!a) { void baja.noEncontrado(c); return }
           lecturaOk()
           abrir(a.id)
         }}
+        dadoDeBaja={baja}
       />
+      {baja.hoja}
 
       <Hoja abierta={pickerProv.abierto} onCerrar={pickerProv.cerrar} titulo="Filtrar por Proveedor">
         <Picker filtro={filtroPicker} setFiltro={setFiltroPicker} placeholder="Buscar proveedor..." items={proveedores.map((p) => ({ id: p.id, nombre: p.nombre }))} activo={prov} onElegir={(id) => elegirFiltro("prov", id)} />

@@ -9,6 +9,7 @@ import type { LineaRecepcion, RecepcionVista } from "../../datos/overlay"
 import { BarraProgreso, C, Contadores, dejarAviso, DESCRIPCION, Marco, META, Rechazos, SinEnviar, TarjetaSwipe, TITULO_GRUPO, useAvisoEntrante, useToast, useVolver, Vacio } from "../../ui"
 import { FichaArticulo, useAbrirFicha, useFichaAbierta, type DatosFicha } from "../comunes/FichaArticulo"
 import { PanelBuscar } from "../comunes/Buscar"
+import { useDadoDeBaja } from "../comunes/DadoDeBaja"
 import { PanelCantidad } from "../comunes/Cantidad"
 
 const DATASET = DS.recepciones
@@ -98,6 +99,8 @@ function useAccionesRecepcion(r: RecepcionVista | null, mostrar: Mostrar) {
   const ops = useNoEnviados()
   const { indice } = useArticulos()
   const oc = r?.orden
+  // Código de un artículo dado de baja ⇒ "¿Reactivarlo?" (MOBILE.md §17)
+  const baja = useDadoDeBaja(mostrar)
 
   // Paridad con la web: entrar a la orden crea/retoma la recepción (la OC pasa a "recibida parcial")
   useEffect(() => {
@@ -124,18 +127,18 @@ function useAccionesRecepcion(r: RecepcionVista | null, mostrar: Mostrar) {
       const buscado = new Set([codigo, padEan13(codigo)])
       const deLaOC = r.lineas.find((l) => l.articulo && [...eansDe(l.articulo), l.articulo.codigo_bulto || ""].some((c) => c && (buscado.has(c) || buscado.has(padEan13(c)))))
       const id = deLaOC?.articulo_id ?? buscarPorCodigo(indice, codigo)[0]?.id
-      if (!id) { lecturaError(); mostrar(`No se encontró el código ${codigo}`, "err"); return null }
+      if (!id) { void baja.noEncontrado(codigo); return null }
       lecturaOk()
       return id
     },
-    [r, indice, mostrar],
+    [r, indice, mostrar, baja.noEncontrado],
   )
 
   const abrirItem = useCallback(
     (articuloId: string, opts: { replace?: boolean } = {}) => oc && navigate(`/recibir/${oc.id}/item/${articuloId}`, { replace: opts.replace }),
     [oc, navigate],
   )
-  return { contar, resolverCodigo, abrirItem }
+  return { contar, resolverCodigo, abrirItem, baja }
 }
 
 function OrdenNoDisponible({ cargando, finalizada }: { cargando: boolean; finalizada?: boolean }) {
@@ -283,7 +286,7 @@ export function Recepcion() {
   const { recepcion: r, cargando } = useRecepcion(id)
   const { toast, mostrar } = useToast()
   useAvisoEntrante(mostrar)
-  const { contar, resolverCodigo, abrirItem } = useAccionesRecepcion(r, mostrar)
+  const { contar, resolverCodigo, abrirItem, baja } = useAccionesRecepcion(r, mostrar)
   const finalizar = useFinalizarRecepcion(r, mostrar)
   const abrirFicha = useAbrirFicha()
   const fichaAbierta = useFichaAbierta()
@@ -356,6 +359,7 @@ export function Recepcion() {
         <div style={{ height: 16 }} />
       </div>
       <FichaArticulo respaldo={respaldoFicha} />
+      {baja.hoja}
 
       <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 12 }}>
         <button onClick={() => navigate(`/recibir/${r.orden.id}/buscar`)} style={{ flex: 2, background: C.white, color: C.text, fontWeight: 700, fontSize: 18, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
@@ -373,7 +377,7 @@ export function RecepcionBuscar() {
   const { id } = useParams()
   const { recepcion: r, cargando } = useRecepcion(id)
   const { toast, mostrar } = useToast()
-  const { resolverCodigo, abrirItem } = useAccionesRecepcion(r, mostrar)
+  const { resolverCodigo, abrirItem, baja } = useAccionesRecepcion(r, mostrar)
   const finalizar = useFinalizarRecepcion(r, mostrar)
   const volver = useVolver()
   if (!r || r.cierrePendiente) return <Marco titulo="Buscar artículo">{toast}<OrdenNoDisponible cargando={cargando} finalizada={r?.cierrePendiente} /></Marco>
@@ -399,7 +403,9 @@ export function RecepcionBuscar() {
         }}
         onElegir={(art) => abrirItem(art.id, { replace: true })}
         onCodigo={(c) => { const a = resolverCodigo(c); if (a) abrirItem(a, { replace: true }) }}
+        dadoDeBaja={baja}
       />
+      {baja.hoja}
       <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 10 }}>
         <button onClick={() => volver()} style={{ flex: 1, background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}` }}>📋 Lista</button>
         <button onClick={() => finalizar(2)} style={{ flex: 1, background: s.pendientes === 0 ? C.green : "#e5e7eb", color: s.pendientes === 0 ? "#fff" : C.light, fontWeight: 800, fontSize: 16, padding: "19px 0", borderRadius: 18, border: "none" }}>✅ Finalizar</button>
@@ -465,7 +471,7 @@ export function RecepcionFaltantes() {
   const { id } = useParams()
   const { recepcion: r, cargando } = useRecepcion(id)
   const { toast, mostrar } = useToast()
-  const { contar, resolverCodigo, abrirItem } = useAccionesRecepcion(r, mostrar)
+  const { contar, resolverCodigo, abrirItem, baja } = useAccionesRecepcion(r, mostrar)
   const volver = useVolver()
   const abrirFicha = useAbrirFicha()
   const respaldoFicha = useMemo(() => respaldoDe(r), [r])
@@ -487,6 +493,7 @@ export function RecepcionFaltantes() {
         <button onClick={() => volver()} style={{ width: "100%", background: C.white, color: C.text, fontWeight: 700, fontSize: 16, padding: 17, borderRadius: 18, border: `1.5px solid ${C.border}`, marginTop: 12 }}>← Volver a la lista</button>
       </div>
       <FichaArticulo respaldo={respaldoFicha} />
+      {baja.hoja}
     </Marco>
   )
 }

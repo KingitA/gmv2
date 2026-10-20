@@ -16,6 +16,7 @@ import {
   type CambiosArticulo,
   type TipoAjusteStock,
 } from "@/lib/deposito/articulos"
+import { cambiarEstadoArticulos } from "@/lib/articulos/estado"
 import { confirmarDevolucion, type ItemDevolucionConfirmado } from "@/lib/deposito/devoluciones"
 import { abrirPicking, aplicarPickingItem, cerrarPicking, ErrorDeposito } from "@/lib/deposito/picking"
 import { getUsuarioActual } from "@/lib/deposito/preparadores"
@@ -327,6 +328,28 @@ const articuloInexistente: HandlerDef<{ articulo_id: string }> = {
   },
 }
 
+/**
+ * Reactivar un artículo DADO DE BAJA desde la app (el operario escaneó/tipeó su código y
+ * la app le ofreció reactivarlo; ver GET /api/mobile/deposito/articulo-baja). Mismo camino
+ * que la web (lib/articulos/estado.ts): registra quién (usuario del dispositivo) y el
+ * origen "app_deposito" en el historial. Idempotente: si ya está activo no cambia nada.
+ * Devuelve el parche para que el artículo aparezca enseguida en la réplica del equipo.
+ */
+const articuloReactivar: HandlerDef<{ articulo_id: string }> = {
+  tipo: "articulo.reactivar",
+  roles: ROLES,
+  validar: (p) => (esId(p?.articulo_id) ? null : "Artículo inválido"),
+  async aplicar(ctx, m) {
+    const { data: art, error } = await ctx.admin.from("articulos").select("id, activo").eq("id", m.payload.articulo_id).maybeSingle()
+    if (error) throw error
+    if (!art) throw new RechazoNegocio("El artículo ya no existe: no se pudo reactivar.", "articulo_inexistente")
+    const cambiados = art.activo === false
+      ? await cambiarEstadoArticulos(ctx.admin, [art.id], true, ctx.sesion.user.id, "app_deposito")
+      : 0
+    return { reactivado: cambiados > 0, ya_estaba_activo: art.activo !== false, replica: [await parcheArticulo(ctx, art.id)] }
+  },
+}
+
 export const HANDLERS_DEPOSITO: HandlerDef[] = [
   pickingAbrir,
   pickingItem,
@@ -339,4 +362,5 @@ export const HANDLERS_DEPOSITO: HandlerDef[] = [
   stockAjustar,
   articuloDatos,
   articuloInexistente,
+  articuloReactivar,
 ]

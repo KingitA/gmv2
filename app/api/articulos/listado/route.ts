@@ -8,7 +8,7 @@ import { aplicarFiltros, calcularFacetas, ordenarPor, type DefColumna, type Filt
 
 // Listado de /articulos con filtros por encabezado (tipo Excel).
 //
-// POST { q?, filtros?, orden?: { col, dir }, proveedor?, fresco? }
+// POST { q?, filtros?, orden?: { col, dir }, proveedor?, fresco?, estado?: "activos"|"bajas"|"todos" }
 //  → { ids: string[] (TODOS, ya ordenados), total, facetas: { col: [{valor, etiqueta, cantidad}] } }
 //
 // Trae un índice liviano de los artículos activos (~2.000 filas, solo las
@@ -16,7 +16,7 @@ import { aplicarFiltros, calcularFacetas, ordenarPor, type DefColumna, type Filt
 // lista completa de ids ordenados. La página pagina de a 50 sin volver a llamar
 // y pide las columnas completas solo de la página visible.
 
-const INDICE = "id,descripcion,sku,ean13,unidades_por_bulto,proveedor_id,proveedor_nombre,marca_nombre,categoria,subcategoria,rubro,descuento_propio,segmento_precio,iva_compras,iva_ventas,precio_compra,porcentaje_ganancia,bonif_recargo,ultimo_costo,precio_base,precio_base_contado"
+const INDICE = "id,activo,descripcion,sku,ean13,unidades_por_bulto,proveedor_id,proveedor_nombre,marca_nombre,categoria,subcategoria,rubro,descuento_propio,segmento_precio,iva_compras,iva_ventas,precio_compra,porcentaje_ganancia,bonif_recargo,ultimo_costo,precio_base,precio_base_contado"
 
 type Fila = Record<string, any>
 
@@ -65,12 +65,13 @@ async function cargarIndice(sb: ReturnType<typeof createAdminClient>, fresco: bo
 }
 
 async function leerIndice(sb: ReturnType<typeof createAdminClient>): Promise<Fila[]> {
-    const { count } = await sb.from("articulos").select("id", { count: "exact", head: true }).eq("activo", true)
+    // Activos y dados de baja (el selector Activos / Dados de baja / Todos filtra en memoria)
+    const { count } = await sb.from("articulos").select("id", { count: "exact", head: true })
     const lote = 1000
     const n = Math.max(1, Math.ceil((count || 0) / lote))
     const partes = await Promise.all(
         Array.from({ length: n }, (_, i) =>
-            sb.from("articulos").select(INDICE).eq("activo", true).order("id").range(i * lote, (i + 1) * lote - 1),
+            sb.from("articulos").select(INDICE).order("id").range(i * lote, (i + 1) * lote - 1),
         ),
     )
     for (const p of partes) if (p.error) throw p.error
@@ -79,16 +80,17 @@ async function leerIndice(sb: ReturnType<typeof createAdminClient>): Promise<Fil
 
 // Ids que coinciden con el texto, en orden de relevancia: EAN exacto (escáner)
 // → ranking híbrido → todos los que contienen cada palabra (completitud).
-async function idsPorTexto(sb: ReturnType<typeof createAdminClient>, q: string): Promise<string[]> {
+async function idsPorTexto(sb: ReturnType<typeof createAdminClient>, q: string, incluirBajas: boolean): Promise<string[]> {
+    const soloActivos = (qb: any) => (incluirBajas ? qb : qb.eq("activo", true))
     if (/^\d{8,14}$/.test(q)) {
         const padded = padEan13(q)
         for (const code of padded !== q ? [padded, q] : [q]) {
-            const { data } = await sb.from("articulos").select("id").eq("activo", true).or(`ean13.cs.{"${code}"},codigo_bulto.eq.${code}`)
+            const { data } = await soloActivos(sb.from("articulos").select("id")).or(`ean13.cs.{"${code}"},codigo_bulto.eq.${code}`)
             if (data && data.length > 0) return data.map((r: any) => r.id)
         }
     }
     const toks = normalizeLocal(q).split(" ").filter((t) => t.length >= 2)
-    let lq = sb.from("articulos").select("id").eq("activo", true)
+    let lq = soloActivos(sb.from("articulos").select("id"))
     for (const t of toks) lq = lq.ilike("search_text", `%${t}%`)
     const [rank, lit] = await Promise.all([
         hybridSearchIds("articulos", q, 300),
@@ -114,15 +116,18 @@ export async function POST(request: NextRequest) {
         const ordenDir: "asc" | "desc" = body.orden?.dir === "desc" ? "desc" : "asc"
         const proveedor: string | null = body.proveedor || null
         const fresco = body.fresco === true
+        const estado: "activos" | "bajas" | "todos" = body.estado === "bajas" || body.estado === "todos" ? body.estado : "activos"
 
         const sb = createAdminClient()
         const [indice, idsTexto] = await Promise.all([
             cargarIndice(sb, fresco),
-            q.length >= 2 ? idsPorTexto(sb, q) : Promise.resolve(null),
+            q.length >= 2 ? idsPorTexto(sb, q, estado !== "activos") : Promise.resolve(null),
         ])
 
-        // Universo: activos (+ proveedor del selector de arriba) (+ texto, en orden de relevancia)
-        let filas: Fila[] = proveedor ? indice.filter((r) => r.proveedor_id === proveedor) : indice
+        // Universo: estado (activos / dados de baja / todos) + proveedor del selector de arriba
+        // + texto (en orden de relevancia)
+        let filas: Fila[] = indice.filter((r) => (estado === "todos" ? true : estado === "bajas" ? r.activo === false : r.activo !== false))
+        if (proveedor) filas = filas.filter((r) => r.proveedor_id === proveedor)
         if (idsTexto) {
             const pos = new Map(idsTexto.map((id, i) => [id, i]))
             filas = filas.filter((r) => pos.has(r.id)).sort((a, b) => pos.get(a.id)! - pos.get(b.id)!)

@@ -138,6 +138,8 @@ interface PreviewResult {
   articulos_sin_cambios: number
   cambios_totales: number
   diffs: DiffRow[]
+  /** SKUs del Excel que existen pero están DADOS DE BAJA: se actualizan sin reactivarlos */
+  articulos_dados_de_baja?: { sku: string; descripcion: string | null }[]
 }
 
 type Step = "upload" | "mapping" | "preview" | "done"
@@ -566,6 +568,21 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
                 <div className="text-xs text-muted-foreground">Sin cambios</div>
               </div>
             </div>
+
+            {!!preview.articulos_dados_de_baja?.length && (
+              <Alert className="mb-4 border-amber-300 bg-amber-50 text-amber-900">
+                <AlertDescription>
+                  <b>{preview.articulos_dados_de_baja.length} artículo{preview.articulos_dados_de_baja.length !== 1 ? "s" : ""} del archivo {preview.articulos_dados_de_baja.length !== 1 ? "están" : "está"} dado{preview.articulos_dados_de_baja.length !== 1 ? "s" : ""} de baja.</b>{" "}
+                  Se actualizan con los datos del Excel pero <b>siguen dados de baja</b> (para usarlos, reactivalos desde Artículos → Dados de baja).
+                  <div className="mt-1 max-h-24 overflow-y-auto text-xs">
+                    {preview.articulos_dados_de_baja.slice(0, 50).map((a) => (
+                      <div key={a.sku}><span className="font-mono">{a.sku}</span> {a.descripcion}</div>
+                    ))}
+                    {preview.articulos_dados_de_baja.length > 50 && <div>… y {preview.articulos_dados_de_baja.length - 50} más</div>}
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
 
             {preview.diffs.length === 0 ? (
               <Alert>

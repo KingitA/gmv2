@@ -161,7 +161,9 @@ export async function processEmailAsPriceChange(
                             if (item.code) {
                                 const { data: skuMatch } = await db.from('articulos')
                                     .select('id, descripcion, sku')
+                                    .eq('activo', true)
                                     .ilike('sku', item.code.trim())
+                                    .limit(1)
                                     .maybeSingle()
 
                                 if (skuMatch) {

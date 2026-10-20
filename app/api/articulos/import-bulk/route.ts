@@ -134,10 +134,12 @@ export async function POST(request: NextRequest) {
           id, sku, descripcion, ean13, unidades_por_bulto,
           precio_compra, porcentaje_ganancia, precio_base, precio_base_contado,
           precio_lista_especial, oferta_lista_especial,
-          descuento_propio, iva_compras, iva_ventas, cantidad_fraccion, marca_id
+          descuento_propio, iva_compras, iva_ventas, cantidad_fraccion, marca_id, activo
         `)
         .in("sku", chunk)
-        .eq("activo", true)
+        // Incluye DADOS DE BAJA: antes un SKU dado de baja parecía "nuevo", se intentaba
+        // crear y fallaba por SKU repetido. Decisión del dueño (20/10/2026): se actualiza
+        // SIN reactivarlo y se avisa (articulos_dados_de_baja / aviso por fila).
 
       for (const art of data || []) {
         articulosMap.set(art.sku.toUpperCase(), art)
@@ -260,6 +262,11 @@ export async function POST(request: NextRequest) {
       rowsParaActualizar.push({ row, articulo: existente })
     }
 
+    // Artículos del Excel que existen pero están DADOS DE BAJA (se actualizan, no se reactivan)
+    const dadosDeBaja = rowsParaActualizar
+      .filter((x) => x.articulo && x.articulo.activo === false)
+      .map((x) => ({ sku: x.articulo.sku as string, descripcion: (x.articulo.descripcion ?? null) as string | null }))
+
     if (dry_run) {
       const nuevos = [...new Set(diffs.filter(d => d.accion === "nuevo").map(d => d.sku))].length
       const actualizados = [...new Set(diffs.filter(d => d.accion === "actualizar").map(d => d.sku))].length
@@ -273,6 +280,7 @@ export async function POST(request: NextRequest) {
         articulos_sin_cambios: sinCambios,
         cambios_totales: diffs.length,
         diffs,
+        articulos_dados_de_baja: dadosDeBaja,
       })
     }
 
@@ -412,6 +420,7 @@ export async function POST(request: NextRequest) {
         status,
         cambios: ds.map(d => ({ campo: d.campo, actual: d.valor_actual, nuevo: d.valor_nuevo })),
         error: err,
+        aviso: articulo && articulo.activo === false ? "Dado de baja: se actualizó sin reactivarlo" : undefined,
       }
     })
 
@@ -432,6 +441,7 @@ export async function POST(request: NextRequest) {
       errores,
       errores_detalle: erroresDetalle,
       filas,
+      articulos_dados_de_baja: dadosDeBaja,
     })
   } catch (error: any) {
     console.error("[import-bulk] Error:", error)

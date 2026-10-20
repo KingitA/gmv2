@@ -1,10 +1,11 @@
-import { useEffect, useMemo, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { esQrOUrl, lecturaError, useLector, useParamEstado } from "@gm/core"
 import { ListaVirtual } from "@gm/core/ui"
 import type { Articulo } from "../../datasets"
-import { buscar, lineaInfo, sufijoMarca } from "../../datos/busqueda"
+import { buscar, hayActivoConCodigo, lineaInfo, pareceCodigo, sufijoMarca } from "../../datos/busqueda"
 import { useArticulos } from "../../datos/hooks"
 import { C, useCampoSinRafaga } from "../../ui"
+import { AvisoBaja, type ControlBaja, type ResultadoBaja } from "./DadoDeBaja"
 
 /**
  * Pantalla "Buscar artículo" (en la web: scannerOpen). El flujo MANUAL es de primera:
@@ -12,7 +13,7 @@ import { C, useCampoSinRafaga } from "../../ui"
  * La búsqueda corre sobre la réplica local (sin red) y el texto vive en ?q= (no
  * agrega historial: atrás sale de la pantalla).
  */
-export function PanelBuscar({ placeholder, vacio, decorar, onElegir, onCodigo, mostrar, filtrar, sinTexto, priorizar }: {
+export function PanelBuscar({ placeholder, vacio, decorar, onElegir, onCodigo, mostrar, filtrar, sinTexto, priorizar, dadoDeBaja }: {
   placeholder: string
   vacio: { icono: string; texto: ReactNode }
   /** Estado del artículo en el pedido/OC (color y leyenda) */
@@ -27,6 +28,8 @@ export function PanelBuscar({ placeholder, vacio, decorar, onElegir, onCodigo, m
   priorizar?: (a: Articulo) => boolean
   /** Qué listar cuando todavía no hay texto (ej. los artículos del filtro activo) */
   sinTexto?: Articulo[]
+  /** Lo tipeado es un código que no tiene ningún activo ⇒ preguntar si está dado de baja (MOBILE.md §17) */
+  dadoDeBaja?: ControlBaja
 }) {
   // El texto se tipea contra estado local (respuesta inmediata) y se refleja en ?q=
   // con un respiro: si el operario entra a un artículo y vuelve, la búsqueda sigue ahí.
@@ -47,6 +50,23 @@ export function PanelBuscar({ placeholder, vacio, decorar, onElegir, onCodigo, m
     if (priorizar) r = [...r].sort((x, y) => Number(priorizar(y)) - Number(priorizar(x)))
     return r.slice(0, 50)
   }, [indice, q, filtrar, sinTexto, priorizar])
+
+  // Código tipeado sin ningún activo con ese código exacto ⇒ ¿está dado de baja? (online-only)
+  const [baja, setBaja] = useState<{ codigo: string; r: ResultadoBaja } | null>(null)
+  const codigoTipeado = q.trim()
+  const consultarBaja = !!dadoDeBaja && !cargando && articulos.length > 0 && pareceCodigo(codigoTipeado) && !hayActivoConCodigo(indice, codigoTipeado)
+  const consultar = dadoDeBaja?.consultar
+  useEffect(() => {
+    if (!consultarBaja || !consultar) return
+    let vivo = true
+    const t = setTimeout(() => {
+      void consultar(codigoTipeado).then((r) => { if (vivo) setBaja({ codigo: codigoTipeado, r }) })
+    }, 600)
+    return () => { vivo = false; clearTimeout(t) }
+  }, [consultarBaja, consultar, codigoTipeado])
+  const avisoBaja = consultarBaja && baja?.codigo === codigoTipeado ? baja.r : null
+  // "Sin señal" solo se aclara cuando además no hay ningún resultado
+  const avisoVisible = avisoBaja?.tipo === "sin_senal" && resultados.length > 0 ? null : avisoBaja
 
   useLector({
     // El buscador tiene foco: igual se intercepta la ráfaga del lector (si no, el
@@ -77,6 +97,8 @@ export function PanelBuscar({ placeholder, vacio, decorar, onElegir, onCodigo, m
           )}
         </div>
       ) : (
+        <>
+        {dadoDeBaja && <AvisoBaja resultado={avisoVisible} onReactivar={dadoDeBaja.ofrecer} />}
         <ListaVirtual
           items={resultados}
           alto={104}
@@ -98,6 +120,7 @@ export function PanelBuscar({ placeholder, vacio, decorar, onElegir, onCodigo, m
             )
           }}
         />
+        </>
       )}
     </>
   )

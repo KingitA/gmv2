@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { hybridSearchIds } from "@/lib/search/hybrid"
+import { padEan13 } from "@/lib/utils/ean"
 import { ARTICULO_SELECT, mapArticuloVendedor } from "@/lib/vendedor/articulos-select"
 
 export const maxDuration = 60
@@ -34,7 +35,7 @@ async function buscarPorEan(supabase: any, ean: string) {
   const { data } = await supabase
     .from("articulos")
     .select(ARTICULO_SELECT)
-    .eq("ean13", limpio)
+    .or(`ean13.cs.{"${limpio}"},ean13.cs.{"${padEan13(limpio)}"},codigo_bulto.eq.${limpio}`) // ean13 es text[]
     .eq("activo", true).gt("precio_base", 0)
     .limit(5)
   return (data || []).map((a: any) => mapArticuloVendedor(a))

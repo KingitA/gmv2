@@ -102,6 +102,28 @@ export function buscar<T extends Buscable>(ix: Indice<T>, q0: string, limite = 5
   return hits.slice(0, limite).map((h) => h.a)
 }
 
+// ─── Artículos dados de baja (MOBILE.md §17) ─────────────────────────────────
+// La réplica solo trae artículos ACTIVOS: un código que no está acá puede ser de uno
+// dado de baja. Estas dos funciones deciden cuándo vale la pena preguntarle al servidor.
+
+/** Texto que parece un código (SKU, EAN, bulto): una sola "palabra", con algún dígito. */
+export function pareceCodigo(q: string): boolean {
+  const t = q.trim()
+  return /^[0-9A-Za-z._/-]{3,30}$/.test(t) && /\d/.test(t)
+}
+
+const sinCeros = (s: string) => (/^\d+$/.test(s) ? s.replace(/^0+(?=\d)/, "") : s.toUpperCase())
+
+/** ¿Algún artículo ACTIVO de la réplica tiene exactamente este código (EAN, bulto o SKU, con o sin ceros)? */
+export function hayActivoConCodigo<T extends Buscable>(ix: Indice<T>, codigo: string): boolean {
+  const c = codigo.trim()
+  if (!c) return false
+  if (buscarPorCodigo(ix, c).length) return true
+  const buscado = sinCeros(c)
+  for (const e of ix.entradas) if (e.a.sku && sinCeros(String(e.a.sku).trim()) === buscado) return true
+  return false
+}
+
 // ─── Texto de apoyo (igual que components/search/ArticuloResultRow del ERP) ──
 
 export function sufijoMarca(a: Buscable): string {

@@ -9,6 +9,7 @@ import { buscarArticulosDeposito, actualizarDatosArticulo, ajustarStock, getTipo
 import { opcionesCon, TIPOS_BULTO_DEFAULT } from "@/lib/catalogos/tipos-articulo"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { toast } from "sonner"
+import { AvisoDadoDeBaja, type ArticuloDadoDeBaja } from "@/components/deposito/aviso-dado-de-baja"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { scanOk, scanError } from "@/lib/utils/scan-feedback"
@@ -33,6 +34,9 @@ type TipoAjuste = "correccion" | "entrada" | "salida"
 export default function DepositoPage() {
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<Articulo[]>([])
+  // Código que no está entre los activos pero es de un artículo DADO DE BAJA → se ofrece reactivar
+  const [dadoDeBaja, setDadoDeBaja] = useState<ArticuloDadoDeBaja | null>(null)
+  const [refrescar, setRefrescar] = useState(0)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<Articulo | null>(null)
   const [editMode, setEditMode] = useState<"datos" | "stock" | null>(null)
@@ -58,10 +62,11 @@ export default function DepositoPage() {
       // La action devuelve { data, error } (antes se usaba el objeto como si fuera la lista)
       const res = await buscarArticulosDeposito(query)
       setResults((res.data || []) as Articulo[])
+      setDadoDeBaja(res.dadoDeBaja ?? null)
       setLoading(false)
     }, 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query])
+  }, [query, refrescar])
 
   const openArticulo = (art: Articulo) => {
     setSelected(art)
@@ -82,9 +87,13 @@ export default function DepositoPage() {
   const onScanCodigo = useCallback(async (code: string) => {
     setQuery(code)
     try {
-      const data = ((await buscarArticulosDeposito(code)).data || []) as Articulo[]
+      const res = await buscarArticulosDeposito(code)
+      const data = (res.data || []) as Articulo[]
+      setDadoDeBaja(res.dadoDeBaja ?? null)
       if (data && data.length > 0) {
         scanOk(); setResults(data); openArticulo(data[0])
+      } else if (res.dadoDeBaja) {
+        scanError(); toast.warning(`El código ${code} es de un artículo dado de baja`)
       } else {
         scanError(); toast.error(`No se encontró el código ${code}`)
       }
@@ -171,7 +180,13 @@ export default function DepositoPage() {
           </div>
         )}
 
-        {!loading && results.length === 0 && query && (
+        {!loading && results.length === 0 && query && dadoDeBaja && (
+          <div className="py-4">
+            <AvisoDadoDeBaja articulo={dadoDeBaja} onReactivado={() => { setDadoDeBaja(null); setRefrescar((n) => n + 1) }} />
+          </div>
+        )}
+
+        {!loading && results.length === 0 && query && !dadoDeBaja && (
           <div className="text-center py-12 text-slate-400">
             <Package className="h-12 w-12 mx-auto mb-2 opacity-30"/>
             <p>Sin resultados para &quot;{query}&quot;</p>
