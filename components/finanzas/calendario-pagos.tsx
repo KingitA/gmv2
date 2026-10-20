@@ -11,7 +11,8 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
-import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react"
+import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil, ChevronDown, ChevronRight, ChevronLeft, SlidersHorizontal } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "sonner"
 import { ChequesEmitidosDialog, type PrefillEmitidos } from "@/components/finanzas/cheques-emitidos-dialog"
 import { FormVencimientoDialog } from "@/components/finanzas/form-vencimiento"
@@ -193,6 +194,15 @@ export function CalendarioPagos({
 
     // En vivo: vencimientos cargados/pagados/movidos por otro usuario, cheques que entran o salen
     useRealtime(showCheques ? ["vencimientos", "cheques"] : ["vencimientos"], load)
+
+    // Cuántos filtros cambiaron respecto de lo normal (para el numerito del botón)
+    const filtrosActivos =
+        tiposActivos.size +
+        (formasActivas.size < Object.keys(FORMAS).length ? 1 : 0) +
+        (filtroModalidad !== "todas" ? 1 : 0) +
+        (verSaldados ? 1 : 0) +
+        (showCheques && verCheques ? 1 : 0) +
+        (showCheques && !verEmitidos ? 1 : 0)
 
     // ── Derivados ──────────────────────────────────────────────────────────
     const pasaFiltros = useCallback(
@@ -636,83 +646,81 @@ export function CalendarioPagos({
 
     return (
         <div className="space-y-4">
-            {/* Tipo de pago (solo FINANZAS) */}
-            {conTipos && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                    <button type="button" onClick={() => setTiposActivos(new Set())}
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${tiposActivos.size === 0 ? "border-azul-300 bg-azul-50 text-azul-700" : "border-neutro-200 bg-white text-neutro-600 hover:bg-neutro-50"}`}>
-                        Todo
-                    </button>
-                    {GRUPOS_TIPO.filter((g) => !g.soloAdmin || soyAdmin).map((g) => (
-                        <button key={g.key} type="button" onClick={() => toggleTipo(g.key)}
-                            className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${tiposActivos.has(g.key) ? "border-azul-300 bg-azul-50 text-azul-700" : "border-neutro-200 bg-white text-neutro-600 hover:bg-neutro-50"}`}>
-                            {g.label}
-                        </button>
-                    ))}
-                </div>
-            )}
-            {/* Filtros + alta */}
+            {/* Barra única: vista, filtros (en un desplegable para no ocupar lugar) y alta */}
             <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mr-1">
-                    Forma de pago
-                </span>
-                {Object.entries(FORMAS).map(([k, f]) => (
-                    <button
-                        key={k}
-                        onClick={() => toggleForma(k)}
-                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${formasActivas.has(k) ? "bg-white shadow-sm" : "opacity-40 line-through"}`}
-                        style={{ borderColor: f.color, color: f.color }}
-                    >
-                        <span className="h-2 w-2 rounded-full" style={{ background: f.color }} />
-                        {f.label}
-                    </button>
-                ))}
-                <Select value={filtroModalidad} onValueChange={setFiltroModalidad}>
-                    <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="todas">Depósito y entrega</SelectItem>
-                        <SelectItem value="deposito">Solo depósito</SelectItem>
-                        <SelectItem value="entrega">Solo entrega</SelectItem>
-                    </SelectContent>
-                </Select>
-                <button
-                    onClick={() => setVerSaldados((v) => !v)}
-                    className={`flex items-center gap-1.5 rounded-full border border-slate-400 px-3 py-1 text-xs font-semibold text-slate-600 transition-all ${verSaldados ? "bg-slate-100 shadow-sm" : "opacity-40"}`}
-                >
-                    <CheckCircle2 className="h-3 w-3" />
-                    Saldados
-                </button>
-                {showCheques && (
-                    <>
-                        <button
-                            onClick={() => setVerCheques((v) => !v)}
-                            className={`flex items-center gap-1.5 rounded-full border border-emerald-600 px-3 py-1 text-xs font-semibold text-emerald-700 transition-all ${verCheques ? "bg-emerald-50" : "opacity-40 line-through"}`}
-                        >
-                            <span className="h-2 w-2 rounded-sm bg-emerald-600" />
-                            Cheques en cartera
-                        </button>
-                        <button
-                            onClick={() => setVerEmitidos((v) => !v)}
-                            className={`flex items-center gap-1.5 rounded-full border border-red-500 px-3 py-1 text-xs font-semibold text-red-600 transition-all ${verEmitidos ? "bg-red-50" : "opacity-40 line-through"}`}
-                        >
-                            <span className="h-2 w-2 rounded-sm bg-red-500" />
-                            Cheques emitidos
-                        </button>
-                    </>
-                )}
                 {conSemana && (
-                    <div className="inline-flex rounded-lg border bg-white p-0.5" role="group" aria-label="Vista del calendario">
+                    <div className="inline-flex rounded-lg bg-neutro-100 p-0.5" role="group" aria-label="Vista del calendario">
                         {(["semana", "mes"] as const).map((m) => (
                             <button key={m} type="button" aria-pressed={vista === m}
                                 onClick={() => url.set({ cal: m }, "replace", { cal: "semana" })}
-                                className={`rounded-md px-3 py-1 text-[13px] font-semibold ${vista === m ? "bg-azul-600 text-white" : "text-neutro-600 hover:bg-neutro-100"}`}>
+                                className={`rounded-md px-3 py-1 text-[13px] font-semibold ${vista === m ? "bg-white text-azul-700 shadow-sm" : "text-neutro-500 hover:text-neutro-800"}`}>
                                 {m === "semana" ? "Semana" : "Meses"}
                             </button>
                         ))}
                     </div>
                 )}
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-8 gap-1.5">
+                            <SlidersHorizontal className="h-4 w-4" />Filtros
+                            {filtrosActivos > 0 && <span className="rounded-full bg-azul-600 px-1.5 text-[11px] font-bold text-white">{filtrosActivos}</span>}
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-[340px] space-y-3 p-4">
+                        {conTipos && (
+                            <div>
+                                <p className="mb-1.5 text-xs font-semibold text-neutro-500">Tipo</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {GRUPOS_TIPO.filter((g) => !g.soloAdmin || soyAdmin).map((g) => (
+                                        <button key={g.key} type="button" onClick={() => toggleTipo(g.key)}
+                                            className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${tiposActivos.has(g.key) ? "border-azul-300 bg-azul-50 text-azul-700" : "border-neutro-200 text-neutro-600 hover:bg-neutro-50"}`}>
+                                            {g.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        <div>
+                            <p className="mb-1.5 text-xs font-semibold text-neutro-500">Forma de pago</p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {Object.entries(FORMAS).map(([k, fo]) => (
+                                    <button key={k} type="button" onClick={() => toggleForma(k)}
+                                        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${formasActivas.has(k) ? "border-neutro-300 bg-white text-neutro-800" : "border-neutro-200 text-neutro-400 line-through"}`}>
+                                        <span className="h-2 w-2 rounded-full" style={{ background: fo.color }} />{fo.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <p className="mb-1.5 text-xs font-semibold text-neutro-500">Cómo se paga</p>
+                            <Select value={filtroModalidad} onValueChange={setFiltroModalidad}>
+                                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="todas">Depósito y entrega</SelectItem>
+                                    <SelectItem value="deposito">Solo depósito</SelectItem>
+                                    <SelectItem value="entrega">Solo entrega en caja</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-1.5 border-t border-neutro-100 pt-3 text-[13px]">
+                            <label className="flex cursor-pointer items-center gap-2"><input type="checkbox" className="size-4 accent-azul-600" checked={verSaldados} onChange={() => setVerSaldados((v) => !v)} />Ver los ya pagados</label>
+                            {showCheques && (
+                                <>
+                                    <label className="flex cursor-pointer items-center gap-2"><input type="checkbox" className="size-4 accent-azul-600" checked={verCheques} onChange={() => setVerCheques((v) => !v)} />Cheques en cartera que vencen</label>
+                                    <label className="flex cursor-pointer items-center gap-2"><input type="checkbox" className="size-4 accent-azul-600" checked={verEmitidos} onChange={() => setVerEmitidos((v) => !v)} />Cheques propios que pueden debitar</label>
+                                </>
+                            )}
+                        </div>
+                        {filtrosActivos > 0 && (
+                            <button type="button" className="text-xs font-semibold text-azul-600 hover:underline"
+                                onClick={() => { setTiposActivos(new Set()); setFormasActivas(new Set(Object.keys(FORMAS))); setFiltroModalidad("todas"); setVerSaldados(false); setVerCheques(false); setVerEmitidos(true) }}>
+                                Quitar filtros
+                            </button>
+                        )}
+                    </PopoverContent>
+                </Popover>
                 <div className="ml-auto">
-                    <Button size="sm" className="gap-1" onClick={() => { resetForm(); setDialogOpen(true) }}><Plus className="h-4 w-4" /> Nuevo pago</Button>
+                    <Button size="sm" className="h-8 gap-1" onClick={() => { resetForm(); setDialogOpen(true) }}><Plus className="h-4 w-4" /> Nuevo pago</Button>
                     {/* Formulario único de vencimientos (alta y edición) */}
                     <FormVencimientoDialog
                         open={dialogOpen}
@@ -752,12 +760,11 @@ export function CalendarioPagos({
                             <div className="grid grid-cols-1 gap-1 md:grid-cols-7">
                                 {diasSemana.map((k) => celdaDia(k))}
                             </div>
-                            {visibles.some((v) => v.fecha_vencimiento < diasSemana[0]) && (
+                            {lateral !== "atrasados" && visibles.some((v) => v.fecha_vencimiento < diasSemana[0]) && (
                                 <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
                                     Hay pagos pendientes de semanas anteriores: pasá a <button type="button" className="font-semibold underline" onClick={() => url.set({ cal: "mes" }, "replace", { cal: "semana" })}>Meses</button> para verlos.
                                 </p>
                             )}
-                            <p className="mt-2 hidden text-[11px] text-muted-foreground md:block">Arrastrá un pago a otro día para cambiarle la fecha.</p>
                         </section>
                     ) : meses.length === 0 ? (
                         <div className="rounded-xl border bg-white p-10 text-center text-sm text-muted-foreground">
@@ -994,14 +1001,6 @@ export function CalendarioPagos({
                         )}
                     </div>
                     )}
-                    <div className="rounded-xl border bg-white p-3 text-[11px] leading-relaxed text-muted-foreground shadow-sm">
-                        <p>
-                            Total visible con estos filtros: <b className="font-mono">{formatCurrency(totalVisible)}</b>.
-                            El <AlertTriangle className="inline h-3 w-3 text-amber-500" /> marca pagos <b>sin descuentos aplicados</b> (chequear NC / retenciones).
-                            <Landmark className="ml-1 inline h-3 w-3" /> = depósito · <HandCoins className="inline h-3 w-3" /> = entrega en caja.
-                            {showCheques && <> Verde punteado = <b>cheques en cartera</b> que vencen ese día · rojo punteado = <b>cheques emitidos</b> cobrables desde ese día (30 días de ventana).</>}
-                        </p>
-                    </div>
                 </div>
             </div>
 

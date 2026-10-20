@@ -390,15 +390,10 @@ function ChequesContenido() {
   const visibles = filtrados.slice(0, limite)
 
   return (
-    <div className="mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6">
+    <div className="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-6">
       {/* ─── Encabezado ─── */}
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Cheques</h1>
-          <p className="text-sm text-neutro-500">
-            Cartera de terceros, depósitos, acreditaciones y cheques propios emitidos
-          </p>
-        </div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold tracking-tight text-azul-900">Cheques</h1>
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => setManualOpen(true)}>
             <Plus className="h-4 w-4" /> Cargar cheque
@@ -416,11 +411,7 @@ function ChequesContenido() {
       </div>
 
       {/* ─── Resumen de cartera ─── */}
-      <div className="mb-4 rounded-2xl border border-neutro-200 bg-white p-4">
-        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-base font-semibold text-azul-900">Cartera de terceros por vencimiento</h2>
-          <span className="text-xs text-neutro-500">Tocá un importe para ver esos cheques abajo</span>
-        </div>
+      <div className="mb-3 rounded-2xl border border-neutro-200 bg-white px-3 py-2">
         {loading && cheques.length === 0 ? (
           <CargaProgreso compacto mensajes={MENSAJES.finanzas} className="mx-auto max-w-sm py-4" />
         ) : (
@@ -428,7 +419,7 @@ function ChequesContenido() {
             <table className="w-full min-w-[720px] border-separate border-spacing-0 text-sm">
               <thead>
                 <tr>
-                  <th className="px-2 py-1.5 text-left text-[13px] font-semibold normal-case text-neutro-600">Cartera</th>
+                  <th className="px-2 py-1.5 text-left text-[13px] font-semibold normal-case text-neutro-600">En cartera</th>
                   {(Object.keys(rangos) as BucketId[]).map((b) => (
                     <th
                       key={b}
@@ -448,7 +439,7 @@ function ChequesContenido() {
                   const esTotal = cart === "TOTAL"
                   return (
                     <tr key={cart} className={cn(esTotal && "bg-neutro-50")}>
-                      <td className={cn("px-2 py-1.5 font-semibold normal-case text-azul-900", esTotal && "border-t border-neutro-200")}>
+                      <td className={cn("px-2 py-0.5 font-semibold normal-case text-azul-900", esTotal && "border-t border-neutro-200")}>
                         {esTotal ? "Total" : <CarteraBadge cartera={cart} />}
                       </td>
                       {(Object.keys(rangos) as BucketId[]).map((b) => {
@@ -457,7 +448,7 @@ function ChequesContenido() {
                           <td
                             key={b}
                             className={cn(
-                              "px-1 py-1 text-right",
+                              "px-1 py-0.5 text-right",
                               esTotal && "border-t border-neutro-200",
                               b === "total" && "border-l border-neutro-200"
                             )}
@@ -468,16 +459,13 @@ function ChequesContenido() {
                               onClick={() => aplicarCelda(cart, b)}
                               title={`${celda.n} cheque${celda.n === 1 ? "" : "s"} · ${rangos[b].ayuda}`}
                               className={cn(
-                                "w-full rounded-lg px-2 py-1 text-right tabular-nums transition-colors",
+                                "w-full rounded-lg px-2 py-0.5 text-right tabular-nums transition-colors",
                                 celda.n === 0 ? "cursor-default text-neutro-300" : "hover:bg-azul-50",
                                 (esTotal || b === "total") && celda.n > 0 && "font-bold text-azul-900",
                                 b === "aldia" && celda.n > 0 && !esTotal && "text-exito-700"
                               )}
                             >
-                              <span className="block">{moneda(celda.monto)}</span>
-                              <span className="block text-[11px] font-normal text-neutro-500">
-                                {celda.n} {celda.n === 1 ? "cheque" : "cheques"}
-                              </span>
+                              {celda.n === 0 ? "—" : moneda(celda.monto, 0)}
                             </button>
                           </td>
                         )
@@ -489,29 +477,31 @@ function ChequesContenido() {
             </table>
           </div>
         )}
-        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t border-neutro-100 pt-2 text-xs text-neutro-600">
-          <button
-            type="button"
-            className="hover:underline"
-            onClick={() => setF({ estado: "EN_VERIFICACION", tipo: null, cartera: null, ven_d: null, ven_h: null })}
-          >
-            En verificación (no cuentan como cartera): <b>{resumen.verificacion.n}</b> · {moneda(resumen.verificacion.monto)}
-          </button>
-          <button
-            type="button"
-            className="hover:underline"
-            onClick={() => setF({ estado: "DEPOSITADO", tipo: null, cartera: null, ven_d: null, ven_h: null })}
-          >
-            Depositados sin acreditar: <b>{resumen.depositados.n}</b> · {moneda(resumen.depositados.monto)}
-          </button>
-          <button
-            type="button"
-            className="hover:underline"
-            onClick={() => setF({ estado: "ENTREGADO_A_PROVEEDOR", tipo: "propios", cartera: null, ven_d: null, ven_h: null })}
-          >
-            Propios emitidos sin debitar: <b>{resumen.propios.n}</b> · {moneda(resumen.propios.monto)}
-          </button>
-        </div>
+        {(resumen.verificacion.n > 0 || resumen.depositados.n > 0 || resumen.propios.n > 0) && (
+          <div className="mt-1 flex flex-wrap gap-1.5 border-t border-neutro-100 pt-1.5 text-xs">
+            {resumen.verificacion.n > 0 && (
+              <button type="button" title="Cheques de cobros sin confirmar: no cuentan como cartera"
+                className="rounded-full border border-neutro-200 px-2.5 py-0.5 text-neutro-600 hover:bg-neutro-50"
+                onClick={() => setF({ estado: "EN_VERIFICACION", tipo: null, cartera: null, ven_d: null, ven_h: null })}>
+                En verificación <b className="text-neutro-800">{moneda(resumen.verificacion.monto, 0)}</b>
+              </button>
+            )}
+            {resumen.depositados.n > 0 && (
+              <button type="button" title="Depositados que todavía no se acreditaron"
+                className="rounded-full border border-neutro-200 px-2.5 py-0.5 text-neutro-600 hover:bg-neutro-50"
+                onClick={() => setF({ estado: "DEPOSITADO", tipo: null, cartera: null, ven_d: null, ven_h: null })}>
+                Depositados <b className="text-neutro-800">{moneda(resumen.depositados.monto, 0)}</b>
+              </button>
+            )}
+            {resumen.propios.n > 0 && (
+              <button type="button" title="Cheques propios entregados que todavía no se debitaron"
+                className="rounded-full border border-neutro-200 px-2.5 py-0.5 text-neutro-600 hover:bg-neutro-50"
+                onClick={() => setF({ estado: "ENTREGADO_A_PROVEEDOR", tipo: "propios", cartera: null, ven_d: null, ven_h: null })}>
+                Propios a debitar <b className="text-neutro-800">{moneda(resumen.propios.monto, 0)}</b>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ─── Filtros ─── */}
@@ -682,14 +672,8 @@ function ChequesContenido() {
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 px-1">
         <p className="text-sm text-neutro-600">
           <b className="text-azul-900">{filtrados.length}</b> {filtrados.length === 1 ? "cheque" : "cheques"} ·{" "}
-          <b className="tabular-nums text-azul-900">{moneda(totalFiltrado)}</b>
+          <b className="tabular-nums text-azul-900">{moneda(totalFiltrado, 0)}</b>
         </p>
-        {estados.includes("EN_VERIFICACION") && (
-          <p className="text-xs text-neutro-500">
-            En verificación = cheques de cobros sin confirmar (los tiene el vendedor o el chofer, o esperan el control de
-            la oficina). No cuentan como cartera; pasan a cartera solos cuando se confirma el cobro.
-          </p>
-        )}
       </div>
 
       {/* ─── Listado ─── */}

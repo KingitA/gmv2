@@ -157,38 +157,33 @@ export default function FinanzasPage() {
 
   // ── Piezas ────────────────────────────────────────────────────────────────
   const FilaCuenta = ({ c }: { c: Cuenta }) => {
-    const k = claveCuenta(c)
-    const incluida = !excluidas.has(k)
-    const aj = extra.ultimos_ajustes[k]
+    const aj = extra.ultimos_ajustes[claveCuenta(c)]
     return (
-      <div className="group flex items-center gap-2 py-1">
-        <input type="checkbox" checked={incluida} title="Entra en «¿Llego a pagar?»"
-          onChange={() => setExcluidas(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })}
-          className="size-3.5 shrink-0 accent-azul-600" />
-        <span className={cn("min-w-0 flex-1 truncate text-[13px]", incluida ? "text-neutro-700" : "text-neutro-400 line-through")}>{c.nombre}</span>
-        <button type="button" onClick={() => setCuentaEdit(c)}
-          title={aj ? `Último cambio: ${aj.usuario ?? "—"}, ${cuandoFue(aj.fecha)}${aj.motivo ? ` · ${aj.motivo}` : ""}\nTocá para cambiar el saldo` : "Tocá para cambiar el saldo"}
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[13px] font-semibold tabular-nums text-neutro-900 hover:bg-azul-50 hover:text-azul-700">
-          {moneda(saldoDe(c), 0)}
-          <Pencil className="h-3 w-3 text-neutro-300 group-hover:text-azul-500" />
-        </button>
-      </div>
+      <button type="button" onClick={() => setCuentaEdit(c)}
+        title={`Tocá para cambiar el saldo${aj ? `\nÚltimo cambio: ${aj.usuario ?? "—"}, ${cuandoFue(aj.fecha)}${aj.motivo ? ` · ${aj.motivo}` : ""}` : ""}`}
+        className="group flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left text-[13px] hover:bg-azul-50">
+        <span className="min-w-0 flex-1 truncate text-neutro-600">{c.nombre}</span>
+        <span className="font-semibold tabular-nums text-neutro-900 group-hover:text-azul-700">{moneda(saldoDe(c), 0)}</span>
+        <Pencil className="h-3 w-3 shrink-0 text-transparent group-hover:text-azul-500" />
+      </button>
     )
   }
 
-  const Grande = ({ titulo, valor, children, nota }: { titulo: string; valor: number; children?: React.ReactNode; nota?: React.ReactNode }) => (
-    <div className="min-w-0 rounded-2xl border border-neutro-200 bg-white p-4">
-      <div className="text-[13px] font-semibold text-neutro-500">{titulo}</div>
-      <div className="mt-0.5 text-[28px] font-extrabold leading-tight tracking-tight text-azul-900 tabular-nums">{loading ? "—" : moneda(valor, 0)}</div>
-      {nota && <div className="text-xs text-neutro-400">{nota}</div>}
-      {children && <div className="mt-2 border-t border-neutro-100 pt-2">{children}</div>}
+  const Saldo = ({ titulo, valor, extraTitulo, children, title }: { titulo: string; valor: number; extraTitulo?: React.ReactNode; children?: React.ReactNode; title?: string }) => (
+    <div className="min-w-0 rounded-xl border border-neutro-200 bg-white px-3.5 py-3" title={title}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-semibold text-neutro-500">{titulo}</span>
+        {extraTitulo}
+      </div>
+      <div className="text-[22px] font-extrabold leading-tight tracking-tight text-azul-900 tabular-nums">{loading ? "—" : moneda(valor, 0)}</div>
+      {children && <div className="mt-1.5 space-y-0">{children}</div>}
     </div>
   )
 
   const Tramo = ({ label, monto }: { label: string; monto: number }) => (
-    <div className="flex items-center justify-between py-1 text-[13px]">
+    <div className="flex items-center justify-between px-1 py-0.5 text-[13px]">
       <span className="text-neutro-600">{label}</span>
-      <span className="font-semibold tabular-nums text-neutro-900">{moneda(monto, 0)}</span>
+      <span className={cn("font-semibold tabular-nums", monto ? "text-neutro-900" : "text-neutro-300")}>{monto ? moneda(monto, 0) : "—"}</span>
     </div>
   )
 
@@ -211,72 +206,48 @@ export default function FinanzasPage() {
   )
 
   return (
-    <div className="mx-auto w-full max-w-[1700px] space-y-5 px-4 py-5 sm:px-6">
+    <div className="mx-auto w-full max-w-[1700px] space-y-4 px-4 py-4 sm:px-6">
       {/* ── Encabezado ── */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Panel de Finanzas</h1>
-          <p className="text-sm text-neutro-500">Lo que hay, lo que hay que pagar y si alcanza</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="mr-2 text-2xl font-bold tracking-tight text-azul-900">Finanzas</h1>
+        {extra.cobros_por_verificar.cantidad > 0 && (
+          <Link href="/caja" className="inline-flex items-center gap-1.5 rounded-full border border-ambar-200 bg-ambar-50 px-3 py-1 text-[13px] font-semibold text-ambar-800 hover:bg-ambar-100">
+            {extra.cobros_por_verificar.cantidad} cobro{extra.cobros_por_verificar.cantidad === 1 ? "" : "s"} por verificar en Caja · {moneda(extra.cobros_por_verificar.monto, 0)}
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setGraficoOpen(true)}
+            title={ultimoCambio ? `Último cambio de saldos: ${ultimoCambio.usuario ?? "—"}, ${cuandoFue(ultimoCambio.fecha)}` : undefined}>
+            <IconoGrafico className="h-4 w-4" />Ver gráfico
+          </Button>
+          <Button size="sm" className="h-9 gap-1.5" onClick={() => setNuevoGastoOpen(true)}><Plus className="h-4 w-4" />Nuevo gasto</Button>
         </div>
-        <Button onClick={() => setNuevoGastoOpen(true)} className="gap-1.5"><Plus className="h-4 w-4" />Nuevo gasto</Button>
       </div>
 
-      {extra.cobros_por_verificar.cantidad > 0 && (
-        <Link href="/caja" className="flex items-center gap-2 rounded-xl border border-ambar-200 bg-ambar-50 px-4 py-2.5 text-sm text-ambar-800 hover:bg-ambar-100">
-          <b>{extra.cobros_por_verificar.cantidad} cobro{extra.cobros_por_verificar.cantidad === 1 ? "" : "s"} por verificar en Caja</b>
-          <span>· {moneda(extra.cobros_por_verificar.monto, 0)}</span>
-          <ArrowRight className="ml-auto h-4 w-4" />
-        </Link>
-      )}
+      {/* ── Lo que hay (tocá un saldo para cambiarlo) ── */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Saldo titulo="Efectivo" valor={suma(efectivo)}>
+          {efectivo.map(c => <FilaCuenta key={claveCuenta(c)} c={c} />)}
+        </Saldo>
+        <Saldo titulo="Bancos" valor={suma(bancos)}>
+          {bancos.map(c => <FilaCuenta key={claveCuenta(c)} c={c} />)}
+        </Saldo>
+        <Saldo titulo="Cheques en cartera" valor={tramos.total}
+          extraTitulo={<Link href="/finanzas/cheques" className="text-xs font-semibold text-azul-600 hover:underline">Ver</Link>}>
+          <Tramo label="Al día" monto={tramos.alDia} />
+          <Tramo label="Próximos 30 días" monto={tramos.a30} />
+          <Tramo label="31 a 60 días" monto={tramos.a60} />
+          <Tramo label="Más de 60 días" monto={tramos.mas60} />
+        </Saldo>
+        <Saldo titulo="Bolsa" valor={suma(bolsa)} title="Rescate en 24-48 h · no suma al disponible"
+          extraTitulo={<button type="button" onClick={() => setBolsaAbierta(a => !a)} className="text-xs font-semibold text-azul-600 hover:underline">{bolsaAbierta ? "Ocultar" : "Cambiar"}</button>}>
+          {bolsaAbierta && bolsa.map(c => <FilaCuenta key={claveCuenta(c)} c={c} />)}
+        </Saldo>
+      </div>
 
-      {/* ── Lo que hay ── */}
-      <section>
-        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <h2 className="text-lg font-bold tracking-tight text-azul-900">Lo que hay</h2>
-          <span className="text-xs text-neutro-400">
-            Saldos cargados a mano · tocá un saldo para cambiarlo
-            {ultimoCambio && <> · último cambio: <b className="font-semibold text-neutro-600">{ultimoCambio.usuario ?? "—"}</b>, {cuandoFue(ultimoCambio.fecha)}</>}
-          </span>
-          <button type="button" onClick={() => setGraficoOpen(true)} className="ml-auto inline-flex items-center gap-1.5 text-sm font-semibold text-azul-600 hover:underline">
-            <IconoGrafico className="h-4 w-4" />Ver gráfico
-          </button>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Grande titulo="Efectivo" valor={suma(efectivo)}>
-            {efectivo.map(c => <FilaCuenta key={claveCuenta(c)} c={c} />)}
-          </Grande>
-          <Grande titulo="Bancos" valor={suma(bancos)}>
-            {bancos.map(c => <FilaCuenta key={claveCuenta(c)} c={c} />)}
-          </Grande>
-          <Grande titulo="Cheques en cartera" valor={tramos.total} nota={`${tramos.cantidad} cheque${tramos.cantidad === 1 ? "" : "s"} de terceros`}>
-            <Tramo label="Al día" monto={tramos.alDia} />
-            <Tramo label="Próximos 30 días" monto={tramos.a30} />
-            <Tramo label="De 31 a 60 días" monto={tramos.a60} />
-            <Tramo label="Más de 60 días" monto={tramos.mas60} />
-            <Link href="/finanzas/cheques" className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-azul-600 hover:underline">Ver cheques <ArrowRight className="h-3 w-3" /></Link>
-          </Grande>
-          <Grande titulo="Bolsa" valor={suma(bolsa)} nota="Rescate en 24-48 h · no suma al disponible">
-            <button type="button" onClick={() => setBolsaAbierta(a => !a)} className="text-xs font-semibold text-azul-600 hover:underline">
-              {bolsaAbierta ? "Ocultar cuentas" : "Cambiar un saldo"}
-            </button>
-            {bolsaAbierta && bolsa.map(c => (
-              <div key={claveCuenta(c)} className="group flex items-center gap-2 py-1">
-                <span className="min-w-0 flex-1 truncate text-[13px] text-neutro-700">{c.nombre}</span>
-                <button type="button" onClick={() => setCuentaEdit(c)} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[13px] font-semibold tabular-nums hover:bg-azul-50">
-                  {moneda(saldoDe(c), 0)}<Pencil className="h-3 w-3 text-neutro-300" />
-                </button>
-              </div>
-            ))}
-          </Grande>
-        </div>
-      </section>
-
-      {/* ── Lo que hay que pagar ── */}
-      <section>
-        <h2 className="mb-2 text-lg font-bold tracking-tight text-azul-900">Lo que hay que pagar</h2>
-        <p className="mb-3 text-xs text-neutro-400">Tocá un pago para sumarlo a la cinta; el lápiz lo edita (fecha, monto, forma de pago, generar orden de pago o marcarlo pagado). Arrastralo para cambiarle el día.</p>
-        <CalendarioPagos key={calKey} showCheques conSemana conTipos lateral="atrasados" onDataChanged={load} />
-      </section>
+      {/* ── Lo que hay que pagar: semana + atrasados ── */}
+      <CalendarioPagos key={calKey} showCheques conSemana conTipos lateral="atrasados" onDataChanged={load} />
 
       {/* ── ¿Llego a pagar? ── */}
       <section className="rounded-2xl border border-neutro-200 bg-white p-4 sm:p-5">
@@ -291,7 +262,18 @@ export default function FinanzasPage() {
           <FechaInput value={hasta} onChange={(iso) => { if (iso) { setHasta(iso); setDias(0) } }} containerClassName="w-[130px]" />
           <span className="text-sm text-neutro-500">hasta el <b className="text-neutro-800">{fecha(hasta)}</b></span>
           <div className="ml-auto flex flex-wrap items-center gap-1.5 text-xs">
-            <span className="text-neutro-500">Cheques que cuento:</span>
+            <span className="text-neutro-500">Cuento:</span>
+            {[...efectivo, ...bancos].map(c => {
+              const k = claveCuenta(c)
+              const on = !excluidas.has(k)
+              return (
+                <button key={k} type="button" onClick={() => setExcluidas(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })}
+                  className={cn("rounded-full border px-2.5 py-0.5 font-semibold", on ? "border-azul-300 bg-azul-50 text-azul-700" : "border-neutro-200 text-neutro-400 line-through")}>
+                  {c.nombre}
+                </button>
+              )
+            })}
+            <span className="ml-1 text-neutro-500">Cheques:</span>
             {CARTERAS.map(c => (
               <button key={c.key} type="button"
                 onClick={() => setCarterasSel(p => { const n = new Set(p); n.has(c.key) ? n.delete(c.key) : n.add(c.key); return n })}
@@ -318,9 +300,6 @@ export default function FinanzasPage() {
               ? <>Comprometiste {moneda(-queda.cheques, 0)} más de lo que hay en cartera.</>
               : saleCheques > 0 ? "Los cheques comprometidos están cubiertos." : "No hay pagos con cheque hasta esa fecha."} />
         </div>
-        {saleEfectivo + saleBancos > 0 && Object.keys(proyRet).length > 0 && (
-          <p className="mt-2 text-xs text-neutro-400">Los pagos con retención de Ganancias proyectada cuentan por lo que realmente sale (el neto).</p>
-        )}
       </section>
 
       {/* ── Diálogos ── */}
