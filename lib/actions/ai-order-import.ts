@@ -574,6 +574,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                         const { data } = await supabase
                             .from("articulos")
                             .select("id, descripcion, sku")
+                            .eq("activo", true) // un dado de baja (ej. "062216") tapaba al real ("62216")
                             .ilike("sku", code)
                             .limit(1)
                             .maybeSingle()
@@ -585,6 +586,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                         const { data: eanMatch } = await supabase
                             .from("articulos")
                             .select("id, descripcion, sku")
+                            .eq("activo", true)
                             .contains("ean13", [stripped])
                             .limit(1)
                             .maybeSingle()
@@ -599,6 +601,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                         const { data } = await supabase
                             .from("articulos")
                             .select("id, descripcion, sku")
+                            .eq("activo", true)
                             .ilike("sku", firstWordMatch[1])
                             .limit(1)
                             .maybeSingle()
@@ -719,7 +722,7 @@ Devolvé UNICAMENTE las palabras fundamentales sueltas en minúsculas en un JSON
                                     .filter(k => k.length >= 2 && !['de', 'la', 'con', 'sin', 'un', 'una', 'el', 'los', 'las', 'por', 'uni', 'cajas', 'bulto'].includes(k)) 
                                 
                                 if (validKeywords.length > 0) {
-                                    let rpcQuery = supabase.from("articulos").select("id, descripcion, sku")
+                                    let rpcQuery = supabase.from("articulos").select("id, descripcion, sku").eq("activo", true)
                                     // AND ILIKE estricto: la descripción debió haber matcheado CADA palabra
                                     for (const kw of validKeywords) {
                                         rpcQuery = rpcQuery.ilike("descripcion", `%${kw}%`)

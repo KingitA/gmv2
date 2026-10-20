@@ -102,10 +102,11 @@ export class MatchingEngine {
                 .from('articulos_proveedores')
                 .select(`
                   articulo_id,
-                  articulos ( id, descripcion, sku )
+                  articulos!inner ( id, descripcion, sku, activo )
                 `)
                 .eq('proveedor_id', providerId)
                 .eq('codigo_proveedor', item.code)
+                .eq('articulos.activo', true)
                 .maybeSingle();
 
             if (data && data.articulos) {
@@ -128,6 +129,7 @@ export class MatchingEngine {
             const { data: eanRows } = await getSupabase()
                 .from('articulos')
                 .select('id, descripcion, sku')
+                .eq('activo', true)
                 .contains('ean13', [String(item.ean)])
                 .limit(1);
 
@@ -214,7 +216,8 @@ export class MatchingEngine {
         const { data: arts } = await getSupabase()
             .from('articulos')
             .select('id, descripcion, sku')
-            .in('id', rows.map(r => r.id));
+            .in('id', rows.map(r => r.id))
+            .eq('activo', true); // los dados de baja no son candidatos
         const byId = new Map((arts || []).map((a: any) => [a.id, a]));
         return rows
             .filter(r => byId.has(r.id))

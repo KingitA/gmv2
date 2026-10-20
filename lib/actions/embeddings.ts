@@ -120,7 +120,12 @@ export async function searchProductsByVector(query: string, matchThreshold = 0.3
             return []
         }
 
-        return products || []
+        // match_articulos no filtra dados de baja: solo artículos activos (respeta el orden)
+        const lista = (products || []) as any[]
+        if (!lista.length) return []
+        const { data: activos } = await supabase.from("articulos").select("id").in("id", lista.map((p) => p.id)).eq("activo", true)
+        const ok = new Set((activos || []).map((a: any) => a.id))
+        return lista.filter((p) => ok.has(p.id))
     } catch (err) {
         console.error("Vector search exception:", err)
         return []
