@@ -27,7 +27,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | Cheques en verificación / anular cheque compartido | Cuentas corrientes | Hecho 20/10 (20ac463) |
 | Puesta a cero y apertura | Cuentas corrientes | Instalado; se ejecuta el día del corte |
 | App Vendedor v0.4.0 (dos cajitas, retiro, 10 % contado, Resumen) | App Vendedor | Pendiente |
-| App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único, cobrado duplicado al sincronizar, "debe" del buscador) | App Chofer | **En curso** desde el 21/10 (rama `chofer-v0.3.0`, sesión chofer) |
+| App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único, cobrado duplicado al sincronizar, "debe" del buscador) | App Chofer | **Hecho en código 21/10** (rama `chofer-v0.3.0`); falta OK de merge, APK e instalar |
 | App Depósito v0.3.0 (devolución por renglón, formatos, mercadería por cupo, **reactivar artículos dados de baja**) | App Depósito | Hecho 20/10 (rama `deposito-v030`), APK v0.3.0 |
 | Tope de reintentos del outbox (O10) en `@gm/core` — **toca a las 3 apps** | App Depósito | Hecho 20/10. Vendedor y chofer lo reciben en su próxima APK sin hacer nada (ver abajo) |
 | Recepción: la base rechazaba "faltante" (web y APK) | App Depósito | Hecho 20/10, migración `20261020d_recepciones_estado_faltante.sql` aplicada 21/10 y probada (la operación que fallaba 1.156 veces ahora guarda) |
@@ -38,7 +38,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |
 |---|---|---|---|
 | Vendedor | v0.4.0 (versionCode 9) | 20/10 | — |
-| Chofer | v0.2.2 (versionCode 5) | 01/10 | Cobro contado 07/10, formatos §20, cuentas corrientes etapas 1 a 3, devoluciones a valor |
+| Chofer | v0.2.2 (versionCode 5) | 01/10 | Todo lo de la v0.3.0 (lista abajo) hasta que se compile e instale |
 | Depósito | v0.3.0 (versionCode 8) | 20/10 | — |
 
 ---
@@ -49,18 +49,20 @@ Todo lo que estaba pendiente quedó en la v0.4.0 (detalle en MOBILE.md §18, "v0
 
 **Queda para probar en la calle:** un retiro real con la cuenta personal vinculada, y un pedido con cupo de mercadería hasta el picking.
 
-## App Chofer → próxima versión v0.3.0
+## App Chofer → v0.3.0 HECHA en código (21/10/2026, rama `chofer-v0.3.0`; falta OK de merge, APK e instalar)
 
-**Ya está en el código de `main` (solo falta compilar):** saldo de la parada con una sola fórmula (`saldoDeParada`), hoja de ruta viva durante el viaje, `chofer_clientes` con `saldo_proyectado`, overlay de devolución sin enviar, formatos §20 en las pantallas que tocó la sesión de formatos.
+Detalle en MOBILE.md §19 "v0.3.0". Todo lo que estaba pendiente:
 
-**Falta hacer:**
-1. ~~Riesgo de cobro doble~~ **Resuelto en el servidor (20/10):** `cargarCuentaCobro` ya manda `en_cobro` por comprobante y la app ya lo descuenta (`saldoCobrable`). Solo hay que verificarlo en el equipo con un comprobante que el vendedor tenga en cobro.
-2. "Neto a cobrar" de la ficha (`Cliente.tsx`) y `resumenCuenta` (`cuenta-cobro.ts:83`): usar `valor_cobro` de la devolución, no `monto_total` bruto.
-3. **10 % contado con la regla del 07/10** (`datos/cuenta-cobro.ts:73-79`): igual que vendedor.
-4. **Formatos §20**: revisar que todas las pantallas usen `@gm/formato` y `MontoInput` / `FechaInput` / `CuitInput`, con el aviso de CUIT repetido. MOBILE.md §20 dice "falta chofer".
-5. Billetera (etapa 3): "Plata del viaje" como hoy + "Tu cuenta" (`saldo_cuenta_corriente` / `cuenta_personal`). El chofer no tiene comisiones.
-6. **Un cheque = un papel**: el servidor ya deja una sola fila (20/10) y `cheques_cantidad` de la hoja y de la billetera cuenta el cheque una vez. En la app hay que verificar que el overlay sin señal no lo muestre dos veces. `repartirMetodos` todavía agrega el sufijo " (2)" a las piezas locales; el servidor lo saca al vincularlas.
-7. Menores anotados en la pasada final (MOBILE.md §19): lo cobrado se ve duplicado 2–10 s al sincronizar un cobro conjunto; el "debe" del buscador de clientes no se refresca; un rechazo de negocio reintenta 3 veces. (La cabecera `cobranzas` que quedaba `pendiente` con todos sus pagos anulados ya la resuelve el servidor desde el 20/10.)
+1. ~~Riesgo de cobro doble~~ **Resuelto en el servidor (20/10)**; la app lo descuenta en `saldoCobrable`. Queda verificarlo en el equipo con un comprobante que el vendedor tenga en cobro.
+2. ~~"Neto a cobrar" y `resumenCuenta` con el bruto~~ **Hecho**: `valor_cobro` en ficha, selector y total; devolución local con `valor_estimado` (misma regla que el servidor).
+3. ~~10 % contado regla vieja~~ **Hecho**: `nc_contado` desde `cargarCuentaCobro` + `ncContadoDe` en la app (10 % del total, una vez, también en pago parcial).
+4. ~~Formatos §20~~ **Hecho**: solo faltaban el importe del gasto y el efectivo de la rendición (`MontoInput`). El aviso de CUIT repetido no aplica al chofer.
+5. ~~Billetera etapa 3~~ **Hecho**: "💵 Plata del viaje" + "👤 Tu cuenta" (`cuenta_personal`).
+6. ~~Un cheque = un papel~~ **Verificado**: la hoja, la billetera y el overlay cuentan el cheque una vez; el servidor quita el sufijo " (2)" al vincular las piezas.
+7. ~~Menores de la pasada final~~ **Hechos**: cobrado duplicado al sincronizar (dedup por `idempotency_key` en hoja, ficha y billetera) y "debe" del buscador (parche de `chofer_clientes` tras cobrar/anular). "Reintenta 3 veces" no era de la app (422 definitivo; eran cortes de señal).
+8. Nuevo: al rendir, aviso de que las devoluciones del viaje quedan esperando depósito.
+
+**Queda para probar en el equipo (pasada guionada, cuando el dueño dé el OK):** cobro parcial con 10 % sobre un presupuesto, devolución sobre una factura contado (valor −10 %), cobro conjunto con cheque (un solo papel en cartera, sin duplicado en pantalla al sincronizar), "Tu cuenta" con la cuenta personal vinculada.
 
 ## App Depósito → v0.3.0 HECHA (20/10/2026, instalada en el NuStar)
 

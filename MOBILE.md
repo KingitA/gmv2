@@ -2017,6 +2017,47 @@ el caso (REV viva, imputación confirmada, saldo 10.491,36).
 - [x] Limpieza por id. La foto final no es idéntica solo por actividad ajena del 01/10 (importación de
   62 comprobantes históricos a las 13:39, 2 pedidos y 2 viajes nuevos).
 
+### v0.3.0 (21/10/2026): cuentas corrientes, 10 % del 07/10, devoluciones a valor, dos cajitas
+
+Lo que el servidor ya tenía desde el 16–20/10 (fuente única del saldo, `en_cobro`, un cheque = un papel,
+cheques en verificación, O10) entra con solo compilar. Lo que cambió en la app y en los dos lectores del
+servidor que son del chofer (`lib/viajes/cliente-viaje.ts`, `lib/viajes/hoja-ruta.ts`):
+
+- **10 % contado con la regla del 07/10.** `cargarCuentaCobro` manda `nc_contado` por comprobante
+  (`bonificacionPendientePorComprobante`, la misma función que usa el ERP al cobrar): 10 % del TOTAL,
+  una sola vez; 0 si ya lo tiene o no bonifica. La app (`ncContadoDe`, `datos/cuenta-cobro.ts`) lo
+  descuenta en cuanto el comprobante está seleccionado, **también en un pago parcial** (presupuesto
+  $ 100 con contado: NC $ 10, se entregan $ 20 de los $ 30 seleccionados). Réplica vieja sin
+  `nc_contado`: regla anterior (solo si se salda completo), que es lo que esas APK mostraban.
+- **Devoluciones por su valor.** La ficha, el selector del cobro y el "Neto a cobrar" usan
+  `valor_cobro` (regla única `valorDevolucion`: −10 % si la factura fue contado); el bruto queda como
+  dato. Una devolución cargada en el equipo viaja con `valor_estimado` (misma función, `@gm/vendedor`,
+  con `bonificado_contado` de los comprados) y el overlay descuenta ese valor en la parada y en la ficha.
+- **El cobro que el servidor ya tiene no se cuenta dos veces.** En la pasada del 01/10 lo cobrado se vio
+  duplicado 2–10 s: la hoja se refrescaba con el pago del servidor mientras la operación seguía en la
+  cola. Ahora la hoja, la ficha y la billetera traen `idempotency_key` de cada pago y el overlay saltea
+  la operación cuyas claves (la propia y las derivadas de los clientes agregados, `claveDelCliente`)
+  ya están en la réplica (`yaEnReplica`).
+- **"Debe" del buscador de "Agregar cliente".** Tras un cobro o una anulación, el parche de réplica
+  incluye las filas de `chofer_clientes` de los clientes tocados (`porIds` del dataset): el saldo
+  proyectado se actualiza al instante.
+- **Billetera en dos cajitas** (cuentas corrientes etapa 3): "💵 Plata del viaje" (como antes: efectivo,
+  fondos, gastos, cheques como cantidad) y "👤 Tu cuenta" (`cuenta_personal.a_favor`: diferencias de
+  rendición, mercadería retirada, pagos). Sin cuenta vinculada muestra el saldo de rendiciones de siempre
+  y avisa. El chofer no tiene comisiones ni retiro.
+- **Formatos §20**: `MontoInput` en el importe del gasto y en el efectivo de la rendición (lo último que
+  quedaba con `inputMode` crudo).
+- **Rendir**: si el viaje tiene devoluciones, la hoja avisa que quedan esperando depósito y que la NC la
+  emite oficina (desde el 16/10 confirmar la rendición ya no las aprueba).
+- Verificado sin tocar: un cheque compartido se cuenta UNA vez en la hoja, la billetera y el overlay
+  (`cheques_cantidad` por medio físico). El sufijo " (2)" que `repartirMetodos` pone a las piezas lo quita
+  el servidor al vincularlas al papel único; en el equipo solo se ve en el detalle del pago sin enviar.
+- "Un rechazo de negocio reintentó 3 veces" (observación del 01/10): no era de la app. El 422 es
+  definitivo al primer intento (`ErrorHttp.reintentable`); los 3 intentos fueron de la señal entrando y
+  saliendo al apagar el modo avión. Sin cambio.
+- Tests: `packages/core/test/chofer-030.test.ts` (10 % del 07/10, valor de devolución, dedup por clave en
+  hoja/ficha/billetera, cobro conjunto). El mock (`mock-chofer.mjs`) manda los campos nuevos.
+
 ### Probar sin backend
 `cd mobile && node scripts/mock-chofer.mjs` (3997) → `apps/chofer/.env.development.local` con
 `VITE_API_BASE=http://localhost:3997` → `npm run dev:chofer` → http://localhost:5173 (cualquier
@@ -2103,9 +2144,11 @@ existe ahí): las operaciones igual quedan en cola y salen al restaurarla.
 
 ### Pendiente en los celulares
 
-- **Vendedor: HECHO** en v0.3.1 (14/10/2026, instalada en el NuStar). Falta **chofer y depósito**: hasta
-  entonces los equipos siguen con los formatos viejos, sin `CuitInput` ni el aviso de CUIT
-  repetido. No se traban: el servidor acepta lo que mandan (ver punto 6).
+- **Vendedor: HECHO** en v0.3.1 (14/10/2026, instalada en el NuStar). **Depósito: HECHO** en v0.3.0
+  (20/10). **Chofer: HECHO** en v0.3.0 (21/10): ya usaba `MontoInput` / `FechaInput` / `CuitInput` en
+  cobros, cheques y devoluciones; faltaban el importe del gasto y el efectivo de la rendición. El aviso
+  de CUIT repetido no aplica (el chofer no da de alta clientes). Hasta que cada equipo tenga su APK sigue
+  con los formatos viejos; no se traba: el servidor acepta lo que mandan (ver punto 6).
 - En la app vendedor, varios montos se confirman al salir del campo (`MontoInput`), no con
   cada tecla: los totales en vivo se actualizan al dejar el campo.
 

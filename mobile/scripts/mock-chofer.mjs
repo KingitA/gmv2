@@ -115,7 +115,7 @@ function parada(pa) {
     id: p.id, monto: p.monto, estado: p.estado, fecha: p.created_at, cargado_por: "Chofer",
     metodos: p.detalles.map((d) => ({ tipo: d.tipo_pago, monto: d.monto, detalle: d.tipo_pago === "cheque" ? [d.banco, d.numero_cheque].filter(Boolean).join(" · ") : d.numero_comprobante_pago || "" })),
     imputaciones: p.imputaciones.map((i) => ({ comprobante: S.comprobantes.find((k) => k.id === i.comprobante_id)?.numero_comprobante || "comprobante", monto: i.monto_imputado, de_este_viaje: true })),
-    a_cuenta: r2(Math.max(0, p.monto - p.imputaciones.reduce((s, i) => s + i.monto_imputado, 0))), contado_10: !!p.contado, ajuste: p.ajuste || 0,
+    a_cuenta: r2(Math.max(0, p.monto - p.imputaciones.reduce((s, i) => s + i.monto_imputado, 0))), contado_10: !!p.contado, ajuste: p.ajuste || 0, idempotency_key: p.idempotency_key || null,
   }))
   const cobrado = r2(pagos.reduce((s, p) => s + p.monto, 0))
   const devuelto = r2(S.devoluciones.filter((d) => d.viaje_id === pa.viaje_id && d.cliente_id === pa.cliente_id).reduce((s, d) => s + d.monto_total, 0))
@@ -152,8 +152,8 @@ function filaCliente(viajeId, clienteId) {
   const ped = S.pedidos.find((p) => p.viaje_id === viajeId && p.cliente_id === clienteId && p.estado !== "eliminado")
   const artDe = (id) => S.f.articulos.find((a) => a.id === id)
   const pend = compsDe(clienteId).filter((k) => k.saldo_pendiente > 0).map(({ id, tipo_comprobante, numero_comprobante, fecha, total_factura, saldo_pendiente }) => ({ id, tipo_comprobante, numero_comprobante, fecha, total_factura, saldo_pendiente }))
-  const pagos = pagosVivos(viajeId, clienteId).map((p) => ({ id: p.id, monto: p.monto, estado: p.estado, created_at: p.created_at }))
-  const devs = S.devoluciones.filter((d) => d.viaje_id === viajeId && d.cliente_id === clienteId).map((d) => ({ id: d.id, numero_devolucion: d.numero_devolucion, monto_total: d.monto_total, estado: d.estado, devoluciones_detalle: d.items.map((i, n) => ({ id: `${d.id}:${n}`, articulo_id: i.articulo_id, cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, motivo: i.motivo, condicion: i.condicion, articulos: { sku: artDe(i.articulo_id)?.sku, descripcion: artDe(i.articulo_id)?.descripcion } })) }))
+  const pagos = pagosVivos(viajeId, clienteId).map((p) => ({ id: p.id, monto: p.monto, estado: p.estado, created_at: p.created_at, idempotency_key: p.idempotency_key || null }))
+  const devs = S.devoluciones.filter((d) => d.viaje_id === viajeId && d.cliente_id === clienteId).map((d) => ({ id: d.id, numero_devolucion: d.numero_devolucion, monto_total: d.monto_total, valor_cobro: d.monto_total, estado: d.estado, devoluciones_detalle: d.items.map((i, n) => ({ id: `${d.id}:${n}`, articulo_id: i.articulo_id, cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, motivo: i.motivo, condicion: i.condicion, articulos: { sku: artDe(i.articulo_id)?.sku, descripcion: artDe(i.articulo_id)?.descripcion } })) }))
   const totalDev = r2(devs.reduce((s, d) => s + d.monto_total, 0)), totalCob = r2(pagos.reduce((s, p) => s + p.monto, 0))
   const pedidosCli = S.pedidos.filter((p) => p.cliente_id === clienteId && p.estado !== "eliminado")
   return {
@@ -164,7 +164,7 @@ function filaCliente(viajeId, clienteId) {
     resumen: { saldo_anterior: c.saldo_actual, saldo_real: c.saldo_actual, saldo_proyectado: r2(c.saldo_actual - totalCob), pendiente_verificacion: totalCob, total_pedido: ped?.total || 0, total_devuelto: totalDev, total_cobrado: totalCob, total_a_cobrar: r2(c.saldo_actual + (ped?.total || 0) - totalDev), ya_cobrado: totalCob > 0 },
     viaje_estado: v.estado,
     cobro: {
-      comprobantes: compsDe(clienteId).filter((k) => ["pendiente", "parcial"].includes(k.estado_pago)).map(({ id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_factura, saldo_pendiente, estado_pago, pedido_id }) => ({ id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_factura, saldo_pendiente, estado_pago, pedido_id })),
+      comprobantes: compsDe(clienteId).filter((k) => ["pendiente", "parcial"].includes(k.estado_pago)).map(({ id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_factura, saldo_pendiente, estado_pago, pedido_id }) => ({ id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_factura, saldo_pendiente, estado_pago, pedido_id, en_cobro: 0, nc_contado: ["FA", "FB", "FC", "PRES"].includes(tipo_comprobante) ? r2(total_factura * 0.1) : 0 })),
       pedidos: pedidosCli.map((p) => ({ id: p.id, numero_pedido: p.numero_pedido, fecha: p.fecha, total: p.total, estado: p.estado, pago_contado_10: p.pago_contado_10, anticipo_pago_id: p.anticipo_pago_id })),
       pedidos_facturados: [...new Set(S.comprobantes.filter((k) => k.cliente_id === clienteId && k.pedido_id).map((k) => k.pedido_id))],
       dtos_hechos: [],
@@ -179,14 +179,14 @@ function billetera() {
     const sinRendir = p.estado === "pendiente_rendicion"
     if (sinRendir && !p.declarado) for (const d of p.detalles) { if (d.tipo_pago === "efectivo") efectivo += d.monto; else if (d.tipo_pago === "cheque") { chequesCant++; chequesMonto += d.monto } else transf += d.monto }
     else if (sinRendir && p.declarado) enRend += p.monto
-    return { id: p.id, fecha: p.created_at, cliente: clienteDe(p.cliente_id)?.nombre || "Cliente", viaje: viajeDe(p.viaje_id)?.nombre || "", monto: p.monto, metodos: [...new Set(p.detalles.map((d) => (d.tipo_pago === "cheque" ? `Cheque ${d.banco || ""} ${d.numero_cheque || ""}`.trim() : d.tipo_pago === "transferencia" ? "Transferencia" : "Efectivo")))], estado: p.estado === "confirmado" ? "rendido" : p.declarado ? "en_rendicion" : "en_mano" }
+    return { id: p.id, fecha: p.created_at, cliente: clienteDe(p.cliente_id)?.nombre || "Cliente", viaje: viajeDe(p.viaje_id)?.nombre || "", monto: p.monto, metodos: [...new Set(p.detalles.map((d) => (d.tipo_pago === "cheque" ? `Cheque ${d.banco || ""} ${d.numero_cheque || ""}`.trim() : d.tipo_pago === "transferencia" ? "Transferencia" : "Efectivo")))], estado: p.estado === "confirmado" ? "rendido" : p.declarado ? "en_rendicion" : "en_mano", idempotency_key: p.idempotency_key || null }
   })
   const fondo = r2(S.fondos.filter((f) => vivos.has(f.viaje_id)).reduce((s, f) => s + f.monto, 0))
   const gastos = r2(S.gastos.filter((g) => vivos.has(g.viaje_id)).reduce((s, g) => s + g.monto, 0))
   return {
     id: "billetera", efectivo: r2(efectivo + fondo - gastos),
     desglose: { cobros_efectivo: r2(efectivo), fondo_viaje: fondo, gastos, cheques_monto: r2(chequesMonto), transferencias: r2(transf), en_rendicion: r2(enRend) },
-    cheques_cantidad: chequesCant, saldo_cuenta_corriente: 0, cobros,
+    cheques_cantidad: chequesCant, saldo_cuenta_corriente: -12500, cuenta_personal: { cliente_id: "cp", saldo_real: 12500, saldo_proyectado: 12500, a_favor: -12500, comisiones_ganadas: 0, retiros: 0 }, cobros,
     gastos: S.gastos.map((g) => ({ id: g.id, viaje: viajeDe(g.viaje_id)?.nombre || "", categoria: g.categoria, monto: g.monto, estado: g.estado, observaciones: g.observaciones, created_at: g.created_at })),
     fondos: S.fondos.map((f) => ({ id: f.id, viaje: viajeDe(f.viaje_id)?.nombre || "", monto: f.monto, created_at: f.created_at })),
   }
@@ -282,7 +282,7 @@ const HANDLERS = {
     const recortadas = []
     for (const i of imps) { const x = Math.min(i.monto_imputado, resta); if (x > 0.005) { recortadas.push({ ...i, monto_imputado: r2(x) }); resta = r2(resta - x) } }
     for (const i of recortadas) { const k = S.comprobantes.find((c) => c.id === i.comprobante_id); if (!k) throw new Rechazo("cobranza_crear: comprobante inexistente"); if (k.anulado_en) throw new Rechazo(`cobranza_crear: el comprobante ${k.numero_comprobante} está anulado — no se puede cobrar`) }
-    const pago = { id: randomUUID(), viaje_id: v.id, cliente_id: p.cliente_id, monto, estado: "pendiente_rendicion", created_at: ahora(), creado_por: u.id, detalles: (p.metodos || []).map((x) => ({ tipo_pago: x.tipo, monto: r2(Number(x.monto)), banco: x.banco_emisor || null, numero_cheque: x.numero_cheque || null, numero_comprobante_pago: x.numero_comprobante || null })), imputaciones: recortadas, contado: !!p.contado_general, ajuste, fotos: [...(p.comprobante_urls || []).map((c) => c.url), ...(p.fotos_pendientes || []).map(() => "https://placehold.co/640x300/e2e8f0/475569.png?text=Foto+pendiente+(mock)")], declarado: false }
+    const pago = { id: randomUUID(), idempotency_key: m.idempotency_key || null, viaje_id: v.id, cliente_id: p.cliente_id, monto, estado: "pendiente_rendicion", created_at: ahora(), creado_por: u.id, detalles: (p.metodos || []).map((x) => ({ tipo_pago: x.tipo, monto: r2(Number(x.monto)), banco: x.banco_emisor || null, numero_cheque: x.numero_cheque || null, numero_comprobante_pago: x.numero_comprobante || null })), imputaciones: recortadas, contado: !!p.contado_general, ajuste, fotos: [...(p.comprobante_urls || []).map((c) => c.url), ...(p.fotos_pendientes || []).map(() => "https://placehold.co/640x300/e2e8f0/475569.png?text=Foto+pendiente+(mock)")], declarado: false }
     S.pagos.push(pago)
     for (const i of recortadas) { const k = S.comprobantes.find((c) => c.id === i.comprobante_id); k.saldo_pendiente = r2(k.saldo_pendiente - i.monto_imputado); k.estado_pago = k.saldo_pendiente <= 0.009 ? "pagado" : "parcial" }
     for (const pid of (p.pedidos_contado || []).filter((id) => !anticipos || anticipos.some((a) => a.pedido_id === id))) { const ped = S.pedidos.find((x) => x.id === pid); if (ped) { ped.pago_contado_10 = true; ped.anticipo_pago_id = pago.id } }

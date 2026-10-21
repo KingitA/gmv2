@@ -33,6 +33,8 @@ export interface PagoHoja {
   a_cuenta: number
   contado_10: boolean
   ajuste: number
+  /** Clave con la que la app lo registró: así reconoce su propio cobro sin enviar (sin contarlo dos veces) */
+  idempotency_key?: string | null
 }
 
 export interface ParadaHoja {
@@ -156,7 +158,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
         .order("numero_pedido", { ascending: true }),
       supabase
         .from("pagos_clientes")
-        .select(`id, cliente_id, monto, estado, observaciones, created_at, creado_por,
+        .select(`id, cliente_id, monto, estado, observaciones, created_at, creado_por, idempotency_key,
           pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, numero_comprobante_pago, cheque_id),
           imputaciones(comprobante_id, monto_imputado, comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante, punto_venta, numero_comprobante, pedido_id))`)
         .eq("viaje_id", viajeId)
@@ -281,6 +283,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       a_cuenta: r2(Math.max(0, Number(p.monto) - impTotal)),
       contado_10: obs.includes("[10% CONTADO]"),
       ajuste: ajusteM ? Number(ajusteM[1]) : 0,
+      idempotency_key: p.idempotency_key || null,
     }
     if (!pagosPorCliente.has(p.cliente_id)) pagosPorCliente.set(p.cliente_id, [])
     pagosPorCliente.get(p.cliente_id)!.push(fila)

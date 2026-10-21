@@ -5,6 +5,7 @@ import { DS, esEnCurso, MOTIVOS_DEVOLUCION, type Articulo, type DetallePedido, t
 import { guardarBorrador, useBorradorDevolucion } from "../datos/borrador-devolucion"
 import { buscarArticulos, useArticulos, useClienteViaje, useEncolar, useViaje, uuidv4 } from "../datos/hooks"
 import { parseMonto } from "@gm/formato"
+import { valorEstimadoDevolucion } from "../datos/cuenta-cobro"
 import { dejarAviso, formatCurrency, MontoInput, Pantalla, useBloqueoSalida, useBusqueda, useToast } from "../ui"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
 
@@ -115,7 +116,8 @@ export function Devolucion() {
     enviandoRef.current = true
     setEnviando(true)
     try {
-      const payload: OpDevolucion = { viaje_id: viajeId, id: uuidv4(), cliente_id: clienteId, pedido_id: data?.pedido?.id || null, items }
+      // Valor con la regla única (= lo que descontará el cobro y valdrá la NC): el overlay lo usa sin señal
+      const payload: OpDevolucion = { viaje_id: viajeId, id: uuidv4(), cliente_id: clienteId, pedido_id: data?.pedido?.id || null, items, valor_estimado: valorEstimadoDevolucion(items, data?.comprados ?? []) }
       await encolar("viaje.devolucion", payload, `Devolución ${clienteNombre} ${formatCurrency(total)}`)
       guardarBorrador(viajeId, clienteId, null)
       dejarAviso(online ? `↩ Devolución registrada por ${formatCurrency(total)}. Se procesará al confirmar la rendición.` : `↩ Devolución por ${formatCurrency(total)} guardada en el equipo: se envía al volver la señal.`)

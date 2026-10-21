@@ -61,10 +61,10 @@ Documento vivo de traspaso para los agentes de las apps (vendedor, chofer, depó
 
 ### Qué tiene que hacer el agente de la app
 
-1. **Armar una APK nueva.**
-2. Pendiente, **riesgo de cobro doble**: `SelectorCuenta` / `cargarCuentaCobro` no recibe del servidor lo que ya está "en cobro" (cobros pendientes del vendedor o de otro viaje sobre el mismo comprobante). La ficha del vendedor sí lo reserva. Hay que agregar `en_cobro` desde el servidor, igual que en `lib/vendedor/ficha-cliente.ts`.
-3. Pendiente: el "Neto a cobrar" de la ficha (`Cliente.tsx`) y `resumenCuenta` (`cuenta-cobro.ts:83`) usan el `monto_total` bruto de la devolución. El servidor ya usa el valor (`valor_cobro`).
-4. Pendiente: la estimación del 10 % contado sigue la regla vieja (`cuenta-cobro.ts:73-79`). Es lo mismo que en vendedor.
+1. **Armar una APK nueva.** → v0.3.0 (21/10/2026, rama `chofer-v0.3.0`).
+2. ~~Riesgo de cobro doble~~ **Hecho en el servidor el 20/10** (`en_cobro` en `cargarCuentaCobro`); la app lo descuenta en `saldoCobrable` junto con sus propios cobros sin enviar.
+3. ~~Devolución al bruto~~ **Hecho 21/10 (v0.3.0)**: la ficha, el selector y el total del cobro usan `valor_cobro`; una devolución cargada en el equipo viaja con `valor_estimado` (`valorDevolucion`, la misma regla del servidor) y el overlay descuenta ese valor.
+4. ~~10 % contado con la regla vieja~~ **Hecho 21/10 (v0.3.0)**: `cargarCuentaCobro` manda `nc_contado` por comprobante (`bonificacionPendientePorComprobante`, la misma del ERP) y la app muestra ese importe aunque el pago sea parcial (`ncContadoDe` en `datos/cuenta-cobro.ts`).
 
 ---
 
@@ -157,11 +157,8 @@ Reglas del dueño:
 
 ### App Chofer — qué tiene que hacer el agente
 
-1. Billetera:
-   - "Plata del viaje" (efectivo, fondos, gastos y cheques como cantidad), como hoy.
-   - "Tu cuenta": `saldo_cuenta_corriente` / `cuenta_personal` (diferencias de rendición, mercadería, pagos).
-   - El chofer no tiene comisiones.
-2. **Armar una APK nueva.**
+1. ~~Billetera~~ **Hecho 21/10 (v0.3.0)**: dos cajitas, "💵 Plata del viaje" (como antes) y "👤 Tu cuenta" (`cuenta_personal.a_favor`; sin cuenta vinculada muestra `saldo_cuenta_corriente` y avisa que la oficina no la vinculó). El chofer no tiene comisiones.
+2. **Armar una APK nueva.** → v0.3.0.
 
 ### App Depósito
 

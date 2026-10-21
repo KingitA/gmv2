@@ -152,27 +152,37 @@ const billetera: DatasetDef = {
 
 // ─── Clientes (cobro conjunto: "Agregar cliente para cobrar") ────────────────
 
-const CLIENTE_COLS = "id, nombre, razon_social, nombre_razon_social, cuit, codigo_cliente, direccion, localidad, activo"
+export const CLIENTE_COLS = "id, nombre, razon_social, nombre_razon_social, cuit, codigo_cliente, direccion, localidad, activo"
+
+/** Filas de chofer_clientes con su saldo (fuente única: real + proyectado; el chofer lee el proyectado). */
+export async function filasClientesCatalogo(ctx: CtxSync, filas: any[]): Promise<FilaReplica[]> {
+  const saldos = await getSaldosClientes(ctx.supabase, filas.map((c) => c.id))
+  return filas.map((c) => ({
+    id: c.id,
+    nombre: c.nombre,
+    razon_social: c.razon_social,
+    nombre_razon_social: c.nombre_razon_social,
+    cuit: c.cuit,
+    codigo_cliente: c.codigo_cliente,
+    direccion: c.direccion,
+    localidad: c.localidad,
+    saldo_actual: saldos.get(c.id)?.saldo_real ?? 0,
+    saldo_proyectado: saldos.get(c.id)?.saldo_proyectado ?? 0,
+  }))
+}
 
 const clientes: DatasetDef = {
   nombre: "chofer_clientes",
   roles: ROLES,
   async cargar(ctx) {
     const filas = await fetchAllRows<any>(() => ctx.supabase.from("clientes").select(CLIENTE_COLS).eq("activo", true))
-    // Fuente única: real + proyectado (el chofer lee el proyectado)
-    const saldos = await getSaldosClientes(ctx.supabase, filas.map((c) => c.id))
-    return filas.map((c) => ({
-      id: c.id,
-      nombre: c.nombre,
-      razon_social: c.razon_social,
-      nombre_razon_social: c.nombre_razon_social,
-      cuit: c.cuit,
-      codigo_cliente: c.codigo_cliente,
-      direccion: c.direccion,
-      localidad: c.localidad,
-      saldo_actual: saldos.get(c.id)?.saldo_real ?? 0,
-      saldo_proyectado: saldos.get(c.id)?.saldo_proyectado ?? 0,
-    }))
+    return filasClientesCatalogo(ctx, filas)
+  },
+  // Tras un cobro o una anulación, el "debe" del buscador de "Agregar cliente" se actualiza
+  // solo para los clientes tocados (antes quedaba viejo hasta el refresco periódico)
+  async porIds(ctx, ids) {
+    const { data } = await ctx.supabase.from("clientes").select(CLIENTE_COLS).in("id", ids).eq("activo", true)
+    return filasClientesCatalogo(ctx, data || [])
   },
 }
 

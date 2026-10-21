@@ -3,7 +3,7 @@ import { PEDIDO_PREFIX } from "@gm/cobro"
 import type { ComprobanteCobro } from "../datasets"
 import {
   agruparCuenta, alternarAnticipo, alternarComprobante, alternarContadoPedido, alternarContadoTodo, alternarGrupo, alternarTodo, clavesDeLaCuenta,
-  fijarMonto, montoAnticipo, resumenCuenta, saldoCobrable, type DatosCuenta, type EstadoCuenta,
+  fijarMonto, montoAnticipo, resumenCuenta, saldoCobrable, valorDeDevolucion, type DatosCuenta, type EstadoCuenta,
 } from "../datos/cuenta-cobro"
 import { moneda } from "@gm/formato"
 import { formatCurrency, formatDateAR, MontoInput } from "../ui"
@@ -135,7 +135,7 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
           <div className="flex items-center justify-between">
             <div>
               <p className="font-bold text-amber-800">Incluir devoluciones como crédito</p>
-              <p className="text-sm text-amber-600">{formatCurrency(devPendientes.reduce((s, d) => s + Number(d.monto_total), 0))}{devPendientes.some((d) => d.local) ? " (incluye una sin enviar)" : ""}</p>
+              <p className="text-sm text-amber-600">{formatCurrency(devPendientes.reduce((s, d) => s + valorDeDevolucion(d), 0))}{devPendientes.some((d) => d.local) ? " (incluye una sin enviar)" : ""}</p>
             </div>
             <button onClick={() => onChange({ ...estado, incluirDevoluciones: !estado.incluirDevoluciones })} className={`h-7 w-14 rounded-full ${estado.incluirDevoluciones ? "bg-green-500" : "bg-gray-300"}`} aria-label="Incluir devoluciones">
               <span className={`mx-1 block h-5 w-5 rounded-full bg-white shadow ${estado.incluirDevoluciones ? "translate-x-7" : ""}`} />
@@ -154,9 +154,9 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
               <p className="text-sm text-emerald-700">
                 {estado.contadoGeneral
                   ? r.bonificacionEstimada > 0
-                    ? `−${formatCurrency(r.bonificacionEstimada)} sobre lo seleccionado (la NC sale al confirmar la rendición)`
+                    ? `−${formatCurrency(r.bonificacionEstimada)}: el 10 % del total de cada comprobante seleccionado, una sola vez (la NC sale al confirmar la rendición)`
                     : "Lo seleccionado ya tiene el 10% aplicado o no bonifica: no se aplica dos veces."
-                  : "Aplica a los comprobantes seleccionados que aún no lo tengan; los pedidos sin facturar cobran el 90%."}
+                  : "10 % del total de cada comprobante seleccionado que aún no lo tenga (también en un pago parcial); los pedidos sin facturar cobran el 90%."}
               </p>
             </div>
             <button onClick={() => onChange(alternarContadoTodo(estado, cobro))} className={`h-7 w-14 shrink-0 rounded-full ${estado.contadoGeneral ? "bg-green-500" : "bg-gray-300"}`} aria-label="10% contado a todo">

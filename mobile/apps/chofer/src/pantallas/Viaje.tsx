@@ -5,8 +5,8 @@ import { fechaHoraCorta, Hoja } from "@gm/core/ui"
 import { DS, esEnCurso, ESTADOS_COBRABLES, type OpFinalizar, type OpIniciar, type OpParada } from "../datasets"
 import { paradasSinResolver, type ParadaVista } from "../datos/overlay"
 import { rechazosDe, useDescargaViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
-import { numero, parseMonto } from "@gm/formato"
-import { AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, HojaConfirmar, Linea, Pantalla, Rechazos, SinDescargar, SinEnviar, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
+import { parseMonto } from "@gm/formato"
+import { AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, HojaConfirmar, Linea, MontoInput, Pantalla, Rechazos, SinDescargar, SinEnviar, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
 import { GastoHoja } from "./GastoHoja"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
 
@@ -46,7 +46,7 @@ export function Viaje() {
   const [aviso, setAviso] = useState("")
   const [ocupado, setOcupado] = useState(false)
   // Rendición
-  const [efectivoEntrega, setEfectivoEntrega] = useState("")
+  const [efectivoEntrega, setEfectivoEntrega] = useState(0)
 
   const paradaSel = hojaParada.valor ? v?.paradas.find((p) => p.id === hojaParada.valor) ?? null : null
   const paradaReabrir = hojaReabrir.valor ? v?.paradas.find((p) => p.id === hojaReabrir.valor) ?? null : null
@@ -64,7 +64,7 @@ export function Viaje() {
   }, [claveHoja])
   useEffect(() => {
     if (rendir.abierto && v?.dinero) {
-      setEfectivoEntrega(numero(Math.max(0, v.dinero.efectivo_en_mano || 0)))
+      setEfectivoEntrega(Math.max(0, v.dinero.efectivo_en_mano || 0))
       setAviso("")
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -158,7 +158,7 @@ export function Viaje() {
     if (!viaje.es_titular) return setAviso("El viaje lo rinde el chofer titular.")
     setOcupado(true)
     try {
-      const payload: OpFinalizar = { viaje_id: viajeId, efectivo_declarado: Math.max(0, parseMonto(efectivoEntrega) ?? 0) }
+      const payload: OpFinalizar = { viaje_id: viajeId, efectivo_declarado: Math.max(0, efectivoEntrega) }
       await encolar("viaje.finalizar", payload, `Rendir viaje ${viaje.nombre || ""}`.trim())
       dejarAviso(online ? "Viaje enviado a rendición: oficina la ve en la Caja del Día y la confirma al recibir la plata." : "Cierre del viaje guardado en el equipo: se envía a oficina al volver la señal.")
       navigate("/", { replace: true })
@@ -452,13 +452,15 @@ export function Viaje() {
               {dinero.cheques_cantidad > 0 && <Linea etiqueta="Cheques que entregás" valor={`${dinero.cheques_cantidad} ${dinero.cheques_cantidad === 1 ? "cheque" : "cheques"}`} />}
               {dinero.cobrado_transferencias > 0 && <Linea etiqueta="Transferencias" valor={formatCurrency(dinero.cobrado_transferencias)} />}
             </div>
+            {v.paradas.some((p) => p.devuelto > 0.005) && (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                ↩ Las devoluciones de este viaje ({formatCurrency(v.paradas.reduce((s, p) => s + p.devuelto, 0))}) quedan esperando que depósito las revise; la nota de crédito la emite oficina. Mientras tanto ya descuentan de lo que debe cada cliente.
+              </p>
+            )}
             {!online && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">📡 Sin señal: el cierre queda guardado en el equipo y sale a oficina al reconectar.</p>}
             <div>
               <p className="mb-1 text-sm font-bold text-gray-700">Efectivo que entregás en oficina</p>
-              <input
-                type="text" inputMode="decimal" value={efectivoEntrega} onChange={(e) => setEfectivoEntrega(e.target.value.replace(/[^\d.,]/g, ""))}
-                className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-xl font-bold"
-              />
+              <MontoInput valor={efectivoEntrega} onCambio={setEfectivoEntrega} className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-xl font-bold" />
               {dinero.efectivo_en_mano < -0.01 ? (
                 <p className="mt-1 text-xs font-medium text-amber-700">Gastaste más que el fondo + lo cobrado: pusiste {formatCurrency(-dinero.efectivo_en_mano)} de tu bolsillo. Queda a tu favor y oficina te lo reintegra.</p>
               ) : (

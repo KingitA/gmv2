@@ -1,5 +1,5 @@
 import { useOverlay, useParamEstado } from "@gm/core"
-import { DS } from "../datasets"
+import { DS, type BilleteraData } from "../datasets"
 import { useBilletera, useMe, useRefrescarAlEntrar } from "../datos/hooks"
 import { fechaHora, formatCurrency, Pantalla, SinDescargar, SinEnviar, useToast } from "../ui"
 import { GastoHoja } from "./GastoHoja"
@@ -17,6 +17,36 @@ const ESTADO_COBRO: Record<string, { label: string; cls: string }> = {
   rendido: { label: "CONFIRMADO", cls: "bg-gray-100 text-gray-500" },
   sin_enviar: { label: "EN MANO · SIN ENVIAR", cls: "bg-amber-50 text-amber-800 border border-amber-300" },
   rechazado: { label: "RECHAZADO POR OFICINA", cls: "bg-red-100 text-red-700" },
+}
+
+/**
+ * "Tu cuenta" (cuentas corrientes etapa 3, regla del dueño 19/10/2026): la cuenta personal del chofer
+ * es su cuenta de cliente. Ahí van las diferencias de rendición (de más o de menos), la mercadería
+ * que retira y los pagos que hace. El chofer no tiene comisiones. `cuenta_personal: null` = la
+ * oficina todavía no la vinculó: se muestra el saldo de rendiciones de siempre.
+ */
+function CajaCuentaPersonal({ data }: { data: BilleteraData }) {
+  const cp = data.cuenta_personal
+  const aFavor = cp ? cp.a_favor : data.saldo_cuenta_corriente
+  const debe = aFavor < -0.005
+  const nada = Math.abs(aFavor) <= 0.005
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <p className="text-sm text-gray-500">👤 Tu cuenta</p>
+      <p className={`mt-1 text-3xl font-bold ${nada ? "text-gray-700" : debe ? "text-red-600" : "text-green-600"}`}>
+        {nada ? formatCurrency(0) : debe ? `Debés ${formatCurrency(-aFavor)}` : `A favor ${formatCurrency(aFavor)}`}
+      </p>
+      {cp ? (
+        <p className="mt-1 text-xs text-gray-500">
+          Diferencias de rendición, mercadería que retiraste y pagos que hiciste.{cp.retiros > 0.005 ? ` Retiros: ${formatCurrency(cp.retiros)}.` : ""}
+        </p>
+      ) : (
+        <p className="mt-1 text-xs text-gray-500">
+          {nada ? "Sin diferencias de rendiciones anteriores." : "Diferencias de rendiciones anteriores."} La oficina todavía no vinculó tu cuenta personal.
+        </p>
+      )}
+    </div>
+  )
 }
 
 export function Billetera() {
@@ -51,8 +81,9 @@ export function Billetera() {
         <SinDescargar que="la billetera" />
       ) : (
         <div className="space-y-4 p-4">
+          {/* ── 1. Plata del VIAJE (de la empresa, en tu mano): efectivo, fondos, gastos y cheques como cantidad ── */}
           <div className="rounded-2xl bg-blue-700 p-5 text-white">
-            <p className="text-sm text-blue-200">Efectivo en mano</p>
+            <p className="text-sm text-blue-200">💵 Plata del viaje · efectivo en mano</p>
             <p className="text-4xl font-bold">{formatCurrency(data.efectivo)}</p>
             {(efectivoSinEnviar > 0 || gastosSinEnviar > 0) && (
               <p className="mt-1 text-xs text-amber-200">
@@ -68,12 +99,11 @@ export function Billetera() {
               <span className="rounded-full bg-blue-600 px-3 py-1">🧾 {data.cheques_cantidad} {data.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano · {formatCurrency(data.desglose.cheques_monto)}</span>
               {data.desglose.en_rendicion > 0 && <span className="rounded-full bg-amber-500/80 px-3 py-1">📦 {formatCurrency(data.desglose.en_rendicion)} camino a oficina</span>}
             </div>
-            {Math.abs(data.saldo_cuenta_corriente) > 0.01 && (
-              <p className={`mt-2 text-sm ${data.saldo_cuenta_corriente < 0 ? "text-red-200" : "text-green-200"}`}>
-                {data.saldo_cuenta_corriente < 0 ? `Debés ${formatCurrency(-data.saldo_cuenta_corriente)} de rendiciones anteriores` : `Tenés ${formatCurrency(data.saldo_cuenta_corriente)} a favor de rendiciones anteriores`}
-              </p>
-            )}
+            <p className="mt-2 text-xs text-blue-200">Es plata de la empresa: se rinde en oficina al cerrar el viaje.</p>
           </div>
+
+          {/* ── 2. TU cuenta (personal): diferencias de rendición, mercadería que retiraste, pagos que hiciste ── */}
+          <CajaCuentaPersonal data={data} />
 
           <div className="flex gap-2">
             <button onClick={() => setTab("cobros")} className={`min-h-11 flex-1 rounded-xl py-2 text-sm font-bold ${tab === "cobros" ? "bg-blue-600 text-white" : "border border-gray-200 bg-white text-gray-600"}`}>Cobros</button>
