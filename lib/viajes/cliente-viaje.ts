@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { ESTADOS_DEVOLUCION_EN_PROCESO, getSaldosCliente, saldoDeParada } from "@/lib/cuenta-corriente/saldo"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { enCobroPorComprobante } from "@/lib/cobranzas/en-cobro"
+import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
 
 // Ficha de UN cliente dentro de un viaje de reparto: lo que ve el chofer al bajar
 // del camión (pedido con renglones, comprobantes pendientes, devoluciones y cobros
@@ -106,7 +107,9 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
   // Cobros ya registrados del chofer para este cliente en este viaje
   const { data: pagos_registrados } = await supabase
     .from("pagos_clientes")
-    .select("id, monto, estado, created_at")
+    // idempotency_key: la app reconoce su propio cobro cuando la hoja llega antes de que
+    // la operación salga de la cola (si no, lo mostraba dos veces unos segundos)
+    .select("id, monto, estado, created_at, idempotency_key")
     .eq("viaje_id", viajeId)
     .eq("cliente_id", clienteId)
     .in("estado", ["pendiente_rendicion", "confirmado"])
@@ -231,7 +234,7 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
 
 export interface CuentaCobro {
   /** Débitos cobrables (FA/FB/FC/PRES/ND*), pendientes o parciales, no anulados */
-  comprobantes: Array<{ id: string; tipo_comprobante: string; numero_comprobante: string; fecha: string; total_neto: number; total_factura: number; saldo_pendiente: number; estado_pago: string; pedido_id: string | null; /** Ya tomado por cobros sin confirmar (vendedor u otro viaje): no se puede cobrar de nuevo */ en_cobro: number }>
+  comprobantes: Array<{ id: string; tipo_comprobante: string; numero_comprobante: string; fecha: string; total_neto: number; total_factura: number; saldo_pendiente: number; estado_pago: string; pedido_id: string | null; /** Ya tomado por cobros sin confirmar (vendedor u otro viaje): no se puede cobrar de nuevo */ en_cobro: number; /** NC del 10 % contado que le corresponde si se cobra contado (regla 07/10: 10 % del TOTAL, una vez; 0 si ya la tiene o no bonifica) */ nc_contado: number }>
   /** Pedidos vivos del cliente (para agrupar comprobantes y anticipar los sin facturar) */
   pedidos: Array<{ id: string; numero_pedido: string; fecha: string; total: number; estado: string; pago_contado_10?: boolean | null; anticipo_pago_id?: string | null }>
   /** Pedidos que ya tienen algún comprobante (facturados), tengan o no saldo */
@@ -268,8 +271,15 @@ export async function cargarCuentaCobro(supabase: SupabaseClient, clienteId: str
   ])
   // EN COBRO desde el servidor (misma fórmula que la ficha del vendedor): sin esto el
   // chofer podía cobrar un comprobante que el vendedor ya cobró y la oficina no confirmó.
-  const { enCobro } = await enCobroPorComprobante(supabase, (comps || []).map((c: any) => c.id))
-  const lista = (comps || []).map((c: any) => ({ ...c, total_neto: Number(c.total_neto) || 0, total_factura: Number(c.total_factura) || 0, saldo_pendiente: Number(c.saldo_pendiente) || 0, en_cobro: enCobro.get(c.id) || 0 }))
+  const ids = (comps || []).map((c: any) => c.id as string)
+  // nc_contado: la misma regla del 07/10 que usa el servidor al cobrar (bonif-pendiente):
+  // 10 % del total del comprobante, una sola vez, aunque el pago sea parcial. La app lo
+  // muestra en vez de estimarlo con la regla vieja (solo si se saldaba completo).
+  const [{ enCobro }, ncPendiente] = await Promise.all([
+    enCobroPorComprobante(supabase, ids),
+    ids.length ? bonificacionPendientePorComprobante(supabase, clienteId, ids.map((id) => ({ comprobante_id: id, monto_imputado: 0 }))) : Promise.resolve({} as Record<string, number>),
+  ])
+  const lista = (comps || []).map((c: any) => ({ ...c, total_neto: Number(c.total_neto) || 0, total_factura: Number(c.total_factura) || 0, saldo_pendiente: Number(c.saldo_pendiente) || 0, en_cobro: enCobro.get(c.id) || 0, nc_contado: ncPendiente[c.id] ?? 0 }))
   const ncsObs = (ncs || []).map((n: any) => String(n.observaciones || ""))
   const dtos = lista.filter((c) => ncsObs.some((o) => o.includes(c.numero_comprobante))).map((c) => c.id)
   return {

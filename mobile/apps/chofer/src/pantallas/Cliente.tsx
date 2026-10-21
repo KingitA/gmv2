@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOnline, useRuntime } from "@gm/core"
 import { DS, esEnCurso, ESTADOS_COBRABLES, idClienteViaje, type DetallePedido, type OpCobroAnular, type OpParada } from "../datasets"
 import { agregarAlBorrador } from "../datos/borrador-devolucion"
+import { valorDeDevolucion } from "../datos/cuenta-cobro"
 import { cierreAConservar, esIdLocal, keyDeIdLocal } from "../datos/overlay"
 import { rechazosDe, useClienteViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
 import { AvisosBcra, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, SinEnviar, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
@@ -182,7 +183,12 @@ export function Cliente() {
                       </span>
                     )}
                   </div>
-                  <p className="font-bold text-green-600">+{formatCurrency(dev.monto_total)}</p>
+                  <div className="text-right">
+                    <p className="font-bold text-green-600">+{formatCurrency(valorDeDevolucion(dev))}</p>
+                    {dev.valor_cobro !== undefined && Math.abs(dev.valor_cobro - dev.monto_total) > 0.005 && (
+                      <p className="text-[10px] text-green-700">bruto {formatCurrency(dev.monto_total)} · con el 10 % contado de la factura</p>
+                    )}
+                  </div>
                 </div>
               ))}
               {comprobantes_pendientes.length > 0 && devoluciones.length > 0 && (

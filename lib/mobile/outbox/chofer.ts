@@ -21,7 +21,7 @@ import { GET as meGET } from "@/app/api/chofer/me/route"
 import { subirFotosPendientes } from "@/lib/cobranzas/fotos"
 import { esTripulante, iniciarViajeSiDespachado } from "@/lib/viajes/chofer"
 import type { FilaReplica } from "../contrato"
-import { cargarViajeChofer, filaBillletera, filaClienteViaje } from "../sync/chofer"
+import { cargarViajeChofer, CLIENTE_COLS, filaBillletera, filaClienteViaje, filasClientesCatalogo } from "../sync/chofer"
 import { esUuid } from "../uuid"
 import { llamarGET, llamarRuta } from "./rutas"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
@@ -56,6 +56,14 @@ async function parcheClientes(ctx: CtxOutbox, viajeId: string, clienteIds: strin
   const upserts: FilaReplica[] = []
   for (const id of ids) upserts.push(await filaClienteViaje(ctx, viajeId, id, v?.estado || "en_curso"))
   return { dataset: "chofer_viaje_clientes", upserts, deletes: [] }
+}
+
+/** El "debe" del buscador de "Agregar cliente" (chofer_clientes) para los clientes del cobro. */
+async function parcheClientesCatalogo(ctx: CtxOutbox, clienteIds: string[]): Promise<ParcheReplica> {
+  const ids = [...new Set(clienteIds.filter(esUuid))]
+  if (!ids.length) return { dataset: "chofer_clientes", upserts: [], deletes: [] }
+  const { data } = await ctx.supabase.from("clientes").select(CLIENTE_COLS).in("id", ids).eq("activo", true)
+  return { dataset: "chofer_clientes", upserts: await filasClientesCatalogo(ctx, data || []), deletes: [] }
 }
 
 async function parcheBilletera(ctx: CtxOutbox): Promise<ParcheReplica> {
@@ -124,7 +132,7 @@ const viajeCobrar: HandlerDef<Record<string, any>> = {
       body: { ...resto, comprobante_urls, idempotency_key: m.idempotency_key },
     })
     const clienteIds = [resto.cliente_id, ...((resto.cobros_extra as any[]) || []).map((c) => c?.cliente_id), ...((resto.clientes_extra as any[]) || []).map((c) => c?.cliente_id)].filter(esUuid)
-    return { ...r, replica: await parches(() => parcheViaje(ctx, viaje_id), () => parcheClientes(ctx, viaje_id, clienteIds), () => parcheBilletera(ctx)) }
+    return { ...r, replica: await parches(() => parcheViaje(ctx, viaje_id), () => parcheClientes(ctx, viaje_id, clienteIds), () => parcheClientesCatalogo(ctx, clienteIds), () => parcheBilletera(ctx)) }
   },
 }
 
@@ -139,7 +147,7 @@ const viajeCobroAnular: HandlerDef<{ viaje_id: string; pago_id: string; cliente_
     if (pago && pago.estado !== "anulado") {
       await llamarRuta(cobroDELETE, ctx, { ruta: `/api/chofer/viaje/${viaje_id}/cobro/${pago_id}`, method: "DELETE", params: { id: viaje_id, pagoId: pago_id } })
     }
-    return { replica: await parches(() => parcheViaje(ctx, viaje_id), () => parcheClientes(ctx, viaje_id, [cliente_id]), () => parcheBilletera(ctx)) }
+    return { replica: await parches(() => parcheViaje(ctx, viaje_id), () => parcheClientes(ctx, viaje_id, [cliente_id]), () => parcheClientesCatalogo(ctx, [cliente_id]), () => parcheBilletera(ctx)) }
   },
 }
 

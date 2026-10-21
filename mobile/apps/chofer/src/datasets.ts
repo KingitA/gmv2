@@ -74,6 +74,8 @@ export interface PagoHoja {
   a_cuenta: number
   contado_10: boolean
   ajuste: number
+  /** Clave con la que este equipo lo registró (el overlay no lo cuenta dos veces mientras la operación sale de la cola) */
+  idempotency_key?: string | null
 }
 export interface ParadaHoja {
   id: string
@@ -154,7 +156,10 @@ export interface ComprobantePendiente { id: string; tipo_comprobante: string; nu
 export interface DevolucionRow {
   id: string
   numero_devolucion: string
+  /** Bruto (cantidad × precio original) */
   monto_total: number
+  /** Lo que descuenta en el cobro = lo que valdrá la NC (regla única valor-devolucion: −10 % si la factura fue contado). Falta en réplicas viejas. */
+  valor_cobro?: number
   estado: string
   devoluciones_detalle?: Array<{ id: string; articulo_id: string; cantidad: number; precio_venta_original: number; motivo: string; condicion: string; articulos?: { sku: string | null; descripcion: string } | null }>
   /** Registrada en este equipo y todavía sin enviar */
@@ -165,6 +170,7 @@ export interface PagoRegistrado {
   monto: number
   estado: string
   created_at: string
+  idempotency_key?: string | null
   /** Registrado en este equipo: sin enviar / enviando / rechazado */
   local?: { opKey: string; estado: string; error: string | null }
 }
@@ -178,8 +184,10 @@ export interface ComprobanteCobro {
   saldo_pendiente: number
   estado_pago: string
   pedido_id: string | null
-  /** Lo que ya está en un cobro registrado en este equipo sin enviar */
+  /** Lo que ya está tomado: cobros sin confirmar del vendedor u otro viaje (servidor) + cobros de este equipo sin enviar */
   en_cobro?: number
+  /** NC del 10 % contado que le corresponde (regla 07/10: 10 % del TOTAL, una vez; 0 = ya la tiene o no bonifica). Falta en réplicas viejas. */
+  nc_contado?: number
 }
 export interface PedidoCobro { id: string; numero_pedido: string; fecha: string; total: number; estado: string; pago_contado_10?: boolean | null; anticipo_pago_id?: string | null }
 export interface CuentaCobro {
@@ -201,6 +209,8 @@ export interface Comprado {
   numero_comprobante: string
   tipo_comprobante: string
   cantidad_total: number
+  /** La factura de origen tiene bonificación contado viva: una devolución de esa mercadería vale 10 % menos */
+  bonificado_contado?: boolean
 }
 
 export interface ClienteViajeRow {
@@ -230,7 +240,9 @@ export interface ClienteViajeRow {
 
 // ─── Billetera (= GET /api/chofer/billetera) ─────────────────────────────────
 
-export interface CobroBilletera { id: string; fecha: string; cliente: string; viaje: string; monto: number; metodos: string[]; estado: "en_mano" | "en_rendicion" | "rendido" | "sin_enviar" | "rechazado"; error?: string | null }
+export interface CobroBilletera { id: string; fecha: string; cliente: string; viaje: string; monto: number; metodos: string[]; estado: "en_mano" | "en_rendicion" | "rendido" | "sin_enviar" | "rechazado"; error?: string | null; idempotency_key?: string | null }
+/** Cuenta personal del chofer (= su cuenta de cliente; cuentas corrientes etapa 3). null = la oficina no la vinculó. */
+export interface CuentaPersonalChofer { cliente_id: string; saldo_real: number; saldo_proyectado: number; a_favor: number; comisiones_ganadas: number; retiros: number }
 export interface GastoBilletera { id: string; viaje: string; categoria: string; monto: number; estado: string; observaciones: string | null; created_at: string; local?: boolean }
 export interface FondoBilletera { id: string; viaje: string; monto: number; created_at: string }
 export interface BilleteraData {
@@ -238,7 +250,9 @@ export interface BilleteraData {
   efectivo: number
   desglose: { cobros_efectivo: number; fondo_viaje: number; gastos: number; cheques_monto: number; transferencias: number; en_rendicion: number }
   cheques_cantidad: number
+  /** > 0 a favor del chofer, < 0 debe (sale de la cuenta personal si está vinculada) */
   saldo_cuenta_corriente: number
+  cuenta_personal?: CuentaPersonalChofer | null
   cobros: CobroBilletera[]
   gastos: GastoBilletera[]
   fondos: FondoBilletera[]
@@ -334,7 +348,15 @@ export interface ItemDevolucion {
   origen: "pedido" | "vieja"
   comprobante_venta_id?: string | null
 }
-export interface OpDevolucion { viaje_id: string; id: string; cliente_id: string; pedido_id: string | null; items: ItemDevolucion[] }
+export interface OpDevolucion {
+  viaje_id: string
+  id: string
+  cliente_id: string
+  pedido_id: string | null
+  items: ItemDevolucion[]
+  /** Valor con la regla única (valorDevolucion: −10 % si la factura fue contado): lo que el overlay descuenta mientras no sincroniza. El servidor lo ignora y lo recalcula. */
+  valor_estimado?: number
+}
 export interface OpParada { viaje_id: string; parada_id: string; cliente_id: string; estado: string; bultos_entregados?: number; motivo_no_entrega?: string; motivo_no_cobro?: string }
 export interface OpGasto { viaje_id: string | null; viaje_nombre?: string; categoria: string; monto: number; observaciones: string | null; foto_url: string | null }
 export interface OpFinalizar { viaje_id: string; efectivo_declarado: number; observaciones?: string | null }

@@ -5,6 +5,7 @@
 
 import { anticiposDeSeleccion, PEDIDO_PREFIX, pedidosContadoAEnviar, pedidosContadoAlAplicarTodo } from "@gm/cobro"
 import { redondear } from "@gm/formato"
+import { valorDevolucion } from "@gm/vendedor"
 import type { ComprobanteCobro, CuentaCobro, PedidoCobro } from "../datasets"
 
 const r2 = (n: number) => redondear(n)
@@ -26,7 +27,39 @@ export const estadoCuentaVacio = (): EstadoCuenta => ({ sel: {}, contadoPedidos:
 /** Los datos de la réplica que hacen falta para cobrarle a un cliente. */
 export interface DatosCuenta {
   cobro: CuentaCobro
-  devoluciones: Array<{ id: string; monto_total: number; estado: string; local?: boolean }>
+  devoluciones: Array<{ id: string; monto_total: number; valor_cobro?: number; estado: string; local?: boolean }>
+}
+
+/**
+ * Valor de una devolución cargada en el equipo (= servidor, sin percepciones): neto, + IVA si la
+ * factura de origen es fiscal, −10 % si esa factura tuvo contado. Misma función que la app Vendedor.
+ */
+export function valorEstimadoDevolucion(
+  items: Array<{ cantidad: number; precio_venta_original: number; comprobante_venta_id?: string | null }>,
+  comprados: Array<{ comprobante_venta_id: string | null; tipo_comprobante: string; bonificado_contado?: boolean }>,
+): number {
+  const orig = items.map((i) => comprados.find((c) => c.comprobante_venta_id && c.comprobante_venta_id === i.comprobante_venta_id))
+  return valorDevolucion({
+    renglones: items.map((i) => ({ subtotal: Number(i.cantidad) * Number(i.precio_venta_original) })),
+    aplica10: orig.some((c) => !!c?.bonificado_contado),
+    conIva: orig.some((c) => !!c && ["FA", "FB", "FC"].includes(c.tipo_comprobante)),
+  }).total
+}
+
+/** Lo que una devolución descuenta en el cobro: su valor con la regla única (−10 % si la factura fue contado); el bruto solo en réplicas viejas. */
+export const valorDeDevolucion = (d: { monto_total: number; valor_cobro?: number }) => r2(Number(d.valor_cobro ?? d.monto_total) || 0)
+
+/**
+ * NC del 10 % contado que le corresponde a un comprobante seleccionado (regla del dueño 07/10/2026):
+ * el 10 % del TOTAL del comprobante, una sola vez, aunque el pago sea parcial. `nc_contado` lo manda
+ * el servidor con esa regla (0 = ya la tiene o no bonifica). Réplica vieja sin `nc_contado`: regla
+ * anterior (solo si se salda completo), que es lo que esas APK también mostraban.
+ */
+export function ncContadoDe(cp: ComprobanteCobro, imputado: number, dtosHechos: Set<string>): number {
+  if (!(imputado > 0.005) || dtosHechos.has(cp.id)) return 0
+  if (!TIPOS_BONIFICABLES.includes(String(cp.tipo_comprobante || "").toUpperCase())) return 0
+  if (cp.nc_contado !== undefined) return r2(Number(cp.nc_contado) || 0)
+  return Math.abs(imputado - cp.saldo_pendiente) < 0.01 ? r2(cp.total_factura * 0.1) : 0
 }
 
 /** Saldo cobrable HOY: el del comprobante menos lo que ya está en un cobro hecho acá sin enviar. */
@@ -70,17 +103,11 @@ export function resumenCuenta(datos: DatosCuenta | null | undefined, e: EstadoCu
   const dtosHechos = new Set(datos?.cobro.dtos_hechos ?? [])
   const devPendientes = (datos?.devoluciones ?? []).filter((d) => d.estado === "pendiente")
   let bonificacion = 0
-  if (e.contadoGeneral) {
-    for (const cp of comprobantes) {
-      const imp = e.sel[cp.id]
-      if (imp === undefined || dtosHechos.has(cp.id)) continue
-      if (!TIPOS_BONIFICABLES.includes(String(cp.tipo_comprobante || "").toUpperCase())) continue
-      if (Math.abs(imp - cp.saldo_pendiente) < 0.01) bonificacion += cp.total_factura * 0.1
-    }
-  }
+  if (e.contadoGeneral) for (const cp of comprobantes) bonificacion += ncContadoDe(cp, e.sel[cp.id] ?? 0, dtosHechos)
   bonificacion = r2(bonificacion)
   const totalImputado = r2(Object.values(e.sel).reduce((s, v) => s + v, 0))
-  const devTotal = e.incluirDevoluciones ? r2(devPendientes.reduce((s, d) => s + Number(d.monto_total), 0)) : 0
+  // Las devoluciones descuentan por su VALOR (= la NC futura), no por el bruto
+  const devTotal = e.incluirDevoluciones ? r2(devPendientes.reduce((s, d) => s + valorDeDevolucion(d), 0)) : 0
   const aCuenta = Math.max(0, r2(Number(e.aCuenta) || 0))
   return {
     totalImputado,

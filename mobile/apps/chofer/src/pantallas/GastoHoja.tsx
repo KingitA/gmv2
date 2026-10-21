@@ -3,8 +3,8 @@ import { useOnline, useRuntime } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
 import { CATEGORIAS_GASTO, type OpGasto } from "../datasets"
 import { useEncolar } from "../datos/hooks"
-import { numero, parseMonto, redondear } from "@gm/formato"
-import { formatCurrency } from "../ui"
+import { redondear } from "@gm/formato"
+import { formatCurrency, MontoInput } from "../ui"
 
 // Hoja "Cargar un gasto" (= components/chofer/gasto-sheet.tsx): a mano o por foto del
 // ticket. El gasto se ENCOLA (`viaje.gasto`) y sale cuando hay señal; la foto + OCR del
@@ -23,7 +23,7 @@ export function GastoHoja({ viajeId, viajeNombre, abierta, onCerrar, onGuardado 
   const encolar = useEncolar()
   const fileRef = useRef<HTMLInputElement>(null)
   const [categoria, setCategoria] = useState("nafta")
-  const [monto, setMonto] = useState("")
+  const [monto, setMonto] = useState(0)
   const [obs, setObs] = useState("")
   const [fotoUrl, setFotoUrl] = useState<string | null>(null)
   const [leyendo, setLeyendo] = useState(false)
@@ -36,7 +36,7 @@ export function GastoHoja({ viajeId, viajeNombre, abierta, onCerrar, onGuardado 
   }, [])
   // Cada apertura arranca limpia
   useEffect(() => {
-    if (abierta) { setCategoria("nafta"); setMonto(""); setObs(""); setFotoUrl(null); setAviso(""); setLeyendo(false); setOcupado(false) }
+    if (abierta) { setCategoria("nafta"); setMonto(0); setObs(""); setFotoUrl(null); setAviso(""); setLeyendo(false); setOcupado(false) }
   }, [abierta])
 
   const leerTicket = async (file: File) => {
@@ -51,7 +51,7 @@ export function GastoHoja({ viajeId, viajeNombre, abierta, onCerrar, onGuardado 
       if (d.foto_url) setFotoUrl(d.foto_url)
       if (d.success && d.categoria && d.monto) {
         setCategoria(d.categoria)
-        setMonto(numero(d.monto))
+        setMonto(redondear(d.monto))
         if (d.detalle) setObs(d.detalle)
         setAviso(`✓ Ticket leído: ${d.categoria} ${formatCurrency(d.monto)}. Revisá y guardá.`)
       } else {
@@ -65,7 +65,7 @@ export function GastoHoja({ viajeId, viajeNombre, abierta, onCerrar, onGuardado 
   }
 
   const guardar = async () => {
-    const m = parseMonto(monto) ?? 0
+    const m = monto
     if (!m || m <= 0) { setAviso("Poné el importe del gasto"); return }
     setOcupado(true)
     setAviso("")
@@ -114,10 +114,7 @@ export function GastoHoja({ viajeId, viajeNombre, abierta, onCerrar, onGuardado 
             </button>
           ))}
         </div>
-        <input
-          type="text" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value.replace(/[^\d.,]/g, ""))} placeholder="Importe"
-          className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg"
-        />
+        <MontoInput valor={monto} onCambio={setMonto} placeholder="Importe" className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg" />
         <input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Detalle (opcional)" className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3" />
         <p className="text-center text-xs text-gray-500">Oficina aprueba cada gasto al rendir el viaje.</p>
         {aviso && (

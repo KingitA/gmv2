@@ -24,7 +24,7 @@ export async function GET() {
       viajeIds.length
         ? supabase
             .from("pagos_clientes")
-            .select("id, viaje_id, cliente_id, monto, estado, created_at, clientes(nombre, razon_social, nombre_razon_social), pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, color_cheque, cheque_id)")
+            .select("id, viaje_id, cliente_id, monto, estado, created_at, idempotency_key, clientes(nombre, razon_social, nombre_razon_social), pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, color_cheque, cheque_id)")
             .in("viaje_id", viajeIds)
             .in("estado", ["pendiente_rendicion", "confirmado"])
             .order("created_at", { ascending: false })
@@ -94,6 +94,8 @@ export async function GET() {
         monto: Number(p.monto),
         metodos: [...new Set(metodos)],
         estado: p.estado === "confirmado" ? "rendido" : declarado ? "en_rendicion" : "en_mano",
+        // La app reconoce su propio cobro sin enviar por la clave (no lo lista dos veces)
+        idempotency_key: p.idempotency_key || null,
       })
     }
 

@@ -10,7 +10,7 @@
 import type { ItemOutbox } from "@gm/core"
 import { cierreDeParadaPorCobro } from "@gm/cobro"
 import { moneda, redondear } from "@gm/formato"
-import { montoDelPrincipal, repartirMetodos } from "@gm/cobro/conjunto"
+import { claveDelCliente, montoDelPrincipal, repartirMetodos } from "@gm/cobro/conjunto"
 import type {
   BilleteraData, ClienteViajeRow, DineroHoja, MetodoPayload, OpCobrar, OpCobroAnular, OpDevolucion, OpFinalizar, OpGasto, OpIniciar, OpParada,
   PagoHoja, ParadaHoja, ViajeDetalle,
@@ -24,12 +24,34 @@ export const idLocal = (opKey: string) => `local:${opKey}`
 export const esIdLocal = (id: string | null | undefined) => !!id && id.startsWith("local:")
 export const keyDeIdLocal = (id: string) => id.slice("local:".length)
 
+/** Lo que descuenta una devolución cargada acá: su valor con la regla única (lo manda la pantalla); el bruto solo si la operación es de una APK anterior. */
+const valorDevolucionLocal = (p: OpDevolucion) =>
+  p.valor_estimado != null ? r2(Number(p.valor_estimado)) : r2(p.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_venta_original), 0))
+
 const suma = (metodos: MetodoPayload[] | undefined, tipo?: string) =>
   r2((metodos || []).filter((m) => !tipo || m.tipo === tipo).reduce((s, m) => s + (Number(m.monto) || 0), 0))
 
 /** Cobrado sin enviar por cliente dentro de un viaje (titular + clientes extra del cobro conjunto). */
 function cobrosDelViaje(ops: ItemOutbox[], viajeId: string) {
   return de<OpCobrar>(vivas(ops), "viaje.cobrar").filter((x) => x.p.viaje_id === viajeId)
+}
+
+/**
+ * Claves con las que el servidor registra los pagos de una operación de cobro: la del principal es la
+ * de la operación; cada cliente agregado lleva una derivada (misma regla que el servidor, @gm/cobro/conjunto).
+ */
+export function clavesDelCobro(op: ItemOutbox, p: OpCobrar): string[] {
+  return Array.from({ length: 1 + (p.clientes_extra || []).length }, (_, i) => claveDelCliente(op.key, i)).filter((k): k is string => !!k)
+}
+
+/**
+ * ¿La réplica ya tiene el pago de esta operación? Pasa cuando la hoja o la ficha se refrescan mientras
+ * el cobro todavía figura en la cola (el servidor tardó unos segundos con la foto y el cheque): sin
+ * esto, lo cobrado se veía DUPLICADO hasta que la operación salía de la cola (pasada del 01/10/2026).
+ */
+export const yaEnReplica = (op: ItemOutbox, p: OpCobrar, claves: Iterable<string | null | undefined>) => {
+  const vistas = new Set([...claves].filter(Boolean))
+  return clavesDelCobro(op, p).some((k) => vistas.has(k))
 }
 
 /**
@@ -110,7 +132,9 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
   }
 
   // Cobros hechos acá (cliente principal + clientes extra del cobro conjunto)
+  const clavesServidor = v.paradas.flatMap((pa) => pa.pagos.map((x) => x.idempotency_key))
   for (const { op, p } of cobrosDelViaje(ops, v.id)) {
+    if (yaEnReplica(op, p, clavesServidor)) continue // el servidor ya lo tiene: no se cuenta dos veces
     sinEnviar.cobros++
     // Cobro conjunto: cada cliente ve SU parte (el principal ya no se lleva todo el monto)
     for (const parte of partesDelCobro(p)) {
@@ -148,7 +172,7 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
     sinEnviar.devoluciones++
     const par = porCliente.get(p.cliente_id)
     if (par) {
-      const total = r2(p.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_venta_original), 0))
+      const total = valorDevolucionLocal(p)
       par.devuelto = r2(par.devuelto + total)
       // Lo devuelto en el viaje baja el total a cobrar (misma regla que el servidor: saldoDeParada)
       par.total_a_cobrar = r2(par.total_a_cobrar - total)
@@ -174,7 +198,7 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
   // cobro hay un resultado de parada (p. ej. la reabrió), manda ese.
   for (const { op, p } of cobrosDelViaje(ops, v.id)) {
     const par = porCliente.get(p.cliente_id)
-    if (!par) continue
+    if (!par || yaEnReplica(op, p, clavesServidor)) continue
     const resultadoPosterior = viv.some((o) => o.tipo === "viaje.parada" && o.seq > op.seq && (o.payload as OpParada).parada_id === par.id)
     if (resultadoPosterior) continue
     const cierre = cierreDeParadaPorCobro({ estado: par.estado, bultos: par.bultos, tienePedidos: par.pedidos.length > 0, minimoExigido: par.minimo_exigido, cobrado: par.cobrado })
@@ -244,7 +268,9 @@ export function clienteVisible(c: ClienteViajeRow, ops: ItemOutbox[]): ClienteVi
     cobro: { ...c.cobro, comprobantes: c.cobro.comprobantes.map((k) => ({ ...k, en_cobro: k.en_cobro || 0 })), pedidos: c.cobro.pedidos.map((p) => ({ ...p })) },
   }
 
+  const clavesServidor = c.pagos_registrados.map((x) => x.idempotency_key)
   for (const { op, p } of cobrosDelViaje(ops, c.viaje_id)) {
+    if (yaEnReplica(op, p, clavesServidor)) continue // la ficha ya trae el pago del servidor
     const propio = p.cliente_id === c.cliente_id
     const extra = (p.cobros_extra || []).find((x) => x.cliente_id === c.cliente_id)
     // Cliente AGREGADO a un cobro conjunto: lleva su propia selección, que se reserva igual
@@ -276,12 +302,13 @@ export function clienteVisible(c: ClienteViajeRow, ops: ItemOutbox[]): ClienteVi
 
   for (const { p } of de<OpDevolucion>(viv, "viaje.devolucion").filter((x) => x.p.viaje_id === c.viaje_id && x.p.cliente_id === c.cliente_id)) {
     if (out.devoluciones.some((d) => d.id === p.id)) continue
-    const total = r2(p.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_venta_original), 0))
+    const total = valorDevolucionLocal(p)
     out.devoluciones = [
       {
         id: p.id,
         numero_devolucion: "sin enviar",
-        monto_total: total,
+        monto_total: r2(p.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_venta_original), 0)),
+        valor_cobro: total,
         estado: "pendiente",
         local: true,
         devoluciones_detalle: p.items.map((i, n) => ({ id: `${p.id}:${n}`, articulo_id: i.articulo_id, cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, motivo: i.motivo, condicion: i.condicion, articulos: { sku: i.sku, descripcion: i.descripcion } })),
@@ -329,7 +356,9 @@ export function clienteDesdeParada(viajeId: string, parada: ParadaHoja, viajeEst
 export function billeteraVisible(b: BilleteraData, ops: ItemOutbox[]): BilleteraData {
   const out: BilleteraData = { ...b, desglose: { ...b.desglose }, cobros: [...b.cobros], gastos: [...b.gastos] }
   // Cobros: los vivos suman plata; los rechazados se listan (para que no pasen inadvertidos) sin sumar
+  const clavesServidor = b.cobros.map((x) => x.idempotency_key)
   for (const { op, p } of de<OpCobrar>(ops, "viaje.cobrar")) {
+    if (yaEnReplica(op, p, clavesServidor)) continue // la billetera ya trae el cobro del servidor
     const rechazado = op.estado === "rechazado"
     // La PLATA se cuenta una vez por medio físico (un cheque repartido entre dos clientes es UN cheque)
     if (!rechazado) {
