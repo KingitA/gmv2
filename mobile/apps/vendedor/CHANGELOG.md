@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.2 (versionCode 11) — 2026-10-21
+
+- Ficha del cliente: el saldo proyectado muestra de dónde sale (cobros sin confirmar, 10% contado, devoluciones) y dice A favor cuando corresponde
+
 ## v0.4.1 (versionCode 10) — 2026-10-21
 
 - Rendición: propone el efectivo cobrado menos lo que retiraste (antes el retiro quedaba a tu favor si no tocabas el número)
