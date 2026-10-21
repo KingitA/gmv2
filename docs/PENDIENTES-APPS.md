@@ -63,6 +63,8 @@ Las hizo la sesión de cuentas corrientes con el OK de Juan (tocan `mobile/apps/
 
 ### Pendientes encontrados el 21/10 (ver tabla de arriba)
 
+0. **NuStar — pantalla blanca al reabrir una app cerrada a la fuerza** (visto 2 veces el 21/10 con la app Vendedor, después de `am force-stop`): logcat `cr_ChildProcessConn: Failed to establish the service connection`; WebView 155.0.8059.43 y Chrome 155.0.8059.79. Se arregla reiniciando el equipo. No es código de la app; conviene actualizar el WebView desde Play Store y probar si se repite al deslizar la app desde Recientes (lo que hace un usuario).
+
 1. ~~**V1 — créditos usados dos veces.**~~ **Resuelto en el servidor 21/10 (460c095)** — la app ya recibe el disponible real; queda el texto original como referencia: En Cobrar, URQUIZA muestra disponibles el a cuenta de $14.011,02 y el anticipo de $170.019, que ya usa el cobro de $122.000 del 14/10 todavía sin rendir (marca `[CREDITOS:…]`). Hace falta que el servidor descuente de cada crédito lo que tienen tomado los cobros pendientes (como `en_cobro` hace con los comprobantes) y que la app lo muestre. Primero confirmar si el servidor ya rechaza el segundo uso.
 2. **V2 — total del pedido vs. lo que debe.** El renglón del pedido #001454 dice $8.646.266,97 (total) y el cliente debe $155.005,43 de ese pedido; se ve recién abriendo la flechita. Mostrar "debe $X" como número principal y el total chico.
 3. **V3 — comisiones.** La lista "Mercadería cobrada" sale del cálculo viejo y "Comisiones ganadas" de la cuenta personal (todavía sin "Poner al día"): no coinciden. Revisarlo el día de la puesta a cero.
