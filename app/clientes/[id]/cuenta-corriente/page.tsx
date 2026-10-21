@@ -236,25 +236,14 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
             return verRechazados;
         }).forEach((pago) => {
             const metodoPago = pago.detalles.map(d => d.tipo_pago).join(" + ");
-            documentos.push({
-                id: pago.id,
-                tipo: "PAGO",
-                numero: metodoPago || "Pago",
-                fecha: pago.fecha_pago,
-                pedido: "-",
-                total: -pago.monto, // Negativo porque es un pago (reduce deuda)
-                saldo: 0, // Los pagos no tienen saldo pendiente
-                estado: pago.estado,
-                es_devolucion: false,
-                es_credito: true, // Los pagos son créditos (reducen deuda)
-            });
 
             // Plata a cuenta: lo del pago que no se aplicó a ningún comprobante
             // (entrega a cuenta o sobrante). Fórmula única compartida con la
             // Caja del Día: lib/cuenta-corriente/pago-disponible.ts.
+            let disponible = 0;
             if (pago.estado === "confirmado") {
                 const tipoDe = new Map(data.comprobantes.map((c) => [c.id, c.tipo_comprobante]));
-                const disponible = disponibleDePago(
+                disponible = disponibleDePago(
                     pago.monto,
                     (pago.imputaciones || []).map((i) => ({
                         monto_imputado: i.monto_imputado,
@@ -262,6 +251,25 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                         tipo_comprobante_destino: tipoDe.get(i.comprobante_id) ?? null,
                     })),
                 );
+            }
+
+            documentos.push({
+                id: pago.id,
+                tipo: "PAGO",
+                numero: metodoPago || "Pago",
+                fecha: pago.fecha_pago,
+                pedido: "-",
+                total: -pago.monto, // Negativo porque es un pago (reduce deuda)
+                // Saldo del pago = lo que todavía no se aplicó a ninguna factura
+                // (queda a cuenta). Antes mostraba "−$0,00" aunque hubiera
+                // $4.000.000 a cuenta (auditoría 21/10, WENG BIAO).
+                saldo: disponible > 0.009 ? -disponible : 0,
+                estado: pago.estado,
+                es_devolucion: false,
+                es_credito: true, // Los pagos son créditos (reducen deuda)
+            });
+
+            if (pago.estado === "confirmado") {
                 if (disponible > 0.009) {
                     documentos.push({
                         id: `acuenta-${pago.id}`,
@@ -488,6 +496,11 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                         {data.cliente.saldo_proyectado != null && Math.abs(data.cliente.saldo_proyectado - data.cliente.saldo_total) > 0.009 && (
                             <p className="text-xs text-amber-600 mt-1">
                                 {(data.cliente.pendiente_verificacion ?? 0) > 0 && <>Cobros sin verificar: {moneda(data.cliente.pendiente_verificacion ?? 0)}{' · '}</>}
+                                {/* El resto de la diferencia es el 10 % contado (y ajustes) que se aplica al confirmar los cobros */}
+                                {(() => {
+                                    const otros = Math.round((data.cliente.saldo_total - (data.cliente.saldo_proyectado ?? 0) - (data.cliente.pendiente_verificacion ?? 0) - (data.cliente.devoluciones_en_proceso ?? 0)) * 100) / 100;
+                                    return Math.abs(otros) > 0.01 ? <>10 % contado al confirmar: {moneda(otros)}{' · '}</> : null;
+                                })()}
                                 {(data.cliente.devoluciones_en_proceso ?? 0) > 0 && <>Devoluciones en proceso: {moneda(data.cliente.devoluciones_en_proceso ?? 0)}{' · '}</>}
                                 Proyectado: {moneda(data.cliente.saldo_proyectado)}
                             </p>
@@ -774,7 +787,14 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                     {moneda(doc.total)}
                                                 </TableCell>
                                                 <TableCell className={`text-right font-bold ${doc.es_credito ? 'text-green-600' : ''}`}>
-                                                    {doc.es_credito ? '-' : ''}{moneda(Math.abs(doc.saldo))}
+                                                    {doc.tipo === "PAGO" && Math.abs(doc.saldo) < 0.01 ? (
+                                                        <span className="font-normal text-gray-400" title="Todo el pago está aplicado a facturas">aplicado</span>
+                                                    ) : (
+                                                        <>{doc.es_credito ? '-' : ''}{moneda(Math.abs(doc.saldo))}</>
+                                                    )}
+                                                    {doc.tipo === "PAGO" && Math.abs(doc.saldo) >= 0.01 && (
+                                                        <span className="ml-1 text-[10px] font-semibold text-blue-700">a cuenta</span>
+                                                    )}
                                                     {(enCallePorComprobante.get(doc.id) ?? 0) > 0.005 && (
                                                         <span className="ml-2 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 align-middle" title="Cobrado por el vendedor/chofer, pendiente de verificación en oficina">
                                                             en calle {moneda(enCallePorComprobante.get(doc.id)!)}

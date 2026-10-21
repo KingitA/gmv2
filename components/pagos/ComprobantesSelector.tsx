@@ -10,6 +10,32 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { CargaProgreso } from "@/components/ui/carga-progreso"
 import { InputMonto } from "@/components/ui/input-monto"
 import { fecha, moneda, redondear } from "@/lib/formato"
+import { traerSaldosCliente } from "@/lib/cuenta-corriente/saldos-cliente-fetch"
+
+/**
+ * "Facturas pendientes $X · a favor −$Y · Saldo de la cuenta $Z" — lo mismo en
+ * Cobros y en Caja. Antes decía solo "Saldo a cobrar" con la suma de facturas,
+ * aunque el cliente tuviera plata a favor (WENG BIAO: $8,7 M de facturas y
+ * $7,5 M a favor, debía $1,19 M). Auditoría 21/10.
+ */
+export function TextoSaldoCuenta({ r, fuerte }: { r: ResumenCuenta; fuerte: string }) {
+  const aFavor = r.saldoCuenta != null ? redondear(r.saldoACobrar - r.saldoCuenta) : 0
+  return (
+    <>
+      Facturas pendientes <b className={fuerte}>{moneda(r.saldoACobrar)}</b>
+      {aFavor > 0.009 && <> · a favor / a cuenta <b className="text-green-700">−{moneda(aFavor)}</b></>}
+      {r.saldoCuenta != null && (
+        <>
+          {" · "}Saldo de la cuenta{" "}
+          <b className={r.saldoCuenta > 0.009 ? "text-red-600" : "text-green-700"}>
+            {moneda(r.saldoCuenta)}
+            {r.saldoCuenta < -0.009 ? " a favor" : ""}
+          </b>
+        </>
+      )}
+    </>
+  )
+}
 
 export interface Comprobante {
   id: string
@@ -63,6 +89,8 @@ export const PEDIDO_PREFIX = "pedido:"
 
 export interface ResumenCuenta {
   saldoACobrar: number        // suma de saldos pendientes de comprobantes cobrables
+  /** Saldo REAL de la cuenta (libro, fuente única). null si no se pudo leer. */
+  saldoCuenta?: number | null
   pedidosFacturados: number   // pedidos con comprobantes a cobrar
   pedidosSinFacturar: number  // pedidos sin ningún comprobante (anticipo)
   pedidosSaldados: number     // pedidos facturados sin saldo (historial)
@@ -78,6 +106,8 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
   const [loading, setLoading] = useState(false)
   const [expandido, setExpandido] = useState<Record<string, boolean>>({})
   const supabase = createClient()
+  const clienteActual = useRef(clienteId)
+  clienteActual.current = clienteId
 
   useEffect(() => {
     if (!clienteId) return
@@ -134,12 +164,21 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
         const vivos = new Set(pedList.map((p) => p.id))
         const conSaldo = new Set(lista.filter((c) => c.pedido_id && vivos.has(c.pedido_id)).map((c) => c.pedido_id as string))
         const factSet = new Set((facturados || []).map((f: any) => f.pedido_id).filter(Boolean))
-        onResumenLoaded({
-          saldoACobrar: lista.reduce((s, c) => s + Number(c.saldo_pendiente || 0), 0),
+        const saldoACobrar = lista.reduce((s, c) => s + Number(c.saldo_pendiente || 0), 0)
+        // El saldo de la cuenta llega aparte (fuente única): las facturas solas
+        // no muestran la plata a favor (NC sin aplicar, pagos a cuenta).
+        const resumen: ResumenCuenta = {
+          saldoACobrar,
+          saldoCuenta: null,
           pedidosFacturados: conSaldo.size,
           pedidosSinFacturar: pedList.filter((p) => !factSet.has(p.id)).length,
           pedidosSaldados: pedList.filter((p) => factSet.has(p.id) && !conSaldo.has(p.id)).length,
           otrosComprobantes: lista.filter((c) => !(c.pedido_id && vivos.has(c.pedido_id))).length,
+        }
+        onResumenLoaded(resumen)
+        const cid = clienteId
+        traerSaldosCliente(cid).then((s) => {
+          if (s && clienteActual.current === cid) onResumenLoaded({ ...resumen, saldoCuenta: s.saldo_real })
         })
       }
       setLoading(false)

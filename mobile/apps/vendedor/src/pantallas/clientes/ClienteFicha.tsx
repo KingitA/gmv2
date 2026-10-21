@@ -317,11 +317,8 @@ export function ClienteFicha() {
           <p className="text-sm text-gray-500">Saldo {hayPendiente ? "proyectado" : "de cuenta corriente"}</p>
           <p className={`mt-1 text-3xl font-bold ${proy > 0.01 ? "text-red-600" : "text-green-600"}`}>{Math.abs(proy) < 0.01 ? "$ 0,00" : formatCurrency(proy)}</p>
           {proy > 0.01 && <p className="mt-1 text-sm text-gray-400">El cliente debe</p>}
-          {hayPendiente && (
-            <p className="mt-1 text-xs text-gray-400">
-              Real: {formatCurrency(cliente.saldo_actual)} — la diferencia son cobros/devoluciones que el ERP todavía no confirmó
-            </p>
-          )}
+          {proy < -0.01 && <p className="mt-1 text-sm text-gray-400">A favor del cliente</p>}
+          {hayPendiente && <DesgloseProyectado real={cliente.saldo_actual} proy={proy} cobros={cliente.pendiente_verificacion ?? 0} devoluciones={cliente.devoluciones_en_proceso ?? 0} />}
         </section>
 
         {/* Acciones */}
@@ -660,6 +657,45 @@ export function ClienteFicha() {
         Solo podés hacerlo mientras la plata siga en tu poder (sin rendir). Se revierte todo: billetera, imputaciones y cheques.
       </HojaConfirmar>
     </Pantalla>
+  )
+}
+
+/**
+ * De dónde sale el proyectado: real − cobros sin confirmar − 10 % contado − devoluciones.
+ * Antes decía solo "la diferencia son cobros/devoluciones…" y no se entendía por qué
+ * URQUIZA, con facturas por $323.091, quedaba a favor (auditoría 21/10: era el 10 %
+ * contado de $172.457 que se aplica al confirmar el cobro). El 10 % y lo cargado sin
+ * enviar salen por diferencia: es lo que falta para llegar al proyectado.
+ */
+export function desgloseProyectado(real: number, proy: number, cobros: number, devoluciones: number) {
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  const otros = r2(real - proy - cobros - devoluciones)
+  return { cobros: r2(cobros), devoluciones: r2(devoluciones), otros }
+}
+
+function DesgloseProyectado({ real, proy, cobros, devoluciones }: { real: number; proy: number; cobros: number; devoluciones: number }) {
+  const d = desgloseProyectado(real, proy, cobros, devoluciones)
+  const fila = (label: string, monto: number) =>
+    Math.abs(monto) > 0.01 && (
+      <div className="flex justify-between gap-3">
+        <span>{label}</span>
+        <span className="tabular-nums">{monto > 0 ? "−" : "+"}{formatCurrency(Math.abs(monto))}</span>
+      </div>
+    )
+  return (
+    <div className="mx-auto mt-3 max-w-xs space-y-0.5 border-t border-gray-100 pt-2 text-left text-xs text-gray-500">
+      <div className="flex justify-between gap-3">
+        <span>Saldo real (confirmado)</span>
+        <span className="tabular-nums">{formatCurrency(real)}</span>
+      </div>
+      {fila("Cobros sin confirmar", d.cobros)}
+      {fila("10 % contado y otros al confirmar", d.otros)}
+      {fila("Devoluciones en proceso", d.devoluciones)}
+      <div className="flex justify-between gap-3 border-t border-gray-100 pt-0.5 font-semibold text-gray-700">
+        <span>= Proyectado</span>
+        <span className="tabular-nums">{formatCurrency(proy)}</span>
+      </div>
+    </div>
   )
 }
 

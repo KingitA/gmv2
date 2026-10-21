@@ -65,7 +65,7 @@ const ENTREGA: Record<string, string> = { entregamos_nosotros: "Entregamos nosot
 const FACETAS_CLIENTES = ["tiene_codigo", "localidad", "zona", "viajante", "nivel", "iva", "pago", "facturacion", "lista", "canal", "entrega"]
 const TITULOS: Record<string, string> = {
   codigo: "Código", tiene_codigo: "Código", nombre: "Nombre", direccion: "Dirección", localidad: "Localidad", zona: "Zona", viajante: "Viajante",
-  puntaje: "Puntaje", nivel: "Nivel", iva: "Condición IVA", pago: "Condición de pago", facturacion: "Facturación",
+  saldo: "Saldo", puntaje: "Puntaje", nivel: "Nivel", iva: "Condición IVA", pago: "Condición de pago", facturacion: "Facturación",
   lista: "Lista de precios", canal: "Canal", entrega: "Entrega",
 }
 
@@ -152,7 +152,20 @@ export default function ClientesPage() {
     try { sessionStorage.setItem(CLAVE_GUARDADO, JSON.stringify({ q: searchTerm, filtros, orden, estado })) } catch { /* sin storage */ }
   }, [restaurado, searchTerm, filtros, orden, estado])
 
+  // Saldo de cada cliente (fuente única, real + proyectado) para la columna Saldo.
+  // Antes la lista no mostraba cuánto debe nadie (auditoría 21/10).
+  const [saldos, setSaldos] = useState<Map<string, { real: number; proy: number }>>(new Map())
+  async function loadSaldos() {
+    try {
+      const r = await fetch("/api/clientes/saldos?todos=1")
+      if (!r.ok) return
+      const j = await r.json()
+      setSaldos(new Map(Object.entries(j.saldos || {}).map(([id, s]: [string, any]) => [id, { real: Number(s.saldo_real) || 0, proy: Number(s.saldo_proyectado) || 0 }])))
+    } catch { /* la columna queda vacía; el resto de la lista anda igual */ }
+  }
+
   async function loadClientes() {
+    loadSaldos()
     const supabase = createClient()
     // Paginado interno para no cortar en 1000 (el padrón crece). Trae también los
     // dados de baja: el selector de estado los muestra a pedido.
@@ -247,6 +260,7 @@ export default function ClientesPage() {
     { id: "localidad", valor: (c) => c.localidades?.nombre || c.localidad },
     { id: "zona", valor: (c) => c.localidades?.zonas?.nombre },
     { id: "viajante", valor: (c) => (c.vendedor_id ? nombreVendedor.get(c.vendedor_id) ?? "(viajante dado de baja)" : null) },
+    { id: "saldo", numero: (c) => saldos.get(c.id)?.real ?? 0 },
     { id: "puntaje", numero: (c) => Number(c.puntaje) },
     { id: "nivel", valor: (c) => c.nivel_puntaje },
     { id: "iva", valor: (c) => c.condicion_iva },
@@ -255,7 +269,7 @@ export default function ClientesPage() {
     { id: "lista", valor: (c) => (c.lista_precio_id ? nombreLista.get(c.lista_precio_id) ?? "(lista dada de baja)" : null) },
     { id: "canal", valor: (c) => c.tipo_canal },
     { id: "entrega", valor: (c) => ENTREGA[c.condicion_entrega ?? ""] ?? c.condicion_entrega },
-  ], [nombreVendedor, nombreLista])
+  ], [nombreVendedor, nombreLista, saldos])
 
   // 1) estado  2) búsqueda (en orden de relevancia)  3) filtros  4) orden elegido
   const universo = useMemo(() => {
@@ -417,6 +431,7 @@ export default function ClientesPage() {
                     {encabezado("localidad", "Localidad", "valores")}
                     {encabezado("zona", "Zona", "valores")}
                     {encabezado("viajante", "Viajante", "valores")}
+                    {encabezado("saldo", "Saldo", "numero", "text-right")}
                     {encabezado("puntaje", "Puntaje", "numero", "hidden 2xl:table-cell")}
                     {encabezado("nivel", "Nivel", "valores")}
                     <TableHead className="w-px whitespace-nowrap font-semibold">Acciones</TableHead>
@@ -425,13 +440,13 @@ export default function ClientesPage() {
                 <TableBody>
                   {cargandoClientes ? (
                     <TableRow>
-                      <TableCell colSpan={9}>
+                      <TableCell colSpan={10}>
                         <CargaProgreso compacto mensajes={MENSAJES.clientes} className="mx-auto max-w-sm py-8" />
                       </TableCell>
                     </TableRow>
                   ) : filteredClientes.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                         {buscando ? "Buscando…" : hayAlgo ? "No hay clientes con esa búsqueda o filtros" : "No hay clientes registrados"}
                       </TableCell>
                     </TableRow>
@@ -458,6 +473,25 @@ export default function ClientesPage() {
                         <TableCell className="max-w-[140px] truncate text-muted-foreground 2xl:max-w-[170px]" title={cliente.localidades?.nombre || cliente.localidad || undefined}>{cliente.localidades?.nombre || cliente.localidad || "-"}</TableCell>
                         <TableCell className="max-w-[110px] truncate text-muted-foreground 2xl:max-w-[130px]">{cliente.localidades?.zonas?.nombre || "-"}</TableCell>
                         <TableCell className="max-w-[130px] truncate text-muted-foreground 2xl:max-w-[160px]" title={(cliente.vendedor_id && nombreVendedor.get(cliente.vendedor_id)) || undefined}>{(cliente.vendedor_id && nombreVendedor.get(cliente.vendedor_id)) || "-"}</TableCell>
+                        <TableCell className="whitespace-nowrap text-right tabular-nums">
+                          {(() => {
+                            const s = saldos.get(cliente.id)
+                            if (!s || (Math.abs(s.real) < 0.01 && Math.abs(s.proy) < 0.01)) return <span className="text-muted-foreground">—</span>
+                            return (
+                              <>
+                                <div className={`font-semibold ${s.real > 0.009 ? "text-red-600" : "text-green-700"}`}>
+                                  {moneda(Math.abs(s.real))}
+                                  {s.real < -0.009 && <span className="ml-1 text-[10px] font-semibold">a favor</span>}
+                                </div>
+                                {Math.abs(s.proy - s.real) > 0.009 && (
+                                  <div className="text-[10px] text-amber-700" title="Si se confirma lo pendiente (cobros sin verificar, devoluciones)">
+                                    proyectado {moneda(s.proy)}
+                                  </div>
+                                )}
+                              </>
+                            )
+                          })()}
+                        </TableCell>
                         <TableCell className="hidden whitespace-nowrap 2xl:table-cell">
                           <span className="font-semibold">{entero(cliente.puntaje)}</span>
                           <span className="text-muted-foreground text-sm">/100</span>

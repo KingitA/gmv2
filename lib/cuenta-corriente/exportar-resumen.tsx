@@ -45,6 +45,20 @@ export interface DatosResumen {
 
 const firmado = (f: FilaSaldoExport, v: number) => (f.es_credito ? -Math.abs(v) : Math.abs(v))
 
+// Estado en palabras para el cliente (antes salía el código: "a_cuenta", "pendiente_rendicion"…)
+const ESTADO_LEGIBLE: Record<string, string> = {
+  pendiente: "Pendiente",
+  parcial: "Pago parcial",
+  pagado: "Pagado",
+  a_cuenta: "A cuenta",
+  confirmado: "Confirmado",
+  pendiente_rendicion: "Cobrado, sin confirmar",
+  rechazado: "Rechazado",
+  anulado: "Anulado",
+  facturado: "Con nota de crédito",
+}
+const estadoLegible = (e: string) => ESTADO_LEGIBLE[e] ?? (e ? e.charAt(0).toUpperCase() + e.slice(1).replace(/_/g, " ") : "")
+
 function nombreArchivo(d: DatosResumen, ext: string) {
   const slug = (d.cliente.nombre || "cliente").replace(/[^\p{L}\p{N}]+/gu, "-").toLowerCase()
   return `resumen-cuenta-${slug}-${hoyISO()}.${ext}`
@@ -85,12 +99,16 @@ export function exportarResumenExcel(d: DatosResumen) {
     Pedido: f.pedido === "-" ? "" : f.pedido,
     Total: firmado(f, f.total),
     Saldo: firmado(f, f.saldo),
-    Estado: f.estado,
+    Estado: estadoLegible(f.estado),
   }))
   const wsS = XLSX.utils.json_to_sheet(filasSaldos)
   wsS["!cols"] = [{ wch: 10 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 12 }]
   if (d.soloSeleccion) {
     XLSX.utils.sheet_add_json(wsS, [{ Tipo: "", Número: "", Fecha: "", Pedido: "TOTAL SELECCIONADO", Total: "", Saldo: d.totalSeleccion ?? 0, Estado: "" }], { origin: -1, skipHeader: true })
+  } else if (d.vista === "saldos") {
+    // Igual que el PDF: el cliente ve al pie cuánto debe (o tiene a favor)
+    const leyenda = d.saldoFinal > 0.005 ? "debe" : d.saldoFinal < -0.005 ? "a favor" : "al día"
+    XLSX.utils.sheet_add_json(wsS, [{ Tipo: "", Número: "", Fecha: "", Pedido: "SALDO ACTUAL", Total: "", Saldo: d.saldoFinal, Estado: leyenda }], { origin: -1, skipHeader: true })
   }
   XLSX.utils.book_append_sheet(wb, wsS, d.soloSeleccion ? "Selección" : d.vista === "detallada" ? "Comprobantes" : "Saldos pendientes")
 
@@ -180,7 +198,7 @@ export async function exportarResumenPdf(d: DatosResumen) {
             <C w={colS[3]}>{f.pedido === "-" ? "" : f.pedido}</C>
             <C w={colS[4]} num>{moneda(firmado(f, f.total))}</C>
             <C w={colS[5]} num>{moneda(firmado(f, f.saldo))}</C>
-            <C w={colS[6]}>{f.estado}</C>
+            <C w={colS[6]}>{estadoLegible(f.estado)}</C>
           </View>
         ))}
         {d.soloSeleccion ? (

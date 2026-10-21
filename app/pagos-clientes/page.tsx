@@ -27,7 +27,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { ClienteSearchCombobox } from "@/components/pagos/ClienteSearchCombobox"
-import { ComprobantesSelector, type Comprobante, type ModoPedidos, type ResumenCuenta } from "@/components/pagos/ComprobantesSelector"
+import { ComprobantesSelector, TextoSaldoCuenta, type Comprobante, type ModoPedidos, type ResumenCuenta } from "@/components/pagos/ComprobantesSelector"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { localMatch } from "@/lib/search/local-match"
 import { MetodoPagoForm, type MetodoPago } from "@/components/pagos/MetodoPagoForm"
@@ -832,7 +832,7 @@ function PagosClientesContent() {
                     </div>
                     {resumenCuenta && (
                       <span className="text-xs text-muted-foreground">
-                        Saldo a cobrar <b className="text-foreground">{moneda(resumenCuenta.saldoACobrar)}</b>
+                        <TextoSaldoCuenta r={resumenCuenta} fuerte="text-foreground" />
                         {" · "}{resumenCuenta.pedidosFacturados} facturado{resumenCuenta.pedidosFacturados === 1 ? "" : "s"}
                         {resumenCuenta.otrosComprobantes > 0 && ` + ${resumenCuenta.otrosComprobantes} sin pedido`}
                         {" · "}{resumenCuenta.pedidosSinFacturar} sin facturar

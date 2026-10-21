@@ -17,6 +17,7 @@ import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import {
   ComprobantesSelector,
+  TextoSaldoCuenta,
   PEDIDO_PREFIX,
   type Comprobante,
   type ModoPedidos,
@@ -713,7 +714,7 @@ export function RegistrarCobro({
               </div>
               {resumen && (
                 <span className="text-xs text-slate-500">
-                  Saldo a cobrar <b className="text-slate-800" style={NUM}>{moneda(resumen.saldoACobrar)}</b>
+                  <span style={NUM}><TextoSaldoCuenta r={resumen} fuerte="text-slate-800" /></span>
                   <span className="text-slate-300"> · </span>
                   {resumen.pedidosFacturados} facturado{resumen.pedidosFacturados === 1 ? "" : "s"}
                   {resumen.otrosComprobantes > 0 && ` + ${resumen.otrosComprobantes} sin pedido`}
