@@ -187,7 +187,7 @@ Reglas del dueño:
 - **Rendición descuenta los retiros** (ya está en el código de la app, falta la APK). `pantallas/Rendiciones.tsx` propone como "Efectivo contado" lo cobrado en efectivo **menos los retiros sin rendir** (`efectivoARendir` en `datos/billetera.ts`, lee `retiros_sin_rendir` de la fila `billetera` con su overlay) y lo explica en una línea: "Cobraste $X − retiraste $Y = llevás $Z". El aviso de "faltan/sobran" mide contra ese número.
   - Por qué: `rendicion_crear` v4 descuenta TODOS los retiros sin rendir. Proponiendo solo lo cobrado, el vendedor que retiró $122.000 y rendía sin tocar el número declaraba $122.000 que ya no tenía: el retiro quedaba "a su favor" en su cuenta y la oficina esperaba una plata que no iba a llegar.
   - El servidor (`/api/vendedor/pagos-pendientes`) ahora devuelve también `retiros_sin_rendir`. La página web `/vendedor/rendiciones` hace lo mismo.
-  - **Armar una APK nueva** (v0.4.1).
+  - ~~Armar una APK nueva~~ **Hecho 21/10: v0.4.1 (versionCode 10) instalada en el NuStar**; probada la pantalla (cobró 122.000, retiró 122.000 → propone 0).
 
 ### Oficina (ERP) — sin cambios en apps
 

@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.1 (versionCode 10) — 2026-10-21
+
+- Rendición: propone el efectivo cobrado menos lo que retiraste (antes el retiro quedaba a tu favor si no tocabas el número)
+
 ## v0.4.0 (versionCode 9) — 2026-10-19
 
 - Billetera en dos cajitas y retiro de la cuenta personal; 10% contado con la regla del 07/10; Resumen con el proyectado de lo guardado sin enviar; devoluciones valuadas como el servidor; descuento general y contado por pedido; condiciones por proveedor/marca; mercadería por cupo eligiendo artículos; sin precio base no se vende
