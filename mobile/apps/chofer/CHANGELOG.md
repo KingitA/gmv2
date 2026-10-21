@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.1 (versionCode 7) — 2026-10-21
+
+- Borrador del cobro (si la app se cierra con la cámara abierta no se pierde lo cargado), el pedido de este viaje primero y lo anterior plegado, $0 / A favor en vez de guiones, la ficha explica el saldo (cobros sin confirmar y devoluciones de otros viajes), la devolución muestra lo que vale para el cliente, el sobrante se confirma siempre, alerta de viajes sin rendir
+
 ## v0.3.0 (versionCode 6) — 2026-10-21
 
 - Cuentas corrientes: billetera en dos cajitas (Plata del viaje / Tu cuenta), 10% contado con la regla del 07/10 (10% del total, una vez, también en pago parcial), devoluciones descontadas por su valor, saldo del cliente con fuente única y lo ya en cobro por el vendedor reservado; el cobro sincronizado no se ve dos veces; importes con formato argentino en gasto y rendición

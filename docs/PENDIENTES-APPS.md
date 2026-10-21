@@ -28,7 +28,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | Puesta a cero y apertura | Cuentas corrientes | Instalado; se ejecuta el día del corte |
 | App Vendedor v0.4.0 (dos cajitas, retiro, 10 % contado, Resumen) | App Vendedor | Pendiente |
 | App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único, cobrado duplicado al sincronizar, "debe" del buscador) | App Chofer | Hecho 21/10 (merge 246e87f), APK v0.3.0 instalada en el NuStar |
-| App Chofer v0.3.1 (borrador del cobro, pedido del viaje primero, "$0"/"A favor", ficha explica el saldo, valor de devolución, sobrante, viajes viejos) | App Chofer | Hecho en código 21/10 (rama `chofer-v0.3.1`); falta OK de merge, APK e instalar |
+| App Chofer v0.3.1 (borrador del cobro, pedido del viaje primero, "$0"/"A favor", ficha explica el saldo, valor de devolución, sobrante, viajes viejos) | App Chofer | Hecho 21/10 (merge 7d62a2c), APK v0.3.1 instalada en el NuStar |
 | App Depósito v0.3.0 (devolución por renglón, formatos, mercadería por cupo, **reactivar artículos dados de baja**) | App Depósito | Hecho 20/10 (rama `deposito-v030`), APK v0.3.0 |
 | Tope de reintentos del outbox (O10) en `@gm/core` — **toca a las 3 apps** | App Depósito | Hecho 20/10. Vendedor y chofer lo reciben en su próxima APK sin hacer nada (ver abajo) |
 | Recepción: la base rechazaba "faltante" (web y APK) | App Depósito | Hecho 20/10, migración `20261020d_recepciones_estado_faltante.sql` aplicada 21/10 y probada (la operación que fallaba 1.156 veces ahora guarda) |
@@ -39,7 +39,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |
 |---|---|---|---|
 | Vendedor | v0.4.0 (versionCode 9) | 20/10 | — |
-| Chofer | v0.3.0 (versionCode 6) | 21/10 | — |
+| Chofer | v0.3.1 (versionCode 7) | 21/10 | — |
 | Depósito | v0.3.0 (versionCode 8) | 20/10 | — |
 
 ---
@@ -65,7 +65,7 @@ Detalle en MOBILE.md §19 "v0.3.0". Todo lo que estaba pendiente:
 
 **Probado en el equipo (21/10, TEST-CHOFER4, todo con presupuestos):** cobro parcial con 10 %, devolución a valor (−10 %), `en_cobro` de un cobro de oficina, cobro conjunto con un cheque real (una fila en cartera), sin duplicado al sincronizar, dos cajitas con la cuenta personal real. Detalle y **análisis de uso con 8 cambios propuestos** en MOBILE.md §19 "Pasada guionada 21/10".
 
-**v0.3.1 HECHA en código (21/10, rama `chofer-v0.3.1`; falta OK de merge, APK e instalar):** borrador del cobro (Android mató la app con la cámara abierta), lo de este viaje primero y lo viejo plegado, "$0" / "A favor" en vez de guiones, la ficha explica el saldo (cobros sin confirmar y devoluciones de otros viajes), valor final de la devolución en su pantalla, "atrás" tras el teclado, confirmación del sobrante siempre, alerta de viajes viejos sin rendir, texto del candado. Detalle en MOBILE.md §19 "v0.3.1".
+**v0.3.1 HECHA (21/10, merge 7d62a2c, APK instalada en el NuStar):** borrador del cobro (Android mató la app con la cámara abierta), lo de este viaje primero y lo viejo plegado, "$0" / "A favor" en vez de guiones, la ficha explica el saldo (cobros sin confirmar y devoluciones de otros viajes), valor final de la devolución en su pantalla, "atrás" tras el teclado, confirmación del sobrante siempre, alerta de viajes viejos sin rendir, texto del candado. Detalle en MOBILE.md §19 "v0.3.1".
 
 ## App Depósito → v0.3.0 HECHA (20/10/2026, instalada en el NuStar)
 
