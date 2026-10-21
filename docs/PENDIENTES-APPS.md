@@ -30,7 +30,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único) | App Chofer | Pendiente |
 | App Depósito v0.3.0 (devolución por renglón, formatos, mercadería por cupo, **reactivar artículos dados de baja**) | App Depósito | Hecho 20/10 (rama `deposito-v030`), APK v0.3.0 |
 | Tope de reintentos del outbox (O10) en `@gm/core` — **toca a las 3 apps** | App Depósito | Hecho 20/10. Vendedor y chofer lo reciben en su próxima APK sin hacer nada (ver abajo) |
-| Recepción: la base rechazaba "faltante" (web y APK) | App Depósito | Hecho 20/10, migración `20261020d_recepciones_estado_faltante.sql` **para aplicar** |
+| Recepción: la base rechazaba "faltante" (web y APK) | App Depósito | Hecho 20/10, migración `20261020d_recepciones_estado_faltante.sql` aplicada 21/10 y probada (la operación que fallaba 1.156 veces ahora guarda) |
 | Artículos dados de baja: matching sin bajas, reactivar desde Artículos/Depósito, historial de quién | Servidor (sesión búsquedas/formatos) | Hecho 20/10 (bef0ecd + 570cc2c), migraciones `20261020_pedidos_articulo_real` y `20261020b_articulos_bajas` aplicadas |
 
 ## Versiones instaladas hoy
@@ -75,7 +75,7 @@ Detalle en MOBILE.md §17 "v0.3.0".
    - Servidor: `GET /api/mobile/deposito/articulo-baja?codigo=` (online, `requireMobile`) y operación de outbox `articulo.reactivar { articulo_id }` (`lib/mobile/outbox/deposito.ts`, idempotente; usa `cambiarEstadoArticulos(…, "app_deposito")` de `lib/articulos/estado.ts`). El historial (`articulos_estado_historial`) guarda usuario, fecha y origen.
    - App: `pantallas/comunes/DadoDeBaja.tsx` (hoja `?ver=baja`), usada en Artículos, Recepción y Devoluciones. Sin señal: "no se encontró (sin señal no se puede ver si está dado de baja)". El artículo reaparece al sincronizar (sin overlay optimista).
    - Falta: probar en el NuStar o contra el mock (escanear un código de un artículo dado de baja, reactivar, ver que aparezca) y publicar la APK. Detalle en MOBILE.md §17 "Artículo dado de baja".
-7. **Base de datos (para el dueño)**: aplicar `20261020d_recepciones_estado_faltante.sql` (sin esto, marcar faltante en recepción sigue fallando en web y APK) y `20260827_picking_preparadores.sql` (índice "Ya lo preparó X"; controles previos corridos el 19/10: 0 duplicados en `picking_items` y 0 en `picking_sesiones`). Después: cancelar las recepciones de prueba de OC-000007 y OC-000008, abiertas desde julio/agosto por el bug del faltante.
+7. ~~Base de datos~~ **Hecho 21/10**: el dueño aplicó `20261020d_recepciones_estado_faltante.sql` y `20260827_picking_preparadores.sql`. Probado con la misma función del servidor: RESIDUO VAIVEN → faltante se guardó (primera línea `faltante` de la historia). Recepciones de prueba de OC-000007 y OC-000008 **canceladas** (estaban abiertas desde julio/agosto por este bug); foto antes/después IDÉNTICA en las 18 tablas, stock de los 3.292 artículos y numeración.
 8. **Cola del NuStar limpiada (20/10, con OK del dueño):** se sacaron 3 operaciones del 18–22/09 que nunca iban a entrar (2 recepciones "faltante" y "Abrir pedido 001576", que habría pasado ese pedido de `impreso` a `en_preparacion` un mes tarde).
 
 ### Para los agentes de Vendedor y Chofer: tope de reintentos (O10) en `@gm/core`
@@ -92,7 +92,7 @@ Cambió `mobile/packages/core/src/sync/outbox.ts` (compartido). No hay que tocar
 | 2 | ~~`en_cobro` en la cuenta de cobro del chofer~~ **Hecho 20/10** | Chofer | `lib/cobranzas/en-cobro.ts` (fórmula única con el vendedor). La APK actual ya lo usa. |
 | 3 | ~~Cheques de cobros pendientes en cartera / anular cheque compartido~~ **Hecho 20/10** | Chofer y vendedor | Estado EN_VERIFICACION hasta confirmar el cobro; un cheque compartido no se anula mientras otro cliente lo use. |
 | 4 | Pantalla admin de `mobile_dispositivos` (revocar equipo) y `mobile_alertas_integridad` | Las 3 | MOBILE.md §10. |
-| 6 | ~~Recepción: la base rechazaba `estado_linea = 'faltante'`~~ **Hecho 20/10** | Depósito (web y APK) | La regla vieja de `recepciones_items` no aceptaba `faltante`; la web decía "Marcado como faltante" sin guardar. Migración `20261020d_recepciones_estado_faltante.sql` (**aplicar**) y la web ahora avisa si no se guardó. |
+| 6 | ~~Recepción: la base rechazaba `estado_linea = 'faltante'`~~ **Hecho 20/10** | Depósito (web y APK) | La regla vieja de `recepciones_items` no aceptaba `faltante`; la web decía "Marcado como faltante" sin guardar. Migración `20261020d_recepciones_estado_faltante.sql` (aplicada 21/10) y la web ahora avisa si no se guardó. |
 | 5 | ~~Artículos dados de baja en matching e importaciones~~ **Hecho 20/10** | Las 3 (sin APK, salvo depósito) | Importación de pedidos (el "062216" dado de baja tapaba al "62216"), listas de precios (mail y Excel), facturas/recepciones de proveedor, OC, vincular a mano, chat de IA y búsqueda por IA (`match_articulos` filtra activos en la base): **solo activos**. Excel de artículos con SKU dado de baja: se actualiza sin reactivar y avisa. Búsqueda por foto del vendedor por EAN corregida (servidor). |
 
 ## Lo que NO hay que rehacer (ya está resuelto)

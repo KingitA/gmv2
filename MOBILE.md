@@ -1105,10 +1105,11 @@ ligada por `orden_compra_id` (hay que contarlas al limpiar datos de prueba).
 `ok`, `diferencia_cantidad` y `no_pedido`; todo el código escribe `faltante`. Consecuencias:
 - **Web**: "Marcar faltante" decía "Marcado como faltante" y **no se guardaba nada** (`patchItem`
   no miraba la respuesta). En toda la tabla había 0 líneas `faltante`; las recepciones de
-  OC-000007 (29/07) y OC-000008 (04/08) quedaron abiertas con todo en pendiente.
+  OC-000007 (29/07) y OC-000008 (04/08) quedaron abiertas con todo en pendiente (eran de prueba:
+  canceladas el 21/10 con foto antes/después idéntica).
 - **APK**: la operación del 18/09 falló 1.156 veces, cada 15 s, y trabó la fila (ver O10, §4.2).
 - No lo agarró el checklist del 18/09: probó contar y finalizar, nunca marcar un faltante en recepción.
-- Arreglo: migración **`20261020d_recepciones_estado_faltante.sql`** (agrega `faltante`;
+- Arreglo: migración **`20261020d_recepciones_estado_faltante.sql`** (aplicada 21/10; agrega `faltante`;
   superconjunto, idempotente) y la web ahora muestra el error si el servidor no guardó.
 - Limpieza del NuStar (con OK del dueño): antes de aplicar la migración se sacaron de la cola
   las 3 operaciones trabadas (2 recepciones "faltante" del 18/09 y "Abrir pedido 001576" del
