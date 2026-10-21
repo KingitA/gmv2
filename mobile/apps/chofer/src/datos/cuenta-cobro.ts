@@ -163,6 +163,19 @@ export function alternarContadoPedido(e: EstadoCuenta, p: PedidoCobro): EstadoCu
   return e.sel[PEDIDO_PREFIX + p.id] !== undefined ? conSel(out, PEDIDO_PREFIX + p.id, montoAnticipo(p, !tenia)) : out
 }
 
+/**
+ * Pedidos de ESTE viaje primero; el resto queda plegado en "Debe de antes" (dueño, 21/10/2026: el
+ * chofer está en la puerta con el cliente, lo de hoy tiene que estar arriba). Los saldados no se listan
+ * entre los del viaje (no hay nada que cobrarles).
+ */
+export function separarPorViaje(cobro: CuentaCobro, pedidosViaje: string[]): { delViaje: PedidoCobro[]; anteriores: PedidoCobro[] } {
+  const ids = new Set(pedidosViaje)
+  return {
+    delViaje: cobro.pedidos.filter((p) => ids.has(p.id)),
+    anteriores: cobro.pedidos.filter((p) => !ids.has(p.id)),
+  }
+}
+
 export function clavesDeLaCuenta(cobro: CuentaCobro): string[] {
   return [...cobro.comprobantes.map((c) => c.id), ...agruparCuenta(cobro).pedidosSinFacturar.map((p) => PEDIDO_PREFIX + p.id)]
 }

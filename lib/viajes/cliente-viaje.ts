@@ -25,6 +25,10 @@ export interface ClienteViaje {
   comprobantes_pendientes: any[]
   devoluciones: any[]
   pagos_registrados: any[]
+  /** Cobros del cliente SIN confirmar que no son de este viaje (oficina, vendedor u otro viaje): explican el saldo proyectado */
+  cobros_sin_confirmar: Array<{ id: string; monto: number; created_at: string; origen: "viaje" | "oficina" }>
+  /** Devoluciones en proceso de OTROS viajes (ya descuentan del proyectado): explican el saldo anterior */
+  otras_devoluciones: Array<{ id: string; numero_devolucion: string; estado: string; valor: number; created_at: string }>
   resumen: {
     saldo_anterior: number
     saldo_real: number
@@ -127,6 +131,29 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
     .eq("viaje_id", viajeId)
     .eq("cliente_id", clienteId)
 
+  // Lo que explica el saldo y no es de este viaje (pedido del dueño, 21/10/2026: el chofer no podía
+  // reconciliar "saldo anterior" con lo que veía): cobros sin confirmar de oficina/vendedor/otro
+  // viaje y devoluciones en proceso de otros viajes, valuadas con la regla única.
+  const [{ data: cobrosAjenos }, { data: devsAjenas }] = await Promise.all([
+    supabase
+      .from("pagos_clientes")
+      .select("id, monto, created_at, viaje_id")
+      .eq("cliente_id", clienteId)
+      .in("estado", ["pendiente", "pendiente_rendicion"])
+      .or(`viaje_id.is.null,viaje_id.neq.${viajeId}`)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("devoluciones")
+      .select("id, numero_devolucion, estado, monto_total, created_at, viaje_id")
+      .eq("cliente_id", clienteId)
+      .in("estado", ESTADOS_DEVOLUCION_EN_PROCESO as unknown as string[])
+      .or(`viaje_id.is.null,viaje_id.neq.${viajeId}`)
+      .order("created_at", { ascending: false }),
+  ])
+  const valoresAjenas = (devsAjenas || []).length ? await valorarDevoluciones(supabase, { clienteId, devolucionIds: (devsAjenas || []).map((d: any) => d.id) }).catch(() => new Map()) : new Map()
+  const cobros_sin_confirmar = (cobrosAjenos || []).map((p: any) => ({ id: p.id, monto: Number(p.monto) || 0, created_at: comoUtc(p.created_at) || String(p.created_at), origen: p.viaje_id ? ("viaje" as const) : ("oficina" as const) }))
+  const otras_devoluciones = (devsAjenas || []).map((d: any) => ({ id: d.id, numero_devolucion: d.numero_devolucion, estado: d.estado, valor: Math.round(((valoresAjenas.get(d.id) as any)?.total ?? Number(d.monto_total) ?? 0) * 100) / 100, created_at: comoUtc(d.created_at) || String(d.created_at) }))
+
   // Saldos desde la FUENTE ÚNICA (lib/cuenta-corriente/saldo.ts): real y
   // proyectado del cliente, y el proyectado SIN lo de este viaje para el saldo
   // anterior (misma fórmula que la hoja de ruta: saldoDeParada).
@@ -213,6 +240,8 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
     comprobantes_pendientes: comprobantes || [],
     devoluciones: devolucionesValoradas,
     pagos_registrados: (pagos_registrados || []).map((p) => ({ ...p, created_at: comoUtc(p.created_at) })),
+    cobros_sin_confirmar,
+    otras_devoluciones,
     resumen: {
       saldo_anterior,
       saldo_real: saldos.saldo_real,

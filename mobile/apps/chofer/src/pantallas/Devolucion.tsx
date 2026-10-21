@@ -6,7 +6,7 @@ import { guardarBorrador, useBorradorDevolucion } from "../datos/borrador-devolu
 import { buscarArticulos, useArticulos, useClienteViaje, useEncolar, useViaje, uuidv4 } from "../datos/hooks"
 import { parseMonto } from "@gm/formato"
 import { valorEstimadoDevolucion } from "../datos/cuenta-cobro"
-import { dejarAviso, formatCurrency, MontoInput, Pantalla, useBloqueoSalida, useBusqueda, useToast } from "../ui"
+import { dejarAviso, formatCurrency, GRACIA_TECLADO_MS, MontoInput, Pantalla, useBloqueoSalida, useBusqueda, useToast } from "../ui"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
 
 // Devolución en el reparto (= el sheet "Registrar Devolución" de la ficha web, ahora ruta
@@ -34,11 +34,13 @@ export function Devolucion() {
   const enviandoRef = useRef(false)
   const items = borrador.items
 
+  // Un "atrás" justo después de elegir un artículo (el teclado se acaba de cerrar solo) no cuenta
+  const graciaTeclado = useRef(0)
   const { hoja: hojaDescartar } = useBloqueoSalida(items.length > 0 && !listo, {
     titulo: "¿Descartar la devolución?",
     detalle: `Tenés ${items.length} artículo(s) cargados que todavía no se registraron.`,
     confirmar: "Descartar",
-  })
+  }, { ignorarHasta: graciaTeclado })
   // Registrada: volver a donde se entró (ficha o parada del viaje) sin dejar el formulario en el historial
   useEffect(() => {
     if (!listo) return
@@ -54,6 +56,7 @@ export function Devolucion() {
 
   const agregarArticulo = async (a: Articulo) => {
     setQ("")
+    graciaTeclado.current = Date.now() + GRACIA_TECLADO_MS
     if (items.some((x) => x.articulo_id === a.id)) return
     const enPedido = data?.pedido?.detalle.find((d) => d.articulo_id === a.id)
     let precio = 0
@@ -106,6 +109,7 @@ export function Devolucion() {
 
   const updateItem = (idx: number, patch: Partial<ItemDevolucion>) => setBorrador((prev) => ({ items: prev.items.map((i, n) => (n === idx ? { ...i, ...patch } : i)) }))
   const total = items.reduce((s, i) => s + i.cantidad * i.precio_venta_original, 0)
+  const valorEstimado = valorEstimadoDevolucion(items, data?.comprados ?? [])
 
   const registrar = async () => {
     if (!items.length || enviandoRef.current) return
@@ -117,10 +121,10 @@ export function Devolucion() {
     setEnviando(true)
     try {
       // Valor con la regla única (= lo que descontará el cobro y valdrá la NC): el overlay lo usa sin señal
-      const payload: OpDevolucion = { viaje_id: viajeId, id: uuidv4(), cliente_id: clienteId, pedido_id: data?.pedido?.id || null, items, valor_estimado: valorEstimadoDevolucion(items, data?.comprados ?? []) }
-      await encolar("viaje.devolucion", payload, `Devolución ${clienteNombre} ${formatCurrency(total)}`)
+      const payload: OpDevolucion = { viaje_id: viajeId, id: uuidv4(), cliente_id: clienteId, pedido_id: data?.pedido?.id || null, items, valor_estimado: valorEstimado }
+      await encolar("viaje.devolucion", payload, `Devolución ${clienteNombre} ${formatCurrency(valorEstimado)}`)
       guardarBorrador(viajeId, clienteId, null)
-      dejarAviso(online ? `↩ Devolución registrada por ${formatCurrency(total)}. Se procesará al confirmar la rendición.` : `↩ Devolución por ${formatCurrency(total)} guardada en el equipo: se envía al volver la señal.`)
+      dejarAviso(online ? `↩ Devolución registrada por ${formatCurrency(valorEstimado)}. Depósito la revisa; la nota de crédito la emite oficina.` : `↩ Devolución por ${formatCurrency(valorEstimado)} guardada en el equipo: se envía al volver la señal.`)
       setBorrador(() => ({ items: [] }))
       setListo(true)
     } catch {
@@ -146,9 +150,16 @@ export function Devolucion() {
       pie={
         items.length > 0 ? (
           <div className="border-t border-gray-200 bg-white p-4">
-            <div className="mb-2 flex items-center justify-between rounded-xl bg-green-50 px-4 py-2">
-              <span className="font-medium text-green-700">Total devolución:</span>
-              <span className="text-xl font-bold text-green-700">{formatCurrency(total)}</span>
+            {/* Lo que vale para el cliente = precio final de la factura (con el 10 % contado si lo tuvo):
+                el mismo número que descuenta el cobro y que llevará la nota de crédito (dueño, 21/10) */}
+            <div className="mb-2 rounded-xl bg-green-50 px-4 py-2">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-green-700">Vale para el cliente:</span>
+                <span className="text-xl font-bold text-green-700">{formatCurrency(valorEstimado)}</span>
+              </div>
+              {Math.abs(valorEstimado - total) > 0.005 && (
+                <p className="text-xs text-green-700">Bruto {formatCurrency(total)} · precio final de la factura (con el 10 % contado). Es lo que descuenta el cobro.</p>
+              )}
             </div>
             <button onClick={() => void registrar()} disabled={enviando || !enCurso} className="min-h-14 w-full rounded-2xl bg-amber-500 py-4 text-xl font-bold text-white active:scale-95 disabled:opacity-50">
               {enviando ? "Guardando..." : "Registrar Devolución"}
