@@ -28,7 +28,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | Puesta a cero y apertura | Cuentas corrientes | Instalado; se ejecuta el día del corte |
 | App Vendedor v0.4.0 (dos cajitas, retiro, 10 % contado, Resumen) | App Vendedor | Hecho 20/10 (merge 78ee8a0), APK v0.4.0 |
 | App Vendedor v0.4.1 (la rendición propone efectivo − retiros) y v0.4.2 (la ficha explica el proyectado, "A favor del cliente") | Cuentas corrientes (auditoría 21/10, con OK de Juan) | Hecho 21/10 (ccff0fb, 29b07c5), APK v0.4.2 instalada en el NuStar |
-| V1 — Cobrar: créditos ya usados por un cobro sin rendir figuran "disponibles" (riesgo de usarlos dos veces) | Cuentas corrientes (servidor: `en_cobro` de créditos) + App Vendedor (mostrarlo) | Pendiente — primero confirmar si el servidor lo frena |
+| V1 — Cobrar: créditos ya usados por un cobro sin rendir figuran "disponibles" (riesgo de usarlos dos veces) | Cuentas corrientes | **Hecho 21/10 en el servidor (460c095)**: el servidor no lo frenaba; ahora reserva lo tomado por cobros sin confirmar, rechaza el segundo uso y la ficha manda el disponible real. La app no necesita cambios. |
 | V2 — Cobrar: el renglón del pedido muestra el TOTAL del pedido y no lo que debe | App Vendedor | Pendiente |
 | V3 — Comisiones: "Mercadería cobrada" lista comisiones y "Comisiones ganadas" dice $0 | Cuentas corrientes | Pendiente — revisar después de la puesta a cero + "Poner al día" |
 | App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único, cobrado duplicado al sincronizar, "debe" del buscador) | App Chofer | Hecho 21/10 (merge 246e87f), APK v0.3.0 instalada en el NuStar |
@@ -63,7 +63,7 @@ Las hizo la sesión de cuentas corrientes con el OK de Juan (tocan `mobile/apps/
 
 ### Pendientes encontrados el 21/10 (ver tabla de arriba)
 
-1. **V1 — créditos usados dos veces (prioridad).** En Cobrar, URQUIZA muestra disponibles el a cuenta de $14.011,02 y el anticipo de $170.019, que ya usa el cobro de $122.000 del 14/10 todavía sin rendir (marca `[CREDITOS:…]`). Hace falta que el servidor descuente de cada crédito lo que tienen tomado los cobros pendientes (como `en_cobro` hace con los comprobantes) y que la app lo muestre. Primero confirmar si el servidor ya rechaza el segundo uso.
+1. ~~**V1 — créditos usados dos veces.**~~ **Resuelto en el servidor 21/10 (460c095)** — la app ya recibe el disponible real; queda el texto original como referencia: En Cobrar, URQUIZA muestra disponibles el a cuenta de $14.011,02 y el anticipo de $170.019, que ya usa el cobro de $122.000 del 14/10 todavía sin rendir (marca `[CREDITOS:…]`). Hace falta que el servidor descuente de cada crédito lo que tienen tomado los cobros pendientes (como `en_cobro` hace con los comprobantes) y que la app lo muestre. Primero confirmar si el servidor ya rechaza el segundo uso.
 2. **V2 — total del pedido vs. lo que debe.** El renglón del pedido #001454 dice $8.646.266,97 (total) y el cliente debe $155.005,43 de ese pedido; se ve recién abriendo la flechita. Mostrar "debe $X" como número principal y el total chico.
 3. **V3 — comisiones.** La lista "Mercadería cobrada" sale del cálculo viejo y "Comisiones ganadas" de la cuenta personal (todavía sin "Poner al día"): no coinciden. Revisarlo el día de la puesta a cero.
 
