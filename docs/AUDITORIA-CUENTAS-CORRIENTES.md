@@ -230,3 +230,11 @@ Pendientes de pantalla (no frenan, pero confunden):
 - App vendedor: el saldo proyectado no detalla la NC del 10 % proyectada (URQUIZA: −$76.842,80 con facturas por $323.091).
 - "Saldo a cobrar" de Cobros/Caja suma solo facturas (ignora NC a favor, a cuenta y en cobro). La lista de clientes del ERP no tiene saldo. El Excel de saldos no tiene total.
 - Varios (ver mapa del 21/10): web del vendedor muestra real; empleados en listas de deuda; overlay offline del chofer resta dos veces las devoluciones.
+
+Arreglado además el 21/10 (en main): pantallas que confundían (pago "−$0,00", total en el Excel, "Facturas pendientes · a favor · Saldo de la cuenta" en Cobros/Caja, columna Saldo en clientes, fechas del extracto, 10 % visible en el proyectado del ERP y de la app vendedor v0.4.2), Pendientes de revisar movida a Finanzas → Caja (solo admin), nombre de quien aceptó la devolución. Manual de uso: https://claude.ai/artifact/Gpgo1EaFkTdnGDQg6iXba3
+
+Pendientes que encontré al sacar las capturas (sin tocar todavía):
+- App vendedor, Cobrar: el renglón de cada pedido muestra el TOTAL del pedido (URQUIZA #001454: $8.646.266,97) y no lo que debe ($155.005,43); hay que abrir la flechita para verlo.
+- App vendedor, Cobrar: los créditos que ya usa un cobro sin rendir (URQUIZA: a cuenta $14.011,02 y anticipo $170.019 dentro del cobro de $122.000 del 14/10) figuran "disponibles": riesgo de usarlos dos veces. Falta confirmar si el servidor lo frena.
+- App vendedor, Comisiones: "Mercadería cobrada" lista comisiones (URQUIZA #001454) mientras "Comisiones ganadas" dice $0: la lista sale del cálculo viejo y la cuenta personal todavía no tiene "Poner al día". Se alinea con la puesta a cero + Poner al día; revisar entonces.
+- NuStar: el 21/10 volvió la pantalla blanca por actualización del WebView; se arregló reiniciando el equipo (adb reboot).
