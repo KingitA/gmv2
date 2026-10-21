@@ -61,11 +61,25 @@ export async function GET() {
       }
     })
 
+    // Retiros de efectivo todavía sin rendir: rendicion_crear v4 los descuenta
+    // de lo que tiene que llevar, así que la pantalla propone efectivo − retiros
+    // (si propone solo el efectivo, rendir sin tocar el número deja el retiro
+    // compensado "a su favor" — auditoría 21/10).
+    const { data: retiros, error: eRet } = await supabase
+      .from("billetera_movimientos")
+      .select("monto")
+      .in("viajante_id", session.vendedorIds)
+      .eq("referencia_tipo", "retiro_efectivo")
+      .is("rendicion_id", null)
+    if (eRet) throw eRet
+    const retirosSinRendir = Math.round((retiros || []).reduce((s, m: any) => s - Number(m.monto || 0), 0) * 100) / 100
+
     return NextResponse.json({
       pagos: resultado,
       total: resultado.reduce((s, p) => s + p.monto, 0),
       total_efectivo: totalEfectivo,
       total_otros: totalOtros,
+      retiros_sin_rendir: retirosSinRendir,
     })
   } catch (error: any) {
     console.error("[vendedor] Error en GET /api/vendedor/pagos-pendientes:", error)

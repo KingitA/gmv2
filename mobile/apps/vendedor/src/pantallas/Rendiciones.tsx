@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { ErrorHttp, ErrorSesion, useContadoresOutbox, useOnline, useOverlay, useParamEstado, useRuntime } from "@gm/core"
 import { fecha, fechaHora, redondear } from "@gm/formato"
 import { DS } from "../datasets"
+import { efectivoARendir, useBilletera } from "../datos/billetera"
 import { useFilaBilletera, useRefrescarAlEntrar } from "../datos/hooks"
 import { fechaAR, formatCurrency, HojaConfirmar, MontoInput, Pantalla, SinDescargar, useToast } from "../ui"
 
@@ -64,17 +65,21 @@ export function Rendiciones() {
   const historial = hist?.rendiciones ?? []
   const totales = { total_efectivo: pend?.total_efectivo || 0, total_otros: pend?.total_otros || 0 }
 
+  const { data: billetera } = useBilletera()
+  const retiros = billetera?.retiros_sin_rendir || 0
+
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set())
   const [efectivoDeclarado, setEfectivoDeclarado] = useState<number>(0)
   const [obs, setObs] = useState("")
   const [enviando, setEnviando] = useState(false)
 
-  // Igual que `cargar()` de la web: cuando cambia lo pendiente, todo seleccionado y el efectivo
-  // estimado como declarado. La firma evita pisar lo que tocó el usuario en cada sync sin cambios.
-  const firma = `${pagos.map((p) => p.id).join(",")}|${pend?.total_efectivo ?? 0}`
+  // Igual que `cargar()` de la web: cuando cambia lo pendiente, todo seleccionado y como declarado
+  // lo que tiene que llevar (efectivo − retiros). La firma evita pisar lo que tocó el usuario en
+  // cada sync sin cambios.
+  const firma = `${pagos.map((p) => p.id).join(",")}|${pend?.total_efectivo ?? 0}|${retiros}`
   useEffect(() => {
     setSeleccionados(new Set(pagos.map((p) => p.id)))
-    setEfectivoDeclarado(pend?.total_efectivo || 0)
+    setEfectivoDeclarado(efectivoARendir(pend?.total_efectivo || 0, retiros))
   }, [firma]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (id: string) => {
@@ -89,7 +94,8 @@ export function Rendiciones() {
   const elegidos = pagos.filter((p) => seleccionados.has(p.id))
   const totalSeleccionado = elegidos.reduce((s, p) => s + p.monto, 0)
   const efectivoSel = elegidos.reduce((s, p) => s + (p.monto_efectivo ?? 0), 0)
-  const difDeclarado = redondear(efectivoDeclarado - efectivoSel)
+  const esperado = efectivoARendir(efectivoSel, retiros)
+  const difDeclarado = redondear(efectivoDeclarado - esperado)
   const cuantos = `${elegidos.length} cobro${elegidos.length === 1 ? "" : "s"}`
 
   const rendir = async () => {
@@ -168,6 +174,12 @@ export function Rendiciones() {
                     <span>Efectivo estimado: {formatCurrency(totales.total_efectivo)}</span>
                     <span>Cheques/transf.: {formatCurrency(totales.total_otros)}</span>
                   </div>
+                  {retiros > 0 && (
+                    <p className="rounded-lg bg-indigo-50 p-2 text-sm text-indigo-900">
+                      Cobraste {formatCurrency(efectivoSel)} en efectivo − retiraste {formatCurrency(retiros)} ={" "}
+                      <b>llevás {formatCurrency(esperado)}</b>
+                    </p>
+                  )}
                   <div>
                     <label className="mb-1 block font-bold text-gray-700">💵 Efectivo contado (declarado)</label>
                     <MontoInput
@@ -279,7 +291,7 @@ export function Rendiciones() {
         <p>Efectivo que declarás llevar: <b>{formatCurrency(efectivoDeclarado)}</b></p>
         {difDeclarado !== 0 && (
           <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800">
-            ⚠ Según los cobros deberías llevar {formatCurrency(efectivoSel)} en efectivo ({difDeclarado > 0 ? "sobran" : "faltan"} {formatCurrency(Math.abs(difDeclarado))}). Oficina lo va
+            ⚠ Según los cobros{retiros > 0 ? " y lo que retiraste" : ""} deberías llevar {formatCurrency(esperado)} en efectivo ({difDeclarado > 0 ? "sobran" : "faltan"} {formatCurrency(Math.abs(difDeclarado))}). Oficina lo va
             a ver al controlar.
           </p>
         )}

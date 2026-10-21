@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { prepararMotorCliente, type ArticuloMotor, type InsumosCliente } from "@gm/pricing"
 import { valorDevolucion } from "@gm/vendedor"
 import { bonifFichaPorSeg, cuposDelPedido } from "../../../apps/vendedor/src/datos/condiciones"
-import { billeteraVisible, retirosSinEnviar, type BilleteraData } from "../../../apps/vendedor/src/datos/billetera"
+import { billeteraVisible, efectivoARendir, retirosSinEnviar, type BilleteraData } from "../../../apps/vendedor/src/datos/billetera"
 import { clientesVisibles } from "../../../apps/vendedor/src/datos/overlay"
 import type { Cliente, CondPedido } from "../../../apps/vendedor/src/datasets"
 
@@ -85,5 +85,18 @@ describe("Devolución sin enviar valuada como el servidor", () => {
     const cliente = { id: "c1", nombre: "X", saldo_actual: 50000, saldo_proyectado: 50000, pagos_sin_rendir: 0, bonificaciones: { viajante: {}, mercaderia: {} } } as unknown as Cliente
     const ops = [{ tipo: "devolucion.registrar", estado: "pendiente", payload: { cliente_id: "c1", items: [{ cantidad: 1, precio_venta_original: 10000 }], valor_estimado: v } }] as never
     expect(clientesVisibles([cliente], ops)[0]!.saldo_proyectado).toBe(41000)
+  })
+})
+
+describe("Rendición: el efectivo a llevar descuenta los retiros (auditoría 21/10)", () => {
+  it("cobró 122.000 y retiró 122.000: lleva 0 (antes proponía 122.000 y el retiro quedaba a su favor)", () => {
+    expect(efectivoARendir(122000, 122000)).toBe(0)
+  })
+  it("cobró 300.000 y retiró 50.000: lleva 250.000", () => {
+    expect(efectivoARendir(300000, 50000)).toBe(250000)
+  })
+  it("sin retiros lleva todo el efectivo y nunca propone un número negativo", () => {
+    expect(efectivoARendir(80000.5, 0)).toBe(80000.5)
+    expect(efectivoARendir(10000, 30000)).toBe(0)
   })
 })

@@ -60,6 +60,15 @@ export function billeteraVisible(b: BilleteraData | null, sinEnviar: number): Bi
   }
 }
 
+/**
+ * Efectivo que el vendedor tiene que llevar a la oficina: lo cobrado en efectivo menos lo que
+ * ya retiró para sí (rendicion_crear v4 descuenta TODOS los retiros sin rendir). Proponer solo lo
+ * cobrado hacía que, rindiendo sin tocar el número, el retiro quedara compensado "a su favor".
+ */
+export function efectivoARendir(efectivoCobrado: number, retirosSinRendir: number): number {
+  return Math.max(0, r2(efectivoCobrado - Math.max(0, retirosSinRendir || 0)))
+}
+
 export function useBilletera() {
   const { fila, cargando } = useFilaBilletera<BilleteraData>("billetera")
   const ops = useNoEnviados()

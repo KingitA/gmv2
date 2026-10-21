@@ -20,7 +20,7 @@ import { ImputarPago, type PagoAImputar } from "@/components/caja/imputar-pago"
 
 type Datos = {
   puede_operar_caja: boolean
-  cobros_sin_confirmar: Array<{ pago_id: string; cliente: string; monto: number; estado: string; quien: string; cargado_por: string | null; medios: string[]; desde: string; dias: number }>
+  cobros_sin_confirmar: Array<{ pago_id: string; cliente: string; monto: number; estado: string; en_camino?: boolean; quien: string; cargado_por: string | null; medios: string[]; desde: string; dias: number }>
   a_cuenta_sin_decidir: Array<{ pago_id: string; cliente_id: string; cliente: string; monto: number; disponible: number; desde: string; dias: number }>
   anticipos_esperando_factura: Array<{ pago_id: string; cliente: string; disponible: number; pedidos: string[]; desde: string; dias: number }>
   devoluciones_en_deposito: Array<{ devolucion_id: string; numero: string; cliente: string; monto: number; desde: string; dias: number }>
@@ -116,7 +116,7 @@ export default function PendientesPage() {
                 <div className="min-w-0">
                   <p className="font-semibold">{c.cliente}</p>
                   <p className="text-xs text-muted-foreground">
-                    {c.quien}{c.cargado_por ? ` · ${c.cargado_por}` : ""} · {c.medios.join(", ") || "—"} · {c.estado === "pendiente_rendicion" ? "sin rendir" : "sin confirmar"} · {fecha(c.desde)}
+                    {c.quien}{c.cargado_por ? ` · ${c.cargado_por}` : ""} · {c.medios.join(", ") || "—"} · {c.en_camino ? "rendido, en camino a oficina" : c.estado === "pendiente_rendicion" ? "sin rendir" : "sin confirmar"} · {fecha(c.desde)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

@@ -86,10 +86,25 @@ export async function GET() {
         ...(devRes.data || []).map((d: any) => d.cliente_id),
       ].filter(Boolean)),
     ]
+    // Cobros ya declarados en una rendición abierta: el cobrador ya rindió, la
+    // plata está "en camino a oficina" (antes decía "sin rendir" y confundía).
+    const enCamino = new Set<string>()
+    if (rendRes.data?.length) {
+      const { data: items, error } = await supabase
+        .from("rendicion_items")
+        .select("pago_id")
+        .in("rendicion_id", rendRes.data.map((r: any) => r.id))
+      if (error) throw error
+      for (const it of items || []) enCamino.add(it.pago_id)
+    }
+
+    // confirmado_por de devoluciones es texto: hoy guarda el id del usuario
+    const esUuid = (s: unknown) => typeof s === "string" && /^[0-9a-f-]{36}$/i.test(s)
     const usuarioIds = [
       ...new Set([
         ...(pendRes.data || []).map((p: any) => p.creado_por),
         ...(rendRes.data || []).map((r: any) => r.cobrador_id),
+        ...(devRes.data || []).map((d: any) => d.confirmado_por).filter(esUuid),
       ].filter(Boolean)),
     ]
     const [{ data: clientes }, { data: perfiles }] = await Promise.all([
@@ -109,6 +124,7 @@ export async function GET() {
       cliente: cliente.get(p.cliente_id) || "Cliente",
       monto: Number(p.monto) || 0,
       estado: p.estado,
+      en_camino: enCamino.has(p.id),
       quien: p.cobrador_tipo === "chofer" ? "Chofer" : p.cobrador_tipo === "viajante" ? "Vendedor" : "Oficina",
       cargado_por: usuario.get(p.creado_por) || null,
       medios: [...new Set((p.pagos_detalle || []).map((d: any) => d.tipo_pago))],
@@ -147,7 +163,7 @@ export async function GET() {
       cliente: cliente.get(d.cliente_id) || "Cliente",
       monto: Number(d.monto_total) || 0,
       estado: d.estado,
-      aceptada_por: d.confirmado_por || null,
+      aceptada_por: (esUuid(d.confirmado_por) ? usuario.get(d.confirmado_por) : d.confirmado_por) || null,
       desde: d.estado === "confirmado" ? d.fecha_confirmacion || d.created_at : d.created_at,
       dias: dias(d.estado === "confirmado" ? d.fecha_confirmacion || d.created_at : d.created_at),
     }))

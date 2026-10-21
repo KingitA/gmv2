@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { fecha, fechaHora, redondear } from "@/lib/formato"
 import { InputMonto } from "@/components/ui/input-monto"
+import { efectivoARendir } from "@/lib/vendedor/efectivo-a-rendir"
 
 // Rendiciones del viajante — vos declarás (POST /api/viajante/rendir) y la
 // plata pasa a "en viaje a oficina" (billetera en 0); oficina confirma cuando
@@ -47,6 +48,7 @@ export default function VendedorRendicionesPage() {
   const [totales, setTotales] = useState({ total: 0, total_efectivo: 0, total_otros: 0 })
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set())
   const [efectivoDeclarado, setEfectivoDeclarado] = useState<number>(0)
+  const [retiros, setRetiros] = useState(0)
   const [obs, setObs] = useState("")
   const [historial, setHistorial] = useState<Rendicion[]>([])
   const [abierta, setAbierta] = useState<string | null>(null) // rendición expandida
@@ -63,7 +65,8 @@ export default function VendedorRendicionesPage() {
         setPagos(pend.pagos || [])
         setTotales({ total: pend.total, total_efectivo: pend.total_efectivo, total_otros: pend.total_otros })
         setSeleccionados(new Set((pend.pagos || []).map((p: PagoPendiente) => p.id)))
-        setEfectivoDeclarado(pend.total_efectivo || 0)
+        setRetiros(Number(pend.retiros_sin_rendir) || 0)
+        setEfectivoDeclarado(efectivoARendir(pend.total_efectivo || 0, Number(pend.retiros_sin_rendir) || 0))
       }
       if (!hist.error) setHistorial(hist.rendiciones || [])
     } catch {
@@ -86,17 +89,19 @@ export default function VendedorRendicionesPage() {
   }
 
   const totalSeleccionado = pagos.filter((p) => seleccionados.has(p.id)).reduce((s, p) => s + p.monto, 0)
+  const efectivoSelPantalla = pagos.filter((p) => seleccionados.has(p.id)).reduce((s, p) => s + (p.monto_efectivo ?? 0), 0)
 
   const rendir = async () => {
     if (!seleccionados.size || enviando) return
     const efectivoSel = pagos.filter((p) => seleccionados.has(p.id)).reduce((s, p) => s + (p.monto_efectivo ?? 0), 0)
-    const difDeclarado = redondear(efectivoDeclarado - efectivoSel)
+    const esperado = efectivoARendir(efectivoSel, retiros)
+    const difDeclarado = redondear(efectivoDeclarado - esperado)
     if (
       !confirm(
         `¿Rendir ${seleccionados.size} cobro${seleccionados.size === 1 ? "" : "s"} por ${formatCurrency(totalSeleccionado)}?\n\n` +
           `Efectivo que declarás llevar: ${formatCurrency(efectivoDeclarado)}` +
           (difDeclarado !== 0
-            ? `\n⚠ Según los cobros deberías llevar ${formatCurrency(efectivoSel)} en efectivo (${difDeclarado > 0 ? "sobran" : "faltan"} ${formatCurrency(Math.abs(difDeclarado))}). Oficina lo va a ver al controlar.`
+            ? `\n⚠ Según los cobros${retiros > 0 ? " y lo que retiraste" : ""} deberías llevar ${formatCurrency(esperado)} en efectivo (${difDeclarado > 0 ? "sobran" : "faltan"} ${formatCurrency(Math.abs(difDeclarado))}). Oficina lo va a ver al controlar.`
             : "") +
           `\n\nOficina recibe el aviso de que el dinero está en viaje y tu billetera queda en 0. Los pagos se confirman cuando oficina recibe la plata.`
       )
@@ -180,6 +185,12 @@ export default function VendedorRendicionesPage() {
                   <span>Efectivo estimado: {formatCurrency(totales.total_efectivo)}</span>
                   <span>Cheques/transf.: {formatCurrency(totales.total_otros)}</span>
                 </div>
+                {retiros > 0 && (
+                  <p className="rounded-lg bg-indigo-50 p-2 text-sm text-indigo-900">
+                    Cobraste {formatCurrency(efectivoSelPantalla)} en efectivo − retiraste {formatCurrency(retiros)} ={" "}
+                    <b>llevás {formatCurrency(efectivoARendir(efectivoSelPantalla, retiros))}</b>
+                  </p>
+                )}
                 <div>
                   <label className="text-gray-700 font-bold block mb-1">💵 Efectivo contado (declarado)</label>
                   <InputMonto
