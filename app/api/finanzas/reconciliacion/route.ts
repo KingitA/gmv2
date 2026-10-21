@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { descuadresReales } from "@/lib/cuenta-corriente/descuadres"
 
 export const dynamic = "force-dynamic"
 
@@ -24,7 +25,7 @@ export async function GET() {
     if (error) throw error
 
     const rows = data || []
-    const descuadres = rows.filter((r: any) => Math.abs(Number(r.diferencia)) > 0.01)
+    const descuadres = await descuadresReales(supabase, rows as any[])
 
     return NextResponse.json({
       ok: descuadres.length === 0,

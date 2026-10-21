@@ -220,6 +220,16 @@ export async function GET() {
 
     const enRendicionAbierta = new Set<string>()
     for (const r of resumen) if (r.estado === "abierta") for (const pid of r.pago_ids) enRendicionAbierta.add(pid)
+    // Las abiertas viejas pueden quedar fuera del tope de 60: sus cobros salían
+    // también como "sin declarar" (auditoría 21/10: CARHUE 24/09 aparecía a la
+    // vez esperando la plata y por rendir). Se leen todas las abiertas aparte.
+    {
+      const { data: abiertas } = await supabase
+        .from("rendiciones")
+        .select("rendicion_items(pago_id)")
+        .eq("estado", "abierta")
+      for (const r of abiertas || []) for (const it of (r as any).rendicion_items || []) enRendicionAbierta.add(it.pago_id)
+    }
 
     // ── 8. Viajes con pagos pendientes (agrupados) ──
     const viajesMap = new Map<string, any>()

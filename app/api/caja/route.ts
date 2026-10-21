@@ -653,8 +653,9 @@ export async function GET(request: NextRequest) {
     // caja lo muestra como alerta para que no pase un día sin mirarse.
     let reconciliacionDescuadres = 0
     try {
-      const { data: recon } = await supabase.from("v_cc_reconciliacion").select("diferencia")
-      reconciliacionDescuadres = (recon || []).filter((r: any) => Math.abs(num(r.diferencia)) > 0.01).length
+      const { data: recon } = await supabase.from("v_cc_reconciliacion").select("cliente_id, diferencia")
+      const { descuadresReales } = await import("@/lib/cuenta-corriente/descuadres")
+      reconciliacionDescuadres = (await descuadresReales(supabase, recon || [])).length
     } catch { /* la vista puede no existir aún */ }
 
     // ── Armado final ──
