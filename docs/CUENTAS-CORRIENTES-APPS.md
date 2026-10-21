@@ -189,6 +189,8 @@ Reglas del dueño:
   - El servidor (`/api/vendedor/pagos-pendientes`) ahora devuelve también `retiros_sin_rendir`. La página web `/vendedor/rendiciones` hace lo mismo.
   - ~~Armar una APK nueva~~ **Hecho 21/10: v0.4.1 (versionCode 10) instalada en el NuStar**; probada la pantalla (cobró 122.000, retiró 122.000 → propone 0).
 
+- **v0.4.2 (21/10, instalada en el NuStar):** la ficha del cliente explica el saldo proyectado (real − cobros sin confirmar − 10 % contado y otros − devoluciones) y dice "A favor del cliente". Pendientes V1-V3 en docs/PENDIENTES-APPS.md.
+
 ### Oficina (ERP) — sin cambios en apps
 
 - Caja → controlar rendición: el "esperado en mano" resta los retiros del vendedor y, antes de confirmar, avisa qué cobros vuelven a la billetera del cobrador por tener el cheque sin tildar.

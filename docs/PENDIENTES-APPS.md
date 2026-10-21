@@ -26,7 +26,11 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | `en_cobro` del chofer (servidor) | Cuentas corrientes | Hecho 20/10 (20ac463) |
 | Cheques en verificación / anular cheque compartido | Cuentas corrientes | Hecho 20/10 (20ac463) |
 | Puesta a cero y apertura | Cuentas corrientes | Instalado; se ejecuta el día del corte |
-| App Vendedor v0.4.0 (dos cajitas, retiro, 10 % contado, Resumen) | App Vendedor | Pendiente |
+| App Vendedor v0.4.0 (dos cajitas, retiro, 10 % contado, Resumen) | App Vendedor | Hecho 20/10 (merge 78ee8a0), APK v0.4.0 |
+| App Vendedor v0.4.1 (la rendición propone efectivo − retiros) y v0.4.2 (la ficha explica el proyectado, "A favor del cliente") | Cuentas corrientes (auditoría 21/10, con OK de Juan) | Hecho 21/10 (ccff0fb, 29b07c5), APK v0.4.2 instalada en el NuStar |
+| V1 — Cobrar: créditos ya usados por un cobro sin rendir figuran "disponibles" (riesgo de usarlos dos veces) | Cuentas corrientes (servidor: `en_cobro` de créditos) + App Vendedor (mostrarlo) | Pendiente — primero confirmar si el servidor lo frena |
+| V2 — Cobrar: el renglón del pedido muestra el TOTAL del pedido y no lo que debe | App Vendedor | Pendiente |
+| V3 — Comisiones: "Mercadería cobrada" lista comisiones y "Comisiones ganadas" dice $0 | Cuentas corrientes | Pendiente — revisar después de la puesta a cero + "Poner al día" |
 | App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único, cobrado duplicado al sincronizar, "debe" del buscador) | App Chofer | Hecho 21/10 (merge 246e87f), APK v0.3.0 instalada en el NuStar |
 | App Chofer v0.3.1 (borrador del cobro, pedido del viaje primero, "$0"/"A favor", ficha explica el saldo, valor de devolución, sobrante, viajes viejos) | App Chofer | Hecho 21/10 (merge 7d62a2c), APK v0.3.1 instalada en el NuStar |
 | App Depósito v0.3.0 (devolución por renglón, formatos, mercadería por cupo, **reactivar artículos dados de baja**) | App Depósito | Hecho 20/10 (rama `deposito-v030`), APK v0.3.0 |
@@ -38,7 +42,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |
 |---|---|---|---|
-| Vendedor | v0.4.0 (versionCode 9) | 20/10 | — |
+| Vendedor | v0.4.2 (versionCode 11) | 21/10 | — |
 | Chofer | v0.3.1 (versionCode 7) | 21/10 | — |
 | Depósito | v0.3.0 (versionCode 8) | 20/10 | — |
 
@@ -49,6 +53,19 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 Todo lo que estaba pendiente quedó en la v0.4.0 (detalle en MOBILE.md §18, "v0.4.0"): 10 % contado con la regla del 07/10, fila del proyectado en Resumen, devolución sin enviar valuada como el servidor, billetera en dos cajitas, pantalla de retiro (`retiro.registrar`), "Para retirar" en Comisiones, y los precios pendientes del 06/10 (descuento general y contado por pedido, condiciones por proveedor/marca, mercadería por cupo eligiendo artículos, "sin precio base, sin precio" también en el servidor). Un cheque = un papel: verificado, la app no lo duplica sin señal.
 
 **Queda para probar en la calle:** un retiro real con la cuenta personal vinculada, y un pedido con cupo de mercadería hasta el picking.
+
+## App Vendedor → v0.4.1 y v0.4.2 HECHAS (21/10/2026, auditoría de cuentas corrientes, instalada v0.4.2 en el NuStar)
+
+Las hizo la sesión de cuentas corrientes con el OK de Juan (tocan `mobile/apps/vendedor`): **el agente de la app Vendedor parte de este estado** (`version.json` en 0.4.2 / versionCode 11).
+
+- **v0.4.1** — `pantallas/Rendiciones.tsx` + `datos/billetera.ts` (`efectivoARendir`): la rendición propone *efectivo cobrado − retiros sin rendir* y lo explica ("Cobraste $X − retiraste $Y = llevás $Z"); el aviso de faltan/sobran mide contra eso. Antes, rindiendo sin tocar el número, el retiro quedaba "a su favor". El servidor (`/api/vendedor/pagos-pendientes`) devuelve `retiros_sin_rendir`. Test en `packages/core/test/vendedor-040.test.ts`.
+- **v0.4.2** — `pantallas/clientes/ClienteFicha.tsx` (`DesgloseProyectado`): debajo del saldo proyectado, la cuenta línea por línea (real − cobros sin confirmar − 10 % contado y otros al confirmar − devoluciones en proceso = proyectado) y "A favor del cliente" cuando es negativo.
+
+### Pendientes encontrados el 21/10 (ver tabla de arriba)
+
+1. **V1 — créditos usados dos veces (prioridad).** En Cobrar, URQUIZA muestra disponibles el a cuenta de $14.011,02 y el anticipo de $170.019, que ya usa el cobro de $122.000 del 14/10 todavía sin rendir (marca `[CREDITOS:…]`). Hace falta que el servidor descuente de cada crédito lo que tienen tomado los cobros pendientes (como `en_cobro` hace con los comprobantes) y que la app lo muestre. Primero confirmar si el servidor ya rechaza el segundo uso.
+2. **V2 — total del pedido vs. lo que debe.** El renglón del pedido #001454 dice $8.646.266,97 (total) y el cliente debe $155.005,43 de ese pedido; se ve recién abriendo la flechita. Mostrar "debe $X" como número principal y el total chico.
+3. **V3 — comisiones.** La lista "Mercadería cobrada" sale del cálculo viejo y "Comisiones ganadas" de la cuenta personal (todavía sin "Poner al día"): no coinciden. Revisarlo el día de la puesta a cero.
 
 ## App Chofer → v0.3.0 HECHA (21/10/2026, merge 246e87f, instalada en el NuStar)
 
