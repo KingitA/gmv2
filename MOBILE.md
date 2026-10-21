@@ -2058,6 +2058,55 @@ servidor que son del chofer (`lib/viajes/cliente-viaje.ts`, `lib/viajes/hoja-rut
 - Tests: `packages/core/test/chofer-030.test.ts` (10 % del 07/10, valor de devolución, dedup por clave en
   hoja/ficha/billetera, cobro conjunto). El mock (`mock-chofer.mjs`) manda los campos nuevos.
 
+**Pasada guionada en el NuStar (21/10/2026, `TEST-CHOFER4`, v0.3.0 contra producción, merge `246e87f`;
+todo con presupuestos, sin facturas; operada por adb, el dueño solo sacó la foto del cheque).**
+
+| Prueba | Resultado |
+|---|---|
+| Descarga del viaje (3 paradas) | ✅ Arranque en frío 0,47 s, viaje descargado al minuto. **Trampa del WebView otra vez**: Google Play lo actualizó (153 → 155) entre la instalación y la pasada y la app abrió en BLANCO ("process is bad"); se arregló reiniciando el equipo (§17 3b). |
+| Cobro parcial con 10 % sobre un presupuesto nuevo (Aman, PRES 0001-00000019 de $ 41.203,20) | ✅ Seleccionados $ 20.000 → NC estimada $ 4.120,32 (10 % del total) → entregó $ 15.879,68; el pago viajó con `[10% CONTADO]` e imputó $ 15.879,68. Parada cerrada por el cobro. |
+| Devolución a valor (Gioventu, mercadería del PRES 0001-00000015 con 10 % hecho) | ✅ Bruto $ 14.794,08 → "+$ 13.314,67 · bruto 14.794,08 · con el 10 % contado de la factura"; "Neto a cobrar" bajó exactamente eso. |
+| `en_cobro` del servidor (cobro pendiente de $ 5.000 cargado en el ERP sobre el PRES 15) | ✅ El selector mostró el candado con $ 5.000 y dejó cobrar solo $ 5.491,36. (Texto a corregir: dice "en un cobro sin enviar" aunque sea de la oficina/vendedor.) |
+| Cobro conjunto con UN cheque real ($ 310.000: Pistone principal a cuenta + Gioventu agregado con su PRES) | ✅ OCR leyó banco, número, fechas, CUIT e importe. En la base: 2 pagos bajo una cabecera, **UNA fila en `cheques` por $ 310.000 `EN_VERIFICACION`** compartida por los dos detalles; aviso BCRA a los 5 s. |
+| Sin duplicado al sincronizar | ✅ Ni el cobro de Aman ni el conjunto se vieron dos veces en la hoja, la ficha ni la billetera. |
+| Billetera | ✅ "💵 Plata del viaje" $ 65.879,68 con "1 cheque en mano · $ 310.000"; "👤 Tu cuenta" con la cuenta personal real del chofer (Debés $ 122.000 por retiros). |
+| Rendir | ✅ La hoja avisa que las devoluciones ($ 13.314,67) quedan esperando depósito. (No se confirmó la rendición.) |
+| Integridad y limpieza | ✅ 5 operaciones, 5 claves, 0 alertas; limpieza por id con respaldo (`limpiar-test4.mjs`): 0 rastros, billetera, caja del fondo, stock, numeración PRES 18 / REMX 31 y pedidos como antes. |
+
+**Incidente durante la pasada (sin explicación todavía):** con la cámara abierta esperando la foto del
+cheque (~8 min), la app volvió sola a la pantalla de inicio y se perdió TODO lo cargado en "Registrar
+cobro" (selección, cliente agregado). El log ya había rotado y no se pudo ver si Android mató el proceso
+por memoria o si fue un toque. Riesgo real en la calle: el chofer arma el cobro, saca la foto y vuelve a
+una pantalla vacía. Correctivo propuesto: **borrador del cobro** (igual que `borrador-devolucion.ts`),
+guardado en el equipo mientras se arma y restaurado al volver.
+
+**Análisis de uso con los ojos del chofer (pedido del dueño, 21/10/2026):**
+1. **La lista del cobro arranca con los pedidos viejos.** En Aman hay que pasar 20 pedidos "sin facturar
+   (anticipo)" de mayo en adelante para llegar al de HOY (001640, abajo de todo). El chofer está en la puerta
+   con el cliente: lo de este viaje tiene que ir PRIMERO y expandido; lo anterior, plegado en "Debe de antes
+   (N pedidos · $ X)".
+2. **"Debe de antes —" esconde un saldo a favor.** Gioventu tenía −$ 9.631,50 (devoluciones viejas en proceso
+   más el cobro reservado) y la tarjeta mostraba "—" con un "Total a cobrar" menor que "Este viaje" sin
+   explicar por qué. Mostrar "A favor $ 9.631,50" y, en la ficha, de dónde sale (devoluciones pendientes,
+   cobros sin confirmar).
+3. **"Saldo y Devoluciones" de la ficha no muestra lo que explica el saldo**: ni el cobro de $ 5.000 en
+   verificación ni las devoluciones de viajes anteriores. El chofer no puede reconciliar el número de arriba.
+4. **La devolución no muestra su valor antes de registrarla.** "Total devolución $ 14.794,08" y recién en la
+   ficha aparece $ 13.314,67. El chofer le dice un número al cliente y después ve otro: mostrar el valor con
+   el 10 % en la pantalla de devolución.
+5. **El botón físico "atrás" con el teclado cerrado pregunta "¿Descartar?"** en el cobro y la devolución
+   (bien), pero cuando el teclado se acaba de cerrar solo (elegir un artículo), el mismo "atrás" ya abre el
+   descarte: sorprende. Que el primer "atrás" después de un cierre automático del teclado no cuente.
+6. **Sobrante grande sin confirmación.** Un cheque de $ 310.000 contra $ 5.491,36 seleccionados dejó
+   $ 304.508,64 a cuenta de Pistone sin preguntar (hasta $ X preguntaba "ajuste o a cuenta"). Confirmar
+   siempre: "$ 304.508,64 quedan a cuenta de PISTONE".
+7. **Inicio lleno de viajes de prueba viejos** ("PRUEBA 1 06/12/2026", "BAHIA 28/05" pendientes de
+   rendición) y "$ 7.424.630 camino a oficina" en la billetera: son restos de pruebas, pero en producción
+   un viaje pendiente de rendición de hace meses debería aparecer como alerta, no como lista.
+8. Menores: el texto del candado ("en un cobro sin enviar") para cobros de oficina; el buscador de
+   "Agregar cliente" muestra la cuenta ENTERA del agregado (misma lista larga del punto 1); en la hoja de
+   rendición "Cheques que entregás: 1 cheque" sin el importe.
+
 ### Probar sin backend
 `cd mobile && node scripts/mock-chofer.mjs` (3997) → `apps/chofer/.env.development.local` con
 `VITE_API_BASE=http://localhost:3997` → `npm run dev:chofer` → http://localhost:5173 (cualquier

@@ -62,7 +62,9 @@ Detalle en MOBILE.md §19 "v0.3.0". Todo lo que estaba pendiente:
 7. ~~Menores de la pasada final~~ **Hechos**: cobrado duplicado al sincronizar (dedup por `idempotency_key` en hoja, ficha y billetera) y "debe" del buscador (parche de `chofer_clientes` tras cobrar/anular). "Reintenta 3 veces" no era de la app (422 definitivo; eran cortes de señal).
 8. Nuevo: al rendir, aviso de que las devoluciones del viaje quedan esperando depósito.
 
-**Queda para probar en el equipo (pasada guionada, cuando el dueño dé el OK):** cobro parcial con 10 % sobre un presupuesto, devolución sobre una factura contado (valor −10 %), cobro conjunto con cheque (un solo papel en cartera, sin duplicado en pantalla al sincronizar), "Tu cuenta" con la cuenta personal vinculada.
+**Probado en el equipo (21/10, TEST-CHOFER4, todo con presupuestos):** cobro parcial con 10 %, devolución a valor (−10 %), `en_cobro` de un cobro de oficina, cobro conjunto con un cheque real (una fila en cartera), sin duplicado al sincronizar, dos cajitas con la cuenta personal real. Detalle y **análisis de uso con 8 cambios propuestos** en MOBILE.md §19 "Pasada guionada 21/10".
+
+**Para la v0.3.1 (con OK del dueño):** borrador del cobro mientras se arma (la app volvió al inicio con la cámara abierta y se perdió lo cargado); lo de este viaje primero en la lista del cobro y lo viejo plegado; "A favor" en vez de "—"; valor de la devolución en su pantalla; confirmar un sobrante grande; texto del candado para cobros de oficina.
 
 ## App Depósito → v0.3.0 HECHA (20/10/2026, instalada en el NuStar)
 
