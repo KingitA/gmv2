@@ -133,7 +133,7 @@ Lo que se hizo:
 - Botones "Proponer lo más viejo" y "Dejar a cuenta" (`/api/pagos/[id]/a-cuenta`, migración `20261016b`).
 - Los anticipos se vinculan siempre al pedido, en oficina y en chofer. `lib/cobranzas/aplicar-anticipo.ts` los aplica al facturar (`generar`, paso 7b). Al anular un cobro, el pedido queda libre.
 - Devoluciones (migración `20261016c`): `revisarDevolucion` revisa renglón por renglón, solo desde pendiente y sin duplicar stock. La NC solo sale de devoluciones aceptadas y solo por los renglones aceptados. Se sacó la auto-confirmación al rendir el viaje y se registra el usuario real.
-- Bandeja `/pendientes` (`/api/pendientes`): cobros sin confirmar, entregas a cuenta sin decidir, anticipos esperando factura, devoluciones esperando depósito, devoluciones aceptadas sin NC y rendiciones abiertas.
+- Bandeja `/caja/pendientes` (antes `/pendientes`; desde el 21/10 dentro de Caja y solo admin) (`/api/pendientes`): cobros sin confirmar, entregas a cuenta sin decidir, anticipos esperando factura, devoluciones esperando depósito, devoluciones aceptadas sin NC y rendiciones abiertas.
 
 Migraciones `20261016b` y `20261016c` APLICADAS por el dueño y verificadas (19/10).
 

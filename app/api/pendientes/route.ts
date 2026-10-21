@@ -12,10 +12,10 @@ import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
 //   4. Devoluciones esperando que depósito las revise
 //   5. Devoluciones aceptadas sin NC (la emite una persona de la oficina)
 //   6. Rendiciones abiertas (rojo si pasan la semana)
-// Solo lectura: no cambia nada. La ven admin y administrativo; las acciones de
-// plata (imputar, dejar a cuenta, confirmar) son solo admin.
+// Solo lectura: no cambia nada. Vive dentro de Caja: solo admin (dueño 21/10);
+// las acciones de plata (imputar, dejar a cuenta, confirmar) también.
 export async function GET() {
-  const auth = await requirePermiso("revisar_devoluciones")
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()

@@ -25,12 +25,11 @@ export const SECCIONES: Seccion[] = [
     label: "Clientes",
     href: "/clientes-pedidos",
     prefijos: [
-      "/clientes-pedidos", "/clientes", "/viajes", "/comprobantes-venta", "/revision-devoluciones", "/pendientes", "/apertura",
+      "/clientes-pedidos", "/clientes", "/viajes", "/comprobantes-venta", "/revision-devoluciones", "/apertura",
       "/pagos-clientes", "/viajantes", "/transportes", "/mostrador", "/imports", "/personal",
     ],
     accesos: [
       { label: "Pedidos y viajes", href: "/clientes-pedidos" },
-      { label: "Pendientes de revisar", href: "/pendientes", roles: ["admin", "administrativo"] },
       { label: "Viajes", href: "/viajes" },
       { label: "Fichas de clientes", href: "/clientes" },
       { label: "Comprobantes emitidos", href: "/comprobantes-venta" },
@@ -72,6 +71,8 @@ export const SECCIONES: Seccion[] = [
     accesos: [
       { label: "Panel", href: "/finanzas", roles: ["admin"] },
       { label: "Caja del día", href: "/caja", roles: ["admin"] },
+      // Bandeja de lo que espera control: dentro de Caja, solo quien confirma (dueño 21/10)
+      { label: "Pendientes de revisar", href: "/caja/pendientes", roles: ["admin"] },
       { label: "Cheques", href: "/finanzas/cheques", roles: ["admin"] },
       { label: "Conciliación", href: "/finanzas/conciliacion", roles: ["admin"] },
       { label: "Cierre de caja", href: "/finanzas/cierres", roles: ["admin"] },

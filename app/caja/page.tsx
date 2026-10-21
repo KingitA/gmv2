@@ -630,6 +630,12 @@ export default function CajaDelDiaPage() {
                   {feed?.panel_pendientes.rendiciones_en_camino ?? 0}
                 </span>
               </div>
+              <Link
+                href="/caja/pendientes"
+                className="mt-2 block border-t border-slate-100 pt-2 text-sm font-semibold text-blue-600 hover:underline"
+              >
+                Ver todo lo pendiente de revisar →
+              </Link>
             </div>
 
             <TareasFallidas />

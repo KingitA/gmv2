@@ -11,7 +11,7 @@ import { requirePermiso } from "@/lib/auth"
 const DIAS_TOPE = 7
 
 export async function GET() {
-  const auth = await requirePermiso("revisar_devoluciones")
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()
