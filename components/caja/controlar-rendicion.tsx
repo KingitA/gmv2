@@ -446,8 +446,8 @@ export function ControlarRendicion({
                 {chequesFaltantes.length > 0 && (
                   <p className="mt-1.5 text-xs font-semibold text-amber-700">
                     ⚠ {chequesFaltantes.length} cheque{chequesFaltantes.length > 1 ? "s" : ""} sin
-                    tildar: su pago quedará confirmado pero SIN verificar (segunda firma pendiente
-                    hasta que aparezca).
+                    tildar: su cobro NO se confirma y vuelve a la billetera del cobrador (lo trae en
+                    la próxima rendición). Si el cheque no existe, rechazá ese cobro.
                   </p>
                 )}
               </div>
