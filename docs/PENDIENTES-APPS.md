@@ -27,7 +27,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | Cheques en verificación / anular cheque compartido | Cuentas corrientes | Hecho 20/10 (20ac463) |
 | Puesta a cero y apertura | Cuentas corrientes | Instalado; se ejecuta el día del corte |
 | App Vendedor v0.4.0 (dos cajitas, retiro, 10 % contado, Resumen) | App Vendedor | Pendiente |
-| App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único, cobrado duplicado al sincronizar, "debe" del buscador) | App Chofer | **Hecho en código 21/10** (rama `chofer-v0.3.0`); falta OK de merge, APK e instalar |
+| App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único, cobrado duplicado al sincronizar, "debe" del buscador) | App Chofer | Hecho 21/10 (merge 246e87f), APK v0.3.0 instalada en el NuStar |
 | App Depósito v0.3.0 (devolución por renglón, formatos, mercadería por cupo, **reactivar artículos dados de baja**) | App Depósito | Hecho 20/10 (rama `deposito-v030`), APK v0.3.0 |
 | Tope de reintentos del outbox (O10) en `@gm/core` — **toca a las 3 apps** | App Depósito | Hecho 20/10. Vendedor y chofer lo reciben en su próxima APK sin hacer nada (ver abajo) |
 | Recepción: la base rechazaba "faltante" (web y APK) | App Depósito | Hecho 20/10, migración `20261020d_recepciones_estado_faltante.sql` aplicada 21/10 y probada (la operación que fallaba 1.156 veces ahora guarda) |
@@ -38,7 +38,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |
 |---|---|---|---|
 | Vendedor | v0.4.0 (versionCode 9) | 20/10 | — |
-| Chofer | v0.2.2 (versionCode 5) | 01/10 | Todo lo de la v0.3.0 (lista abajo) hasta que se compile e instale |
+| Chofer | v0.3.0 (versionCode 6) | 21/10 | — |
 | Depósito | v0.3.0 (versionCode 8) | 20/10 | — |
 
 ---
@@ -49,7 +49,7 @@ Todo lo que estaba pendiente quedó en la v0.4.0 (detalle en MOBILE.md §18, "v0
 
 **Queda para probar en la calle:** un retiro real con la cuenta personal vinculada, y un pedido con cupo de mercadería hasta el picking.
 
-## App Chofer → v0.3.0 HECHA en código (21/10/2026, rama `chofer-v0.3.0`; falta OK de merge, APK e instalar)
+## App Chofer → v0.3.0 HECHA (21/10/2026, merge 246e87f, instalada en el NuStar)
 
 Detalle en MOBILE.md §19 "v0.3.0". Todo lo que estaba pendiente:
 

@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.0 (versionCode 6) — 2026-10-21
+
+- Cuentas corrientes: billetera en dos cajitas (Plata del viaje / Tu cuenta), 10% contado con la regla del 07/10 (10% del total, una vez, también en pago parcial), devoluciones descontadas por su valor, saldo del cliente con fuente única y lo ya en cobro por el vendedor reservado; el cobro sincronizado no se ve dos veces; importes con formato argentino en gasto y rendición
+
 ## v0.2.2 (versionCode 5) — 2026-10-01
 
 - Cobro conjunto: un mismo pago (por ejemplo un cheque) cubre a varios clientes, cada uno con su cuenta completa; ficha con varios pedidos del mismo cliente; hora de los cobros corregida
