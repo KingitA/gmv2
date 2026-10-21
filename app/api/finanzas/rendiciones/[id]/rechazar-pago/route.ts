@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { nowArgentina } from "@/lib/utils"
 
 /**
@@ -21,7 +21,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  // Rechazar plata de una rendición es una acción de Caja: solo admin (regla 23)
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const { id: rendicionId } = await params

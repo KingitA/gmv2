@@ -39,6 +39,20 @@ export function TopNav({ roles = [] }: { roles?: string[] }) {
   useEffect(() => setMenuAbierto(false), [pathname])
 
   const hasErpAccess = roles.includes('admin') || roles.includes('administrativo')
+
+  // Aviso rojo en "Pendientes de revisar" cuando algo espera más de una semana
+  // (rendiciones abiertas, cobros sin confirmar). Se relee al cambiar de pantalla.
+  const [atrasados, setAtrasados] = useState(0)
+  useEffect(() => {
+    if (!hasErpAccess) return
+    let vivo = true
+    fetch('/api/pendientes/alertas')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (vivo && d && typeof d.atrasados === 'number') setAtrasados(d.atrasados) })
+      .catch(() => {})
+    return () => { vivo = false }
+  }, [hasErpAccess, pathname])
+
   if (esRutaSinNav(pathname) || !hasErpAccess) return null
 
   const secciones = SECCIONES.filter(s => puedeVer(s, roles))
@@ -75,6 +89,9 @@ export function TopNav({ roles = [] }: { roles?: string[] }) {
                 >
                   <Icono className="h-4 w-4" />
                   {s.label}
+                  {s.id === 'clientes' && atrasados > 0 && (
+                    <span className="h-2 w-2 rounded-full bg-red-500" title={`${atrasados} pendientes atrasados`} />
+                  )}
                 </Link>
               )
             })}
@@ -126,6 +143,14 @@ export function TopNav({ roles = [] }: { roles?: string[] }) {
                     ${sel ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
                 >
                   {a.label}
+                  {a.href === '/pendientes' && atrasados > 0 && (
+                    <span
+                      className="ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-bold text-white"
+                      title="Esperando hace más de una semana"
+                    >
+                      {atrasados}
+                    </span>
+                  )}
                 </Link>
               )
             })}

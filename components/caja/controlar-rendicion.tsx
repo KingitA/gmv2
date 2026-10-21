@@ -100,6 +100,16 @@ export function ControlarRendicion({
         setFondos(redondear(fondosViaje))
         setGastos(redondear(gastosViaje))
 
+        // Retiros que el vendedor hizo de lo cobrado: rendicion_crear v4 los
+        // descuenta del esperado (ya están debitados en su cuenta personal).
+        // Sin esto el panel mostraba "retiene" lo que en realidad retiró.
+        const { data: rets } = await supabase
+          .from("billetera_movimientos")
+          .select("monto")
+          .eq("rendicion_id", rendicionId)
+          .eq("referencia_tipo", "retiro_efectivo")
+        setRetiros(redondear((rets || []).reduce((s: number, m: any) => s - Number(m.monto || 0), 0)))
+
         fetch("/api/pagos-clientes/rendiciones-resumen")
           .then((r) => r.json())
           .then((d) => setDetalle((d.rendiciones || []).find((x: any) => x.id === rendicionId) || null))
@@ -198,17 +208,18 @@ export function ControlarRendicion({
   const chequesFaltantes = cheques.filter((c) => !checks[c.key])
   const [fondos, setFondos] = useState(0)
   const [gastos, setGastos] = useState(0)
+  const [retiros, setRetiros] = useState(0)
   const efectivoDeclarado = Number(rendicion?.efectivo_declarado ?? 0)
   // Lo que los COBROS dicen que entró en efectivo (Σ pagos_detalle efectivo).
   // Es contra esto que se mide la diferencia: si el vendedor cobró 1.241.200 y
   // trae 1.241.000, faltan 200 aunque él haya "declarado" 1.241.000.
   const efectivoRegistrado = Number(rendicion?.efectivo_registrado ?? 0)
   const contadoNum = Number(efectivoContado) || 0
-  // Esperado en mano = cobrado + a cuenta viaje − gastos declarados.
+  // Esperado en mano = cobrado + a cuenta viaje − gastos declarados − retiros.
   // Dos ejes (mismos que el SQL): retención = esperado − declarado (ya
   // asentada en la CC del cobrador al declarar) y diferencia de oficina =
   // contado − declarado (lo que decide "confirmar con diferencia").
-  const esperado = redondear(efectivoRegistrado + fondos - gastos)
+  const esperado = redondear(efectivoRegistrado + fondos - gastos - retiros)
   const difEfectivo = redondear(contadoNum - efectivoDeclarado)
   const retencion = redondear(esperado - efectivoDeclarado)
 
@@ -235,6 +246,23 @@ export function ControlarRendicion({
       const pagosVerificados = pagosDeclarados
         .map((p) => p.id)
         .filter((pid) => cheques.filter((c) => c.pago_id === pid).every((c) => checks[c.key]))
+      // Los que NO se verifican (cheque sin tildar) no se confirman y vuelven
+      // calladitos a la billetera del cobrador como plata en mano (auditoría
+      // 21/10). Que la oficina lo sepa antes, y que elija rechazar si el
+      // cheque no existe.
+      const sinVerificar = pagosDeclarados.filter((p) => !pagosVerificados.includes(p.id))
+      if (
+        sinVerificar.length &&
+        !window.confirm(
+          `Estos cobros NO se confirman porque falta tildar su cheque:\n\n` +
+            sinVerificar.map((p) => `• ${p.cliente} — ${moneda(p.monto)}`).join("\n") +
+            `\n\nVuelven a la billetera del cobrador como plata en mano: tiene que traerlos en la próxima rendición.` +
+            `\nSi el cheque no existe o está mal cargado, cancelá y usá "Rechazar" en ese cobro.\n\n¿Confirmar el resto?`,
+        )
+      ) {
+        setGuardando(false)
+        return
+      }
       const res = await fetch(`/api/finanzas/rendiciones/${rendicionId}/confirmar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -260,7 +288,9 @@ export function ControlarRendicion({
       if (!res.ok) throw new Error(data.error || "Error confirmando la rendición")
       toast({
         title: "Rendición confirmada",
-        description: "El efectivo entró a la caja y las transferencias pasaron a conciliación.",
+        description:
+          "El efectivo entró a la caja y las transferencias pasaron a conciliación." +
+          (sinVerificar.length ? ` ${sinVerificar.length} cobro(s) sin verificar volvieron a la billetera del cobrador.` : ""),
       })
       onListo()
     } catch (e: any) {
@@ -467,6 +497,12 @@ export function ControlarRendicion({
                   <>
                     <span className="text-slate-600">− Gastos declarados</span>
                     <span className="text-right font-semibold">{moneda(gastos)}</span>
+                  </>
+                )}
+                {retiros > 0 && (
+                  <>
+                    <span className="text-slate-600">− Retiró para él (ya en su cuenta)</span>
+                    <span className="text-right font-semibold">{moneda(retiros)}</span>
                   </>
                 )}
                 <span className="border-t border-slate-300 pt-0.5 font-bold text-slate-800">= Esperado en mano</span>

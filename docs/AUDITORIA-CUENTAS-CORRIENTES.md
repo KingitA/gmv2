@@ -204,3 +204,29 @@ Hecho:
 Pendiente:
 - La migración `20261020_cc_puesta_a_cero.sql` está escrita (autorizada por el dueño el 20/10; APLICADA y verificada: funciones instaladas, nada borrado). Aplicarla NO borra nada: instala `cc_puesta_a_cero_simulacro()` y `cc_puesta_a_cero('PONER A CERO')`. El simulacro, corrido en solo lectura, conserva 12 comprobantes con CAE (/usr/bin/bash), 12 asientos, 6 imputaciones entre ellos y 3 echeqs.
 
+
+## Auditoría para producción — 21/10 (rama `cc-produccion-2110`)
+
+Recorrido completo: base (solo lectura), ERP en Chrome y apps vendedor v0.4.0 / chofer v0.3.0 en el NuStar. El libro cierra: ningún cobro confirmado sin asiento ni duplicado, detalle = monto, imputaciones ≤ pago.
+
+Reglas nuevas del dueño (21/10):
+
+37. El 10 % contado no tiene tope: queda a criterio del cobrador. Siempre es el 10 % de un comprobante y se emite por NC/REV.
+38. Un anticipo puede saldar otros pedidos (reemplaza lo de la regla 20 sobre "solo la factura de ese pedido").
+39. La plata a favor la aplica la oficina, no el sistema solo: un pago se imputa a una factura (factura $100, paga $50 → saldo $50) o queda a cuenta (se ve la factura de $100 con saldo $100 y "a cuenta" $50).
+
+Arreglado en la rama:
+
+| # | Hallazgo | Arreglo |
+|---|---|---|
+| 21 | La rendición del vendedor proponía declarar todo el efectivo cobrado, sin restar los retiros: rindiendo sin tocar, el retiro quedaba "a su favor" (caso Juan Cruz: $0 en mano, proponía $122.000). | App, web y `/api/vendedor/pagos-pendientes` proponen efectivo − retiros y lo explican. Falta APK vendedor. |
+| 22 | `cobranza_anular` v7 anulaba la REV de bonificación entera pero solo liberaba sus imputaciones a los comprobantes del cobro anulado. URQUIZA: PRES-12 "pagado" con $155.005,43 debidos según el libro (única diferencia de `v_cc_reconciliacion`). | Migración `20261021_cobranza_anular_v8.sql` + reparación. |
+| 23 | Rendiciones y cobros trabados sin aviso: viaje CARHUE 24/09 con $7.424.630 "camino a oficina" hace 28 días. La bandeja lo marcaba, pero nadie la abría. | Número rojo en "Pendientes de revisar"; "rendido, en camino" en vez de "sin rendir"; nombre de quien aceptó la devolución en vez del id. |
+| 24 | Al confirmar una rendición, un cobro con cheque sin tildar volvía callado a "plata en mano". El panel no restaba los retiros del esperado (mostraba "retiene" lo retirado). `rechazar-pago` solo pedía estar logueado. | Aviso antes de confirmar, retiros en el esperado, `rechazar-pago` con permiso de Caja. |
+
+Pendientes de pantalla (no frenan, pero confunden):
+- Extracto de la cuenta: los asientos de la apertura de Freije (01/10) están a medianoche UTC y se ven un día antes que en la lista de comprobantes (se van con la puesta a cero; la apertura nueva guarda mediodía).
+- Cuenta detallada: un pago a cuenta se ve "−$0,00 CONFIRMADO" mientras que en "Solo saldos" figura "A CUENTA".
+- App vendedor: el saldo proyectado no detalla la NC del 10 % proyectada (URQUIZA: −$76.842,80 con facturas por $323.091).
+- "Saldo a cobrar" de Cobros/Caja suma solo facturas (ignora NC a favor, a cuenta y en cobro). La lista de clientes del ERP no tiene saldo. El Excel de saldos no tiene total.
+- Varios (ver mapa del 21/10): web del vendedor muestra real; empleados en listas de deuda; overlay offline del chofer resta dos veces las devoluciones.

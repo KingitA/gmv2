@@ -177,3 +177,21 @@ Reglas del dueño:
   - Los mueve un trigger de la migración `20261020b_cheques_un_papel.sql`.
 - **`en_cobro` para el chofer**: `cargarCuentaCobro` (la cuenta de cobro del chofer) manda `en_cobro` por comprobante, con la misma fórmula que la ficha del vendedor (`lib/cobranzas/en-cobro.ts`). La APK chofer actual ya lo descuenta en `saldoCobrable`.
 - La cabecera `cobranzas` de un envío queda `anulada` cuando se anulan todos sus pagos.
+
+---
+
+## Arreglos del 21/10 (auditoría para producción, rama `cc-produccion-2110`)
+
+### App Vendedor — qué tiene que hacer el agente
+
+- **Rendición descuenta los retiros** (ya está en el código de la app, falta la APK). `pantallas/Rendiciones.tsx` propone como "Efectivo contado" lo cobrado en efectivo **menos los retiros sin rendir** (`efectivoARendir` en `datos/billetera.ts`, lee `retiros_sin_rendir` de la fila `billetera` con su overlay) y lo explica en una línea: "Cobraste $X − retiraste $Y = llevás $Z". El aviso de "faltan/sobran" mide contra ese número.
+  - Por qué: `rendicion_crear` v4 descuenta TODOS los retiros sin rendir. Proponiendo solo lo cobrado, el vendedor que retiró $122.000 y rendía sin tocar el número declaraba $122.000 que ya no tenía: el retiro quedaba "a su favor" en su cuenta y la oficina esperaba una plata que no iba a llegar.
+  - El servidor (`/api/vendedor/pagos-pendientes`) ahora devuelve también `retiros_sin_rendir`. La página web `/vendedor/rendiciones` hace lo mismo.
+  - **Armar una APK nueva** (v0.4.1).
+
+### Oficina (ERP) — sin cambios en apps
+
+- Caja → controlar rendición: el "esperado en mano" resta los retiros del vendedor y, antes de confirmar, avisa qué cobros vuelven a la billetera del cobrador por tener el cheque sin tildar.
+- Rechazar un cobro de una rendición pide permiso de Caja (solo admin).
+- Barra del ERP: número rojo en "Pendientes de revisar" con lo que espera más de una semana (`/api/pendientes/alertas`). En la bandeja, los cobros ya rendidos dicen "rendido, en camino a oficina" y las devoluciones muestran el nombre de quien las aceptó.
+- Migración `20261021_cobranza_anular_v8.sql` (la aplica el dueño): anular un cobro que había generado una REV de 10 % contado libera **todas** las imputaciones de esa REV (antes solo las de los comprobantes del cobro y el otro comprobante quedaba "pagado" sin serlo). Repara el caso que ya quedó así (URQUIZA PRES 0001-00000012, $155.005,43).
