@@ -160,7 +160,7 @@ function filaCliente(viajeId, clienteId) {
     id: `${viajeId}:${clienteId}`, viaje_id: viajeId, cliente_id: clienteId,
     cliente: { nombre: c.nombre, razon_social: c.razon_social, direccion: c.direccion, telefono: c.telefono, cuit: c.cuit, condicion_pago: c.condicion_pago },
     pedido: ped ? { id: ped.id, numero: ped.numero_pedido, fecha: ped.fecha, estado: ped.estado, total: ped.total, bultos: ped.bultos, observaciones: ped.observaciones, detalle: ped.detalle.map((d) => ({ ...d, articulos: { sku: artDe(d.articulo_id)?.sku, descripcion: artDe(d.articulo_id)?.descripcion, unidades_por_bulto: artDe(d.articulo_id)?.unidades_por_bulto } })) } : null,
-    comprobantes_pendientes: pend, devoluciones: devs, pagos_registrados: pagos,
+    comprobantes_pendientes: pend, devoluciones: devs, pagos_registrados: pagos, cobros_sin_confirmar: clienteId === S.f.clientes[1].id ? [{ id: uid(8777), monto: 5000, created_at: ahora(), origen: "oficina" }] : [], otras_devoluciones: [],
     resumen: { saldo_anterior: c.saldo_actual, saldo_real: c.saldo_actual, saldo_proyectado: r2(c.saldo_actual - totalCob), pendiente_verificacion: totalCob, total_pedido: ped?.total || 0, total_devuelto: totalDev, total_cobrado: totalCob, total_a_cobrar: r2(c.saldo_actual + (ped?.total || 0) - totalDev), ya_cobrado: totalCob > 0 },
     viaje_estado: v.estado,
     cobro: {

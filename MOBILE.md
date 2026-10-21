@@ -2107,6 +2107,40 @@ guardado en el equipo mientras se arma y restaurado al volver.
    "Agregar cliente" muestra la cuenta ENTERA del agregado (misma lista larga del punto 1); en la hoja de
    rendición "Cheques que entregás: 1 cheque" sin el importe.
 
+**Respuesta del dueño (21/10):** no tocó el equipo → Android mató la app con la cámara abierta. Puntos 1, 2
+("$0" en vez de guiones), 3, 5, 6, 7 y 8 aprobados; 4: la devolución vale el PRECIO FINAL (descuentos,
+impuestos, percepciones), que es lo que ya calcula `valorDevolucion`; lo que faltaba era mostrarlo en la
+pantalla. El importe de los cheques en la rendición NO va ("1 cheque" alcanza; nadie suma 25 cheques).
+
+### v0.3.1 (21/10/2026): lo que pidió el dueño después de mirar la pasada con ojos de chofer
+
+- **Borrador del cobro** (`datos/borrador-cobro.ts`, localStorage por viaje+cliente): selección, clientes
+  agregados y medios de pago se guardan en cada cambio y se restauran al volver a entrar (aviso "Se
+  recuperó el cobro que estabas cargando"). Se borra al registrar o al descartar; vence a las 12 h. Las
+  fotos que no llegaron al bucket se pierden con el proceso: la fila vuelve con sus datos y "sacala de
+  nuevo". Motivo: Android mató la app con la cámara abierta (pasada del 21/10).
+- **Lo de este viaje primero** en el selector del cobro (`SelectorCuenta` + `separarPorViaje`): el pedido
+  de la parada arriba y abierto; el resto plegado en "Debe de antes · N grupos · $ saldo" (se abre solo si
+  tiene algo seleccionado). También para el cliente agregado. Cerrar a mano un pedido del viaje guarda
+  `expandido = "-"`.
+- **Sin guiones**: la tarjeta de la parada muestra "$ 0,00" o "A favor $ X" (verde); la ficha lo mismo en
+  "Saldo anterior".
+- **La ficha explica el saldo**: "Saldo y Devoluciones" lista los cobros sin confirmar que no son de este
+  viaje (oficina / vendedor / otro viaje) y las devoluciones en proceso de viajes anteriores, con su valor.
+  Campos nuevos de `cargarClienteViaje`: `cobros_sin_confirmar`, `otras_devoluciones` (opcionales en la
+  réplica: las APK viejas no los tienen).
+- **La devolución muestra lo que vale** antes de registrar: "Vale para el cliente $ X · bruto $ Y · precio
+  final de la factura (con el 10 % contado)". El aviso y la etiqueta de la cola usan ese valor.
+- **"Atrás" después de elegir un resultado** (el teclado se acaba de cerrar solo) no abre el descarte
+  durante 0,9 s (`useBloqueoSalida` con `ignorarHasta`; cobro y devolución).
+- **El sobrante se confirma siempre**: también cuando no hay nada imputado (antes $ 304.508,64 quedaron a
+  cuenta sin preguntar). El botón dice "Dejar $ X a cuenta de <cliente>".
+- **Inicio**: alerta ámbar con los viajes en rendición de hace más de una semana ("avisá a oficina"); la
+  lista sigue abajo.
+- El candado del selector dice "en otro cobro sin confirmar" (vale para oficina, vendedor y lo local).
+- Tests: `packages/core/test/chofer-031.test.ts`. Verificado contra el mock en el navegador (selector,
+  ficha, borrador restaurado tras recargar).
+
 ### Probar sin backend
 `cd mobile && node scripts/mock-chofer.mjs` (3997) → `apps/chofer/.env.development.local` con
 `VITE_API_BASE=http://localhost:3997` → `npm run dev:chofer` → http://localhost:5173 (cualquier

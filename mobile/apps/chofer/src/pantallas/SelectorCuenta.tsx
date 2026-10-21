@@ -1,11 +1,12 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { PEDIDO_PREFIX } from "@gm/cobro"
-import type { ComprobanteCobro } from "../datasets"
+import type { ComprobanteCobro, PedidoCobro } from "../datasets"
 import {
   agruparCuenta, alternarAnticipo, alternarComprobante, alternarContadoPedido, alternarContadoTodo, alternarGrupo, alternarTodo, clavesDeLaCuenta,
-  fijarMonto, montoAnticipo, resumenCuenta, saldoCobrable, valorDeDevolucion, type DatosCuenta, type EstadoCuenta,
+  fijarMonto, montoAnticipo, resumenCuenta, saldoCobrable, separarPorViaje, valorDeDevolucion, type DatosCuenta, type EstadoCuenta,
 } from "../datos/cuenta-cobro"
-import { moneda } from "@gm/formato"
+import { moneda, redondear } from "@gm/formato"
+const r2 = (n: number) => redondear(n)
 import { formatCurrency, formatDateAR, MontoInput } from "../ui"
 
 // La cuenta de UN cliente dentro del cobro: pedidos y comprobantes seleccionables, "Incluir
@@ -14,13 +15,15 @@ import { formatCurrency, formatDateAR, MontoInput } from "../ui"
 // un cliente se ve su cuenta completa, igual que la del principal).
 
 
-export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir }: {
+export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir, pedidosViaje = [] }: {
   datos: DatosCuenta
   estado: EstadoCuenta
   onChange: (e: EstadoCuenta) => void
   /** id del pedido desplegado ("" = ninguno) */
   expandido: string
   onExpandir: (pedidoId: string) => void
+  /** Pedidos de ESTE viaje: van primero y abiertos; lo anterior queda plegado en "Debe de antes" (dueño, 21/10/2026) */
+  pedidosViaje?: string[]
 }) {
   const { cobro } = datos
   const { compsPorPedido, sinPedido, pedidosSinFacturar, esSaldado } = useMemo(() => agruparCuenta(cobro), [cobro])
@@ -31,6 +34,14 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
   const todoSeleccionado = claves.length > 0 && claves.every((k) => sel[k] !== undefined)
   const devPendientes = datos.devoluciones.filter((d) => d.estado === "pendiente")
   const nadaQueCobrar = cobro.pedidos.length === 0 && sinPedido.length === 0
+  // Lo de este viaje primero; lo anterior, plegado (se abre solo si tiene algo seleccionado)
+  const { delViaje, anteriores } = useMemo(() => separarPorViaje(cobro, pedidosViaje), [cobro, pedidosViaje])
+  const anterioresSeleccionados = anteriores.some((p) => sel[PEDIDO_PREFIX + p.id] !== undefined || (compsPorPedido.get(p.id) || []).some((c) => sel[c.id] !== undefined)) || sinPedido.some((c) => sel[c.id] !== undefined)
+  const [verAnteriores, setVerAnteriores] = useState(false)
+  const anterioresAbiertos = verAnteriores || anterioresSeleccionados || delViaje.length === 0
+  const saldoAnteriores = r2(
+    anteriores.reduce((s, p) => s + (esSaldado(p) ? 0 : (compsPorPedido.get(p.id) || []).reduce((x, c) => x + saldoCobrable(c), 0) + (compsPorPedido.has(p.id) ? 0 : p.total)), 0) + sinPedido.reduce((s, c) => s + saldoCobrable(c), 0),
+  )
 
   // Fila de comprobante (función de render, no componente: los inputs no pierden el foco)
   const filaComprobante = (cp: ComprobanteCobro, dentroDePedido: boolean) => {
@@ -43,7 +54,7 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
           <span className="font-mono text-xs">{cp.numero_comprobante}</span>
           <span className="text-[10px] text-gray-400">{formatDateAR(cp.fecha)}</span>
           {dtosHechos.has(cp.id) && <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">Dto. ctdo</span>}
-          {(cp.en_cobro || 0) > 0.005 && <span className="text-[10px] font-bold text-sky-600">🔒 {moneda(cp.en_cobro!)} en un cobro sin enviar</span>}
+          {(cp.en_cobro || 0) > 0.005 && <span className="text-[10px] font-bold text-sky-600">🔒 {moneda(cp.en_cobro!)} en otro cobro sin confirmar</span>}
           <span className="ml-auto font-mono text-orange-600">saldo {moneda(saldoCobrable(cp))}</span>
         </button>
         {checked ? (
@@ -59,25 +70,15 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
     )
   }
 
-  return (
-    <div className="space-y-3">
-      {nadaQueCobrar ? (
-        <div className="py-4 text-center text-sm text-gray-500">No hay pedidos ni comprobantes pendientes para este cliente</div>
-      ) : (
-        <div className="space-y-2">
-          {claves.length > 0 && (
-            <div className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
-              {/* "10% contado a todo" está más abajo, junto a "Incluir devoluciones" */}
-              <label className="flex min-h-11 items-center gap-2 font-semibold"><input type="checkbox" checked={todoSeleccionado} onChange={() => onChange(alternarTodo(estado, cobro))} className="h-5 w-5" /> Seleccionar todo</label>
-            </div>
-          )}
-          {cobro.pedidos.map((ped) => {
+  // Fila de un pedido (función de render: los inputs no pierden el foco)
+  const filaPedido = (ped: PedidoCobro, esDelViaje: boolean) => {
             const comps = compsPorPedido.get(ped.id) || []
             const facturado = comps.length > 0
             const anticipoSel = sel[PEDIDO_PREFIX + ped.id] !== undefined
             const todosCompsSel = facturado && comps.every((c) => sel[c.id] !== undefined)
             const algunoSel = comps.some((c) => sel[c.id] !== undefined)
-            const abierto = expandido === ped.id
+            // Lo de este viaje arranca abierto ("-" = el chofer lo cerró a mano)
+            const abierto = expandido === ped.id || (esDelViaje && expandido === "" && facturado)
             if (esSaldado(ped))
               return (
                 <div key={ped.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/60 p-2.5 text-slate-400">
@@ -93,7 +94,7 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
               <div key={ped.id} className={`rounded-lg border ${anticipoSel || algunoSel ? "border-blue-300 bg-blue-50/40" : "border-gray-200 bg-white"}`}>
                 <div className="flex items-center gap-2 p-2.5">
                   <input type="checkbox" checked={facturado ? todosCompsSel : anticipoSel} onChange={() => onChange(facturado ? alternarGrupo(estado, comps) : alternarAnticipo(estado, ped))} className="h-5 w-5 shrink-0" />
-                  <button onClick={() => facturado && onExpandir(abierto ? "" : ped.id)} disabled={!facturado} className="flex min-h-11 min-w-0 flex-1 flex-wrap items-center gap-x-1.5 text-left">
+                  <button onClick={() => facturado && onExpandir(abierto ? "-" : ped.id)} disabled={!facturado} className="flex min-h-11 min-w-0 flex-1 flex-wrap items-center gap-x-1.5 text-left">
                     <span className="w-4 text-gray-400">{facturado ? (abierto ? "▾" : "▸") : ""}</span>
                     <span className="text-sm font-semibold">Pedido #{ped.numero_pedido}</span>
                     <span className="text-xs text-gray-400">{formatDateAR(ped.fecha)}</span>
@@ -112,8 +113,31 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
                 {facturado && abierto && <div className="border-t bg-white">{comps.map((c) => filaComprobante(c, true))}</div>}
               </div>
             )
-          })}
-          {sinPedido.length > 0 && (
+  }
+
+  return (
+    <div className="space-y-3">
+      {nadaQueCobrar ? (
+        <div className="py-4 text-center text-sm text-gray-500">No hay pedidos ni comprobantes pendientes para este cliente</div>
+      ) : (
+        <div className="space-y-2">
+          {claves.length > 0 && (
+            <div className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
+              {/* "10% contado a todo" está más abajo, junto a "Incluir devoluciones" */}
+              <label className="flex min-h-11 items-center gap-2 font-semibold"><input type="checkbox" checked={todoSeleccionado} onChange={() => onChange(alternarTodo(estado, cobro))} className="h-5 w-5" /> Seleccionar todo</label>
+            </div>
+          )}
+          {delViaje.map((ped) => filaPedido(ped, true))}
+          {(anteriores.length > 0 || sinPedido.length > 0) && (
+            <button onClick={() => setVerAnteriores((v) => !v)} className={`flex min-h-11 w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm ${anterioresAbiertos ? "border-gray-300 bg-gray-100" : "border-gray-200 bg-gray-50"}`}>
+              <span className="w-4 text-gray-400">{anterioresAbiertos ? "▾" : "▸"}</span>
+              <span className="font-semibold text-gray-700">{delViaje.length ? "Debe de antes" : "Pedidos y comprobantes"}</span>
+              <span className="text-xs text-gray-500">{anteriores.length + (sinPedido.length ? 1 : 0)} {anteriores.length + (sinPedido.length ? 1 : 0) === 1 ? "grupo" : "grupos"}</span>
+              <span className="ml-auto font-mono text-orange-600">{moneda(saldoAnteriores)}</span>
+            </button>
+          )}
+          {anterioresAbiertos && anteriores.map((ped) => filaPedido(ped, false))}
+          {anterioresAbiertos && sinPedido.length > 0 && (
             <div className="rounded-lg border border-gray-200 bg-white">
               <div className="flex items-center gap-2 border-b px-3 py-2 text-xs font-semibold text-gray-500">
                 <input type="checkbox" checked={sinPedido.every((c) => sel[c.id] !== undefined)} onChange={() => onChange(alternarGrupo(estado, sinPedido))} className="h-5 w-5" title="Seleccionar todos" />

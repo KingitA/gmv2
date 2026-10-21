@@ -222,6 +222,10 @@ export interface ClienteViajeRow {
   comprobantes_pendientes: ComprobantePendiente[]
   devoluciones: DevolucionRow[]
   pagos_registrados: PagoRegistrado[]
+  /** Cobros sin confirmar que NO son de este viaje (oficina, vendedor u otro viaje). Faltan en réplicas viejas. */
+  cobros_sin_confirmar?: Array<{ id: string; monto: number; created_at: string; origen: "viaje" | "oficina" }>
+  /** Devoluciones en proceso de otros viajes (ya descuentan del saldo). Faltan en réplicas viejas. */
+  otras_devoluciones?: Array<{ id: string; numero_devolucion: string; estado: string; valor: number; created_at: string }>
   resumen: {
     saldo_anterior: number
     saldo_real: number

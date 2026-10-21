@@ -7,13 +7,14 @@ import {
 } from "@gm/cheques"
 import { blobABase64, comprimirFoto, urlLocal } from "@gm/cheques/foto"
 import { ofreceAjuste, topeAjuste } from "@gm/cobro"
+import { borradorVacio, borrarBorradorCobro, guardarBorradorCobro, leerBorradorCobro, sanearMetodosRestaurados } from "../datos/borrador-cobro"
 import { montoDelPrincipal, validarCobroConjunto } from "@gm/cobro/conjunto"
 import { DS, ESTADOS_COBRABLES, idClienteViaje, nombreCliente, type ClienteBusqueda, type MetodoPayload, type OpCobrar } from "../datasets"
 import { estadoCuentaVacio, resumenCuenta, type EstadoCuenta, type ResumenCuenta } from "../datos/cuenta-cobro"
 import { buscarClientes, useClienteViaje, useClientesTodos, useCuentasBancarias, useEncolar, useRefrescarFilas, useViaje, uuidv4 } from "../datos/hooks"
 import { SelectorCuenta } from "./SelectorCuenta"
 import { normalizarCuit } from "@gm/formato"
-import { AvisosBcra, CuitInput, dejarAviso, dejarAvisoSinCuit, FechaInput, formatCurrency, formatDateAR, MontoInput, Pantalla, round2, SinDescargar, useBloqueoSalida, useBusqueda, useToast } from "../ui"
+import { AvisosBcra, CuitInput, dejarAviso, dejarAvisoSinCuit, FechaInput, formatCurrency, formatDateAR, GRACIA_TECLADO_MS, MontoInput, Pantalla, round2, SinDescargar, useBloqueoSalida, useBusqueda, useToast } from "../ui"
 
 // Cobro en el reparto (= el sheet "Registrar Cobro" de la ficha web, ahora ruta propia).
 //  · Pedidos / comprobantes a cobrar (incluye anticipos a pedidos sin facturar): lo que
@@ -99,14 +100,17 @@ export function Cobrar() {
   const { toast, mostrar } = useToast()
 
   // ── Qué paga el cliente de la parada ──
-  const [cuenta, setCuenta] = useState<EstadoCuenta>(estadoCuentaVacio)
+  // Borrador: lo cargado sobrevive a que Android mate la app (p. ej. con la cámara abierta, 21/10/2026)
+  const borradorInicial = useMemo(() => leerBorradorCobro<MetodoPago>(viajeId, clienteId), [viajeId, clienteId])
+  const [cuenta, setCuenta] = useState<EstadoCuenta>(() => borradorInicial?.cuenta ?? estadoCuentaVacio())
+  const [restaurado, setRestaurado] = useState(!!borradorInicial)
   const [expandido, setExpandido] = useParamEstado("abierto")
   // ── Clientes agregados (cobro conjunto): cada uno con su propia cuenta ──
-  const [agregados, setAgregados] = useState<Agregado[]>([])
+  const [agregados, setAgregados] = useState<Agregado[]>(() => borradorInicial?.agregados ?? [])
   const [resumenes, setResumenes] = useState<Record<string, ResumenCuenta>>({})
   const [busqCli, setBusqCli] = useBusqueda("cli")
   // ── Cómo paga ──
-  const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([{ id: "1", tipo: "efectivo", monto: 0 }])
+  const [metodosPago, setMetodosPago] = useState<MetodoPago[]>(() => (borradorInicial ? sanearMetodosRestaurados(borradorInicial.metodosPago) : [{ id: "1", tipo: "efectivo", monto: 0 }]))
   const fotosLocales = useRef(new Map<string, { b64: string; mime: string; nombre: string }>())
   const fileInputRef = useRef<HTMLInputElement>(null)
   const vivo = useRef(true)
@@ -133,7 +137,14 @@ export function Cobrar() {
   const puedeCobrar = ESTADOS_COBRABLES.includes(estadoViaje)
 
   const sucio = !listo && (totalMetodos > 0 || r.haySeleccion || agregados.length > 0 || metodosPago.some(esFila))
-  const { hoja: hojaDescartar } = useBloqueoSalida(sucio, { titulo: "¿Descartar el cobro?", detalle: "Lo cargado en esta pantalla no se registró todavía.", confirmar: "Descartar" })
+  const graciaTeclado = useRef(0)
+  const { hoja: hojaDescartar } = useBloqueoSalida(sucio, { titulo: "¿Descartar el cobro?", detalle: "Lo cargado en esta pantalla no se registró todavía.", confirmar: "Descartar" }, { onDescartar: () => borrarBorradorCobro(viajeId, clienteId), ignorarHasta: graciaTeclado })
+  // Cada cambio queda en el equipo; registrado o vacío, se borra
+  useEffect(() => {
+    if (listo) return
+    if (borradorVacio({ cuenta, agregados, metodosPago })) borrarBorradorCobro(viajeId, clienteId)
+    else guardarBorradorCobro(viajeId, clienteId, { cuenta, agregados, metodosPago })
+  }, [cuenta, agregados, metodosPago, listo, viajeId, clienteId])
 
   // Diálogo abierto sin diferencia (recarga o se corrigió el monto): no corresponde
   useEffect(() => {
@@ -144,6 +155,7 @@ export function Cobrar() {
   // pantalla anterior. Abierto sin historial ⇒ padre lógico (la ficha), con replace.
   useEffect(() => {
     if (!listo) return
+    borrarBorradorCobro(viajeId, clienteId)
     try { sessionStorage.setItem(CLAVE_VOLVER_A_PARADA, clienteId) } catch { /* noop */ }
     const pasos = dialogo.abierto && (location.state as { overlay?: boolean } | null)?.overlay ? 2 : 1
     if (indiceHistorial() >= pasos) navigate(-pasos)
@@ -158,6 +170,7 @@ export function Cobrar() {
   )
   const agregarCliente = (cli: ClienteBusqueda) => {
     setBusqCli("")
+    graciaTeclado.current = Date.now() + GRACIA_TECLADO_MS
     setAgregados((prev) => (prev.some((a) => a.cliente.id === cli.id) ? prev : [...prev, { cliente: cli, estado: estadoCuentaVacio() }]))
   }
   const quitarCliente = (id: string) => {
@@ -235,7 +248,8 @@ export function Cobrar() {
     // Diferencia (mismo criterio que viajante / ERP): ajuste por redondeo (tope 1% de lo
     // imputado, oficina lo confirma al rendir) o dejar saldo pendiente / a cuenta.
     let ajusteRedondeo = 0
-    if (Math.abs(diff) > 0.01 && r.totalImputado > 0) {
+    // Un sobrante se confirma SIEMPRE (dueño, 21/10: $ 304.508,64 quedaron a cuenta sin preguntar)
+    if (Math.abs(diff) > 0.01 && (r.totalImputado > 0 || diff > 0)) {
       if (!modoDiferencia) { setDialogoDiff(diff); dialogo.abrir(); return }
       // +falta = crédito (tope 1 %), −sobra = débito. El sobrante nunca bloquea: si supera el
       // 1 % no se ofrece como ajuste y queda a cuenta del cliente.
@@ -320,7 +334,7 @@ export function Cobrar() {
       etiquetaFrescura="Ficha al"
       pie={
         <div className="border-t border-gray-200 bg-white p-4">
-          {Math.abs(diff) > 0.01 && r.totalImputado > 0 && (
+          {Math.abs(diff) > 0.01 && (r.totalImputado > 0 || diff > 0) && (
             <p className={`mb-2 rounded-xl px-4 py-2 text-center text-sm font-medium ${diff < 0 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
               {diff < 0 ? `Faltan ${formatCurrency(Math.abs(diff))}` : `Sobran ${formatCurrency(diff)}`}
               <span className="block text-xs font-normal opacity-80">{diff < 0 ? "Al registrar elegís: ajuste por redondeo o dejar el saldo pendiente." : "Al registrar elegís: dejarlo a cuenta del cliente o, si es chico, ajuste por redondeo."}{agregados.length ? ` La diferencia es de ${clienteNombre}.` : ""}</span>
@@ -335,6 +349,12 @@ export function Cobrar() {
       {toast}
       {hojaDescartar}
       <p className="truncate bg-blue-700 px-5 pb-3 text-sm text-blue-200">{clienteNombre}</p>
+      {restaurado && (
+        <div className="flex items-center gap-2 border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-900">
+          <span className="flex-1">↩ Se recuperó el cobro que estabas cargando. Revisalo antes de registrar.</span>
+          <button onClick={() => setRestaurado(false)} className="min-h-9 px-2 font-bold">OK</button>
+        </div>
+      )}
       {!puedeCobrar && <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-center text-sm text-amber-800">El viaje no está activo: no se pueden registrar cobros.</div>}
       {data.parcial && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
@@ -350,7 +370,7 @@ export function Cobrar() {
           {!descargada && data.parcial ? (
             <SinDescargar que="la cuenta del cliente" />
           ) : (
-            <SelectorCuenta datos={data} estado={cuenta} onChange={setCuenta} expandido={expandido} onExpandir={setExpandido} />
+            <SelectorCuenta datos={data} estado={cuenta} onChange={setCuenta} expandido={expandido} onExpandir={setExpandido} pedidosViaje={data.pedido ? [data.pedido.id] : []} />
           )}
         </section>
 
@@ -435,7 +455,7 @@ export function Cobrar() {
               </p>
             ) : null}
             <button onClick={() => void guardarCobro("saldo")} disabled={guardando} className="min-h-12 w-full rounded-2xl border-2 border-gray-300 py-4 font-bold text-gray-700 disabled:opacity-50">
-              {dialogoDiff < 0 ? "Dejar el saldo pendiente" : "Dejar el sobrante a cuenta del cliente"}
+              {dialogoDiff < 0 ? "Dejar el saldo pendiente" : `Dejar ${formatCurrency(dialogoDiff)} a cuenta de ${clienteNombre}`}
             </button>
             <button onClick={dialogo.cerrar} className="min-h-11 w-full py-2 text-sm text-gray-400">Volver</button>
           </div>
@@ -476,7 +496,7 @@ function CuentaAgregada({ viajeId, agregado, online, onEstado, onResumen, onQuit
       </div>
       <div className="mt-2">
         {completa ? (
-          <SelectorCuenta datos={datos} estado={agregado.estado} onChange={(e) => onEstado(id, e)} expandido={abierto} onExpandir={setAbierto} />
+          <SelectorCuenta datos={datos} estado={agregado.estado} onChange={(e) => onEstado(id, e)} expandido={abierto} onExpandir={setAbierto} pedidosViaje={datos.pedido ? [datos.pedido.id] : []} />
         ) : (
           <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
             {online

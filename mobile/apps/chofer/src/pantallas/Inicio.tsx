@@ -56,6 +56,8 @@ export function Inicio() {
   const rt = useRuntime()
   const yo = useYo()
   const { fila: me, cargando } = useMe()
+  // Viajes en rendición de hace más de una semana: alerta, no solo un renglón más en la lista (dueño, 21/10)
+  const viejosSinRendir = (me?.historial ?? []).filter((v) => v.estado === "en_rendicion" && Date.now() - Date.parse(v.fecha) > 7 * 86_400_000)
   const contadores = useContadoresOutbox()
   const ops = useNoEnviados()
   const salir = useOverlay("salir")
@@ -104,6 +106,12 @@ export function Inicio() {
           )}
         </section>
 
+        {viejosSinRendir.length > 0 && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="font-bold">⚠ {viejosSinRendir.length === 1 ? "Un viaje" : `${viejosSinRendir.length} viajes`} de hace más de una semana sin rendición confirmada</p>
+            <p className="mt-0.5 text-xs">{viejosSinRendir.map((v) => `${v.nombre || "Viaje"} (${formatDateAR(v.fecha)})`).join(" · ")}. Avisá a oficina para que cierre la rendición.</p>
+          </div>
+        )}
         {!!me?.historial?.length && (
           <section>
             <h2 className="mb-3 text-lg font-bold text-gray-700">Viajes Anteriores</h2>

@@ -208,9 +208,10 @@ export function Viaje() {
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           <div className="rounded-lg bg-gray-50 py-2"><p className="text-xs text-gray-400">Bultos</p><p className="font-bold text-gray-800">{p.bultos}</p></div>
           <div className="rounded-lg bg-gray-50 py-2"><p className="text-xs text-gray-400">Este viaje</p><p className="text-sm font-bold text-gray-800">{formatCurrency(p.total_viaje)}</p></div>
-          <div className={`rounded-lg py-2 ${p.saldo_anterior > 0 ? "bg-red-50" : "bg-gray-50"}`}>
-            <p className="text-xs text-gray-400">Debe de antes</p>
-            <p className={`text-sm font-bold ${p.saldo_anterior > 0 ? "text-red-600" : "text-gray-400"}`}>{p.saldo_anterior > 0 ? formatCurrency(p.saldo_anterior) : "—"}</p>
+          {/* Sin guiones (dueño, 21/10): $0, o "A favor" si el cliente tiene crédito */}
+          <div className={`rounded-lg py-2 ${p.saldo_anterior > 0.005 ? "bg-red-50" : p.saldo_anterior < -0.005 ? "bg-green-50" : "bg-gray-50"}`}>
+            <p className="text-xs text-gray-400">{p.saldo_anterior < -0.005 ? "A favor" : "Debe de antes"}</p>
+            <p className={`text-sm font-bold ${p.saldo_anterior > 0.005 ? "text-red-600" : p.saldo_anterior < -0.005 ? "text-green-700" : "text-gray-500"}`}>{formatCurrency(Math.abs(p.saldo_anterior))}</p>
           </div>
         </div>
 

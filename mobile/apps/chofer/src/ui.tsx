@@ -314,20 +314,38 @@ export function HojaConfirmar({ abierta, onCerrar, titulo, children, confirmar, 
  * bloquea la navegación (incluido el botón ATRÁS físico, que en la app es history.back)
  * y muestra la hoja "¿Descartar?". `sucio` = hay algo que se perdería.
  */
-export function useBloqueoSalida(sucio: boolean, textos: { titulo: string; detalle: string; confirmar: string }) {
+/**
+ * "Atrás" con trabajo sin registrar: pregunta antes de descartar.
+ * - `onDescartar`: se llama cuando el usuario confirma el descarte (p. ej. borrar el borrador).
+ * - `ignorarHasta`: un "atrás" físico que llega antes de ese instante (ms) se ignora en silencio. Lo usan
+ *   las pantallas después de elegir un resultado de búsqueda: el teclado se acaba de cerrar solo y el
+ *   primer "atrás" del chofer suele ser para eso, no para irse (pasada del 21/10/2026).
+ */
+export function useBloqueoSalida(
+  sucio: boolean,
+  textos: { titulo: string; detalle: string; confirmar: string },
+  opciones: { onDescartar?: () => void; ignorarHasta?: { current: number } } = {},
+) {
   const blocker = useBlocker(({ currentLocation, nextLocation }) => sucio && currentLocation.pathname !== nextLocation.pathname)
   const bloqueado = blocker.state === "blocked"
+  const tragar = bloqueado && (opciones.ignorarHasta?.current ?? 0) > Date.now()
+  useEffect(() => {
+    if (tragar) blocker.reset?.()
+  }, [tragar, blocker])
   const hoja = (
-    <Hoja abierta={bloqueado} onCerrar={() => blocker.reset?.()} titulo={textos.titulo}>
+    <Hoja abierta={bloqueado && !tragar} onCerrar={() => blocker.reset?.()} titulo={textos.titulo}>
       <div className="mb-4 text-[15px] text-gray-600">{textos.detalle}</div>
       <div className="grid grid-cols-2 gap-2">
         <button onClick={() => blocker.reset?.()} className="min-h-12 rounded-xl border border-gray-300 bg-white font-bold text-gray-700">Seguir acá</button>
-        <button onClick={() => blocker.proceed?.()} className="min-h-12 rounded-xl bg-red-600 font-bold text-white">{textos.confirmar}</button>
+        <button onClick={() => { opciones.onDescartar?.(); blocker.proceed?.() }} className="min-h-12 rounded-xl bg-red-600 font-bold text-white">{textos.confirmar}</button>
       </div>
     </Hoja>
   )
   return { hoja, bloqueado }
 }
+
+/** Ventana (ms) en la que un "atrás" después de cerrar el teclado solo no cuenta. */
+export const GRACIA_TECLADO_MS = 900
 
 // ─── Campos ──────────────────────────────────────────────────────────────────
 

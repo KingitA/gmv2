@@ -41,6 +41,8 @@ export function Cliente() {
   if (!data) return <Pantalla titulo="Cliente" dataset={DS.clientesViaje}>{null}</Pantalla>
 
   const { cliente, pedido, resumen, comprobantes_pendientes, devoluciones, pagos_registrados } = data
+  const cobrosSinConfirmar = data.cobros_sin_confirmar ?? []
+  const otrasDevoluciones = data.otras_devoluciones ?? []
   const clienteNombre = cliente?.razon_social || cliente?.nombre || "Cliente"
   const estadoViaje = viaje?.viaje.estado || data.viaje_estado
   const esReadOnly = estadoViaje === "completado"
@@ -120,7 +122,10 @@ export function Cliente() {
 
       <div className="mx-4 mt-4 rounded-2xl bg-blue-700 p-4 text-white">
         <div className="grid grid-cols-3 gap-3 text-center text-sm">
-          <div><p className="text-xs text-blue-200">Saldo anterior</p><p className="font-bold text-red-300">{formatCurrency(resumen.saldo_anterior)}</p></div>
+          <div>
+            <p className="text-xs text-blue-200">{resumen.saldo_anterior < -0.005 ? "A favor" : "Saldo anterior"}</p>
+            <p className={`font-bold ${resumen.saldo_anterior < -0.005 ? "text-green-300" : "text-red-300"}`}>{formatCurrency(Math.abs(resumen.saldo_anterior))}</p>
+          </div>
           <div><p className="text-xs text-blue-200">Este pedido</p><p className="font-bold">{formatCurrency(resumen.total_pedido)}</p></div>
           <div><p className="text-xs text-blue-200">A cobrar</p><p className="font-bold text-yellow-200">{formatCurrency(resumen.total_a_cobrar)}</p></div>
         </div>
@@ -157,11 +162,29 @@ export function Cliente() {
           </section>
         )}
 
-        {/* Saldo pendiente + devoluciones juntos */}
-        {(comprobantes_pendientes.length > 0 || devoluciones.length > 0) && (
+        {/* Saldo pendiente + devoluciones juntos; también lo que explica el saldo y no es de este viaje */}
+        {(comprobantes_pendientes.length > 0 || devoluciones.length > 0 || cobrosSinConfirmar.length > 0 || otrasDevoluciones.length > 0) && (
           <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
             <h3 className="mb-3 font-bold text-gray-700">Saldo y Devoluciones</h3>
             <div className="space-y-2">
+              {cobrosSinConfirmar.map((c) => (
+                <div key={c.id} className="flex items-center justify-between rounded-xl bg-sky-50 px-3 py-2 text-sm">
+                  <div>
+                    <p className="font-medium text-sky-800">🔒 Cobro sin confirmar {c.origen === "oficina" ? "(oficina / vendedor)" : "(otro viaje)"}</p>
+                    <p className="text-xs text-sky-700">{fechaHora(c.created_at)} · ya descuenta de lo que debe</p>
+                  </div>
+                  <p className="font-bold text-sky-700">+{formatCurrency(c.monto)}</p>
+                </div>
+              ))}
+              {otrasDevoluciones.map((d) => (
+                <div key={d.id} className="flex items-center justify-between rounded-xl bg-green-50 px-3 py-2 text-sm">
+                  <div>
+                    <p className="font-medium text-green-800">↩ Devolución {d.numero_devolucion} (viaje anterior)</p>
+                    <p className="text-xs text-green-700">{d.estado === "pendiente" ? "esperando depósito" : "aceptada, sin nota de crédito todavía"} · ya descuenta</p>
+                  </div>
+                  <p className="font-bold text-green-600">+{formatCurrency(d.valor)}</p>
+                </div>
+              ))}
               {comprobantes_pendientes.map((c) => (
                 <div key={c.id} className="flex items-center justify-between text-sm">
                   <div>
