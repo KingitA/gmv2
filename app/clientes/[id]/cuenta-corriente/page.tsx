@@ -608,6 +608,26 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                             <TableCell />
                                         </TableRow>
                                     ))}
+                                    {/* El 10 % contado (y ajustes) que nacen al confirmar: es lo que falta
+                                        para que las filas sumen el proyectado (antes no figuraba: URQUIZA
+                                        −$172.458,74 invisible, auditoría 21/10). */}
+                                    {(() => {
+                                        if (data.cliente.saldo_proyectado == null) return null;
+                                        const otros = Math.round((data.cliente.saldo_total - data.cliente.saldo_proyectado
+                                            - cobrosEnCalle.reduce((s, p) => s + Number(p.monto || 0), 0)
+                                            - (data.cliente.devoluciones_en_proceso ?? 0)) * 100) / 100;
+                                        if (Math.abs(otros) < 0.01) return null;
+                                        return (
+                                            <TableRow className="bg-slate-50/70 text-gray-400 italic">
+                                                <TableCell />
+                                                <TableCell className="whitespace-nowrap">10 % contado al confirmar</TableCell>
+                                                <TableCell>nota de crédito que nace cuando la oficina confirma el cobro (y ajustes de centavos)</TableCell>
+                                                <TableCell />
+                                                <TableCell className="text-right tabular-nums">({otros > 0 ? "−" : "+"}{moneda(Math.abs(otros))})</TableCell>
+                                                <TableCell />
+                                            </TableRow>
+                                        );
+                                    })()}
                                     {(data.cliente.devoluciones_en_proceso ?? 0) > 0 && (
                                         <TableRow className="bg-slate-50/70 text-gray-400 italic">
                                             <TableCell />

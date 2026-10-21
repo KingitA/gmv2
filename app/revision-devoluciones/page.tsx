@@ -21,6 +21,7 @@ import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { InputMonto } from "@/components/ui/input-monto"
 import { fecha, fechaHora, numero, redondear } from "@/lib/formato"
+import { createClient } from "@/lib/supabase/client"
 
 const ESTADO_UI: Record<string, { label: string; cls: string }> = {
   pendiente: { label: "Pendiente depósito", cls: "bg-amber-100 text-amber-800 border-amber-300" },
@@ -55,7 +56,16 @@ export default function RevisionDevolucionesPage() {
     try {
       const res = await fetch("/api/devoluciones?estado=revision")
       const data = await res.json()
-      setDevoluciones(Array.isArray(data) ? data : [])
+      const lista = Array.isArray(data) ? data : []
+      // confirmado_por guarda el id del usuario: se muestra su nombre (antes
+      // "Aceptó D6AC25BB-…", auditoría 21/10)
+      const ids = [...new Set(lista.map((d: any) => d.confirmado_por).filter((v: any) => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v)))]
+      if (ids.length) {
+        const { data: perfiles } = await createClient().from("profiles").select("id, nombre, email").in("id", ids)
+        const nombre = new Map((perfiles || []).map((p: any) => [p.id, p.nombre || p.email]))
+        for (const d of lista) if (nombre.has(d.confirmado_por)) d.confirmado_por = nombre.get(d.confirmado_por)
+      }
+      setDevoluciones(lista)
     } catch {
       toast({ title: "Error", description: "No se pudieron cargar las devoluciones", variant: "destructive" })
     } finally {

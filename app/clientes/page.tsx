@@ -427,7 +427,7 @@ export default function ClientesPage() {
                   <TableRow className="bg-neutro-50 hover:bg-neutro-50">
                     {encabezado("codigo", "Código", "numero")}
                     {encabezado("nombre", "Nombre")}
-                    {encabezado("direccion", "Dirección")}
+                    {encabezado("direccion", "Dirección", undefined, "hidden 2xl:table-cell")}
                     {encabezado("localidad", "Localidad", "valores")}
                     {encabezado("zona", "Zona", "valores")}
                     {encabezado("viajante", "Viajante", "valores")}
@@ -469,7 +469,7 @@ export default function ClientesPage() {
                             <div className="truncate text-xs text-muted-foreground" title={cliente.razon_social}>{cliente.razon_social}</div>
                           )}
                         </TableCell>
-                        <TableCell className="max-w-[180px] truncate text-muted-foreground 2xl:max-w-[240px]" title={cliente.direccion || undefined}>{cliente.direccion || "-"}</TableCell>
+                        <TableCell className="hidden max-w-[180px] truncate text-muted-foreground 2xl:table-cell 2xl:max-w-[240px]" title={cliente.direccion || undefined}>{cliente.direccion || "-"}</TableCell>
                         <TableCell className="max-w-[140px] truncate text-muted-foreground 2xl:max-w-[170px]" title={cliente.localidades?.nombre || cliente.localidad || undefined}>{cliente.localidades?.nombre || cliente.localidad || "-"}</TableCell>
                         <TableCell className="max-w-[110px] truncate text-muted-foreground 2xl:max-w-[130px]">{cliente.localidades?.zonas?.nombre || "-"}</TableCell>
                         <TableCell className="max-w-[130px] truncate text-muted-foreground 2xl:max-w-[160px]" title={(cliente.vendedor_id && nombreVendedor.get(cliente.vendedor_id)) || undefined}>{(cliente.vendedor_id && nombreVendedor.get(cliente.vendedor_id)) || "-"}</TableCell>
