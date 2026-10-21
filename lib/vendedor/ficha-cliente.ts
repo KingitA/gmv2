@@ -5,6 +5,7 @@
 
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
 import { enCobroPorComprobante } from "@/lib/cobranzas/en-cobro"
+import { reservasDeCreditos } from "@/lib/cobranzas/creditos"
 import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
@@ -120,7 +121,7 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
   // ── PLATA A FAVOR del cliente (el vendedor debe verla al cobrar: sin esto
   // podría cobrar la deuda bruta cuando el cliente tiene crédito) ──
   // a) Créditos documento vivos: NC/REV con saldo disponible
-  const { data: creditosVivos } = await supabase
+  const { data: creditosVivosDb } = await supabase
     .from("comprobantes_venta")
     .select("id, tipo_comprobante, numero_comprobante, fecha, saldo_pendiente")
     .eq("cliente_id", id)
@@ -128,6 +129,16 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
     .is("anulado_en", null)
     .neq("estado_pago", "anulado")
     .order("fecha", { ascending: true })
+  // Lo que ya tomaron cobros sin confirmar no está disponible: se descuenta
+  // de cada crédito (auditoría 21/10, créditos usados dos veces). La app
+  // muestra este número tal cual.
+  const reservas = await reservasDeCreditos(supabase, id)
+  const creditosVivos = (creditosVivosDb || [])
+    .map((c: any) => ({
+      ...c,
+      saldo_pendiente: -Math.round(Math.max(0, -Number(c.saldo_pendiente) - (reservas.get(c.id) ?? 0)) * 100) / 100,
+    }))
+    .filter((c: any) => Number(c.saldo_pendiente) < -0.005)
 
   // b) Entregas a cuenta con disponible sin imputar. No solo confirmadas:
   // también las que están EN VIAJE (sin rendir) o EN OFICINA (sin confirmar)
@@ -160,14 +171,14 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
       monto: Number(p.monto) || 0,
       // ¿La tiene este usuario? (para el rótulo "en tu poder")
       mia: session.vendedorIds.includes(p.vendedor_id) || p.creado_por === session.user.id,
-      disponible: disponibleDePago(
+      disponible: Math.round(Math.max(0, disponibleDePago(
         p.monto,
         (impsPorPagoConf.get(p.id) || []).map((i: any) => ({
           monto_imputado: i.monto_imputado,
           estado: i.estado,
           tipo_comprobante_destino: (i.comprobante as any)?.tipo_comprobante ?? null,
         })),
-      ),
+      ) - (reservas.get(p.id) ?? 0)) * 100) / 100,
     }))
     .filter((p: any) =>
       p.estado === "rechazado"

@@ -374,7 +374,21 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
   const fondoEntregado = r2((fondos || []).reduce((s: number, f: any) => s + Number(f.monto), 0))
   const gastosVigentes = (gastos || []).filter((g: any) => g.estado !== "rechazado")
   const gastosTotal = r2(gastosVigentes.reduce((s: number, g: any) => s + Number(g.monto), 0))
-  const cobradoEfectivo = sumaTipo(["efectivo"])
+  // Efectivo que el chofer todavía TIENE: el de cobros sin confirmar. Antes
+  // sumaba también los ya confirmados por oficina, y en la segunda rendición
+  // de un viaje (p. ej. un cheque que faltó) la app proponía entregar plata
+  // que ya había entregado: la diferencia quedaba "a su favor" (auditoría
+  // 21/10). Misma base que rendicion_crear (efectivo pendiente + fondos −
+  // gastos − fondo ya liquidado).
+  const cobradoEfectivo = r2(
+    (pagos || [])
+      .filter((p: any) => p.estado === "pendiente_rendicion")
+      .flatMap((p: any) => p.pagos_detalle || [])
+      .filter((d: any) => d.tipo_pago === "efectivo")
+      .reduce((s: number, d: any) => s + Number(d.monto), 0),
+  )
+  const { data: liquidadoRpc } = await supabase.rpc("viaje_fondo_liquidado", { p_viaje_id: viajeId })
+  const fondoLiquidado = r2(Number(liquidadoRpc) || 0)
 
   const presupuesto = {
     nafta: Number(viaje.dinero_nafta) || 0,
@@ -451,7 +465,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       // Un cheque = un papel: un cheque compartido entre clientes cuenta una vez
       cheques_cantidad: new Set(detalles.filter((d: any) => d.tipo_pago === "cheque").map((d: any, i: number) => d.cheque_id || `suelto-${i}`)).size,
       cobrado_transferencias: sumaTipo(["transferencia", "deposito"]),
-      efectivo_en_mano: r2(fondoEntregado + cobradoEfectivo - gastosTotal),
+      efectivo_en_mano: r2(fondoEntregado - fondoLiquidado + cobradoEfectivo - gastosTotal),
       saldo_billetera_titular: r2(((saldoBill || []) as any[]).reduce((s, x) => s + Number(x.saldo), 0)),
       // Plata declarada en rendiciones ABIERTAS del titular: está "en camino a
       // oficina" — sigue en el saldo contable de la billetera (se debita al

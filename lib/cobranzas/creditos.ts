@@ -89,14 +89,48 @@ export function asignarCreditosFIFO(
 }
 
 /**
+ * Cuánto de cada crédito ya está TOMADO por cobros de este cliente que todavía
+ * no se confirmaron (marca [CREDITOS:...] de pagos pendiente / pendiente_rendicion).
+ * Los créditos se ejecutan recién al confirmar, así que sin restar esto dos
+ * cobros sin confirmar podían usar la misma plata a favor (auditoría 21/10:
+ * URQUIZA, a cuenta $14.011,02 y anticipo $170.019 tomados por el cobro de
+ * $122.000 seguían "disponibles"). Map credito_id → monto reservado.
+ */
+export async function reservasDeCreditos(
+  supabase: SupabaseClient,
+  clienteId: string,
+  excluirPagoId?: string | null,
+): Promise<Map<string, number>> {
+  const { data, error } = await supabase
+    .from("pagos_clientes")
+    .select("id, observaciones")
+    .eq("cliente_id", clienteId)
+    .in("estado", ["pendiente", "pendiente_rendicion"])
+    .like("observaciones", `%${MARCA_INICIO}%`)
+  if (error) throw new Error(error.message)
+  const out = new Map<string, number>()
+  for (const p of data || []) {
+    if (excluirPagoId && p.id === excluirPagoId) continue
+    for (const par of parsearMarcaCreditos(p.observaciones)) {
+      out.set(par.credito_id, r2((out.get(par.credito_id) ?? 0) + par.monto))
+    }
+  }
+  return out
+}
+
+/**
  * Valida que cada crédito exista, sea del cliente y tenga disponible
- * suficiente. Lanza Error con mensaje claro si algo no cierra.
+ * suficiente (descontado lo que ya tomaron otros cobros sin confirmar).
+ * Lanza Error con mensaje claro si algo no cierra.
  */
 export async function validarCreditos(
   supabase: SupabaseClient,
   clienteId: string,
   creditos: CreditoSeleccionado[],
 ): Promise<void> {
+  const reservas = await reservasDeCreditos(supabase, clienteId)
+  const reservaTxt = (id: string) =>
+    (reservas.get(id) ?? 0) > 0.005 ? ` — ${moneda(reservas.get(id)!)} ya los usa otro cobro sin confirmar` : ""
   for (const cr of creditos) {
     if (!(Number(cr.monto) > 0)) throw new Error("Crédito con monto inválido")
     if (cr.tipo === "nc") {
@@ -110,9 +144,9 @@ export async function validarCreditos(
       if (nc.anulado_en || nc.estado_pago === "anulado") throw new Error(`El crédito ${nc.numero_comprobante} está anulado`)
       if (!["NC", "NCA", "NCB", "NCC", "REV"].includes(nc.tipo_comprobante))
         throw new Error(`${nc.numero_comprobante} no es un comprobante de crédito`)
-      const disponible = Math.max(0, -Number(nc.saldo_pendiente))
+      const disponible = r2(Math.max(0, -Number(nc.saldo_pendiente) - (reservas.get(cr.id) ?? 0)))
       if (Number(cr.monto) > disponible + 0.01)
-        throw new Error(`El crédito ${nc.numero_comprobante} tiene ${moneda(disponible)} disponibles (pediste ${moneda(Number(cr.monto))})`)
+        throw new Error(`El crédito ${nc.numero_comprobante} tiene ${moneda(disponible)} disponibles (pediste ${moneda(Number(cr.monto))})${reservaTxt(cr.id)}`)
     } else {
       const { data: pg } = await supabase
         .from("pagos_clientes")
@@ -133,9 +167,9 @@ export async function validarCreditos(
         .eq("pago_id", cr.id)
         .neq("estado", "anulado")
       const usado = (imps || []).reduce((s: number, i: any) => s + Number(i.monto_imputado), 0)
-      const disponible = r2(Number(pg.monto) - usado)
+      const disponible = r2(Math.max(0, Number(pg.monto) - usado - (reservas.get(cr.id) ?? 0)))
       if (Number(cr.monto) > disponible + 0.01)
-        throw new Error(`La plata a cuenta tiene ${moneda(disponible)} disponibles (pediste ${moneda(Number(cr.monto))})`)
+        throw new Error(`La plata a cuenta tiene ${moneda(disponible)} disponibles (pediste ${moneda(Number(cr.monto))})${reservaTxt(cr.id)}`)
     }
   }
 }
@@ -255,8 +289,19 @@ export async function ejecutarCreditosDePago(
           .select("saldo_pendiente")
           .eq("id", p.debito_id)
           .maybeSingle()
-        const aplicar = Math.round(Math.min(p.monto, Math.max(0, Number(deb?.saldo_pendiente ?? p.monto))) * 100) / 100
-        if (aplicar <= 0.005) continue // el débito ya está saldado: nada que aplicar
+        // Y tope a lo que le QUEDA a la plata a cuenta: si dos cobros la
+        // tomaron (marcas viejas, antes de reservasDeCreditos), el segundo no
+        // puede imputar más plata de la que el pago tiene.
+        const [{ data: pgCred }, { data: impsCred }] = await Promise.all([
+          supabase.from("pagos_clientes").select("monto").eq("id", p.credito_id).maybeSingle(),
+          supabase.from("imputaciones").select("monto_imputado").eq("pago_id", p.credito_id).neq("estado", "anulado"),
+        ])
+        const quedaEnCredito = Math.max(0, Number(pgCred?.monto ?? 0) - (impsCred || []).reduce((s: number, i: any) => s + Number(i.monto_imputado || 0), 0))
+        const aplicar = Math.round(Math.min(p.monto, quedaEnCredito, Math.max(0, Number(deb?.saldo_pendiente ?? p.monto))) * 100) / 100
+        if (aplicar <= 0.005) {
+          if (quedaEnCredito <= 0.005) avisos.push(`Crédito ${p.credito_id.slice(0, 8)}: la plata a cuenta ya estaba usada entera, no se aplicó (${moneda(p.monto)})`)
+          continue // el débito ya está saldado o el crédito no tiene más plata
+        }
         const { error: insErr } = await supabase.from("imputaciones").insert({
           pago_id: p.credito_id,
           comprobante_id: p.debito_id,
