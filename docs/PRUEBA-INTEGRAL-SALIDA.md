@@ -164,14 +164,33 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   - el resto, completo.
 - [x] 4.3b **001942** (FITTERER, lista Bahía): los 3 renglones marcados **faltante** (0 preparado), para ver qué hace el sistema con un pedido que no tiene nada para entregar.
 - [x] 4.4 Los 4 pasaron a "Pendiente Facturación". La ficha del pedido en el ERP muestra quién preparó y cuándo ("Juan Cruz · 18:19–18:21"), y cada renglón tiene un color (rojo faltante, naranja parcial, verde completo). Ver problema 14.
-- [ ] 4.5 (se ve en la 5.3) Al generar los comprobantes, el 001941 tiene que salir **por lo preparado**: sin el BATMAN y con 30 PACKx2 en vez de 36. Es decir **$638.813,76** ($722.880,96 − $57.697,44 del BATMAN − 6 × $4.394,96), y su comisión baja en la misma proporción. El 001942 no debería generar comprobante, o tiene que avisar que no hay nada para facturar.
+- [x] 4.5 (verificado en la 5.3: PRES 0001-00000021 por $638.813,76, con 30 PACKx2 y sin BATMAN) Al generar los comprobantes, el 001941 tiene que salir **por lo preparado**: sin el BATMAN y con 30 PACKx2 en vez de 36. Es decir **$638.813,76** ($722.880,96 − $57.697,44 del BATMAN − 6 × $4.394,96), y su comisión baja en la misma proporción. El 001942 no debería generar comprobante, o tiene que avisar que no hay nada para facturar.
 
 ## Fase 5 — Gestión en el ERP
 
-- [ ] 5.1 Modificar un pedido: sacar un renglón y cambiar una cantidad.
+- [x] 5.1 Modificar un pedido ya preparado (001941, "Pendiente Facturación"): **el ERP no deja**. Todo queda bloqueado salvo la condición de entrega, que es la regla actual (después de preparar no se edita). Juan quiere poder cambiar lista y método y que se reprecie solo: problema 16.
 - [ ] 5.2 Cambiar la condición de pago de un pedido.
-- [ ] 5.3 Generar comprobantes: **solo PRES**. Consulta: fiscales nuevos = 0.
-- [ ] 5.4 Los PRES suman a la cuenta del cliente.
+- [x] 5.3 Comprobantes generados (23/10, 18:36 a 18:51). **Solo PRES; fiscales nuevos: 0.**
+
+| Pedido | Comprobante | Importe | Qué tiene |
+|---|---|---|---|
+| 001939 URQUIZA | **PRES 0001-00000019** | $518.287,20 | Las 2 bolsas de ARNANUK (240 de 60x90 y 120 de 80x110) con su 10 %. Sale **aparte** por la condición especial del proveedor |
+| 001939 URQUIZA | **PRES 0001-00000020** | $1.790.928,36 | Aceite, bolbilla, PACKx2 (360), shampoo |
+| 001941 FITTERER | **PRES 0001-00000021** | $638.813,76 | **Por lo preparado**: 30 PACKx2 (no 36), sin el BATMAN faltante |
+| 001940 CHEN | **PRES 0001-00000022** | $154.329,05 | Los 4 artículos completos |
+| 001942 FITTERER | — | — | Todo faltante: el sistema dice "Comprobantes generados exitosamente:" con la lista **vacía**, no genera nada y el pedido queda en "Pendiente Facturación" (problema 17) |
+
+  Cada renglón del comprobante tiene la misma cantidad y el mismo precio que el pedido, con el % de oferta y el 10 % de ARNANUK. 001941 también generó el **Remito X 0001-00000034**.
+- [x] 5.4 Los PRES suman a la cuenta de cada cliente (un asiento "presupuesto" por comprobante):
+  - **199 URQUIZA $2.309.215,56**: los 2 PRES;
+  - **556 FITTERER $4.423.099,76**: $3.784.286,00 de la apertura más el PRES de $638.813,76;
+  - **1190 CHEN $154.329,05**.
+- [x] 5.4b Stock: bajó **solo lo que salió**. Por ejemplo, el PACKx2 bajó 360 + 30; el BATMAN y los HORNAL del 001942 no bajaron.
+- [x] 5.4c Comisión: quedó vinculada a cada comprobante.
+  - 001939: $73.135,90.
+  - 001940: $7.222,82.
+  - **001941: bajó de $17.922,67 a $15.838,36** (sin el BATMAN y con 30 PACKx2), lo que confirma que el arreglo del problema 15 también corrige la comisión.
+  - 001942: sus renglones de comisión y de kardex se borraron al intentar generar, porque no tiene nada para facturar.
 - [ ] 5.5 Armar el viaje: solo ofrece pedidos de prueba; asignar chofer (Juan) y vehículo.
 - [ ] 5.6 Bloquear la entrega de **1190** hasta que pague (retener entregas): el chofer ve el aviso.
 - [ ] 5.7 Entregar fondo al chofer: aparece en su billetera.
@@ -260,8 +279,11 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 11 | 3.7 | **Comisiones del vendedor: pedidos sin número.** En la lista, 001940, 001941 y 001942 aparecen como "—": el kardex no guarda el número del pedido cuando el pedido viene de la app (pasa en 9.143 de 11.279 renglones del último mes). Conviene tomar el número del pedido y no del kardex | Servidor | Anotado 23/10 |
 | 12 | 3 | Artículo "Cepillo Dent BATMAN/M.MARAVILLA" con proveedor "INEXISTENTE", y "PACKx2 ULTRA BLANCO x90g" sin rubro. Son datos de artículos para corregir | Oficina (artículos) | Anotado 23/10 |
 | 13 | 3.2 | **No se puede marcar un pedido como contado al venderlo.** Ni la app vendedor ni el ERP tienen esa opción. Hoy el 10 % contado solo aparece al **cobrar** (app vendedor, chofer o /caja), y el pedido lo registra recién ahí. Juan espera poder marcarlo al tomar el pedido | App vendedor + ERP (Juan define cómo) | Anotado 23/10 |
-| 14 | 4.4 | ERP, ficha del pedido después de preparar: el renglón muestra lo **pedido** (36 u.) y un color, pero no **cuánto se preparó** (30 de 36), y el total sigue diciendo $722.880,96 como si fuera completo. Conviene mostrar "preparado 30 de 36" y el total que se va a facturar | ERP (pantalla) | Anotado 23/10 |
+| 14 | 4.4 / 5 | (Juan también lo vio en el modal de edición) ERP, ficha del pedido después de preparar: el renglón muestra lo **pedido** (36 u.) y un color, pero no **cuánto se preparó** (30 de 36), y el total sigue diciendo $722.880,96 como si fuera completo. Conviene mostrar "preparado 30 de 36" y el total que se va a facturar | ERP (pantalla) | Anotado 23/10 |
 | 15 | 4.5 | **GRAVE: al generar el comprobante se factura lo PEDIDO y no lo PREPARADO.** `generar` (app/api/comprobantes-venta/generar/route.ts:222-284) saltea los renglones FALTANTE, pero en un renglón PARCIAL usa la cantidad pedida: el 001941 saldría con 36 PACKx2 cuando se prepararon 30. El cliente pagaría 6 unidades que no recibe, y lo mismo pasaría con la comisión y el stock. Visto leyendo el código, antes de generar nada | Servidor | **Arreglado 23/10** (`lib/pedidos/cantidad-a-facturar.ts`): el comprobante y el kardex (y con él la comisión) usan lo preparado en los renglones PARCIAL. Falta verlo en la 5.3 |
+| 16 | 5.1 | **No se puede cambiar la lista ni el método de un pedido ya preparado.** Después del depósito ("Pendiente Facturación") solo se edita la condición de entrega. Juan quiere poder cambiar **lista y método de facturación** hasta generar el comprobante, y que al guardar se **reprecie solo**. Las cantidades siguen bloqueadas, porque son las del depósito | ERP + servidor (Juan define) | Anotado 23/10 |
+| 17 | 5.3 | **Pedido con todo faltante.** "Generar" muestra "Comprobantes generados exitosamente:" con la lista vacía, no genera nada y el pedido queda en "Pendiente Facturación" para siempre. Juan quiere poder **volverlo a "pendiente"** (para prepararlo cuando haya mercadería) o **pasarlo a eliminado**. Además el mensaje tendría que decir "no hay nada para facturar: todo faltante" | ERP + servidor | Anotado 23/10 |
+| 18 | 5.3 | Observación: los PRES nuevos se numeran **0001-00000019…** y los de la apertura conservan el número del sistema viejo, **0001-00117929…**, en el mismo punto de venta. Hoy no chocan, pero en la cuenta del cliente conviven dos numeraciones. Hay que decidir si gmv2 sigue la numeración del sistema viejo, usa otro punto de venta o se deja así | Juan decide | Anotado 23/10 |
 
 ### Detalle del problema 9
 
