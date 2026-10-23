@@ -238,3 +238,11 @@ Pendientes que encontré al sacar las capturas (sin tocar todavía):
 - App vendedor, Cobrar: los créditos que ya usa un cobro sin rendir (URQUIZA: a cuenta $14.011,02 y anticipo $170.019 dentro del cobro de $122.000 del 14/10) figuran "disponibles": riesgo de usarlos dos veces. Falta confirmar si el servidor lo frena.
 - App vendedor, Comisiones: "Mercadería cobrada" lista comisiones (URQUIZA #001454) mientras "Comisiones ganadas" dice $0: la lista sale del cálculo viejo y la cuenta personal todavía no tiene "Poner al día". Se alinea con la puesta a cero + Poner al día; revisar entonces.
 - NuStar: el 21/10 volvió la pantalla blanca por actualización del WebView; se arregló reiniciando el equipo (adb reboot).
+
+Verificación del servidor del 21/10 (tarde), arreglado en main (460c095):
+
+| # | Hallazgo | Arreglo |
+|---|---|---|
+| 25 | Créditos (NC o plata a cuenta) tomados por un cobro sin confirmar seguían disponibles: un segundo cobro podía usarlos y al confirmar se imputaba de más. | `reservasDeCreditos`: la validación y la ficha del vendedor descuentan lo reservado; al confirmar, tope a lo que le queda a la plata a cuenta. |
+| 26 | Hoja de ruta: "efectivo en mano" sumaba cobros ya confirmados y no restaba el fondo liquidado; en una segunda rendición del viaje la app proponía entregar plata ya entregada (la diferencia iba a favor del chofer). | Misma base que `rendicion_crear`: efectivo de cobros sin confirmar + fondos − gastos − fondo liquidado. |
+| 27 | Cancelar una rendición (botón o al rechazar todos sus pagos) dejaba los retiros pegados a la rendición cancelada (el retiro se cobraba dos veces) y `/cancelar` no anulaba el saldo declarado. | Las dos vías usan `rendicion_devolver` v2; `/cancelar` pide permiso de Caja. En la base no había casos dañados (1 solo retiro, sin rendición). |

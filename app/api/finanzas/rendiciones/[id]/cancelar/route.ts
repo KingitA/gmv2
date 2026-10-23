@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { fecha } from "@/lib/formato"
 
 /**
@@ -17,7 +17,8 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  // Acción de Caja: solo admin (regla 23)
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
 
   try {
@@ -55,15 +56,15 @@ export async function POST(
       }
     }
 
-    const { error: updErr } = await supabase
-      .from("rendiciones")
-      .update({
-        estado: "cancelada",
-        observaciones: `Cancelada por oficina: sin pagos vigentes (${fecha(new Date())})`,
-      })
-      .eq("id", rendicionId)
-      .eq("estado", "abierta")
-    if (updErr) throw updErr
+    // Cancela con rendicion_devolver (v2): anula el saldo declarado y LIBERA
+    // LOS RETIROS para la próxima rendición. Antes solo cambiaba el estado y
+    // el retiro terminaba cobrado dos veces en la cuenta personal (auditoría 21/10).
+    const { error: devErr } = await supabase.rpc("rendicion_devolver", {
+      p_rendicion_id: rendicionId,
+      p_usuario_id: auth.user!.id,
+      p_motivo: `Cancelada por oficina: sin pagos vigentes (${fecha(new Date())})`,
+    })
+    if (devErr) throw devErr
 
     return NextResponse.json({ success: true })
   } catch (error: any) {

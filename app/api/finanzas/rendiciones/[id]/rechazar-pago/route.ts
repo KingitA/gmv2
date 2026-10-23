@@ -129,49 +129,19 @@ export async function POST(
     ).length
     let rendicionCancelada = false
     if (rendibles === 0) {
-      await admin
-        .from("rendiciones")
-        .update({
-          estado: "cancelada",
-          confirmado_por: auth.user.id,
-          confirmado_at: nowArgentina(),
-          observaciones: [rend.observaciones, `Cancelada: todos sus pagos fueron rechazados (${motivoTxt})`].filter(Boolean).join(" · "),
-        })
-        .eq("id", rendicionId)
+      // Rendición sin nada rendible → se cancela con rendicion_devolver (v2):
+      // anula el saldo declarado (caso FREIJE 02/10: −$674.500 fantasma),
+      // LIBERA LOS RETIROS para la próxima rendición y reabre el viaje. Antes
+      // se cancelaba a mano y los retiros quedaban pegados a la rendición
+      // cancelada: la siguiente no los descontaba y el retiro se cobraba dos
+      // veces en la cuenta personal (auditoría 21/10).
+      const { error: devErr } = await admin.rpc("rendicion_devolver", {
+        p_rendicion_id: rendicionId,
+        p_usuario_id: auth.user.id,
+        p_motivo: `Cancelada: todos sus pagos fueron rechazados (${motivoTxt})`,
+      })
+      if (devErr) throw new Error(`No se pudo cancelar la rendición: ${devErr.message}`)
       rendicionCancelada = true
-
-      // Compensar el SALDO DECLARADO de la rendición (modelo 20260915: al
-      // declarar se asienta la retención/el a-favor en la billetera). Sin
-      // esto, cancelar la rendición dejaba ese movimiento vivo para siempre
-      // (caso FREIJE 02/10: −$674.500 fantasma). Mismo mecanismo que
-      // rendicion_devolver del chofer, idempotente por rendición.
-      const { data: declarados } = await admin
-        .from("billetera_movimientos")
-        .select("viajante_id, monto")
-        .eq("referencia_tipo", "rendicion_saldo_declarado")
-        .eq("referencia_id", rendicionId)
-      const totalDeclarado = (declarados || []).reduce((s: number, m: any) => s + Number(m.monto), 0)
-      if (Math.abs(totalDeclarado) > 0.005) {
-        const { data: yaDevuelta } = await admin
-          .from("billetera_movimientos")
-          .select("id")
-          .eq("referencia_tipo", "rendicion_devuelta")
-          .eq("referencia_id", rendicionId)
-          .maybeSingle()
-        if (!yaDevuelta) {
-          await admin.from("billetera_movimientos").insert({
-            viajante_id: declarados![0].viajante_id,
-            tipo: totalDeclarado > 0 ? "credito" : "debito",
-            medio: "efectivo",
-            monto: -totalDeclarado,
-            concepto: `Rendición ${rendicionId.slice(0, 8)} cancelada por oficina: se anula el saldo declarado (${motivoTxt})`,
-            referencia_id: rendicionId,
-            referencia_tipo: "rendicion_devuelta",
-            fecha: nowArgentina(),
-            creado_por: auth.user.id,
-          })
-        }
-      }
     }
 
     return NextResponse.json({
