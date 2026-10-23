@@ -64,7 +64,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 - [x] 0.1 Auditoría: base, código y cuentas de Juan (23/10).
 - [ ] 0.2 Código: estado "Sistema viejo" en las pantallas. Fuera de la cola, del armado de viajes, del calendario de pedidos sueltos y de los pedidos cobrables (ERP, ficha del vendedor y del chofer). Rama `prueba-integral`.
-- [ ] 0.3 SQL (Juan lo aplica en Supabase): agrega el estado e instala cuatro funciones que no hacen nada hasta que se las llama:
+- [ ] 0.3 SQL `supabase/migrations/20261023_prueba_integral.sql` (Juan lo aplica en Supabase): agrega el estado e instala cuatro funciones que no hacen nada hasta que se las llama:
   - pasar a "Sistema viejo" (con simulacro);
   - limpieza complementaria de viajes, remitos de viaje y preparación del depósito (con simulacro).
 - [ ] 0.4 Pasar la rama a main y desplegar **antes** de mover los pedidos. Así ninguna pantalla se encuentra con un estado que no conoce.
@@ -77,8 +77,9 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 - [ ] 1.2 `SELECT * FROM cc_puesta_a_cero_simulacro();` → revisamos juntos.
 - [ ] 1.3 `SELECT cc_puesta_a_cero('PONER A CERO');`
 - [ ] 1.4 `SELECT * FROM prueba_limpieza_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba_limpieza('LIMPIAR');`
-- [ ] 1.5 `SELECT * FROM pedidos_sistema_viejo_simulacro(now(), '{1190,199,556}');` → `SELECT pedidos_pasar_a_sistema_viejo(now(), '{1190,199,556}', 'PASAR');`
-  - **Ojo:** los pedidos reales viejos de los 3 clientes de prueba también hay que pasarlos. Se corre una segunda vez sin excluir a nadie, **antes** de cargar el primer pedido de prueba.
+- [ ] 1.5 `SELECT * FROM pedidos_sistema_viejo_simulacro(now(), '{}');` → `SELECT pedidos_pasar_a_sistema_viejo(now(), '{}', 'PASAR');`
+  - Todavía no hay pedidos de prueba, así que se pasan todos, también los viejos de 1190, 199 y 556.
+  - Durante la prueba, cada mañana, para mover los pedidos reales nuevos sin tocar los de prueba: `SELECT pedidos_pasar_a_sistema_viejo(now(), '{1190,199,556}', 'PASAR');`
 - [ ] 1.6 Foto después. Tienen que quedar: los 12 con CAE, los 3 echeqs propios, todos los clientes, artículos y proveedores, y todos los pedidos (en "Sistema viejo" o "Eliminado").
 - [ ] 1.7 Juan carga los saldos reales de bancos y caja.
 - [ ] 1.8 Verificar en cero: tu cuenta personal, billetera de vendedor y de chofer, comisiones cobradas, viajes (ninguno), saldos de todos los clientes, cola del depósito vacía.
@@ -193,4 +194,4 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   - 1190 `7366eab6-603d-41aa-a31a-806c07d41e07`;
   - 199 `6daf55b6-22df-491d-b2e3-522674ab89d7`;
   - 556 `0ba07007-10cc-426a-9692-a32df50d9e8c`.
-- Consulta "fiscales nuevos" (desde el inicio de la prueba): `select tipo_comprobante, numero, created_at from comprobantes_venta where tipo_comprobante not in ('PRES','REV') and created_at >= '<inicio>'`.
+- Consulta "fiscales nuevos" (desde el inicio de la prueba): `select tipo_comprobante, cae, created_at from comprobantes_venta where tipo_comprobante not in ('PRES','REV') and created_at >= '<inicio>'`.
