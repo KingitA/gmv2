@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.2 (versionCode 8) — 2026-10-23
+
+- Devoluciones tal cual fue facturado: lo del pedido entra con el precio neto de SU factura (bloqueado), con IVA, percepciones e IIBB vigente, menos el 10% si fue contado; el mismo valor en la ficha, el cobro y la nota de crédito. La rendición propone solo el efectivo que todavía tenés.
+
 ## v0.3.1 (versionCode 7) — 2026-10-21
 
 - Borrador del cobro (si la app se cierra con la cámara abierta no se pierde lo cargado), el pedido de este viaje primero y lo anterior plegado, $0 / A favor en vez de guiones, la ficha explica el saldo (cobros sin confirmar y devoluciones de otros viajes), la devolución muestra lo que vale para el cliente, el sobrante se confirma siempre, alerta de viajes sin rendir

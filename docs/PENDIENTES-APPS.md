@@ -39,7 +39,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | Artículos dados de baja: matching sin bajas, reactivar desde Artículos/Depósito, historial de quién | Servidor (sesión búsquedas/formatos) | Hecho 20/10 (bef0ecd + 570cc2c), migraciones `20261020_pedidos_articulo_real` y `20261020b_articulos_bajas` aplicadas |
 | Devoluciones "tal cual fue facturado" — servidor, NC/REV y pantallas web | Sesión precios (con OK de Juan; toca `lib/cobranzas`) | Hecho 22/10 (rama `devoluciones-nc-exacta`, merge en main) — ver "Devoluciones tal cual facturado" abajo |
 | ~~D1 — APK Vendedor con el valor de devolución nuevo~~ | App Vendedor | Hecho 23/10, APK v0.4.3 instalada en el NuStar |
-| D2 — APK Chofer con el valor de devolución nuevo (el código ya está) | App Chofer | Pendiente: compilar, probar en el NuStar y publicar |
+| ~~D2 — APK Chofer con el valor de devolución nuevo~~ | App Chofer | Hecho 23/10, APK v0.3.2 (versionCode 8) instalada en el NuStar; falta la prueba de campo con un pedido facturado real (ver D2) |
 | D3 — Poner en 0 las devoluciones de prueba antes de producción (dato sucio) | Cuentas corrientes / oficina | Pendiente (día del corte) |
 
 ## Versiones instaladas hoy
@@ -47,7 +47,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |
 |---|---|---|---|
 | Vendedor | v0.4.3 (versionCode 12) | 23/10 | — |
-| Chofer | v0.3.1 (versionCode 7) | 21/10 | Devoluciones tal cual facturado (22/10) → D2 |
+| Chofer | v0.3.2 (versionCode 8) | 23/10 | — |
 | Depósito | v0.3.0 (versionCode 8) | 20/10 | — |
 
 ---
@@ -149,9 +149,11 @@ El código **ya está** en `mobile/apps/vendedor` (commit 188385d): `pantallas/c
 2. Probar en el NuStar: devolución de algo facturado contado (precio bloqueado, total con IVA + percepciones − 10 %), algo nunca facturado de un cliente "todo factura" (precio neto, editable), y que el valor coincida con la NC que emite oficina.
 3. `npm run build:apks -- --apps vendedor --notas "..."`, instalar y tachar D1.
 
-### D2 — App Chofer (agente de la app Chofer)
+### D2 — App Chofer (agente de la app Chofer) — HECHO 23/10, v0.3.2
 
-El código **ya está** en `mobile/apps/chofer` (commit 188385d): `pantallas/Devolucion.tsx` (`resolverItem`: con señal pregunta al ERP con el `pedidoId` del viaje; sin señal usa `comprados`; lo del pedido ya no entra con el precio con IVA; precio facturado bloqueado; muestra el comprobante asociado), `datos/cuenta-cobro.ts` (`valorEstimadoDevolucion` con origen + alícuota) y `datasets.ts`. Falta:
+Compilada e instalada en el NuStar (versionCode 8), abre en línea y sincroniza. Probado contra el mock el camino de respaldo (sin origen del servidor: el renglón del pedido entra al neto y el valor suma el IVA). **Queda para la calle, con un viaje real:** devolver algo del pedido que se entrega (factura A: precio neto bloqueado, total con IVA + percepciones), algo de mercadería vieja, y sin señal; el valor tiene que ser el mismo en la ficha, en el cobro y en la NC. Incluye también el arreglo del servidor del 21/10 (la rendición propone solo el efectivo que el chofer todavía tiene).
+
+El código **ya estaba** en `mobile/apps/chofer` (commit 188385d): `pantallas/Devolucion.tsx` (`resolverItem`: con señal pregunta al ERP con el `pedidoId` del viaje; sin señal usa `comprados`; lo del pedido ya no entra con el precio con IVA; precio facturado bloqueado; muestra el comprobante asociado), `datos/cuenta-cobro.ts` (`valorEstimadoDevolucion` con origen + alícuota) y `datasets.ts`. Falta:
 1. Subir versión (`version.json` 0.3.2) y CHANGELOG.
 2. Probar en el NuStar: devolver algo **del pedido que se entrega** (factura A: precio neto bloqueado, total con IVA + percepciones), algo de mercadería vieja, y sin señal. El valor tiene que ser el mismo en la ficha, en el cobro y en la NC.
 3. `npm run build:apks -- --apps chofer --notas "..."`, instalar y tachar D2.
