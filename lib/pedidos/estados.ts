@@ -38,6 +38,7 @@ export const ESTADO_LABEL: Record<string, string> = {
   entregado: "Entregado",
   rechazado: "Rechazado",
   eliminado: "Eliminado",
+  sistema_viejo: "Sistema viejo",
 }
 
 export function esPedidoEditable(estado: string | null | undefined): boolean {
@@ -61,7 +62,7 @@ export function puedeEditarEntrega(estado: string | null | undefined): boolean {
  * recién al despachar el viaje — ver lib/viajes/estados.ts.
  */
 export function puedeAsignarViaje(estado: string | null | undefined): boolean {
-  return !!estado && !["en_viaje", "entregado", "rechazado", "eliminado"].includes(estado)
+  return !!estado && !["en_viaje", "entregado", "rechazado", "eliminado", "sistema_viejo"].includes(estado)
 }
 
 /** Estados a los que se puede pasar A MANO desde `estado` (sin contar el actual). */
@@ -93,6 +94,7 @@ export function motivoBloqueo(estado: string | null | undefined): string | null 
   if (esPedidoEditable(estado)) return null
   const label = (ESTADO_LABEL[estado || ""] || estado || "").toLowerCase()
   if (estado === "eliminado") return "Este pedido está eliminado y no se puede modificar."
+  if (estado === "sistema_viejo") return "Este pedido se cargó antes del pase a producción: se entregó y cobró en el sistema viejo. No se puede modificar."
   if (puedeEditarEntrega(estado))
     return `Este pedido ya está ${label}: no se puede modificar. Solo podés cambiar la forma de entrega. Si hay que corregir algo, hacé un pedido nuevo.`
   return `Este pedido ya está ${label} y no se puede modificar. Si hay que corregir algo, hacé un pedido nuevo.`

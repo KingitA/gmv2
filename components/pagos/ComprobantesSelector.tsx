@@ -140,7 +140,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
         .from("pedidos")
         .select("id, numero_pedido, fecha, total, estado")
         .eq("cliente_id", clienteId)
-        .neq("estado", "eliminado")
+        .not("estado", "in", "(eliminado,sistema_viejo)")
         .order("fecha", { ascending: true }),
       // Pedidos que ya tienen comprobante (facturados), sin importar el saldo
       supabase

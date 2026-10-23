@@ -97,7 +97,7 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
     .select("id, numero_pedido, fecha, estado, total, pago_contado_10, anticipo_pago_id")
     .eq("cliente_id", id)
     .is("eliminado_at", null)
-    .not("estado", "in", "(eliminado,en_venta)")
+    .not("estado", "in", "(eliminado,en_venta,sistema_viejo)")
     .order("fecha", { ascending: true })
 
   const { data: compsDePedidos } = await supabase

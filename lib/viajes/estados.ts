@@ -39,7 +39,7 @@ export const ESTADOS_PARADA = ["pendiente", "entregado", "entregado_parcial", "n
 export type EstadoParada = (typeof ESTADOS_PARADA)[number]
 
 /** Pedidos que NO pueden subirse a un viaje (finales o ya en la calle). */
-const PEDIDO_NO_ASIGNABLE = ["en_viaje", "entregado", "rechazado", "eliminado"]
+const PEDIDO_NO_ASIGNABLE = ["en_viaje", "entregado", "rechazado", "eliminado", "sistema_viejo"]
 
 /** Mientras está programado se arma: datos, choferes, pedidos, paradas. */
 export function viajeEditable(estado: string | null | undefined): boolean {
