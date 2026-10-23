@@ -190,6 +190,7 @@ const ESTADOS_PEDIDO = [
   { value: "entregado", label: "Entregado", color: "bg-green-600" },
   { value: "rechazado", label: "Rechazado", color: "bg-red-500" },
   { value: "eliminado", label: "Eliminado", color: "bg-gray-500" },
+  { value: "sistema_viejo", label: "Sistema viejo", color: "bg-gray-400" },
 ]
 
 export default function ClientesPedidosPage() {
@@ -1162,7 +1163,7 @@ export default function ClientesPedidosPage() {
       .from("pedidos")
       .select("id, numero_pedido, estado, fecha_entrega, clientes (nombre_razon_social, localidades (zonas (id, nombre)))")
       .is("viaje_id", null)
-      .not("estado", "in", "(entregado,eliminado,rechazado)")
+      .not("estado", "in", "(entregado,eliminado,rechazado,sistema_viejo)")
       .gte("fecha_entrega", diasCal[0])
       .lte("fecha_entrega", diasCal[diasCal.length - 1])
     if (error) return // sin la migración de fecha_entrega todavía: el calendario no muestra sueltos

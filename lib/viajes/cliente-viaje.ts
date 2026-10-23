@@ -294,7 +294,7 @@ export async function cargarCuentaCobro(supabase: SupabaseClient, clienteId: str
       .from("pedidos")
       .select("id, numero_pedido, fecha, total, estado, pago_contado_10, anticipo_pago_id")
       .eq("cliente_id", clienteId)
-      .neq("estado", "eliminado")
+      .not("estado", "in", "(eliminado,sistema_viejo)")
       .order("fecha", { ascending: true }),
     supabase.from("comprobantes_venta").select("pedido_id").eq("cliente_id", clienteId).not("pedido_id", "is", null),
   ])

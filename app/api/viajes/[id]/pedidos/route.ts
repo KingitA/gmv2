@@ -80,7 +80,7 @@ export async function GET(
             .from("pedidos")
             .select(SELECT_PEDIDO)
             .is("viaje_id", null)
-            .not("estado", "in", "(en_viaje,entregado,rechazado,eliminado)")
+            .not("estado", "in", "(en_viaje,entregado,rechazado,eliminado,sistema_viejo)")
             .or("condicion_entrega.is.null,condicion_entrega.neq.retira_mostrador")
             .order("fecha", { ascending: true })
             .limit(500)
