@@ -141,14 +141,17 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 > **Todo pedido de prueba lleva "PRUEBA" en las observaciones**, para que nadie de la oficina o del depósito lo prepare o despache de verdad. Desde el lunes 26/10 la oficina sigue importando e imprimiendo pedidos reales como siempre: van a aparecer en la cola junto con los de prueba, y Juan trabaja solo los suyos.
 
-- [ ] 3.1 Pedido a 199 (URQUIZA) con varios artículos de distintas marcas y rubros, alguno bonificado (prueba la condición por proveedor con 10 %).
-- [ ] 3.2 Pedido a 1190 marcado **contado** (lo va a pagar al chofer).
-- [ ] 3.3 Pedido a 556 (cuenta corriente: lo paga en la oficina).
-- [ ] 3.4 Un pedido hecho **sin señal** (modo avión) que se envía al volver: no se duplica.
-- [ ] 3.5 Cambiar a un cliente de lista Neco a lista Bahía (sin tocar método) y hacerle un pedido: los precios cambian como corresponde.
-- [ ] 3.6 Los pedidos llegan al ERP con los mismos precios y totales que mostró la app.
-- [ ] 3.7 Comisión "vendida" visible en la app y en el ERP con el % correcto por rubro.
-- Números de pedido: ……
+- [x] 3.1 **001939 — URQUIZA (199):** 5 artículos y 540 unidades por $2.017.121,16; después 3.4 le sumó un renglón. Las 2 bolsas de ARNANUK llevan el 10 % de su condición por proveedor (por ejemplo, la bolsa consorcio 80x110 de $2.094,38 a $1.884,94). Todo en Presupuesto y lista Neco.
+- [~] 3.2 **001940 — CHEN XIANG RONG (1190):** 4 artículos, 31 unidades, $154.329,05. **No quedó marcado como contado**: se marca desde el ERP en la 5.2.
+- [x] 3.3 **001941 — FITTERER (556):** 5 artículos, 180 unidades, $722.880,96.
+- [x] 3.4 Sin señal (modo avión): Juan **editó** el 001939 y le agregó 240 bolsas consorcio 60x90 (+$292.094,40). Al volver la señal se mandó una sola vez: el mismo pedido quedó con 6 renglones, 780 unidades y $2.309.215,56, sin duplicados.
+- [x] 3.5 556 pasado a lista **Bahía** en el ERP; el pedido **001942** (3 artículos HORNAL, 100 unidades, $115.545,25) salió con lista Bahía en cada renglón y método Presupuesto. Fueron artículos distintos a los del pedido anterior, así que no hay una comparación del mismo artículo entre las dos listas.
+- [x] 3.6 Los 4 pedidos llegaron con el total **exacto** que mostró la app (los renglones suman lo mismo que el total). Todos entraron como "pendiente" (no "en revisión", porque los clientes ya tenían pedidos) y no salió ningún fiscal.
+- [~] 3.7 Comisión "vendida": **el cálculo está bien**, renglón por renglón. Da $104.058,65: 001939 $73.135,90, 001940 $7.222,82, 001941 $17.922,67 y 001942 $5.777,26.
+  - Va 5 % en limpieza y bazar, y en perfumería 5 % (negro) o 3 % (blanco).
+  - En los artículos "blancos" vendidos en presupuesto se calcula sin IVA (÷1,21), como dice la regla del motor.
+  - **Pero la pantalla del vendedor muestra mal el total y los números de pedido**: ver problemas 10 y 11.
+- Números de pedido: **001939** (199), **001940** (1190), **001941** y **001942** (556). Solo el 001939 tiene "Prueba" en observaciones: a los otros 3 hay que agregárselo desde el ERP (5.1).
 
 ## Fase 4 — Preparación en la app Depósito
 
@@ -247,6 +250,9 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 7 | 2 | **Apertura: cuentas de empleados, socios y viajantes** (15 cuentas, 805 renglones, $12,7 M: retiros, sueldos, comisiones, diferencias de rendición). **Decisión de Juan (23/10): van a la cuenta personal de cada uno**, y lo que no es comprobante entra como ajuste (igual que el problema 6) | Servidor (/apertura) | Decidido, falta hacerlo |
 | 8 | 2 | **Apertura: 17 clientes cuyo saldo "no cuadra".** El reporte trae dos columnas de saldo y el lector compara con la primera. **Juan confirmó (23/10) que la buena es la segunda**: por ejemplo DELLI GUSTAVO (169) debe $2.804.921,57, que es la suma de lo pendiente. Hay que cambiar el lector para que compare con la segunda columna | Servidor (lector del .chr) | Decidido, falta hacerlo |
 | 9 | 2 | **Apertura: clientes que faltan o cambiaron de dueño** (detalle abajo). Con CUIT distinto, **la deuda iría al cliente equivocado** hasta que se actualicen en gmv2. Falta además el listado completo de clientes que están en el sistema viejo y no en gmv2 | Oficina (clientes) + Claude arma el listado | Pendiente |
+| 10 | 3.7 | **Comisiones del vendedor: "sin cobrar" suma de más.** La app (`/api/vendedor/comisiones`) muestra $2.368.414,82 sin cobrar, pero lo de esta prueba es $104.058,65. El resto son $1.917.710,02 de 21 pedidos en "Sistema viejo" (esas comisiones se liquidan en el sistema viejo) y $346.646,15 de 10 pedidos **eliminados**: el kardex los sigue marcando como no eliminados. Lo mismo puede pasar en el Playroom | Servidor | Anotado 23/10 |
+| 11 | 3.7 | **Comisiones del vendedor: pedidos sin número.** En la lista, 001940, 001941 y 001942 aparecen como "—": el kardex no guarda el número del pedido cuando el pedido viene de la app (pasa en 9.143 de 11.279 renglones del último mes). Conviene tomar el número del pedido y no del kardex | Servidor | Anotado 23/10 |
+| 12 | 3 | Artículo "Cepillo Dent BATMAN/M.MARAVILLA" con proveedor "INEXISTENTE", y "PACKx2 ULTRA BLANCO x90g" sin rubro. Son datos de artículos para corregir | Oficina (artículos) | Anotado 23/10 |
 
 ### Detalle del problema 9
 
