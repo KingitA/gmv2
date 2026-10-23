@@ -155,10 +155,16 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Fase 4 — Preparación en la app Depósito
 
-- [ ] 4.1 La cola muestra **solo** los pedidos de prueba (nada de "Sistema viejo").
-- [ ] 4.2 Preparar uno completo.
-- [ ] 4.3 Preparar uno con un faltante.
-- [ ] 4.4 El ERP muestra lo preparado y el faltante.
+- [x] 4.1 La cola mostró solo los 4 pedidos de prueba. Ningún pedido real fuera de "Sistema viejo" (23/10, ~18:20).
+- [x] 4.2 Preparados completos: **001939** (URQUIZA, 6 renglones) y **001940** (CHEN, 4 renglones).
+- [x] 4.3 **001941** (FITTERER) con faltantes:
+  - PACKx2 ULTRA BLANCO: 30 de 36, queda "PARCIAL";
+  - Cepillo BATMAN: 0 de 12, "FALTANTE";
+  - CEPILLO KIDS: Juan lo marcó faltante y después lo volvió al pedido, y quedó bien, 24 de 24 "COMPLETO";
+  - el resto, completo.
+- [x] 4.3b **001942** (FITTERER, lista Bahía): los 3 renglones marcados **faltante** (0 preparado), para ver qué hace el sistema con un pedido que no tiene nada para entregar.
+- [x] 4.4 Los 4 pasaron a "Pendiente Facturación". La ficha del pedido en el ERP muestra quién preparó y cuándo ("Juan Cruz · 18:19–18:21"), y cada renglón tiene un color (rojo faltante, naranja parcial, verde completo). Ver problema 14.
+- [ ] 4.5 (se ve en la 5.3) Al generar los comprobantes: el 001941 tiene que salir **por lo preparado**, sin el BATMAN y con 30 PACKx2 en vez de 36. El 001942 no debería generar comprobante, o tiene que avisar que no hay nada para facturar.
 
 ## Fase 5 — Gestión en el ERP
 
@@ -254,6 +260,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 11 | 3.7 | **Comisiones del vendedor: pedidos sin número.** En la lista, 001940, 001941 y 001942 aparecen como "—": el kardex no guarda el número del pedido cuando el pedido viene de la app (pasa en 9.143 de 11.279 renglones del último mes). Conviene tomar el número del pedido y no del kardex | Servidor | Anotado 23/10 |
 | 12 | 3 | Artículo "Cepillo Dent BATMAN/M.MARAVILLA" con proveedor "INEXISTENTE", y "PACKx2 ULTRA BLANCO x90g" sin rubro. Son datos de artículos para corregir | Oficina (artículos) | Anotado 23/10 |
 | 13 | 3.2 | **No se puede marcar un pedido como contado al venderlo.** Ni la app vendedor ni el ERP tienen esa opción. Hoy el 10 % contado solo aparece al **cobrar** (app vendedor, chofer o /caja), y el pedido lo registra recién ahí. Juan espera poder marcarlo al tomar el pedido | App vendedor + ERP (Juan define cómo) | Anotado 23/10 |
+| 14 | 4.4 | ERP, ficha del pedido después de preparar: el renglón muestra lo **pedido** (36 u.) y un color, pero no **cuánto se preparó** (30 de 36), y el total sigue diciendo $722.880,96 como si fuera completo. Conviene mostrar "preparado 30 de 36" y el total que se va a facturar | ERP (pantalla) | Anotado 23/10 |
 
 ### Detalle del problema 9
 
