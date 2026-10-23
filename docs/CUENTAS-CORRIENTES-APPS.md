@@ -198,16 +198,6 @@ Reglas del dueño:
 - Barra del ERP: número rojo en Finanzas → "Pendientes de revisar" (`/caja/pendientes`, solo admin: el dueño la sacó de Clientes el 21/10) con lo que espera más de una semana (`/api/pendientes/alertas`). En la bandeja, los cobros ya rendidos dicen "rendido, en camino a oficina" y las devoluciones muestran el nombre de quien las aceptó.
 - Migración `20261021_cobranza_anular_v8.sql` (la aplica el dueño): anular un cobro que había generado una REV de 10 % contado libera **todas** las imputaciones de esa REV (antes solo las de los comprobantes del cobro y el otro comprobante quedaba "pagado" sin serlo). Repara el caso que ya quedó así (URQUIZA PRES 0001-00000012, $155.005,43).
 
-## Devoluciones tal cual fueron facturadas (22/10, rama `devoluciones-nc-exacta`)
+## Devoluciones tal cual fueron facturadas (22/10)
 
-Regla del dueño (21/10/2026): la NC/REV de una devolución sale **tal cual fue facturada** esa mercadería, ni un centavo más ni uno menos, y **todas** las pantallas muestran el mismo número (web vendedor, web chofer, APK vendedor, APK chofer, cobro, emisión).
-
-- **Valor por renglón** (`lib/cobranzas/valor-devolucion.ts` → `valorDevolucionConOrigen`): neto del renglón facturado × cantidad; IVA = IVA por unidad que llevó ese renglón (sin renglón: 21 % del neto); percepción IVA 3 % solo si el comprobante de origen la llevó (aunque la devolución sea chica); IIBB a la alícuota **vigente** del cliente; −10 % si ese comprobante fue cobrado contado. Ejemplo del dueño: $100 neto + IVA + 3 % + 3 % − 10 %, 10 unidades = **$1.143**.
-- **A qué comprobante se asocia** (`lib/cobranzas/origen-devolucion.ts`): 1) lo del pedido que entrega el chofer → el comprobante de ese pedido; 2) si el artículo está en un comprobante del sistema → el último, **precio bloqueado**; 3) si no (comprobantes importados del sistema viejo, o nunca facturado) → el comprobante **más reciente** del cliente del tipo que corresponde según cómo va hoy el artículo para ese cliente (cliente todo facturado ⇒ NC A aunque el artículo sea de presupuesto), precio neto actual editable. Las 4 rutas de alta lo aplican en el servidor (`prepararRenglonesDevolucion`): aunque una APK vieja mande otro precio, se guarda el facturado.
-- **Emisión** (`/api/comprobantes-venta/generar-nc-reversa`): una devolución mixta emite **NC A/B por lo de factura y REV por lo de presupuesto**; un reintento emite solo la parte que falta.
-- Validado en solo lectura con las FA 0007-00000001…05 y PRES 0001-00000017/18: devolver todo da el total facturado al centavo (la 0007-00000003 difiere solo en el IIBB, que hoy es 0 % por ser de Buenos Aires — regla del IIBB vigente).
-
-### App Vendedor / App Chofer — qué tiene que hacer el agente
-
-- Ya está en el código (`pantallas/clientes/Devolucion.tsx`, `pantallas/Devolucion.tsx`, `datos/cuenta-cobro.ts`): cada ítem guarda `origen_comp`; el precio de lo facturado no se edita; el total es `valorDevolucionConOrigen` con `contexto_devolucion.alicuota_iibb`. Las réplicas `vendedor_cc` y `chofer_viaje_clientes` traen `comprados` con origen y `contexto_devolucion` (campos nuevos, opcionales: las APK instaladas los ignoran).
-- **Falta armar las APK** (vendedor y chofer). Hasta entonces las APK instaladas muestran un estimado viejo, pero el servidor guarda y emite con la regla nueva.
+Ver `docs/PENDIENTES-APPS.md` → "Devoluciones tal cual facturado" (D1 vendedor, D2 chofer, D3 datos de prueba).

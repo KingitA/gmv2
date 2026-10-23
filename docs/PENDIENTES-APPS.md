@@ -37,13 +37,17 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | Tope de reintentos del outbox (O10) en `@gm/core` — **toca a las 3 apps** | App Depósito | Hecho 20/10. Vendedor y chofer lo reciben en su próxima APK sin hacer nada (ver abajo) |
 | Recepción: la base rechazaba "faltante" (web y APK) | App Depósito | Hecho 20/10, migración `20261020d_recepciones_estado_faltante.sql` aplicada 21/10 y probada (la operación que fallaba 1.156 veces ahora guarda) |
 | Artículos dados de baja: matching sin bajas, reactivar desde Artículos/Depósito, historial de quién | Servidor (sesión búsquedas/formatos) | Hecho 20/10 (bef0ecd + 570cc2c), migraciones `20261020_pedidos_articulo_real` y `20261020b_articulos_bajas` aplicadas |
+| Devoluciones "tal cual fue facturado" — servidor, NC/REV y pantallas web | Sesión precios (con OK de Juan; toca `lib/cobranzas`) | Hecho 22/10 (rama `devoluciones-nc-exacta`, merge en main) — ver "Devoluciones tal cual facturado" abajo |
+| D1 — APK Vendedor con el valor de devolución nuevo (el código ya está) | App Vendedor | Pendiente: compilar, probar en el NuStar y publicar |
+| D2 — APK Chofer con el valor de devolución nuevo (el código ya está) | App Chofer | Pendiente: compilar, probar en el NuStar y publicar |
+| D3 — Poner en 0 las devoluciones de prueba antes de producción (dato sucio) | Cuentas corrientes / oficina | Pendiente (día del corte) |
 
 ## Versiones instaladas hoy
 
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |
 |---|---|---|---|
-| Vendedor | v0.4.2 (versionCode 11) | 21/10 | — |
-| Chofer | v0.3.1 (versionCode 7) | 21/10 | — |
+| Vendedor | v0.4.2 (versionCode 11) | 21/10 | Devoluciones tal cual facturado (22/10) → D1 |
+| Chofer | v0.3.1 (versionCode 7) | 21/10 | Devoluciones tal cual facturado (22/10) → D2 |
 | Depósito | v0.3.0 (versionCode 8) | 20/10 | — |
 
 ---
@@ -101,6 +105,57 @@ Detalle en MOBILE.md §17 "v0.3.0".
    - Falta: probar en el NuStar o contra el mock (escanear un código de un artículo dado de baja, reactivar, ver que aparezca) y publicar la APK. Detalle en MOBILE.md §17 "Artículo dado de baja".
 7. ~~Base de datos~~ **Hecho 21/10**: el dueño aplicó `20261020d_recepciones_estado_faltante.sql` y `20260827_picking_preparadores.sql`. Probado con la misma función del servidor: RESIDUO VAIVEN → faltante se guardó (primera línea `faltante` de la historia). Recepciones de prueba de OC-000007 y OC-000008 **canceladas** (estaban abiertas desde julio/agosto por este bug); foto antes/después IDÉNTICA en las 18 tablas, stock de los 3.292 artículos y numeración.
 8. **Cola del NuStar limpiada (20/10, con OK del dueño):** se sacaron 3 operaciones del 18–22/09 que nunca iban a entrar (2 recepciones "faltante" y "Abrir pedido 001576", que habría pasado ese pedido de `impreso` a `en_preparacion` un mes tarde).
+
+## Devoluciones tal cual facturado (22/10/2026) → D1 (Vendedor) y D2 (Chofer)
+
+**Regla del dueño (21/10/2026):** la NC/REV de una devolución sale **tal cual se facturó** esa mercadería, ni un centavo más ni uno menos, y **todas** las pantallas muestran el mismo número (web vendedor, web chofer, APK vendedor, APK chofer, cobro y emisión). Ejemplo del dueño: artículo a $100 neto + 21 % IVA + 3 % percepción IVA + 3 % IIBB − 10 % contado → 10 unidades = **$1.143** (900 + 189 + 27 + 27).
+
+### Qué estaba mal (auditoría 21/10)
+
+1. La NC recalculaba la percepción IVA sobre la devolución con el mínimo de $3.000: una devolución chica de una factura grande salía **sin** percepción IVA ($1.116 en vez de $1.143).
+2. La NC calculaba el IVA como 21 % del neto y la factura lo calcula por renglón: diferencias de centavos (hasta $1,06 en facturas reales; en una NC grande, más).
+3. Chofer, artículo del pedido que entrega: entraba con el precio **con IVA** y sin factura asociada → en pantalla $1.210 y la NC le volvía a sumar IVA y percepciones (**doble IVA**).
+4. Cada pantalla mostraba otro número: vendedor web $1.000 (neto), APK vendedor y chofer $1.089 (sin percepciones), cobro $1.116.
+
+### Reglas (decididas por Juan)
+
+- **Valor por renglón** (`lib/cobranzas/valor-devolucion.ts` → `valorDevolucionConOrigen`, función ÚNICA): neto del renglón facturado × cantidad; IVA = IVA por unidad que llevó ese renglón (sin renglón: 21 % del neto); **percepción IVA 3 % si el comprobante de origen la llevó** (aunque la devolución sea chica; en comprobantes del sistema, la que efectivamente llevó; en importados, si su neto supera $100.000), y si no la llevó, no va; **IIBB a la alícuota VIGENTE** del cliente el día de la NC; −10 % si ese comprobante fue cobrado contado.
+- **A qué comprobante se asocia cada renglón** (`lib/cobranzas/origen-devolucion.ts`):
+  1. lo del pedido que entrega el chofer → el comprobante de **ese pedido**;
+  2. si el artículo está en un comprobante del sistema → el último; **precio bloqueado** (no se edita);
+  3. si no (comprobantes importados del sistema viejo, que solo tienen número, tipo y fecha, o artículo nunca facturado) → el comprobante **más reciente** del cliente del tipo que corresponde según cómo va hoy ese artículo **para ese cliente**. Si el cliente lleva todo facturado es **NC A aunque el artículo tenga iva_ventas 0**. Precio neto actual, editable. (Es una "trampa" aceptada por Juan: no hay forma de saber en qué factura vieja estaba.)
+- **NC A/B o REV:** lo facturado con factura → NC A/B; lo de presupuesto → REV. Una devolución mixta emite **las dos**; si falla a la mitad, al reintentar se emite solo la parte que falta.
+- **El servidor manda:** las 4 rutas de alta (`/api/devoluciones`, `/api/viajante/devolucion`, `/api/chofer/viaje/[id]/devolucion`, `/api/mostrador/devolucion`) pasan por `prepararRenglonesDevolucion`: asocian el comprobante y guardan el precio facturado aunque una APK vieja mande otro (si manda el precio con IVA de algo que va por factura, lo pasa al neto).
+
+### Qué está hecho (servidor y web, en main)
+
+- `lib/cobranzas/valor-devolucion.ts`: `valorDevolucionConOrigen`, `elegirOrigenDevolucion`, `origenDesdeComprado`, tipos `OrigenDevolucion` y `ContextoDevolucion` (isomórfico: lo usan las apps vía `@gm/vendedor`).
+- `lib/cobranzas/origen-devolucion.ts` (nuevo): origen de comprados, contexto del cliente (IIBB vigente + comprobante fiscal y presupuesto más recientes), resolución por artículo y por renglón guardado.
+- `lib/cobranzas/valorar-devoluciones.ts`: valuación por renglón con su origen (la usan ficha del vendedor, chofer, cobros, saldo y la NC).
+- `/api/comprobantes-venta/generar-nc-reversa`: emite con los importes de la regla (NC + REV si es mixta), kardex y PDF con los mismos números.
+- `/api/chofer/articulo/precio-historico` (acepta `pedidoId`): devuelve `precio`, `origen` y `alicuota_iibb`. `/api/vendedor/cliente/[id]/comprados` devuelve `contexto`.
+- Réplicas: `vendedor_cc` y `chofer_viaje_clientes` traen `comprados` con los campos de origen (`fiscal`, `percepcion_iva`, `exacto`, `precio`, `iva_unitario`) y `contexto_devolucion`. Son campos nuevos y opcionales: las APK instaladas los ignoran.
+- Web: `/vendedor/clientes/[id]/devolucion` y la ficha del chofer web (`/chofer/[viajeId]/cliente/[clienteId]`) muestran el valor final y bloquean el precio facturado.
+- Tests: `packages/core/test/valor-devolucion.test.ts` (caso $1.143, percepción en NC chica, IVA del renglón, mixta, asociación, réplica vieja). 361/361.
+- **Validado en solo lectura** con las FA 0007-00000001…05 y PRES 0001-00000017/18: devolver todo da el total facturado al centavo (la 0007-00000003 difiere solo en el IIBB: el cliente es de Buenos Aires y hoy es 0 %, regla del IIBB vigente).
+
+### D1 — App Vendedor (agente de la app Vendedor)
+
+El código **ya está** en `mobile/apps/vendedor` (commit 188385d): `pantallas/clientes/Devolucion.tsx` (cada ítem guarda `origen_comp`; lo facturado se muestra sin poder editar el precio; "Precio unitario neto/final"; el total es `valorDevolucionConOrigen` con `contexto_devolucion.alicuota_iibb`; desde el catálogo entra con el neto del motor y `elegirOrigenDevolucion`) y `datasets.ts` (tipos). Falta:
+1. Subir versión (`version.json` 0.4.3) y CHANGELOG.
+2. Probar en el NuStar: devolución de algo facturado contado (precio bloqueado, total con IVA + percepciones − 10 %), algo nunca facturado de un cliente "todo factura" (precio neto, editable), y que el valor coincida con la NC que emite oficina.
+3. `npm run build:apks -- --apps vendedor --notas "..."`, instalar y tachar D1.
+
+### D2 — App Chofer (agente de la app Chofer)
+
+El código **ya está** en `mobile/apps/chofer` (commit 188385d): `pantallas/Devolucion.tsx` (`resolverItem`: con señal pregunta al ERP con el `pedidoId` del viaje; sin señal usa `comprados`; lo del pedido ya no entra con el precio con IVA; precio facturado bloqueado; muestra el comprobante asociado), `datos/cuenta-cobro.ts` (`valorEstimadoDevolucion` con origen + alícuota) y `datasets.ts`. Falta:
+1. Subir versión (`version.json` 0.3.2) y CHANGELOG.
+2. Probar en el NuStar: devolver algo **del pedido que se entrega** (factura A: precio neto bloqueado, total con IVA + percepciones), algo de mercadería vieja, y sin señal. El valor tiene que ser el mismo en la ficha, en el cobro y en la NC.
+3. `npm run build:apks -- --apps chofer --notas "..."`, instalar y tachar D2.
+
+### D3 — Antes de producción
+
+Las devoluciones que hay hoy en la base son de prueba y están rotas (precios con IVA, sin factura asociada): **no usarlas de ejemplo**. Se ponen en 0 el día del corte.
 
 ### Para los agentes de Vendedor y Chofer: tope de reintentos (O10) en `@gm/core`
 
