@@ -67,20 +67,20 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 - [x] 0.3 SQL `supabase/migrations/20261023_prueba_integral.sql` (Juan lo aplica en Supabase): agrega el estado e instala cuatro funciones que no hacen nada hasta que se las llama:
   - pasar a "Sistema viejo" (con simulacro);
   - limpieza complementaria de viajes, remitos de viaje y preparación del depósito (con simulacro).
-- [ ] 0.4 Pasar la rama a main y desplegar **antes** de mover los pedidos. Así ninguna pantalla se encuentra con un estado que no conoce. (En main 23/10, 1ec4f89; SQL aplicado por Juan y verificado 23/10; falta confirmar que Vercel lo publicó.)
-- [ ] 0.5 Avisar a los otros agentes el día y la hora de la puesta a cero.
+- [x] 0.4 Pasar la rama a main y desplegar **antes** de mover los pedidos. Así ninguna pantalla se encuentra con un estado que no conoce. (En main 23/10, 1ec4f89; SQL aplicado por Juan y verificado 23/10; Vercel lo publicó 23/10.)
+- [x] 0.5 Avisar a los otros agentes el día y la hora de la puesta a cero.
 - [ ] 0.6 Anotar en `docs/PENDIENTES-APPS.md` que las apps muestren "Sistema viejo" con nombre lindo (hoy mostrarían el texto crudo).
 
 ## Fase 1 — Todo a cero
 
-- [ ] 1.1 Foto de la base antes.
-- [ ] 1.2 `SELECT * FROM cc_puesta_a_cero_simulacro();` → revisamos juntos.
-- [ ] 1.3 `SELECT cc_puesta_a_cero('PONER A CERO');`
-- [ ] 1.4 `SELECT * FROM prueba_limpieza_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba_limpieza('LIMPIAR');`
-- [ ] 1.5 `SELECT * FROM pedidos_sistema_viejo_simulacro(now(), '{}');` → `SELECT pedidos_pasar_a_sistema_viejo(now(), '{}', 'PASAR');`
+- [x] 1.1 Foto de la base antes (23/10): 617 clientes, 3.293 artículos, 94 proveedores, 1.937 pedidos, 12 con CAE (suman $0), 3 echeqs propios; prueba: 119 comprobantes, $33,7 M de saldo, 46 cobros, 13 devoluciones, 71 mov. billetera, 124 comisiones cobradas, 438 cheques, 28 viajes, 26 preparaciones.
+- [x] 1.2 `SELECT * FROM cc_puesta_a_cero_simulacro();` → revisamos juntos.
+- [x] 1.3 `SELECT cc_puesta_a_cero('PONER A CERO');`
+- [x] 1.4 `SELECT * FROM prueba_limpieza_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba_limpieza('LIMPIAR');`
+- [x] 1.5 `SELECT * FROM pedidos_sistema_viejo_simulacro(now(), '{}');` → `SELECT pedidos_pasar_a_sistema_viejo(now(), '{}', 'PASAR');`
   - Todavía no hay pedidos de prueba, así que se pasan todos, también los viejos de 1190, 199 y 556.
   - Durante la prueba, cada mañana, para mover los pedidos reales nuevos sin tocar los de prueba: `SELECT pedidos_pasar_a_sistema_viejo(now(), '{1190,199,556}', 'PASAR');`
-- [ ] 1.6 Foto después. Tienen que quedar: los 12 con CAE, los 3 echeqs propios, todos los clientes, artículos y proveedores, y todos los pedidos (en "Sistema viejo" o "Eliminado").
+- [x] 1.6 Foto después (23/10, 14:45): 1.937 pedidos (1.640 en Sistema viejo y 297 eliminados), 12 comprobantes (todos con CAE, suman $0), 12 asientos, 6 imputaciones, 3 cheques (echeqs propios), 0 cobros, devoluciones, billetera, comisiones cobradas, viajes y preparaciones; saldo de todos los clientes $0; clientes, artículos y proveedores sin cambios. Copias: archivo_pruebas.*_20261023_1444, *_20261023_144512 y pedidos_estado_previo_20261023_144528. Tienen que quedar: los 12 con CAE, los 3 echeqs propios, todos los clientes, artículos y proveedores, y todos los pedidos (en "Sistema viejo" o "Eliminado").
 - [ ] 1.7 Juan carga los saldos reales de bancos y caja.
 - [ ] 1.8 Verificar en cero: tu cuenta personal, billetera de vendedor y de chofer, comisiones cobradas, viajes (ninguno), saldos de todos los clientes, cola del depósito vacía.
 - [ ] 1.9 Borrar datos o volver a iniciar sesión en las 3 apps del NuStar. Verificar que muestran todo en cero y la cola vacía.
@@ -194,4 +194,5 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   - 1190 `7366eab6-603d-41aa-a31a-806c07d41e07`;
   - 199 `6daf55b6-22df-491d-b2e3-522674ab89d7`;
   - 556 `0ba07007-10cc-426a-9692-a32df50d9e8c`.
-- Consulta "fiscales nuevos" (desde el inicio de la prueba): `select tipo_comprobante, cae, created_at from comprobantes_venta where tipo_comprobante not in ('PRES','REV') and created_at >= '<inicio>'`.
+- **Inicio de la prueba: 23/10/2026 14:45 (hora Argentina).** Fiscales antes de empezar: 12 (5 FA, 6 NCA, 1 NDA, todos con CAE).
+- Consulta "fiscales nuevos" (desde el inicio de la prueba): `select tipo_comprobante, cae, created_at from comprobantes_venta where tipo_comprobante not in ('PRES','REV') and created_at >= '2026-10-23 14:45-03'`.
