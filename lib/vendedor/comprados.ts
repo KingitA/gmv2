@@ -1,83 +1,46 @@
 // Artículos que un cliente COMPRÓ (facturados), con el último precio facturado y
 // su comprobante: base de la pantalla de devoluciones del vendedor. Extraído de
 // GET /api/vendedor/cliente/[id]/comprados para compartirlo con la réplica móvil.
+//
+// Cada artículo trae su ORIGEN de devolución (lib/cobranzas/origen-devolucion.ts):
+// comprobante, precio neto e IVA del renglón facturado, si ese comprobante llevó
+// percepción IVA y si fue cobrado contado — lo que la app necesita para valuar
+// una devolución sin señal igual que el servidor (regla del dueño 21/10/2026).
 
-import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { origenesComprados } from "@/lib/cobranzas/origen-devolucion"
 
 /** Sin filtrar ni ordenar (la route y la app aplican búsqueda, orden y tope). */
 export async function cargarComprados(supabase: any, id: string) {
-  // La FK de comprobantes_venta_detalle es `comprobante_id` (NO `comprobante_venta_id`, que es el
-  // nombre en kardex/devoluciones): con el nombre equivocado PostgREST devolvía error y esta lista
-  // fallaba siempre (bug encontrado al probar la app Vendedor contra producción, 21/09/2026).
-  // Líneas facturadas del cliente (excluye NC/REV: solo lo que se le vendió)
-  const rows = await fetchAllRows(() =>
-    supabase
-      .from("comprobantes_venta_detalle")
-      .select(
-        "articulo_id, cantidad, precio_unitario, comprobante:comprobante_id!inner(id, cliente_id, fecha, tipo_comprobante, numero_comprobante, anulado_en)"
-      )
-      .eq("comprobante.cliente_id", id)
-      .in("comprobante.tipo_comprobante", ["FA", "FB", "FC", "PRES"])
-      .is("comprobante.anulado_en", null)
-  )
+  const origenes = await origenesComprados(supabase, id)
+  if (!origenes.size) return []
 
-  // Última factura por artículo + cantidad acumulada
-  type Compra = {
-    articulo_id: string
-    ultimo_precio: number
-    ultima_fecha: string
-    comprobante_venta_id: string
-    numero_comprobante: string
-    tipo_comprobante: string
-    cantidad_total: number
-  }
-  const porArticulo = new Map<string, Compra>()
-  for (const r of rows as any[]) {
-    if (!r.articulo_id) continue
-    const fecha = r.comprobante?.fecha || ""
-    const actual = porArticulo.get(r.articulo_id)
-    if (!actual || fecha > actual.ultima_fecha) {
-      porArticulo.set(r.articulo_id, {
-        articulo_id: r.articulo_id,
-        ultimo_precio: Number(r.precio_unitario || 0),
-        ultima_fecha: fecha,
-        comprobante_venta_id: r.comprobante?.id,
-        numero_comprobante: r.comprobante?.numero_comprobante || "—",
-        tipo_comprobante: r.comprobante?.tipo_comprobante || "",
-        cantidad_total: (actual?.cantidad_total || 0) + Number(r.cantidad || 0),
-      })
-    } else {
-      actual.cantidad_total += Number(r.cantidad || 0)
+  const { data: articulos } = await supabase
+    .from("articulos")
+    .select("id, sku, ean13, descripcion, imagen_url, unidades_por_bulto")
+    .in("id", [...origenes.keys()])
+
+  return (articulos || []).map((a: any) => {
+    const o = origenes.get(a.id)!
+    return {
+      articulo_id: a.id,
+      ultimo_precio: o.precio ?? 0,
+      ultima_fecha: o.ultima_fecha,
+      comprobante_venta_id: o.comprobante_venta_id as string,
+      numero_comprobante: o.numero_comprobante || "—",
+      tipo_comprobante: o.tipo_comprobante || "",
+      cantidad_total: o.cantidad_total,
+      bonificado_contado: o.bonificado_contado,
+      // Origen de devolución (= OrigenDevolucion)
+      fiscal: o.fiscal,
+      percepcion_iva: o.percepcion_iva,
+      exacto: o.exacto,
+      precio: o.precio,
+      iva_unitario: o.iva_unitario,
+      sku: a.sku,
+      ean13: a.ean13,
+      descripcion: a.descripcion,
+      imagen_url: a.imagen_url,
+      unidades_por_bulto: a.unidades_por_bulto,
     }
-  }
-
-  if (!porArticulo.size) return []
-
-  const [{ data: articulos }, { data: bonifs }] = await Promise.all([
-    supabase
-      .from("articulos")
-      .select("id, sku, ean13, descripcion, imagen_url, unidades_por_bulto")
-      .in("id", [...porArticulo.keys()]),
-    // Facturas con bonificación contado viva (misma detección que lib/cobranzas/valorar-devoluciones.ts):
-    // una devolución de esa mercadería vale 10% menos. La app la valúa igual sin señal.
-    supabase
-      .from("comprobantes_venta")
-      .select("observaciones")
-      .eq("cliente_id", id)
-      .in("tipo_comprobante", ["REV", "NCA", "NCB", "NCC"])
-      .is("anulado_en", null)
-      .neq("estado_pago", "anulado")
-      .ilike("observaciones", "%Bonificación contado%"),
-  ])
-  const bonifObs = (bonifs || []).map((b: any) => String(b.observaciones || ""))
-
-  return (articulos || []).map((a: any) => ({
-    ...porArticulo.get(a.id)!,
-    bonificado_contado: bonifObs.some((o: string) => o.includes(porArticulo.get(a.id)!.numero_comprobante)),
-    sku: a.sku,
-    ean13: a.ean13,
-    descripcion: a.descripcion,
-    imagen_url: a.imagen_url,
-    unidades_por_bulto: a.unidades_por_bulto,
-  }))
+  })
 }

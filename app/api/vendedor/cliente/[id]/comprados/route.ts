@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { cargarComprados } from "@/lib/vendedor/comprados"
+import { contextoDevolucion } from "@/lib/cobranzas/origen-devolucion"
 import { localMatch } from "@/lib/search/local-match"
 
 // GET /api/vendedor/cliente/[id]/comprados?q=
@@ -28,8 +29,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: "Cliente inexistente o no asignado a vos." }, { status: 404 })
     }
 
-    let comprados = await cargarComprados(supabase, id)
-    if (!comprados.length) return NextResponse.json({ comprados: [] })
+    // contexto: alícuota IIBB vigente y comprobantes más recientes (lo que no está en ninguno)
+    let [comprados, contexto] = await Promise.all([cargarComprados(supabase, id), contextoDevolucion(supabase, id)])
+    if (!comprados.length) return NextResponse.json({ comprados: [], contexto })
 
     if (q) {
       comprados = comprados.filter((c: any) =>
@@ -38,7 +40,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     comprados.sort((a: any, b: any) => (b.ultima_fecha || "").localeCompare(a.ultima_fecha || ""))
-    return NextResponse.json({ comprados: comprados.slice(0, 100) })
+    return NextResponse.json({ comprados: comprados.slice(0, 100), contexto })
   } catch (error: any) {
     console.error("[vendedor] Error en GET /api/vendedor/cliente/[id]/comprados:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })

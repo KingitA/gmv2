@@ -1,0 +1,383 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
+import { calcularPercepciones, type ClientePercepcion } from "@/lib/comprobantes/calcular-percepciones"
+import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
+import { cargarMarcasBonificacion, separarYaBonificados } from "@/lib/comprobantes/ya-bonificados"
+import { ARTICULO_PRECIO_COLS, cargarInsumosCliente } from "@/lib/pricing/cargar-insumos"
+import { descuentosPorArticulo, prepararMotorCliente, type ArticuloMotor } from "@/lib/pricing/motor"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { hoyISO } from "@/lib/formato"
+import {
+  elegirOrigenDevolucion,
+  type ContextoDevolucion,
+  type OrigenDevolucion,
+} from "@/lib/cobranzas/valor-devolucion"
+
+/**
+ * DE DÓNDE VIENE un artículo devuelto (regla del dueño, 21/10/2026) — servidor.
+ *
+ * Cada renglón de una devolución se asocia a UN comprobante de venta y se valúa
+ * como fue facturado ahí (lib/cobranzas/valor-devolucion.ts):
+ *  1. lo entregado en el pedido del viaje → el comprobante de ESE pedido;
+ *  2. si el artículo está en un comprobante del sistema → el último, exacto
+ *     (precio neto e IVA del renglón; el precio no se puede tocar);
+ *  3. si no (comprobante importado del sistema viejo, que solo tiene número,
+ *     tipo y fecha, o artículo nunca facturado) → el comprobante MÁS RECIENTE
+ *     del cliente del tipo que corresponde según cómo va hoy ese artículo para
+ *     ese cliente (motor de precios: cliente todo facturado ⇒ NC A/B aunque el
+ *     artículo sea de presupuesto). Precio sugerido: el neto actual del cliente.
+ *
+ * Percepción IVA: la lleva la NC si el comprobante de origen la llevaba (neto
+ * de ese comprobante por encima del mínimo y cliente RI no excluido).
+ * Percepción IIBB: alícuota vigente hoy.
+ */
+
+const FISCALES = ["FA", "FB", "FC"]
+const VENTAS = [...FISCALES, "PRES"]
+const r2 = (n: number) => Math.round(n * 100) / 100
+
+type ClienteDev = ClientePercepcion & { cuit?: string | null }
+
+const CLIENTE_COLS = "id, cuit, condicion_iva, exento_iva, exento_iibb, provincia, percepcion_iibb"
+
+async function leerCliente(supabase: SupabaseClient, clienteId: string, cliente?: ClienteDev | null): Promise<ClienteDev> {
+  if (cliente && "cuit" in cliente) return cliente
+  const { data } = await supabase.from("clientes").select(CLIENTE_COLS).eq("id", clienteId).single()
+  return (data || {}) as ClienteDev
+}
+
+/** Alícuota IIBB vigente hoy para el cliente (%), 0 si no se le percibe (no RI, exento, Buenos Aires). */
+export async function alicuotaIIBBVigente(supabase: SupabaseClient, cliente: ClienteDev): Promise<number> {
+  let tasa = 0
+  try {
+    tasa = await resolverAlicuotaIIBB(supabase, cliente as any)
+  } catch {
+    tasa = Number(cliente.percepcion_iibb) || 0
+  }
+  // Mismas exclusiones que la emisión (calcularPercepciones), sin depender del monto
+  return calcularPercepciones(1, { ...cliente, percepcion_iibb: tasa }, true).tasa_iibb_aplicada
+}
+
+/**
+ * ¿El comprobante de origen llevó percepción IVA? Tal cual fue facturado:
+ *  - emitido por este sistema (sale de un pedido): la que efectivamente llevó;
+ *  - importado del sistema viejo (sin pedido ni percepción guardada): por regla,
+ *    neto de ese comprobante por encima del mínimo y cliente RI no excluido.
+ */
+function llevoPercepcionIva(comp: CompRow, cliente: ClienteDev): boolean {
+  if (Math.abs(Number(comp.percepcion_iva) || 0) > 0) return true
+  if (comp.pedido_id) return false
+  return calcularPercepciones(Math.abs(Number(comp.total_neto) || 0), cliente, true).percepcion_iva > 0
+}
+
+interface CompRow {
+  id: string
+  tipo_comprobante: string
+  numero_comprobante: string
+  fecha: string
+  total_neto: number | null
+  percepcion_iva?: number | null
+  pedido_id: string | null
+  created_at?: string
+}
+
+function origenDe(comp: CompRow, cliente: ClienteDev, bonificados: Set<string>, extra: { exacto: boolean; precio: number | null; iva_unitario: number | null }): OrigenDevolucion {
+  const fiscal = FISCALES.includes(comp.tipo_comprobante)
+  return {
+    comprobante_venta_id: comp.id,
+    tipo_comprobante: comp.tipo_comprobante,
+    numero_comprobante: comp.numero_comprobante,
+    fiscal,
+    percepcion_iva: fiscal && llevoPercepcionIva(comp, cliente),
+    bonificado_contado: bonificados.has(comp.id),
+    ...extra,
+  }
+}
+
+async function bonificadosDe(supabase: SupabaseClient, clienteId: string, comps: CompRow[]): Promise<Set<string>> {
+  if (!comps.length) return new Set()
+  const marcas = await cargarMarcasBonificacion(supabase, clienteId, comps.map((c) => c.id))
+  return new Set(separarYaBonificados(comps, marcas).yaBonificados.map((c) => c.id))
+}
+
+/**
+ * IVA por unidad que llevó cada renglón de factura: la factura lo calcula como
+ * precio_final − neto del renglón del pedido (generar/route.ts). Clave comp|articulo.
+ */
+async function ivaUnitarioDeRenglones(
+  supabase: SupabaseClient,
+  renglones: Array<{ comp: CompRow; articulo_id: string; precio_unitario: number }>,
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const fiscales = renglones.filter((r) => FISCALES.includes(r.comp.tipo_comprobante) && r.comp.pedido_id)
+  const pedidoIds = [...new Set(fiscales.map((r) => r.comp.pedido_id as string))]
+  if (!pedidoIds.length) return out
+  const filas: any[] = []
+  for (let i = 0; i < pedidoIds.length; i += 100) {
+    const { data } = await supabase
+      .from("pedidos_detalle")
+      .select("pedido_id, articulo_id, precio_final, precio_base, es_bonificado")
+      .in("pedido_id", pedidoIds.slice(i, i + 100))
+    filas.push(...(data || []))
+  }
+  for (const r of fiscales) {
+    const candidatos = filas.filter((f) => f.pedido_id === r.comp.pedido_id && f.articulo_id === r.articulo_id && f.es_bonificado !== true)
+    for (const f of candidatos) {
+      const final = Number(f.precio_final) || 0
+      const neto = Number(f.precio_base) > 0 ? Number(f.precio_base) : r2(final / 1.21)
+      // El renglón del pedido que se facturó a ese precio neto
+      if (Math.abs(neto - r.precio_unitario) < 0.005 && final > neto) {
+        out.set(`${r.comp.id}|${r.articulo_id}`, r2(final - neto))
+        break
+      }
+    }
+  }
+  return out
+}
+
+export interface CompradoOrigen extends OrigenDevolucion {
+  articulo_id: string
+  ultima_fecha: string
+  cantidad_total: number
+}
+
+/** Artículos que el cliente compró (renglones de comprobantes del sistema) con su origen exacto: el último. */
+export async function origenesComprados(supabase: SupabaseClient, clienteId: string, clienteIn?: ClienteDev | null): Promise<Map<string, CompradoOrigen>> {
+  const cliente = await leerCliente(supabase, clienteId, clienteIn)
+  // La FK de comprobantes_venta_detalle es `comprobante_id` (NO `comprobante_venta_id`)
+  const rows = await fetchAllRows(() =>
+    supabase
+      .from("comprobantes_venta_detalle")
+      .select(
+        "articulo_id, cantidad, precio_unitario, es_bonificado, comprobante:comprobante_id!inner(id, cliente_id, fecha, created_at, tipo_comprobante, numero_comprobante, total_neto, percepcion_iva, pedido_id, anulado_en)",
+      )
+      .eq("comprobante.cliente_id", clienteId)
+      .in("comprobante.tipo_comprobante", VENTAS)
+      .is("comprobante.anulado_en", null),
+  )
+  // Último comprobante por artículo (renglones a $0 de mercadería bonificada no cuentan)
+  const ult = new Map<string, { comp: CompRow; precio_unitario: number; cantidad_total: number }>()
+  for (const r of rows as any[]) {
+    if (!r.articulo_id || !r.comprobante || r.es_bonificado === true || !(Number(r.precio_unitario) > 0)) continue
+    const comp = r.comprobante as CompRow
+    const clave = `${comp.fecha || ""}|${comp.created_at || ""}`
+    const actual = ult.get(r.articulo_id)
+    const claveActual = actual ? `${actual.comp.fecha || ""}|${actual.comp.created_at || ""}` : ""
+    if (!actual || clave > claveActual) {
+      ult.set(r.articulo_id, { comp, precio_unitario: Number(r.precio_unitario), cantidad_total: (actual?.cantidad_total || 0) + Number(r.cantidad || 0) })
+    } else {
+      actual.cantidad_total += Number(r.cantidad || 0)
+    }
+  }
+  const comps = [...new Map([...ult.values()].map((u) => [u.comp.id, u.comp])).values()]
+  const [bonificados, ivas] = await Promise.all([
+    bonificadosDe(supabase, clienteId, comps),
+    ivaUnitarioDeRenglones(supabase, [...ult.entries()].map(([articulo_id, u]) => ({ comp: u.comp, articulo_id, precio_unitario: u.precio_unitario }))),
+  ])
+  const out = new Map<string, CompradoOrigen>()
+  for (const [articulo_id, u] of ult) {
+    out.set(articulo_id, {
+      ...origenDe(u.comp, cliente, bonificados, {
+        exacto: true,
+        precio: u.precio_unitario,
+        iva_unitario: ivas.get(`${u.comp.id}|${articulo_id}`) ?? null,
+      }),
+      articulo_id,
+      ultima_fecha: u.comp.fecha || "",
+      cantidad_total: u.cantidad_total,
+    })
+  }
+  return out
+}
+
+/** Contexto para valuar sin señal: alícuota IIBB vigente y comprobantes más recientes (fiscal / presupuesto). */
+export async function contextoDevolucion(supabase: SupabaseClient, clienteId: string, clienteIn?: ClienteDev | null): Promise<ContextoDevolucion> {
+  const cliente = await leerCliente(supabase, clienteId, clienteIn)
+  const hoy = hoyISO()
+  const ultimoDe = async (tipos: string[]) => {
+    const { data } = await supabase
+      .from("comprobantes_venta")
+      .select("id, tipo_comprobante, numero_comprobante, fecha, total_neto, percepcion_iva, pedido_id, created_at")
+      .eq("cliente_id", clienteId)
+      .in("tipo_comprobante", tipos)
+      .is("anulado_en", null)
+      .neq("estado_pago", "anulado")
+      .lte("fecha", hoy)
+      .order("fecha", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    return (data as CompRow | null) ?? null
+  }
+  const [alicuota, fiscal, pres] = await Promise.all([alicuotaIIBBVigente(supabase, cliente), ultimoDe(FISCALES), ultimoDe(["PRES"])])
+  const bonificados = await bonificadosDe(supabase, clienteId, [fiscal, pres].filter(Boolean) as CompRow[])
+  const sinPrecio = { exacto: false, precio: null, iva_unitario: null }
+  return {
+    alicuota_iibb: alicuota,
+    ultimo_fiscal: fiscal ? origenDe(fiscal, cliente, bonificados, sinPrecio) : null,
+    ultimo_presupuesto: pres ? origenDe(pres, cliente, bonificados, sinPrecio) : null,
+  }
+}
+
+/** Cómo va hoy cada artículo para el cliente (motor de precios) + precio sugerido (neto si factura). */
+async function comoVaHoy(supabase: SupabaseClient, clienteId: string, articuloIds: string[]) {
+  const out = new Map<string, { va: "factura" | "presupuesto"; precio: number; alCliente: number }>()
+  if (!articuloIds.length) return out
+  const [insumos, { data: articulos }, { data: desc }] = await Promise.all([
+    cargarInsumosCliente(supabase, clienteId),
+    supabase.from("articulos").select(ARTICULO_PRECIO_COLS).in("id", articuloIds),
+    supabase.from("articulos_descuentos").select("articulo_id,tipo,porcentaje,orden").in("articulo_id", articuloIds).order("orden"),
+  ])
+  const porArt = descuentosPorArticulo(desc || [])
+  const motor = prepararMotorCliente(insumos)
+  for (const a of articulos || []) {
+    try {
+      const p = motor.precio({ ...(a as any), descuentos: porArt.get((a as any).id) || [] } as ArticuloMotor)
+      out.set((a as any).id, { va: p.vaEnComprobante, precio: p.vaEnComprobante === "factura" ? p.precioNeto : p.precio, alCliente: p.precio })
+    } catch {
+      // sin precio calculable: se resuelve como factura y precio a mano
+    }
+  }
+  return out
+}
+
+export interface OrigenResuelto extends OrigenDevolucion {
+  /** Precio a usar si no es exacto (neto actual del cliente si va por factura) */
+  precio_sugerido: number | null
+  /** Precio al cliente hoy (con IVA si va por factura) — para reconocer lo que mandan apps viejas */
+  precio_al_cliente: number | null
+}
+
+/**
+ * Origen de cada artículo de una devolución (reglas 1-3). `pedidoId`: el pedido
+ * que se está entregando (chofer) — lo devuelto de ese pedido va contra SU comprobante.
+ */
+export async function resolverOrigenesDevolucion(
+  supabase: SupabaseClient,
+  clienteId: string,
+  articuloIds: string[],
+  opts: { pedidoId?: string | null; cliente?: ClienteDev | null } = {},
+): Promise<{ origenes: Map<string, OrigenResuelto>; contexto: ContextoDevolucion }> {
+  const ids = [...new Set(articuloIds.filter(Boolean))]
+  const cliente = await leerCliente(supabase, clienteId, opts.cliente)
+  const [comprados, contexto, hoy] = await Promise.all([
+    origenesComprados(supabase, clienteId, cliente),
+    contextoDevolucion(supabase, clienteId, cliente),
+    comoVaHoy(supabase, clienteId, ids),
+  ])
+
+  // Regla 1: comprobante(s) del pedido entregado
+  const delPedido = new Map<string, OrigenDevolucion>()
+  if (opts.pedidoId) {
+    const { data: comps } = await supabase
+      .from("comprobantes_venta")
+      .select("id, tipo_comprobante, numero_comprobante, fecha, total_neto, percepcion_iva, pedido_id, created_at, comprobantes_venta_detalle(articulo_id, precio_unitario, es_bonificado)")
+      .eq("pedido_id", opts.pedidoId)
+      .in("tipo_comprobante", VENTAS)
+      .is("anulado_en", null)
+    const lista = (comps || []) as any[]
+    const renglones: Array<{ comp: CompRow; articulo_id: string; precio_unitario: number }> = []
+    for (const c of lista) {
+      for (const d of c.comprobantes_venta_detalle || []) {
+        if (d.es_bonificado === true || !(Number(d.precio_unitario) > 0) || !ids.includes(d.articulo_id)) continue
+        renglones.push({ comp: c, articulo_id: d.articulo_id, precio_unitario: Number(d.precio_unitario) })
+      }
+    }
+    const [bonificados, ivas] = await Promise.all([bonificadosDe(supabase, clienteId, lista), ivaUnitarioDeRenglones(supabase, renglones)])
+    for (const r of renglones) {
+      if (delPedido.has(r.articulo_id)) continue
+      delPedido.set(r.articulo_id, origenDe(r.comp, cliente, bonificados, {
+        exacto: true,
+        precio: r.precio_unitario,
+        iva_unitario: ivas.get(`${r.comp.id}|${r.articulo_id}`) ?? null,
+      }))
+    }
+  }
+
+  const origenes = new Map<string, OrigenResuelto>()
+  for (const id of ids) {
+    const exacto = delPedido.get(id) ?? comprados.get(id) ?? null
+    const hoyArt = hoy.get(id)
+    const o = elegirOrigenDevolucion(exacto, contexto, hoyArt?.va ?? "factura")
+    origenes.set(id, { ...o, precio_sugerido: o.exacto ? o.precio : hoyArt?.precio ?? null, precio_al_cliente: hoyArt?.alCliente ?? null })
+  }
+  return { origenes, contexto }
+}
+
+/**
+ * Antes de guardar una devolución (todas las rutas de alta): cada renglón queda
+ * asociado a su comprobante y, si el artículo está facturado en el sistema, al
+ * precio FACTURADO (no se acepta otro). Si no, se respeta el precio cargado; si
+ * vino el precio con IVA del motor en algo que va por factura (apps viejas), se
+ * pasa al neto.
+ */
+export async function prepararRenglonesDevolucion<T extends { articulo_id: string; precio_venta_original?: number | null; comprobante_venta_id?: string | null }>(
+  supabase: SupabaseClient,
+  clienteId: string,
+  items: T[],
+  opts: { pedidoId?: string | null } = {},
+): Promise<Array<T & { precio_venta_original: number; comprobante_venta_id: string | null }>> {
+  if (!items.length) return []
+  const { origenes } = await resolverOrigenesDevolucion(supabase, clienteId, items.map((i) => i.articulo_id), opts)
+  const out: Array<T & { precio_venta_original: number; comprobante_venta_id: string | null }> = []
+  for (const it of items) {
+    const o = origenes.get(it.articulo_id)
+    let precio = Number(it.precio_venta_original) || 0
+    if (o?.exacto && o.precio != null) {
+      precio = o.precio
+    } else if (o) {
+      if (!(precio > 0) && o.precio_sugerido) precio = o.precio_sugerido
+      // App vieja: mandó el precio al cliente (con IVA) de algo que va por factura
+      else if (o.fiscal && o.precio_sugerido && o.precio_al_cliente && Math.abs(o.precio_al_cliente - precio) < 0.005) precio = o.precio_sugerido
+    }
+    out.push({ ...it, precio_venta_original: r2(precio), comprobante_venta_id: o?.comprobante_venta_id ?? null })
+  }
+  return out
+}
+
+
+/**
+ * Origen de renglones YA GUARDADOS (valuación y emisión de la NC): cada uno contra
+ * el comprobante al que quedó asociado. Exacto si el artículo está en ese
+ * comprobante al mismo precio (entonces el IVA por unidad es el del renglón).
+ * Renglón sin comprobante (no había ninguno del tipo): fiscal según cómo va hoy.
+ */
+export async function origenesDeRenglones(
+  supabase: SupabaseClient,
+  clienteId: string,
+  renglones: Array<{ articulo_id: string; comprobante_venta_id: string | null; precio_venta_original: number | null }>,
+  clienteIn?: ClienteDev | null,
+): Promise<OrigenDevolucion[]> {
+  const cliente = await leerCliente(supabase, clienteId, clienteIn)
+  const compIds = [...new Set(renglones.map((r) => r.comprobante_venta_id).filter(Boolean))] as string[]
+  const { data: comps } = compIds.length
+    ? await supabase
+        .from("comprobantes_venta")
+        .select("id, tipo_comprobante, numero_comprobante, fecha, total_neto, percepcion_iva, pedido_id, comprobantes_venta_detalle(articulo_id, precio_unitario, es_bonificado)")
+        .in("id", compIds)
+    : { data: [] as any[] }
+  const compDe = new Map((comps || []).map((c: any) => [c.id, c]))
+  const sinComp = [...new Set(renglones.filter((r) => !r.comprobante_venta_id || !compDe.has(r.comprobante_venta_id)).map((r) => r.articulo_id))]
+  const exactos: Array<{ comp: CompRow; articulo_id: string; precio_unitario: number }> = []
+  for (const r of renglones) {
+    const c = r.comprobante_venta_id ? compDe.get(r.comprobante_venta_id) : null
+    const precio = Number(r.precio_venta_original) || 0
+    if (c && (c.comprobantes_venta_detalle || []).some((d: any) => d.articulo_id === r.articulo_id && Math.abs(Number(d.precio_unitario) - precio) < 0.005)) {
+      exactos.push({ comp: c, articulo_id: r.articulo_id, precio_unitario: precio })
+    }
+  }
+  const [bonificados, ivas, hoy] = await Promise.all([
+    bonificadosDe(supabase, clienteId, (comps || []) as CompRow[]),
+    ivaUnitarioDeRenglones(supabase, exactos),
+    comoVaHoy(supabase, clienteId, sinComp),
+  ])
+  return renglones.map((r) => {
+    const c = r.comprobante_venta_id ? compDe.get(r.comprobante_venta_id) : null
+    if (!c) return elegirOrigenDevolucion(null, null, hoy.get(r.articulo_id)?.va ?? "factura")
+    const ex = exactos.find((e) => e.comp.id === c.id && e.articulo_id === r.articulo_id && Math.abs(e.precio_unitario - (Number(r.precio_venta_original) || 0)) < 0.005)
+    return origenDe(c, cliente, bonificados, {
+      exacto: !!ex,
+      precio: ex ? ex.precio_unitario : null,
+      iva_unitario: ex ? ivas.get(`${c.id}|${r.articulo_id}`) ?? null : null,
+    })
+  })
+}

@@ -22,6 +22,7 @@ import { GET as billeteraGET } from "@/app/api/chofer/billetera/route"
 import { GET as cuentasGET } from "@/app/api/chofer/cuentas-bancarias/route"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { cargarComprados } from "@/lib/vendedor/comprados"
+import { contextoDevolucion } from "@/lib/cobranzas/origen-devolucion"
 import { HEADER_SIN_INICIAR, viajesDelChofer } from "@/lib/viajes/chofer"
 import { cargarClienteViaje, cargarCuentaCobro } from "@/lib/viajes/cliente-viaje"
 import type { FilaReplica } from "../contrato"
@@ -92,13 +93,18 @@ async function viajesOperables(ctx: CtxSync): Promise<Array<{ id: string; estado
 
 /** Una fila = un cliente dentro de un viaje: todo lo que la ficha, el cobro y la devolución necesitan sin red. */
 export async function filaClienteViaje(ctx: CtxSync, viajeId: string, clienteId: string, viajeEstado: string): Promise<FilaReplica> {
-  const [ficha, cobro, comprados] = await Promise.all([
+  const [ficha, cobro, comprados, contextoDev] = await Promise.all([
     cargarClienteViaje(ctx.supabase, viajeId, clienteId, viajeEstado),
     cargarCuentaCobro(ctx.supabase, clienteId),
     // Accesorio: si falla, la ficha y el cobro igual tienen que andar
     cargarComprados(ctx.supabase, clienteId).catch((e) => {
       console.error("[sync/chofer_viaje_clientes] comprados:", e?.message || e)
       return [] as Awaited<ReturnType<typeof cargarComprados>>
+    }),
+    // Para valuar devoluciones sin señal igual que el servidor (IIBB vigente, comprobante más reciente)
+    contextoDevolucion(ctx.supabase, clienteId).catch((e) => {
+      console.error("[sync/chofer_viaje_clientes] contexto devolución:", e?.message || e)
+      return null
     }),
   ])
   return {
@@ -108,6 +114,7 @@ export async function filaClienteViaje(ctx: CtxSync, viajeId: string, clienteId:
     ...ficha,
     cobro,
     comprados: [...comprados].sort((a: any, b: any) => (b.ultima_fecha || "").localeCompare(a.ultima_fecha || "")).slice(0, 150),
+    contexto_devolucion: contextoDev,
   }
 }
 

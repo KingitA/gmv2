@@ -39,6 +39,7 @@ import { bonificacionesDesdeFilas } from "@/lib/vendedor/bonificaciones"
 import { cargarMovimientosCliente, cargarMovimientosClientes } from "@/lib/cuenta-corriente/extracto-servidor"
 import type { MovimientoCC } from "@/lib/cuenta-corriente/extracto"
 import { cargarComprados } from "@/lib/vendedor/comprados"
+import { contextoDevolucion } from "@/lib/cobranzas/origen-devolucion"
 import { agruparPorComprobante, KARDEX_COMISION_COLS, mapArticuloComision } from "@/lib/vendedor/comisiones-detalle"
 import { cargarDetallePedido } from "@/lib/vendedor/detalle-pedido"
 import { cargarFichaCliente } from "@/lib/vendedor/ficha-cliente"
@@ -201,13 +202,15 @@ export async function cargarCuentaCliente(
   if (!ficha) return null
   // Comprados y habituales son ACCESORIOS de la cuenta corriente: si una consulta falla, el
   // vendedor igual tiene que poder ver la deuda y cobrar (no tumban toda la fila).
-  const [comprados, frecuencia, movimientos] = await Promise.all([
+  const [comprados, frecuencia, movimientos, contextoDev] = await Promise.all([
     cargarComprados(supabase, id).catch((e) => { console.error("[sync/vendedor_cc] comprados:", e?.message || e); return [] as Awaited<ReturnType<typeof cargarComprados>> }),
     frecuenciaHabituales(supabase, id).catch((e) => { console.error("[sync/vendedor_cc] habituales:", e?.message || e); return new Map<string, { veces: number; ultCantidad: number }>() }),
     // Extracto (Cobrar → Resumen): el MISMO libro y la misma carga que el ERP. null = falló (la app lo dice)
     movimientosPrecargados !== undefined
       ? Promise.resolve(movimientosPrecargados)
       : cargarMovimientosCliente(supabase, id).catch((e) => { console.error("[sync/vendedor_cc] movimientos:", e?.message || e); return null }),
+    // Para valuar devoluciones sin señal igual que el servidor (IIBB vigente, comprobante más reciente)
+    contextoDevolucion(supabase, id).catch((e) => { console.error("[sync/vendedor_cc] contexto devolución:", e?.message || e); return null }),
   ])
   const habituales = [...frecuencia.entries()]
     .sort((a, b) => b[1].veces - a[1].veces)
@@ -219,6 +222,7 @@ export async function cargarCuentaCliente(
     comprados: [...comprados].sort((a: any, b: any) => (b.ultima_fecha || "").localeCompare(a.ultima_fecha || "")).slice(0, 100),
     habituales,
     movimientos,
+    contexto_devolucion: contextoDev,
   }
 }
 

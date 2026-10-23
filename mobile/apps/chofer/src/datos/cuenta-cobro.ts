@@ -5,7 +5,7 @@
 
 import { anticiposDeSeleccion, PEDIDO_PREFIX, pedidosContadoAEnviar, pedidosContadoAlAplicarTodo } from "@gm/cobro"
 import { redondear } from "@gm/formato"
-import { valorDevolucion } from "@gm/vendedor"
+import { origenDesdeComprado, valorDevolucionConOrigen, type CompradoConOrigen, type OrigenDevolucion } from "@gm/vendedor"
 import type { ComprobanteCobro, CuentaCobro, PedidoCobro } from "../datasets"
 
 const r2 = (n: number) => redondear(n)
@@ -31,19 +31,24 @@ export interface DatosCuenta {
 }
 
 /**
- * Valor de una devolución cargada en el equipo (= servidor, sin percepciones): neto, + IVA si la
- * factura de origen es fiscal, −10 % si esa factura tuvo contado. Misma función que la app Vendedor.
+ * Valor de una devolución cargada en el equipo (= servidor, regla del dueño 21/10/2026): cada
+ * renglón tal cual fue facturado en su comprobante de origen — neto e IVA del renglón,
+ * percepción IVA si esa factura la llevó, IIBB vigente del cliente, −10 % si fue contado.
+ * Misma función que la app Vendedor y que la NC (valorDevolucionConOrigen).
  */
 export function valorEstimadoDevolucion(
-  items: Array<{ cantidad: number; precio_venta_original: number; comprobante_venta_id?: string | null }>,
-  comprados: Array<{ comprobante_venta_id: string | null; tipo_comprobante: string; bonificado_contado?: boolean }>,
+  items: Array<{ cantidad: number; precio_venta_original: number; comprobante_venta_id?: string | null; origen_comp?: OrigenDevolucion | null }>,
+  comprados: Array<Partial<CompradoConOrigen> & { comprobante_venta_id: string | null; tipo_comprobante: string }>,
+  alicuotaIIBB = 0,
 ): number {
-  const orig = items.map((i) => comprados.find((c) => c.comprobante_venta_id && c.comprobante_venta_id === i.comprobante_venta_id))
-  return valorDevolucion({
-    renglones: items.map((i) => ({ subtotal: Number(i.cantidad) * Number(i.precio_venta_original) })),
-    aplica10: orig.some((c) => !!c?.bonificado_contado),
-    conIva: orig.some((c) => !!c && ["FA", "FB", "FC"].includes(c.tipo_comprobante)),
-  }).total
+  return valorDevolucionConOrigen(
+    items.map((i) => {
+      const c = comprados.find((x) => x.comprobante_venta_id && x.comprobante_venta_id === i.comprobante_venta_id)
+      const origen = i.origen_comp ?? (c ? origenDesdeComprado({ numero_comprobante: "", ultimo_precio: Number(i.precio_venta_original) || 0, ...c }) : null)
+      return { cantidad: Number(i.cantidad) || 0, precio_venta_original: Number(i.precio_venta_original) || 0, origen }
+    }),
+    alicuotaIIBB,
+  ).total
 }
 
 /** Lo que una devolución descuenta en el cobro: su valor con la regla única (−10 % si la factura fue contado); el bruto solo en réplicas viejas. */

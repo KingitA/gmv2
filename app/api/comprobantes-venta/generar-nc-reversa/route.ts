@@ -1,22 +1,27 @@
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
-import { nowArgentina, todayArgentina } from "@/lib/utils"
+import { todayArgentina } from "@/lib/utils"
 import { requirePermiso } from '@/lib/auth'
 import { insertarKardex } from '@/lib/kardex/insertar-kardex'
-import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
 import { determinarTipoNCADesdeOriginal, determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
-import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
-import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
-import { valorDevolucion } from "@/lib/cobranzas/valor-devolucion"
+import { TASA_PERCEPCION_IVA_DEVOLUCION, valorDevolucionConOrigen } from "@/lib/cobranzas/valor-devolucion"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { cuitDigitos, cuitValido, ahoraISO } from "@/lib/formato"
+
+/** Corta la emisión con una respuesta de error (validaciones dentro de una parte). */
+class Corte extends Error {
+  constructor(public respuesta: NextResponse) { super("corte") }
+}
+const corte = (body: Record<string, any>, status: number) => new Corte(NextResponse.json(body, { status }))
+
+const TIPOS_NC_FISCAL = ["NCA", "NCB", "NCC"]
 
 export async function POST(request: Request) {
   try {
@@ -34,7 +39,8 @@ export async function POST(request: Request) {
     const body = await request.json()
     const {
       devolucion_id,
-      tipo_comprobante, // 'NC' o 'REV'
+      // El tipo lo decide el origen de cada renglón (regla del dueño 21/10/2026:
+      // tal cual fue facturado). Se acepta el campo por compatibilidad.
       motivo_ajuste,
       asociados_manual, // [{ tipo: 'FA'|'FB'|..., numero: 'PPPP-NNNNNNNN' }] — para devoluciones sin comprobante original detectable (RG 4540)
     } = body
@@ -116,433 +122,511 @@ export async function POST(request: Request) {
       }, { status: 422 })
     }
 
-    let tipoFinal = tipo_comprobante
+    // ── VALOR — regla única (lib/cobranzas/valor-devolucion, 21/10/2026): cada
+    // renglón tal cual fue facturado en SU comprobante de origen: neto e IVA del
+    // renglón, percepción IVA si ese comprobante la llevó, IIBB vigente, −10% si
+    // fue cobrado contado. Es el MISMO número que se descontó en el cobro.
+    const valoracion = (await valorarDevoluciones(supabase, {
+      clienteId: devolucion.cliente_id,
+      devolucionIds: [devolucion.id],
+      cliente: devolucion.cliente,
+    })).get(devolucion.id)!
+    const origenDe = new Map(valoracion.renglones.map((r) => [r.id, r.origen]))
+    const alicuotaIIBB = valoracion.alicuota_iibb
 
-    if (tipo_comprobante === "auto") {
-      // Prioridad 1: usar el tipo del comprobante original referenciado
-      const compOriginal = devolucion.detalle.length > 0
-        ? devolucion.detalle[0].comprobante_original
-        : null
+    // Partes: lo que se facturó con factura → NC A/B; lo de presupuesto → REV
+    const partes = [
+      { fiscal: true, items: devolucion.detalle.filter((it: any) => origenDe.get(it.id)?.fiscal) },
+      { fiscal: false, items: devolucion.detalle.filter((it: any) => !origenDe.get(it.id)?.fiscal) },
+    ].filter((p) => p.items.length > 0)
 
-      if (compOriginal) {
-        const tipoDesdeOriginal = determinarTipoNCADesdeOriginal(compOriginal.tipo_comprobante)
-        if (tipoDesdeOriginal) {
-          tipoFinal = tipoDesdeOriginal
-        } else {
-          return NextResponse.json({
-            error: `No se puede determinar el tipo de NC para el comprobante original tipo "${compOriginal.tipo_comprobante}".`,
-            error_code: "TIPO_ORIGINAL_DESCONOCIDO",
-          }, { status: 422 })
-        }
-      } else {
-        // Sin comprobante original: derivar desde condición IVA del cliente
-        const metodo = devolucion.cliente.metodo_facturacion?.toLowerCase() || "factura"
-        if (metodo.includes("presupuesto") || metodo.includes("remito")) {
-          tipoFinal = "REV"
-        } else {
-          const tipoFactura = determinarTipoFactura(devolucion.cliente.condicion_iva)
-          if (!tipoFactura) {
-            return NextResponse.json({
-              error: mensajeErrorCondicionIva(devolucion.cliente.nombre_razon_social),
-              error_code: "CLIENTE_SIN_CONDICION_IVA",
-              cliente_id: devolucion.cliente_id,
-              cliente_nombre: devolucion.cliente.nombre_razon_social,
-            }, { status: 422 })
-          }
-          tipoFinal = tipoFactura === "FA" ? "NCA" : "NCB"
-        }
-      }
-    }
+    // Reintento: una parte ya emitida (NC o REV viva con esta devolución) no se repite
+    const prefijoObs = `Devolución ${devolucion.numero_devolucion || devolucion.id}`
+    const { data: yaEmitidos } = await supabase
+      .from("comprobantes_venta")
+      .select("id, tipo_comprobante, numero_comprobante, total_factura, observaciones")
+      .eq("cliente_id", devolucion.cliente_id)
+      .in("tipo_comprobante", [...TIPOS_NC_FISCAL, "REV"])
+      .is("anulado_en", null)
+      .ilike("observaciones", `${prefijoObs}%`)
+    const emitidoDe = (fiscal: boolean) =>
+      (yaEmitidos || []).find((c: any) => {
+        const obs = String(c.observaciones || "")
+        const esDeEsta = obs === prefijoObs || obs.startsWith(prefijoObs + " ")
+        return esDeEsta && (fiscal ? TIPOS_NC_FISCAL.includes(c.tipo_comprobante) : c.tipo_comprobante === "REV")
+      })
 
-    // ─── Configuración ARCA ───
     const { data: empresaConfig } = await supabase
       .from('configuracion_empresa')
       .select('cuit, arca_ambiente, arca_punto_venta')
       .single()
 
-    const esFiscal = REQUIERE_CAE.has(tipoFinal)
-    if (esFiscal && !empresaConfig?.arca_punto_venta) {
-      return NextResponse.json(
-        { error: 'configuracion_empresa.arca_punto_venta no está configurado. No se puede emitir la NC fiscal.' },
-        { status: 500 },
-      )
-    }
-    const puntoVenta = esFiscal
-      ? String(empresaConfig!.arca_punto_venta).padStart(4, '0')
-      : '0001'
+    const emitidos: Array<{ id: string; tipo: string; numero: string; total: number; ya_existia?: boolean }> = []
+    const avisos: string[] = []
 
-    const { data: numeracion, error: numError } = await supabase
-      .from("numeracion_comprobantes")
-      .select("*")
-      .eq("tipo_comprobante", tipoFinal)
-      .eq("punto_venta", puntoVenta)
-      .single()
-
-    if (numError) {
-      return NextResponse.json({ error: `Numeración no encontrada para ${tipoFinal} PV ${puntoVenta}` }, { status: 500 })
-    }
-
-    let nuevoNumero = numeracion.ultimo_numero + 1
-
-    // ─── Obtener TA y sincronizar numeración con ARCA ───
-    let arcaTa: { token: string; sign: string } | null = null
-    if (esFiscal && empresaConfig) {
-      const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
-      arcaTa = await obtenerTAConCache(supabase, ambiente)
-      const cbteTipo = TIPO_CBTE_ARCA[tipoFinal]
-      if (cbteTipo) {
-        const ultimoEnArca = await ultimoAutorizado(
-          ambiente, arcaTa.token, arcaTa.sign,
-          cuitDigitos(empresaConfig.cuit),
-          parseInt(puntoVenta, 10), cbteTipo,
-        )
-        if (ultimoEnArca !== numeracion.ultimo_numero) {
-          await supabase.from('numeracion_comprobantes')
-            .update({ ultimo_numero: ultimoEnArca })
-            .eq('tipo_comprobante', tipoFinal)
-            .eq('punto_venta', puntoVenta)
-          nuevoNumero = ultimoEnArca + 1
-        }
-      }
-    }
-
-    const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, "0")}`
-
-    // ── VALOR DE LA DEVOLUCIÓN — regla única (lib/cobranzas/valor-devolucion,
-    // 29/09): si la factura original fue cobrada CONTADO con 10%, la NC sale
-    // con la misma bonificación POR RENGLÓN (el cliente pagó el 90% de esa
-    // mercadería, la NC le devuelve exactamente eso). El descuento hecho en
-    // el cobro y esta NC coinciden al centavo porque usan la misma función.
-    const valoracion = await valorarDevoluciones(supabase, {
-      clienteId: devolucion.cliente_id,
-      devolucionIds: [devolucion.id],
-      cliente: devolucion.cliente,
-    })
-    const aplica10 = valoracion.get(devolucion.id)?.aplica_10 ?? false
-    const motor = valorDevolucion({
-      renglones: devolucion.detalle.map((item: any) => ({ subtotal: Number(item.subtotal) || 0 })),
-      aplica10,
-      conIva: false, // IVA y percepciones se calculan abajo con el circuito fiscal propio de esta ruta
-    })
-    const netoRenglon = motor.netoPorRenglon
-    const totalNeto = motor.neto
-
-    // precio_venta_original es el precio NETO (igual que en la FA original)
-    // el IVA se calcula como 21% del neto, no como complemento del total.
-    // exento_iva NO anula el IVA de la operación (es solo exclusión de percepciones).
-    const totalIva = tipoFinal.startsWith("NC")
-      ? Math.round(totalNeto * 21 / 100 * 100) / 100
-      : 0
-
-    // ─── Percepciones en NC (se incluyen en negativo, espejo de la factura original) ───
-    const tasaIIBBResuelta = esFiscal ? await resolverAlicuotaIIBB(supabase, devolucion.cliente) : 0
-    const percResult    = calcularPercepciones(totalNeto, { ...devolucion.cliente, percepcion_iibb: tasaIIBBResuelta }, esFiscal)
-    const percIVA       = percResult.percepcion_iva
-    const percIIBB      = percResult.percepcion_iibb
-    const totalTrib     = Math.round((percIVA + percIIBB) * 100) / 100
-    // Integer-cent arithmetic guarantees ImpTotal == ImpNeto + ImpIva + ImpTrib in ARCA's decimal validation
-    const totalComprobante = (
-      Math.round(totalNeto * 100) +
-      Math.round(totalIva  * 100) +
-      Math.round(totalTrib * 100)
-    ) / 100
-
-    // ─── Solicitar CAE a ARCA (solo NCA/NCB, no REV) ───
-    let cae: string | null = null
-    let vencimientoCae: string | null = null
-
-    if (esFiscal && empresaConfig && arcaTa) {
-      const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
-      const ta = arcaTa
-      if (!devolucion.cliente?.cuit || devolucion.cliente.cuit.trim() === '') {
-        return NextResponse.json({
-          error: `El cliente "${devolucion.cliente?.nombre_razon_social ?? ''}" no tiene CUIT configurado. Sin CUIT no se puede emitir un comprobante fiscal.`,
-          error_code: 'CLIENTE_SIN_CUIT',
-          cliente_id: devolucion.cliente_id,
-          cliente_nombre: devolucion.cliente?.nombre_razon_social,
-        }, { status: 422 })
-      }
-      if (!cuitValido(devolucion.cliente.cuit)) {
-        return NextResponse.json({
-          error: `El CUIT del cliente "${devolucion.cliente?.nombre_razon_social ?? ''}" no es válido (${devolucion.cliente.cuit}): corregilo en la ficha del cliente.`,
-          error_code: 'CLIENTE_CUIT_INVALIDO',
-          cliente_id: devolucion.cliente_id,
-          cliente_nombre: devolucion.cliente?.nombre_razon_social,
-        }, { status: 422 })
-      }
-      const clienteCuit = cuitDigitos(devolucion.cliente.cuit)
-      const fecha = todayArgentina().replace(/-/g, '')
-
-      // RG 5616/2024: condición IVA del receptor obligatoria
-      const condIvaReceptor = condicionIvaReceptorId(devolucion.cliente?.condicion_iva)
-      if (condIvaReceptor === null) {
-        return NextResponse.json({
-          error: `El cliente "${devolucion.cliente?.nombre_razon_social ?? ''}" tiene condición de IVA "${devolucion.cliente?.condicion_iva ?? 'sin cargar'}" que no mapea a ningún código de receptor de ARCA (RG 5616). Corregí la condición de IVA del cliente antes de emitir.`,
-          error_code: 'CONDICION_IVA_NO_MAPEA',
-        }, { status: 422 })
+    // ─── Emisión de UNA parte (NC fiscal o REV) ───
+    const emitirParte = async (parte: { fiscal: boolean; items: any[] }) => {
+      const previo = emitidoDe(parte.fiscal)
+      if (previo) {
+        emitidos.push({ id: previo.id, tipo: previo.tipo_comprobante, numero: previo.numero_comprobante, total: Math.abs(Number(previo.total_factura) || 0), ya_existia: true })
+        return
       }
 
-      // CbteAsoc (RG 4540): TODOS los comprobantes originales distintos referenciados
-      // por los ítems de la devolución, más los ingresados manualmente.
-      const asocVistos = new Set<string>()
-      const cbteAsoc: { tipo: number; ptoVta: number; nro: number }[] = []
-
-      for (const item of devolucion.detalle) {
-        const orig = item.comprobante_original
-        if (!orig?.numero_comprobante || !TIPO_CBTE_ARCA[orig.tipo_comprobante]) continue
-        const clave = `${orig.tipo_comprobante}|${orig.numero_comprobante}`
-        if (asocVistos.has(clave)) continue
-        asocVistos.add(clave)
-        cbteAsoc.push({
-          tipo:   TIPO_CBTE_ARCA[orig.tipo_comprobante],
-          ptoVta: parseInt(orig.numero_comprobante.split('-')[0], 10),
-          nro:    parseInt(orig.numero_comprobante.split('-')[1] ?? '0', 10),
-        })
-      }
-
-      // Asociados ingresados manualmente (caso migración: el original no está en el sistema)
-      for (const asoc of (asociados_manual ?? [])) {
-        const tipoArca = TIPO_CBTE_ARCA[asoc?.tipo]
-        const partes   = String(asoc?.numero ?? '').trim().split('-')
-        const ptoVta   = parseInt(partes[0], 10)
-        const nro      = parseInt(partes[1] ?? '', 10)
-        if (!tipoArca || isNaN(ptoVta) || isNaN(nro)) {
-          return NextResponse.json({
-            error: `Comprobante asociado inválido: "${asoc?.tipo ?? ''} ${asoc?.numero ?? ''}". Formato esperado: tipo FA/FB/NDA/NDB y número PPPP-NNNNNNNN (ej: FA 0007-00000123).`,
-            error_code: 'ASOCIADO_INVALIDO',
-          }, { status: 422 })
-        }
-        const clave = `${asoc.tipo}|${asoc.numero}`
-        if (asocVistos.has(clave)) continue
-        asocVistos.add(clave)
-        cbteAsoc.push({ tipo: tipoArca, ptoVta, nro })
-      }
-
-      // RG 4540: una NC/ND fiscal no puede emitirse sin comprobante asociado
-      if (cbteAsoc.length === 0) {
-        return NextResponse.json({
-          error: 'No se detectó ningún comprobante original asociado a esta devolución (RG 4540). Ingresá manualmente el/los comprobantes que esta NC ajusta antes de emitir.',
-          error_code: 'NC_SIN_ASOCIADO',
-        }, { status: 422 })
-      }
-
-      const tributos = []
-      if (percIVA > 0) {
-        tributos.push({ id: TRIBUTO_ID.PERCEPCION_IVA, desc: 'Percepcion IVA RG 5329', baseImp: totalNeto, alic: percResult.tasa_iva_aplicada, importe: percIVA })
-      }
-      if (percIIBB > 0) {
-        tributos.push({ id: TRIBUTO_ID.PERCEPCION_IIBB, desc: 'Percepcion IIBB', baseImp: totalNeto, alic: percResult.tasa_iibb_aplicada, importe: percIIBB })
-      }
-
-      const respCAE = await solicitarCAE({
-        ambiente,
-        token:    ta.token,
-        sign:     ta.sign,
-        cuit:     cuitDigitos(empresaConfig.cuit),
-        ptoVta:   parseInt(puntoVenta, 10),
-        cbteTipo: TIPO_CBTE_ARCA[tipoFinal],
-        cbteDesde: nuevoNumero,
-        cbteHasta: nuevoNumero,
-        concepto:  CONCEPTO.PRODUCTOS,
-        docTipo:   DOC_TIPO.CUIT,
-        docNro:    clienteCuit,
-        fecha,
-        impTotal:   totalComprobante,
-        impTotConc: 0,
-        impNeto:    totalNeto,
-        impOpEx:    0,
-        impIva:     totalIva,
-        impTrib:    totalTrib,
-        iva: totalIva > 0
-          ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
-          : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
-        cbteAsoc,
-        tributos: tributos.length > 0 ? tributos : undefined,
-        condicionIVAReceptorId: condIvaReceptor,
-      })
-      cae            = respCAE.cae
-      vencimientoCae = respCAE.vencimientoCae
-    }
-
-    const comprobanteInsert = {
-      tipo_comprobante:   tipoFinal,
-      numero_comprobante: numeroComprobante,
-      punto_venta:        puntoVenta,
-      fecha:              todayArgentina(),
-      cliente_id:         devolucion.cliente_id,
-      pedido_id:          devolucion.pedido_id || null,
-      total_neto:         -Math.abs(totalNeto),
-      total_iva:          -Math.abs(totalIva),
-      percepcion_iva:     -Math.abs(percIVA),
-      percepcion_iibb:    -Math.abs(percIIBB),
-      total_factura:      -Math.abs(totalComprobante),
-      saldo_pendiente:    -Math.abs(totalComprobante),
-      estado_pago:        "pendiente",
-      motivo_ajuste:      motivo_ajuste,
-      observaciones:      `Devolución ${devolucion.numero_devolucion || devolucion.id}${aplica10 ? " (renglones bonificados 10% contado — la factura original fue cobrada con el descuento)" : ""}`,
-      ...(cae            ? { cae }                             : {}),
-      ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
-    }
-
-    const detallePayload = devolucion.detalle.map((item: any, idx: number) => ({
-      articulo_id: item.articulo_id,
-      descripcion: item.articulo.descripcion + (aplica10 ? " (bonif. 10% contado)" : ""),
-      cantidad: -Math.abs(item.cantidad), // Negativo
-      precio_unitario: item.precio_venta_original || 0,
-      // Con 10% contado: el renglón sale bonificado (mismo redondeo por renglón
-      // que usó el descuento en el cobro — coinciden al centavo)
-      precio_total: -Math.abs(netoRenglon[idx] ?? item.subtotal ?? 0),
-    }))
-
-    const logId = cae ? await registrarCAEObtenido(supabase, {
-      tipo: tipoFinal, puntoVenta, numero: numeroComprobante,
-      cae, vencimientoCae, importe: Math.abs(totalComprobante),
-      clienteCuit: devolucion.cliente?.cuit ?? null,
-      payload: { comprobante: comprobanteInsert, detalle: detallePayload },
-    }) : null
-
-    const { data: comprobante, error: comprobanteError } = await supabase
-      .from("comprobantes_venta")
-      .insert(comprobanteInsert)
-      .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones, motivo_ajuste')
-      .single()
-
-    if (comprobanteError) {
-      if (cae) {
-        await marcarHuerfano(supabase, logId, comprobanteError.message)
-        return NextResponse.json({ error: mensajeHuerfano(tipoFinal, numeroComprobante, cae) }, { status: 500 })
-      }
-      return NextResponse.json(
-        {
-          error: "Error creando comprobante: " + comprobanteError.message,
-        },
-        { status: 500 },
-      )
-    }
-
-    await marcarComprobanteCreado(supabase, logId, comprobante.id)
-
-    const detalleInserts = detallePayload.map((d: any) => ({ ...d, comprobante_id: comprobante.id }))
-
-    const { error: detalleError } = await supabase.from("comprobantes_venta_detalle").insert(detalleInserts)
-
-    if (detalleError) {
-      return NextResponse.json(
-        {
-          error: "Error creando detalle del comprobante",
-        },
-        { status: 500 },
-      )
-    }
-
-    // Kardex: registrar movimiento por cada ítem de la NC/Reversa
-    // No-vendible: no afecta stock, no se registra en kardex
-    const esNC = tipoFinal.startsWith("NC")
-    const colorDinero = esNC ? "BLANCO" : "NEGRO"
-    const metodoFact = esNC ? "Factura" : "Presupuesto"
-    for (const item of devolucion.detalle) {
-      if (item.es_vendible === false) continue
-      // subtotal es NETO (precio_venta_original × cantidad, sin IVA)
-      const subtotal = Math.abs(item.subtotal || 0)
-      const cantidadAbs = Math.abs(item.cantidad || 1)
-      const precioNeto = subtotal
-      let ivaMonto: number
-      let ivaPct: number
-      if (esNC) {
-        ivaMonto = Math.round(subtotal * 21) / 100
-        ivaPct = 21
+      // Tipo: el del comprobante de origen (FA → NCA, FB → NCB); sin origen
+      // fiscal en el sistema, por la condición de IVA del cliente.
+      let tipoFinal: string
+      if (!parte.fiscal) {
+        tipoFinal = "REV"
       } else {
-        ivaMonto = 0
-        ivaPct = 0
+        const tipoOrig = parte.items.map((it: any) => origenDe.get(it.id)?.tipo_comprobante).find((t: any) => t === "FA" || t === "FB")
+        const desdeOrig = tipoOrig ? determinarTipoNCADesdeOriginal(tipoOrig) : null
+        if (desdeOrig) {
+          tipoFinal = desdeOrig
+        } else {
+          const tipoFactura = determinarTipoFactura(devolucion.cliente.condicion_iva)
+          if (!tipoFactura) {
+            throw corte({
+              error: mensajeErrorCondicionIva(devolucion.cliente.nombre_razon_social),
+              error_code: "CLIENTE_SIN_CONDICION_IVA",
+              cliente_id: devolucion.cliente_id,
+              cliente_nombre: devolucion.cliente.nombre_razon_social,
+            }, 422)
+          }
+          tipoFinal = tipoFactura === "FA" ? "NCA" : "NCB"
+        }
       }
-      const precioUnitNeto = cantidadAbs > 0 ? precioNeto / cantidadAbs : 0
-      const art = item.articulo
-      await insertarKardex(
-        supabase,
-        {
-          tipo_movimiento: 'nota_credito_venta',
-          fecha: ahoraISO(), // kardex.fecha es timestamptz: "AAAA-MM-DD" a secas quedaba el día anterior
+
+      // Valor de esta parte: misma función que el total de la devolución
+      const renglonesValor = parte.items.map((it: any) => ({
+        cantidad: Number(it.cantidad) || 0,
+        precio_venta_original: Number(it.precio_venta_original) || 0,
+        origen: origenDe.get(it.id),
+      }))
+      const v = valorDevolucionConOrigen(renglonesValor, alicuotaIIBB)
+      const netoRenglon = v.netoPorRenglon
+      const ivaRenglon = v.ivaPorRenglon
+      const aplica10 = parte.items.some((it: any) => origenDe.get(it.id)?.bonificado_contado)
+      const totalNeto = parte.fiscal ? v.fiscal.neto : v.rev.total
+      const totalIva = parte.fiscal ? v.fiscal.iva : 0
+      const percIVA = parte.fiscal ? v.fiscal.percepcionIva : 0
+      const percIIBB = parte.fiscal ? v.fiscal.percepcionIibb : 0
+      const totalTrib = Math.round((percIVA + percIIBB) * 100) / 100
+      const totalComprobante = parte.fiscal ? v.fiscal.total : v.rev.total
+
+      // ─── Configuración ARCA ───
+      const esFiscal = REQUIERE_CAE.has(tipoFinal)
+      if (esFiscal && !empresaConfig?.arca_punto_venta) {
+        throw corte({ error: 'configuracion_empresa.arca_punto_venta no está configurado. No se puede emitir la NC fiscal.' }, 500)
+      }
+      const puntoVenta = esFiscal
+        ? String(empresaConfig!.arca_punto_venta).padStart(4, '0')
+        : '0001'
+
+      // Validaciones del receptor y comprobantes asociados ANTES de pedir CAE
+      let clienteCuit = ""
+      let condIvaReceptor: number | null = null
+      const cbteAsoc: { tipo: number; ptoVta: number; nro: number }[] = []
+      const origenIds: string[] = [...new Set(parte.items.map((it: any) => it.comprobante_venta_id).filter(Boolean) as string[])]
+      if (esFiscal) {
+        if (!devolucion.cliente?.cuit || devolucion.cliente.cuit.trim() === '') {
+          throw corte({
+            error: `El cliente "${devolucion.cliente?.nombre_razon_social ?? ''}" no tiene CUIT configurado. Sin CUIT no se puede emitir un comprobante fiscal.`,
+            error_code: 'CLIENTE_SIN_CUIT',
+            cliente_id: devolucion.cliente_id,
+            cliente_nombre: devolucion.cliente?.nombre_razon_social,
+          }, 422)
+        }
+        if (!cuitValido(devolucion.cliente.cuit)) {
+          throw corte({
+            error: `El CUIT del cliente "${devolucion.cliente?.nombre_razon_social ?? ''}" no es válido (${devolucion.cliente.cuit}): corregilo en la ficha del cliente.`,
+            error_code: 'CLIENTE_CUIT_INVALIDO',
+            cliente_id: devolucion.cliente_id,
+            cliente_nombre: devolucion.cliente?.nombre_razon_social,
+          }, 422)
+        }
+        clienteCuit = cuitDigitos(devolucion.cliente.cuit)
+
+        // RG 5616/2024: condición IVA del receptor obligatoria
+        condIvaReceptor = condicionIvaReceptorId(devolucion.cliente?.condicion_iva)
+        if (condIvaReceptor === null) {
+          throw corte({
+            error: `El cliente "${devolucion.cliente?.nombre_razon_social ?? ''}" tiene condición de IVA "${devolucion.cliente?.condicion_iva ?? 'sin cargar'}" que no mapea a ningún código de receptor de ARCA (RG 5616). Corregí la condición de IVA del cliente antes de emitir.`,
+            error_code: 'CONDICION_IVA_NO_MAPEA',
+          }, 422)
+        }
+
+        // CbteAsoc (RG 4540): los comprobantes originales distintos de los renglones
+        // de esta parte, más los ingresados manualmente.
+        const asocVistos = new Set<string>()
+        for (const item of parte.items) {
+          const orig = item.comprobante_original
+          if (!orig?.numero_comprobante || !TIPO_CBTE_ARCA[orig.tipo_comprobante]) continue
+          const clave = `${orig.tipo_comprobante}|${orig.numero_comprobante}`
+          if (asocVistos.has(clave)) continue
+          asocVistos.add(clave)
+          cbteAsoc.push({
+            tipo:   TIPO_CBTE_ARCA[orig.tipo_comprobante],
+            ptoVta: parseInt(orig.numero_comprobante.split('-')[0], 10),
+            nro:    parseInt(orig.numero_comprobante.split('-')[1] ?? '0', 10),
+          })
+        }
+
+        // Asociados ingresados manualmente (caso migración: el original no está en el sistema)
+        for (const asoc of (asociados_manual ?? [])) {
+          const tipoArca = TIPO_CBTE_ARCA[asoc?.tipo]
+          const partesNro = String(asoc?.numero ?? '').trim().split('-')
+          const ptoVta   = parseInt(partesNro[0], 10)
+          const nro      = parseInt(partesNro[1] ?? '', 10)
+          if (!tipoArca || isNaN(ptoVta) || isNaN(nro)) {
+            throw corte({
+              error: `Comprobante asociado inválido: "${asoc?.tipo ?? ''} ${asoc?.numero ?? ''}". Formato esperado: tipo FA/FB/NDA/NDB y número PPPP-NNNNNNNN (ej: FA 0007-00000123).`,
+              error_code: 'ASOCIADO_INVALIDO',
+            }, 422)
+          }
+          const clave = `${asoc.tipo}|${asoc.numero}`
+          if (asocVistos.has(clave)) continue
+          asocVistos.add(clave)
+          cbteAsoc.push({ tipo: tipoArca, ptoVta, nro })
+        }
+
+        // RG 4540: una NC/ND fiscal no puede emitirse sin comprobante asociado
+        if (cbteAsoc.length === 0) {
+          throw corte({
+            error: 'No se detectó ningún comprobante original asociado a esta devolución (RG 4540). Ingresá manualmente el/los comprobantes que esta NC ajusta antes de emitir.',
+            error_code: 'NC_SIN_ASOCIADO',
+          }, 422)
+        }
+      }
+
+      const { data: numeracion, error: numError } = await supabase
+        .from("numeracion_comprobantes")
+        .select("*")
+        .eq("tipo_comprobante", tipoFinal)
+        .eq("punto_venta", puntoVenta)
+        .single()
+
+      if (numError) {
+        throw corte({ error: `Numeración no encontrada para ${tipoFinal} PV ${puntoVenta}` }, 500)
+      }
+
+      let nuevoNumero = numeracion.ultimo_numero + 1
+
+      // ─── Obtener TA y sincronizar numeración con ARCA ───
+      let arcaTa: { token: string; sign: string } | null = null
+      if (esFiscal && empresaConfig) {
+        const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
+        arcaTa = await obtenerTAConCache(supabase, ambiente)
+        const cbteTipo = TIPO_CBTE_ARCA[tipoFinal]
+        if (cbteTipo) {
+          const ultimoEnArca = await ultimoAutorizado(
+            ambiente, arcaTa.token, arcaTa.sign,
+            cuitDigitos(empresaConfig.cuit),
+            parseInt(puntoVenta, 10), cbteTipo,
+          )
+          if (ultimoEnArca !== numeracion.ultimo_numero) {
+            await supabase.from('numeracion_comprobantes')
+              .update({ ultimo_numero: ultimoEnArca })
+              .eq('tipo_comprobante', tipoFinal)
+              .eq('punto_venta', puntoVenta)
+            nuevoNumero = ultimoEnArca + 1
+          }
+        }
+      }
+
+      const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, "0")}`
+
+      // ─── Solicitar CAE a ARCA (solo NCA/NCB, no REV) ───
+      let cae: string | null = null
+      let vencimientoCae: string | null = null
+
+      if (esFiscal && empresaConfig && arcaTa) {
+        const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
+        const fecha = todayArgentina().replace(/-/g, '')
+        const tributos = []
+        if (percIVA > 0) {
+          // Percepción IVA espejo de la del comprobante de origen: base = neto de
+          // los renglones cuyo comprobante la llevó (aunque esta NC sea chica)
+          tributos.push({ id: TRIBUTO_ID.PERCEPCION_IVA, desc: 'Percepcion IVA RG 5329', baseImp: v.fiscal.baseIva, alic: TASA_PERCEPCION_IVA_DEVOLUCION, importe: percIVA })
+        }
+        if (percIIBB > 0) {
+          tributos.push({ id: TRIBUTO_ID.PERCEPCION_IIBB, desc: 'Percepcion IIBB', baseImp: totalNeto, alic: alicuotaIIBB, importe: percIIBB })
+        }
+
+        const respCAE = await solicitarCAE({
+          ambiente,
+          token:    arcaTa.token,
+          sign:     arcaTa.sign,
+          cuit:     cuitDigitos(empresaConfig.cuit),
+          ptoVta:   parseInt(puntoVenta, 10),
+          cbteTipo: TIPO_CBTE_ARCA[tipoFinal],
+          cbteDesde: nuevoNumero,
+          cbteHasta: nuevoNumero,
+          concepto:  CONCEPTO.PRODUCTOS,
+          docTipo:   DOC_TIPO.CUIT,
+          docNro:    clienteCuit,
+          fecha,
+          impTotal:   totalComprobante,
+          impTotConc: 0,
+          impNeto:    totalNeto,
+          impOpEx:    0,
+          impIva:     totalIva,
+          impTrib:    totalTrib,
+          iva: totalIva > 0
+            ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
+            : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
+          cbteAsoc,
+          tributos: tributos.length > 0 ? tributos : undefined,
+          condicionIVAReceptorId: condIvaReceptor!,
+        })
+        cae            = respCAE.cae
+        vencimientoCae = respCAE.vencimientoCae
+      }
+
+      const comprobanteInsert = {
+        tipo_comprobante:   tipoFinal,
+        numero_comprobante: numeroComprobante,
+        punto_venta:        puntoVenta,
+        fecha:              todayArgentina(),
+        cliente_id:         devolucion.cliente_id,
+        pedido_id:          devolucion.pedido_id || null,
+        total_neto:         -Math.abs(totalNeto),
+        total_iva:          -Math.abs(totalIva),
+        percepcion_iva:     -Math.abs(percIVA),
+        percepcion_iibb:    -Math.abs(percIIBB),
+        total_factura:      -Math.abs(totalComprobante),
+        saldo_pendiente:    -Math.abs(totalComprobante),
+        estado_pago:        "pendiente",
+        motivo_ajuste:      motivo_ajuste,
+        observaciones:      `${prefijoObs}${aplica10 ? " (renglones bonificados 10% contado — la factura original fue cobrada con el descuento)" : ""}`,
+        ...(cae            ? { cae }                             : {}),
+        ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
+      }
+
+      const detallePayload = parte.items.map((item: any, idx: number) => {
+        const bonif = origenDe.get(item.id)?.bonificado_contado
+        return {
           articulo_id: item.articulo_id,
-          cantidad: cantidadAbs,
-          precio_lista: precioUnitNeto,
-          precio_unitario_final: precioUnitNeto,
-          iva_porcentaje: ivaPct,
-          iva_monto_unitario: cantidadAbs > 0 ? ivaMonto / cantidadAbs : 0,
-          iva_incluido: !esNC,
-          subtotal_neto: precioNeto,
-          subtotal_iva: ivaMonto,
-          subtotal_total: Math.round((precioNeto + ivaMonto) * 100) / 100,
-          cliente_id: devolucion.cliente_id,
-          vendedor_id: devolucion.cliente?.vendedor_id ?? null,
-          provincia_destino: devolucion.cliente?.provincia ?? null,
-          pedido_id: devolucion.pedido_id ?? null,
-          comprobante_venta_id: comprobante.id,
-          tipo_comprobante: tipoFinal,
-          numero_comprobante: numeroComprobante,
-          metodo_facturacion: metodoFact,
-          color_dinero: colorDinero,
-          operador_id: auth.user.id,
-        },
-        {
-          sku: art?.sku,
-          descripcion: art?.descripcion,
-          categoria: art?.categoria,
-          marca_id: art?.marca_id,
-          proveedor_id: art?.proveedor_id,
-          iva_compras: art?.iva_compras,
-          iva_ventas: art?.iva_ventas,
-        },
-      )
+          descripcion: item.articulo.descripcion + (bonif ? " (bonif. 10% contado)" : ""),
+          cantidad: -Math.abs(item.cantidad), // Negativo
+          precio_unitario: item.precio_venta_original || 0,
+          // Con 10% contado: el renglón sale bonificado (mismo redondeo por renglón
+          // que usó el descuento en el cobro — coinciden al centavo)
+          precio_total: -Math.abs(netoRenglon[idx] ?? 0),
+        }
+      })
+
+      const logId = cae ? await registrarCAEObtenido(supabase, {
+        tipo: tipoFinal, puntoVenta, numero: numeroComprobante,
+        cae, vencimientoCae, importe: Math.abs(totalComprobante),
+        clienteCuit: devolucion.cliente?.cuit ?? null,
+        payload: { comprobante: comprobanteInsert, detalle: detallePayload },
+      }) : null
+
+      const { data: comprobante, error: comprobanteError } = await supabase
+        .from("comprobantes_venta")
+        .insert(comprobanteInsert)
+        .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones, motivo_ajuste')
+        .single()
+
+      if (comprobanteError) {
+        if (cae) {
+          await marcarHuerfano(supabase, logId, comprobanteError.message)
+          throw corte({ error: mensajeHuerfano(tipoFinal, numeroComprobante, cae) }, 500)
+        }
+        throw corte({ error: "Error creando comprobante: " + comprobanteError.message }, 500)
+      }
+
+      await marcarComprobanteCreado(supabase, logId, comprobante.id)
+
+      const detalleInserts = detallePayload.map((d: any) => ({ ...d, comprobante_id: comprobante.id }))
+
+      const { error: detalleError } = await supabase.from("comprobantes_venta_detalle").insert(detalleInserts)
+
+      if (detalleError) {
+        throw corte({ error: "Error creando detalle del comprobante" }, 500)
+      }
+
+      // Kardex: registrar movimiento por cada ítem de la NC/Reversa
+      // No-vendible: no afecta stock, no se registra en kardex
+      const esNC = tipoFinal.startsWith("NC")
+      const colorDinero = esNC ? "BLANCO" : "NEGRO"
+      const metodoFact = esNC ? "Factura" : "Presupuesto"
+      for (const [idx, item] of parte.items.entries()) {
+        if (item.es_vendible === false) continue
+        // Neto e IVA del renglón tal como salen en la NC/REV
+        const cantidadAbs = Math.abs(item.cantidad || 1)
+        const precioNeto = Math.abs(netoRenglon[idx] ?? 0)
+        const ivaMonto = esNC ? Math.abs(ivaRenglon[idx] ?? 0) : 0
+        const ivaPct = esNC && precioNeto > 0 ? Math.round((ivaMonto / precioNeto) * 10000) / 100 : 0
+        const precioUnitNeto = cantidadAbs > 0 ? precioNeto / cantidadAbs : 0
+        const art = item.articulo
+        await insertarKardex(
+          supabase,
+          {
+            tipo_movimiento: 'nota_credito_venta',
+            fecha: ahoraISO(), // kardex.fecha es timestamptz: "AAAA-MM-DD" a secas quedaba el día anterior
+            articulo_id: item.articulo_id,
+            cantidad: cantidadAbs,
+            precio_lista: precioUnitNeto,
+            precio_unitario_final: precioUnitNeto,
+            iva_porcentaje: ivaPct,
+            iva_monto_unitario: cantidadAbs > 0 ? ivaMonto / cantidadAbs : 0,
+            iva_incluido: !esNC,
+            subtotal_neto: precioNeto,
+            subtotal_iva: ivaMonto,
+            subtotal_total: Math.round((precioNeto + ivaMonto) * 100) / 100,
+            cliente_id: devolucion.cliente_id,
+            vendedor_id: devolucion.cliente?.vendedor_id ?? null,
+            provincia_destino: devolucion.cliente?.provincia ?? null,
+            pedido_id: devolucion.pedido_id ?? null,
+            comprobante_venta_id: comprobante.id,
+            tipo_comprobante: tipoFinal,
+            numero_comprobante: numeroComprobante,
+            metodo_facturacion: metodoFact,
+            color_dinero: colorDinero,
+            operador_id: auth.user.id,
+          },
+          {
+            sku: art?.sku,
+            descripcion: art?.descripcion,
+            categoria: art?.categoria,
+            marca_id: art?.marca_id,
+            proveedor_id: art?.proveedor_id,
+            iva_compras: art?.iva_compras,
+            iva_ventas: art?.iva_ventas,
+          },
+        )
+      }
+
+      await supabase
+        .from("numeracion_comprobantes")
+        .update({ ultimo_numero: nuevoNumero })
+        .eq("tipo_comprobante", tipoFinal)
+        .eq("punto_venta", numeracion.punto_venta)
+
+      // Libro mayor: la NC/Reversa acredita al cliente (haber). Fuente única del
+      // saldo (v_saldo_clientes); si falla, la advertencia viaja en la respuesta.
+      const ccAviso = await postearLibroConAviso(supabase, {
+        p_cliente_id:         devolucion.cliente_id,
+        p_tipo_movimiento:    'nota_credito',
+        p_debe:               0,
+        p_haber:              Math.abs(totalComprobante),
+        p_referencia_tipo:    'comprobante_venta',
+        p_referencia_id:      comprobante.id,
+        p_numero_comprobante: numeroComprobante,
+        p_observaciones:      `${tipoFinal} ${numeroComprobante} — Devolución${motivo_ajuste ? ': ' + motivo_ajuste : ''}`,
+        p_usuario_id:         auth.user.id,
+      }, `${tipoFinal} ${numeroComprobante}`)
+      if (ccAviso) avisos.push(ccAviso)
+
+      // Imputación automática NC↔FA (Fase A3): aplicar el crédito contra los
+      // comprobantes de origen de ESTA parte hasta agotarlo. Sin origen, el
+      // crédito queda disponible para imputación manual (cc_imputar_credito).
+      try {
+        for (const origenId of origenIds) {
+          const { data: impRes, error: impErr } = await supabase.rpc("cc_imputar_credito", {
+            p_credito_id: comprobante.id,
+            p_debito_id: origenId,
+            p_monto: null,
+            p_usuario_id: auth.user.id,
+          })
+          if (impErr) {
+            // "sin saldo disponible/pendiente" es esperable cuando el crédito se agotó
+            console.warn("[cc_imputar_credito] NC", comprobante.id, "→", origenId, impErr.message)
+            break
+          }
+          if (Number(impRes?.credito_saldo_restante) >= 0) break // crédito agotado
+        }
+      } catch (impError: any) {
+        console.error("[cc_imputar_credito] NC/REV", comprobante.id, impError.message)
+      }
+
+      emitidos.push({ id: comprobante.id, tipo: tipoFinal, numero: numeroComprobante, total: totalComprobante })
+
+      // ─── Generar PDF con QR y subirlo al bucket ───
+      try {
+        const { data: empresaData } = await supabase.from('configuracion_empresa').select('*').single()
+        const { data: marcasTbl }   = await supabase.from('marcas').select('id, descripcion').eq('activo', true)
+        const marcaDesc = new Map((marcasTbl ?? []).map((m: any) => [m.id, m.descripcion ?? '']))
+
+        let qrDataUrl: string | undefined
+        let qrUrl: string | undefined
+        if (cae && devolucion.cliente?.cuit) {
+          try {
+            const qrParams = {
+              cuit:       empresaData?.cuit ?? '',
+              ptoVta:     puntoVenta,
+              tipoCmp:    tipoFinal,
+              nroCmp:     numeroComprobante,
+              importe:    Math.abs(totalComprobante),
+              fecha:      todayArgentina(),
+              tipoDocRec: 80,
+              nroDocRec:  devolucion.cliente.cuit,
+              cae:        cae,
+            }
+            qrUrl     = buildQRUrl(qrParams)
+            qrDataUrl = await generarQRBase64(qrParams)
+          } catch (qrErr: any) {
+            console.error('[NC QR] Error generando QR:', qrErr.message)
+          }
+        }
+
+        // Detalle para el PDF (mismos importes que el detalle de la NC)
+        const detalleNC = parte.items.map((item: any, idx: number) => ({
+          articulo_id:     item.articulo_id,
+          descripcion:     item.articulo?.descripcion ?? item.descripcion ?? '—',
+          sku:             item.articulo?.sku ?? '',
+          cantidad:        -Math.abs(item.cantidad ?? 0),
+          precio_unitario: item.precio_venta_original ?? 0,
+          precio_total:    -Math.abs(netoRenglon[idx] ?? 0),
+          marca:           marcaDesc.get(item.articulo?.marca_id) ?? '',
+          descuento_propio: 0,
+        }))
+
+        const pdfData = buildPDFData({
+          comprobante: comprobante,
+          cliente:     devolucion.cliente,
+          empresa:     empresaData,
+          detalle:     detalleNC,
+          pedido:      null,
+          bonificaciones: [],
+          marcaDesc,
+          qrDataUrl,
+        })
+
+        const { pdfUrl, pdfPath, pdfHash } = await generarYSubirPDF(supabase, pdfData)
+        const snapshot = buildSnapshot(pdfData)
+
+        await supabase.from('comprobantes_venta').update({
+          pdf_url:              pdfUrl,
+          pdf_path:             pdfPath,
+          pdf_hash:             pdfHash,
+          fecha_generacion_pdf: new Date().toISOString(),
+          estado_pdf:           'generado',
+          pdf_snapshot:         snapshot,
+          qr_url:               qrUrl ?? null,
+        }).eq('id', comprobante.id)
+      } catch (pdfErr: any) {
+        console.error('[NC PDF] Error generando PDF:', pdfErr.message)
+        const { error: pdfMarkErr } = await supabase.from('comprobantes_venta').update({ estado_pdf: 'error' }).eq('id', comprobante.id)
+        if (pdfMarkErr) console.error('[NC PDF] marcando error:', pdfMarkErr.message)
+      }
     }
 
-    await supabase
-      .from("numeracion_comprobantes")
-      .update({ ultimo_numero: nuevoNumero })
-      .eq("tipo_comprobante", tipoFinal)
-      .eq("punto_venta", numeracion.punto_venta)
-
-    // Libro mayor: la NC/Reversa acredita al cliente (haber). Fuente única del
-    // saldo (v_saldo_clientes); si falla, la advertencia viaja en la respuesta.
-    const ccAviso = await postearLibroConAviso(supabase, {
-      p_cliente_id:         devolucion.cliente_id,
-      p_tipo_movimiento:    'nota_credito',
-      p_debe:               0,
-      p_haber:              Math.abs(totalComprobante),
-      p_referencia_tipo:    'comprobante_venta',
-      p_referencia_id:      comprobante.id,
-      p_numero_comprobante: numeroComprobante,
-      p_observaciones:      `${tipoFinal} ${numeroComprobante} — Devolución${motivo_ajuste ? ': ' + motivo_ajuste : ''}`,
-      p_usuario_id:         auth.user.id,
-    }, `${tipoFinal} ${numeroComprobante}`)
-
-    // Imputación automática NC↔FA (Fase A3): aplicar el crédito de la NC
-    // contra los comprobantes de origen de la devolución hasta agotarlo.
-    // Si el ítem no tiene comprobante original linkeado, el crédito queda
-    // disponible para imputación manual (cc_imputar_credito).
-    try {
-      const origenIds: string[] = [
-        ...new Set(
-          (devolucion.detalle ?? [])
-            .map((item: any) => item.comprobante_venta_id)
-            .filter(Boolean) as string[],
-        ),
-      ]
-      for (const origenId of origenIds) {
-        const { data: impRes, error: impErr } = await supabase.rpc("cc_imputar_credito", {
-          p_credito_id: comprobante.id,
-          p_debito_id: origenId,
-          p_monto: null,
-          p_usuario_id: auth.user.id,
-        })
-        if (impErr) {
-          // "sin saldo disponible/pendiente" es esperable cuando el crédito se agotó
-          console.warn("[cc_imputar_credito] NC", comprobante.id, "→", origenId, impErr.message)
-          break
+    // Fiscal primero (si ARCA falla, no queda una REV suelta de una devolución a medias)
+    for (const parte of partes) {
+      try {
+        await emitirParte(parte)
+      } catch (e) {
+        if (e instanceof Corte) {
+          if (!emitidos.length) return e.respuesta
+          // Una parte ya salió: se informa lo emitido y el error de lo que falta.
+          // Reintentar emite solo la parte pendiente (no duplica).
+          const err = await e.respuesta.json()
+          return NextResponse.json({ ...err, error: `${err.error} (ya se emitió ${emitidos.map((c) => `${c.tipo} ${c.numero}`).join(", ")}; al reintentar se emite solo lo que falta)`, emitidos }, { status: e.respuesta.status })
         }
-        if (Number(impRes?.credito_saldo_restante) >= 0) break // crédito agotado
+        throw e
       }
-    } catch (impError: any) {
-      console.error("[cc_imputar_credito] NC/REV", comprobante.id, impError.message)
     }
 
     // Marcar la devolución como facturada para que no pueda generar otra NC
@@ -561,83 +645,17 @@ export async function POST(request: Request) {
       console.error("[generar-nc-reversa] comisiones:", comErr)
     }
 
-    // ─── Generar PDF con QR y subirlo al bucket ───
-    try {
-      const { data: empresaData } = await supabase.from('configuracion_empresa').select('*').single()
-      const { data: marcasTbl }   = await supabase.from('marcas').select('id, descripcion').eq('activo', true)
-      const marcaDesc = new Map((marcasTbl ?? []).map((m: any) => [m.id, m.descripcion ?? '']))
-
-      let qrDataUrl: string | undefined
-      let qrUrl: string | undefined
-      if (cae && devolucion.cliente?.cuit) {
-        try {
-          const qrParams = {
-            cuit:       empresaData?.cuit ?? '',
-            ptoVta:     puntoVenta,
-            tipoCmp:    tipoFinal,
-            nroCmp:     numeroComprobante,
-            importe:    Math.abs(totalComprobante),
-            fecha:      todayArgentina(),
-            tipoDocRec: 80,
-            nroDocRec:  devolucion.cliente.cuit,
-            cae:        cae,
-          }
-          qrUrl     = buildQRUrl(qrParams)
-          qrDataUrl = await generarQRBase64(qrParams)
-        } catch (qrErr: any) {
-          console.error('[NC QR] Error generando QR:', qrErr.message)
-        }
-      }
-
-      // Detalle para el PDF
-      const detalleNC = (devolucion.detalle ?? []).map((item: any) => ({
-        articulo_id:     item.articulo_id,
-        descripcion:     item.articulo?.descripcion ?? item.descripcion ?? '—',
-        sku:             item.articulo?.sku ?? '',
-        cantidad:        -Math.abs(item.cantidad ?? 0),
-        precio_unitario: item.precio_venta_original ?? 0,
-        precio_total:    -Math.abs(item.subtotal ?? 0),
-        marca:           marcaDesc.get(item.articulo?.marca_id) ?? '',
-        descuento_propio: 0,
-      }))
-
-      const pdfData = buildPDFData({
-        comprobante: comprobante,
-        cliente:     devolucion.cliente,
-        empresa:     empresaData,
-        detalle:     detalleNC,
-        pedido:      null,
-        bonificaciones: [],
-        marcaDesc,
-        qrDataUrl,
-      })
-
-      const { pdfUrl, pdfPath, pdfHash } = await generarYSubirPDF(supabase, pdfData)
-      const snapshot = buildSnapshot(pdfData)
-
-      await supabase.from('comprobantes_venta').update({
-        pdf_url:              pdfUrl,
-        pdf_path:             pdfPath,
-        pdf_hash:             pdfHash,
-        fecha_generacion_pdf: new Date().toISOString(),
-        estado_pdf:           'generado',
-        pdf_snapshot:         snapshot,
-        qr_url:               qrUrl ?? null,
-      }).eq('id', comprobante.id)
-    } catch (pdfErr: any) {
-      console.error('[NC PDF] Error generando PDF:', pdfErr.message)
-      await supabase.from('comprobantes_venta').update({ estado_pdf: 'error' }).eq('id', comprobante.id).catch(() => {})
-    }
-
+    const principal = emitidos[0]
     return NextResponse.json({
       success: true,
-      ...(ccAviso ? { advertencia_libro_mayor: ccAviso } : {}),
+      ...(avisos.length ? { advertencia_libro_mayor: avisos.join(" · ") } : {}),
       comprobante: {
-        id: comprobante.id,
-        tipo: tipoFinal,
-        numero: numeroComprobante,
-        total: totalComprobante,
+        id: principal.id,
+        tipo: emitidos.map((c) => c.tipo).join(" + "),
+        numero: emitidos.map((c) => c.numero).join(" + "),
+        total: Math.round(emitidos.reduce((s, c) => s + c.total, 0) * 100) / 100,
       },
+      comprobantes: emitidos,
     })
   } catch (error: any) {
     console.error("[v0] Error generando NC/Reversa:", error)

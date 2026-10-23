@@ -6,6 +6,7 @@ import { guardarBorrador, useBorradorDevolucion } from "../datos/borrador-devolu
 import { buscarArticulos, useArticulos, useClienteViaje, useEncolar, useViaje, uuidv4 } from "../datos/hooks"
 import { parseMonto } from "@gm/formato"
 import { valorEstimadoDevolucion } from "../datos/cuenta-cobro"
+import { elegirOrigenDevolucion, origenDesdeComprado, type OrigenDevolucion } from "@gm/vendedor"
 import { dejarAviso, formatCurrency, GRACIA_TECLADO_MS, MontoInput, Pantalla, useBloqueoSalida, useBusqueda, useToast } from "../ui"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
 
@@ -59,26 +60,7 @@ export function Devolucion() {
     graciaTeclado.current = Date.now() + GRACIA_TECLADO_MS
     if (items.some((x) => x.articulo_id === a.id)) return
     const enPedido = data?.pedido?.detalle.find((d) => d.articulo_id === a.id)
-    let precio = 0
-    let origen: ItemDevolucion["origen"] = "vieja"
-    let aviso: string | null = null
-    if (enPedido) {
-      precio = enPedido.precio_final
-      origen = "pedido"
-    } else {
-      // Último precio facturado a este cliente (replicado en la ficha)
-      const comprado = data?.comprados.find((c) => c.articulo_id === a.id)
-      if (comprado) precio = comprado.ultimo_precio
-      else if (online) {
-        // Nunca se le facturó: el precio al que le iría facturado hoy (= web)
-        try {
-          const d = await api.get<{ precio?: number | null }>(`/api/chofer/articulo/precio-historico?clienteId=${clienteId}&articuloId=${a.id}`, { timeoutMs: 15_000 })
-          precio = Number(d?.precio) || 0
-        } catch {
-          aviso = "No se pudo consultar el precio: cargalo a mano."
-        }
-      } else aviso = "Sin señal y sin ventas previas de este artículo al cliente: cargá el precio a mano."
-    }
+    const { precio, origenComp, aviso } = await resolverItem(a.id, enPedido)
     setBorrador((prev) => ({
       items: [
         ...prev.items,
@@ -86,30 +68,66 @@ export function Devolucion() {
           articulo_id: a.id,
           sku: a.sku,
           descripcion: a.descripcion,
-          cantidad: origen === "pedido" ? enPedido!.cantidad : 1,
+          cantidad: enPedido ? enPedido.cantidad : 1,
           precio_venta_original: precio,
           motivo: "otro",
           condicion: "vendible",
-          origen,
-          comprobante_venta_id: data?.comprados.find((c) => c.articulo_id === a.id)?.comprobante_venta_id ?? null,
+          origen: enPedido ? "pedido" : "vieja",
+          comprobante_venta_id: origenComp.comprobante_venta_id,
+          origen_comp: origenComp,
         },
       ],
     }))
     if (aviso) mostrar(aviso, "err")
   }
 
-  // Del pedido de esta entrega: entra con la cantidad y el precio facturados (después se ajusta)
-  const agregarDelPedido = (it: DetallePedido) => {
+  // Precio y comprobante de origen (regla del dueño 21/10/2026, = servidor): con señal lo
+  // resuelve el ERP (lo del pedido contra la factura de ESE pedido, al neto facturado); sin
+  // señal, el último comprobante replicado del artículo; si no hay, precio a mano y el
+  // comprobante más reciente del cliente. Al sincronizar, el servidor lo vuelve a resolver.
+  async function resolverItem(articuloId: string, enPedido: DetallePedido | undefined) {
+    let precio = 0
+    let origenComp: OrigenDevolucion | null = null
+    let aviso: string | null = null
+    if (online) {
+      try {
+        const pedidoQ = data?.pedido?.id ? `&pedidoId=${data.pedido.id}` : ""
+        const d = await api.get<{ precio?: number | null; origen?: OrigenDevolucion | null }>(`/api/chofer/articulo/precio-historico?clienteId=${clienteId}&articuloId=${articuloId}${pedidoQ}`, { timeoutMs: 15_000 })
+        precio = Number(d?.precio) || 0
+        origenComp = d?.origen ?? null
+      } catch {
+        aviso = "No se pudo consultar el precio de factura: se usa el del equipo."
+      }
+    }
+    if (!origenComp) {
+      const comprado = data?.comprados.find((c) => c.articulo_id === articuloId)
+      if (comprado) {
+        origenComp = origenDesdeComprado(comprado)
+        precio = origenComp.precio ?? comprado.ultimo_precio
+      } else {
+        origenComp = elegirOrigenDevolucion(null, data?.contexto_devolucion, "factura")
+        aviso = aviso ?? "Sin ventas previas de este artículo en el equipo: cargá el precio NETO a mano."
+      }
+    }
+    // Presupuesto: el precio final del pedido es el facturado
+    if (!(precio > 0) && enPedido && !origenComp.fiscal) precio = enPedido.precio_final
+    return { precio, origenComp, aviso }
+  }
+
+  // Del pedido de esta entrega: entra con la cantidad facturada y el precio de la factura (después se ajusta)
+  const agregarDelPedido = async (it: DetallePedido) => {
     if (items.some((x) => x.articulo_id === it.articulo_id)) return
+    const { precio, origenComp, aviso } = await resolverItem(it.articulo_id, it)
     setBorrador((prev) => ({
-      items: [...prev.items, { articulo_id: it.articulo_id, sku: it.articulos?.sku ?? null, descripcion: it.articulos?.descripcion || "Artículo", cantidad: it.cantidad, precio_venta_original: it.precio_final, motivo: "otro", condicion: "vendible", origen: "pedido", comprobante_venta_id: null }],
+      items: [...prev.items, { articulo_id: it.articulo_id, sku: it.articulos?.sku ?? null, descripcion: it.articulos?.descripcion || "Artículo", cantidad: it.cantidad, precio_venta_original: precio, motivo: "otro", condicion: "vendible", origen: "pedido", comprobante_venta_id: origenComp.comprobante_venta_id, origen_comp: origenComp }],
     }))
+    if (aviso) mostrar(aviso, "err")
   }
   const delPedidoSinAgregar = (data?.pedido?.detalle ?? []).filter((it) => !items.some((x) => x.articulo_id === it.articulo_id))
 
   const updateItem = (idx: number, patch: Partial<ItemDevolucion>) => setBorrador((prev) => ({ items: prev.items.map((i, n) => (n === idx ? { ...i, ...patch } : i)) }))
   const total = items.reduce((s, i) => s + i.cantidad * i.precio_venta_original, 0)
-  const valorEstimado = valorEstimadoDevolucion(items, data?.comprados ?? [])
+  const valorEstimado = valorEstimadoDevolucion(items, data?.comprados ?? [], data?.contexto_devolucion?.alicuota_iibb ?? 0)
 
   const registrar = async () => {
     if (!items.length || enviandoRef.current) return
@@ -158,7 +176,7 @@ export function Devolucion() {
                 <span className="text-xl font-bold text-green-700">{formatCurrency(valorEstimado)}</span>
               </div>
               {Math.abs(valorEstimado - total) > 0.005 && (
-                <p className="text-xs text-green-700">Bruto {formatCurrency(total)} · precio final de la factura (con el 10 % contado). Es lo que descuenta el cobro.</p>
+                <p className="text-xs text-green-700">Neto {formatCurrency(total)} · tal cual fue facturado: + IVA + percepciones, − 10 % si fue contado. Es lo que descuenta el cobro y el importe de la NC.</p>
               )}
             </div>
             <button onClick={() => void registrar()} disabled={enviando || !enCurso} className="min-h-14 w-full rounded-2xl bg-amber-500 py-4 text-xl font-bold text-white active:scale-95 disabled:opacity-50">
@@ -226,8 +244,14 @@ export function Devolucion() {
                 <input type="text" inputMode="numeric" value={item.cantidad || ""} onChange={(e) => updateItem(idx, { cantidad: Math.max(0, Math.trunc(parseMonto(e.target.value.replace(/\D/g, "")) ?? 0)) })} className="min-h-11 w-full rounded-xl border-2 border-gray-200 px-3 py-2 text-center text-lg font-bold" />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-gray-500">Precio unit.{item.precio_venta_original <= 0 ? <span className="font-bold text-amber-700"> · cargalo</span> : null}</label>
-                <MontoInput valor={item.precio_venta_original || 0} onCambio={(n) => updateItem(idx, { precio_venta_original: n })} className={`min-h-11 w-full rounded-xl border-2 px-3 py-2 text-center text-lg font-bold ${item.precio_venta_original <= 0 ? "border-amber-400 bg-amber-50" : "border-gray-200"}`} />
+                <label className="mb-1 block text-xs text-gray-500">Precio unit. {item.origen_comp?.fiscal === false ? "final" : "neto"}{item.precio_venta_original <= 0 ? <span className="font-bold text-amber-700"> · cargalo</span> : null}</label>
+                {item.origen_comp?.exacto ? (
+                  // Facturado en el sistema: el precio es el de la factura y no se toca
+                  <p className="min-h-11 w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-3 py-2 text-center text-lg font-bold text-gray-700">{formatCurrency(item.precio_venta_original)}</p>
+                ) : (
+                  <MontoInput valor={item.precio_venta_original || 0} onCambio={(n) => updateItem(idx, { precio_venta_original: n })} className={`min-h-11 w-full rounded-xl border-2 px-3 py-2 text-center text-lg font-bold ${item.precio_venta_original <= 0 ? "border-amber-400 bg-amber-50" : "border-gray-200"}`} />
+                )}
+                {item.origen_comp?.numero_comprobante ? <p className="mt-1 text-[11px] text-gray-400">{item.origen_comp.tipo_comprobante} {item.origen_comp.numero_comprobante}</p> : null}
               </div>
             </div>
             <div>

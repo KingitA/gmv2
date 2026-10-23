@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { esTripulante } from "@/lib/viajes/chofer"
 import { esUuid } from "@/lib/mobile/uuid"
+import { prepararRenglonesDevolucion } from "@/lib/cobranzas/origen-devolucion"
 
 // POST /api/chofer/viaje/[id]/devolucion
 // El chofer registra una devolución durante el reparto.
@@ -25,9 +26,9 @@ export async function POST(
       id: idEquipo,
       cliente_id,
       pedido_id,
-      items, // [{ articulo_id, cantidad, precio_venta_original, motivo, es_vendible, condicion, origen }]
       observaciones,
     } = body
+    let items = body.items // [{ articulo_id, cantidad, precio_venta_original, motivo, es_vendible, condicion, origen }]
 
     if (!cliente_id || !items?.length) {
       return NextResponse.json({ error: "cliente_id e items son requeridos" }, { status: 400 })
@@ -69,6 +70,10 @@ export async function POST(
     if (!["despachado", "en_curso"].includes(viaje.estado)) {
       return NextResponse.json({ error: "El viaje no está activo" }, { status: 400 })
     }
+
+    // Cada renglón contra su comprobante de origen (lo del pedido entregado, contra
+    // el comprobante de ESE pedido) y al precio facturado (regla del dueño 21/10/2026)
+    items = await prepararRenglonesDevolucion(supabase, cliente_id, items, { pedidoId: pedido_id })
 
     const montoTotal = items.reduce(
       (s: number, i: any) => s + Number(i.cantidad) * Number(i.precio_venta_original),

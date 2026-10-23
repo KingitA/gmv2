@@ -1,4 +1,5 @@
 import type { DefDataset } from "@gm/core"
+import type { ContextoDevolucion, OrigenDevolucion } from "@gm/vendedor"
 
 // Datasets que replica la app Chofer (servidor: lib/mobile/sync/chofer.ts). MOBILE.md → "Chofer".
 //
@@ -211,6 +212,12 @@ export interface Comprado {
   cantidad_total: number
   /** La factura de origen tiene bonificación contado viva: una devolución de esa mercadería vale 10 % menos */
   bonificado_contado?: boolean
+  /** Origen de devolución (= OrigenDevolucion, 21/10/2026). Faltan en réplicas viejas */
+  fiscal?: boolean
+  percepcion_iva?: boolean
+  exacto?: boolean
+  precio?: number | null
+  iva_unitario?: number | null
 }
 
 export interface ClienteViajeRow {
@@ -240,6 +247,8 @@ export interface ClienteViajeRow {
   viaje_estado: string
   cobro: CuentaCobro
   comprados: Comprado[]
+  /** Para valuar devoluciones igual que el servidor (IIBB vigente, comprobante más reciente). Ausente = réplica vieja */
+  contexto_devolucion?: ContextoDevolucion | null
 }
 
 // ─── Billetera (= GET /api/chofer/billetera) ─────────────────────────────────
@@ -351,6 +360,8 @@ export interface ItemDevolucion {
   condicion: "vendible" | "no_vendible"
   origen: "pedido" | "vieja"
   comprobante_venta_id?: string | null
+  /** Comprobante de origen y cómo se valúa (regla del dueño 21/10/2026). Falta en borradores viejos */
+  origen_comp?: OrigenDevolucion | null
 }
 export interface OpDevolucion {
   viaje_id: string
