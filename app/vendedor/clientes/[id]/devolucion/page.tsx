@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
-import { previewPrecioArticulo } from "@/lib/actions/pedidos"
+import { origenDesdeComprado, valorDevolucionConOrigen, type OrigenDevolucion } from "@/lib/cobranzas/valor-devolucion"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { localMatch } from "@/lib/search/local-match"
 import { fecha } from "@/lib/formato"
@@ -27,7 +27,15 @@ interface Comprado {
   numero_comprobante: string
   tipo_comprobante: string
   cantidad_total: number
+  // Origen de devolución (lib/cobranzas/origen-devolucion.ts)
+  bonificado_contado?: boolean
+  fiscal?: boolean
+  percepcion_iva?: boolean
+  exacto?: boolean
+  precio?: number | null
+  iva_unitario?: number | null
 }
+
 
 interface ItemDev {
   articulo_id: string
@@ -39,6 +47,7 @@ interface ItemDev {
   comprobante_venta_id: string | null
   fecha_venta_original: string | null
   nunca_facturado: boolean
+  origen: OrigenDevolucion | null
 }
 
 const CONDICIONES: { valor: ItemDev["condicion"]; label: string; hint: string }[] = [
@@ -53,6 +62,7 @@ export default function VendedorDevolucionPage() {
 
   const [clienteNombre, setClienteNombre] = useState("")
   const [comprados, setComprados] = useState<Comprado[]>([])
+  const [alicuotaIIBB, setAlicuotaIIBB] = useState(0)
   const [cargando, setCargando] = useState(true)
   const [q, setQ] = useState("")
 
@@ -84,7 +94,10 @@ export default function VendedorDevolucionPage() {
     ])
       .then(([cli, comp]) => {
         if (!cli.error) setClienteNombre(cli.cliente?.nombre || "")
-        if (!comp.error) setComprados(comp.comprados || [])
+        if (!comp.error) {
+          setComprados(comp.comprados || [])
+          setAlicuotaIIBB(Number(comp.contexto?.alicuota_iibb) || 0)
+        }
       })
       .catch(() => {})
       .finally(() => setCargando(false))
@@ -125,6 +138,7 @@ export default function VendedorDevolucionPage() {
         comprobante_venta_id: c.comprobante_venta_id,
         fecha_venta_original: c.ultima_fecha?.slice(0, 10) || null,
         nunca_facturado: false,
+        origen: origenDesdeComprado(c),
       },
     ])
   }
@@ -132,10 +146,15 @@ export default function VendedorDevolucionPage() {
   // Artículo nunca facturado a este cliente: entra al precio ACTUAL
   const agregarDeCatalogo = async (a: any) => {
     if (items.some((i) => i.articulo_id === a.id)) return
+    // Se asocia al comprobante más reciente del tipo que corresponde (cliente todo
+    // facturado ⇒ NC A aunque el artículo sea de presupuesto); precio actual NETO
     let precio = 0
+    let origen: OrigenDevolucion | null = null
     try {
-      const p = await previewPrecioArticulo(id, a.id, {})
-      precio = p.precio
+      const d = await fetch(`/api/chofer/articulo/precio-historico?clienteId=${id}&articuloId=${a.id}`).then((r) => r.json())
+      precio = Number(d.precio) || 0
+      origen = d.origen ?? null
+      if (typeof d.alicuota_iibb === "number") setAlicuotaIIBB(d.alicuota_iibb)
     } catch {}
     setItems((prev) => [
       ...prev,
@@ -146,9 +165,10 @@ export default function VendedorDevolucionPage() {
         cantidad: 1,
         precio_venta_original: precio,
         condicion: "vendible",
-        comprobante_venta_id: null,
+        comprobante_venta_id: origen?.comprobante_venta_id ?? null,
         fecha_venta_original: null,
         nunca_facturado: true,
+        origen,
       },
     ])
     setModoCatalogo(false)
@@ -160,7 +180,9 @@ export default function VendedorDevolucionPage() {
   const updateItem = (idx: number, patch: Partial<ItemDev>) =>
     setItems((prev) => prev.map((i, n) => (n === idx ? { ...i, ...patch } : i)))
 
-  const total = items.reduce((s, i) => s + i.cantidad * i.precio_venta_original, 0)
+  // Tal cual fue facturado (neto + IVA + percepciones − 10% contado): lo que descuenta
+  // del cobro y el importe de la NC — misma función que el servidor
+  const total = valorDevolucionConOrigen(items, alicuotaIIBB).total
 
   const registrar = async () => {
     if (!items.length || enviando) return
@@ -268,9 +290,10 @@ export default function VendedorDevolucionPage() {
                 />
               </div>
               <div>
-                <label className="text-[11px] text-gray-400 block mb-0.5">Precio unitario</label>
+                <label className="text-[11px] text-gray-400 block mb-0.5">Precio unitario {i.origen?.fiscal ? "neto" : "final"}</label>
                 <InputMonto
                   soloPositivos
+                  disabled={!!i.origen?.exacto}
                   value={i.precio_venta_original || ""}
                   onChange={(n) => updateItem(idx, { precio_venta_original: Math.max(0, n ?? 0) })}
                   className="h-auto w-full rounded-lg border border-gray-300 px-3 py-2 text-right font-bold"
