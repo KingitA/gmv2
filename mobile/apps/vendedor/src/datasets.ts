@@ -157,11 +157,17 @@ export interface Comprado {
   ultimo_precio: number; ultima_fecha: string; comprobante_venta_id: string | null; numero_comprobante: string; tipo_comprobante: string; cantidad_total: number
   /** La factura tuvo bonificación contado (la devolución vale 10% menos). Falta en réplicas viejas */
   bonificado_contado?: boolean
+  /** Origen de devolución (= OrigenDevolucion, 21/10/2026). Faltan en réplicas viejas */
+  fiscal?: boolean
+  percepcion_iva?: boolean
+  exacto?: boolean
+  precio?: number | null
+  iva_unitario?: number | null
 }
 
 /** = GET /api/vendedor/cliente/[id] + comprados + habituales. id = cliente.id */
 export type { MovimientoCC } from "@gm/vendedor"
-import type { MovimientoCC } from "@gm/vendedor"
+import type { MovimientoCC, ContextoDevolucion } from "@gm/vendedor"
 
 export interface CuentaCliente {
   id: string
@@ -177,6 +183,8 @@ export interface CuentaCliente {
   habituales: Array<{ articulo_id: string; veces_pedido: number; cantidad_habitual: number }>
   /** Extracto del libro (= ERP, lib/cuenta-corriente/extracto.ts). null = no se pudo cargar; ausente = réplica vieja */
   movimientos?: MovimientoCC[] | null
+  /** Para valuar devoluciones igual que el servidor (IIBB vigente, comprobante más reciente). Ausente = réplica vieja */
+  contexto_devolucion?: ContextoDevolucion | null
 }
 
 // ─── Pedidos ─────────────────────────────────────────────────────────────────

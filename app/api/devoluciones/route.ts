@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from '@/lib/auth'
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
+import { prepararRenglonesDevolucion } from "@/lib/cobranzas/origen-devolucion"
 import { redondear } from "@/lib/formato"
 
 export async function GET(request: NextRequest) {
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest) {
     const supabase = await createClient()
     const body = await request.json()
 
-    const {
+    let {
       cliente_id,
       vendedor_id,
       pedido_id,
@@ -126,6 +127,10 @@ export async function POST(request: NextRequest) {
     if (!cliente_id || !items || items.length === 0) {
       return NextResponse.json({ error: "cliente_id e items son requeridos" }, { status: 400 })
     }
+
+    // Cada renglón contra su comprobante de origen y, si está facturado en el
+    // sistema, al precio facturado (regla del dueño 21/10/2026)
+    items = await prepararRenglonesDevolucion(supabase, cliente_id, items, { pedidoId: pedido_id })
 
     // Calcular monto total
     const montoTotal = items.reduce((sum: number, item: any) => sum + item.cantidad * item.precio_venta_original, 0)

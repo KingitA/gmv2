@@ -17,6 +17,7 @@ import { EstadoFoto, clsOcr, useLectorFotos } from "@/components/pagos/foto-cheq
 import { ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
 import { InputMonto } from "@/components/ui/input-monto"
 import { redondear } from "@/lib/formato"
+import { valorDevolucionConOrigen, type OrigenDevolucion } from "@/lib/cobranzas/valor-devolucion"
 
 // ─── Tipos ────────────────────────────────────────────────────
 
@@ -67,7 +68,9 @@ interface ItemDevolucion {
   motivo: string
   condicion: "vendible" | "no_vendible"
   origen: "pedido" | "vieja"
-  comprobante_venta_id?: string
+  comprobante_venta_id?: string | null
+  /** Comprobante de origen y cómo se valúa (regla del dueño 21/10/2026) */
+  origenComp?: OrigenDevolucion | null
 }
 
 // Efectivo, o una fila de cheque/transferencia (lib/cheques/fila: nace de la foto,
@@ -111,6 +114,7 @@ export default function ClienteEntregaPage() {
 
   // Estado de devolución
   const [devItems, setDevItems] = useState<ItemDevolucion[]>([])
+  const [devAlicuotaIIBB, setDevAlicuotaIIBB] = useState(0)
   const [busquedaArticulo, setBusquedaArticulo] = useState("")
   const [resultadosArticulo, setResultadosArticulo] = useState<any[]>([])
   const [guardandoDev, setGuardandoDev] = useState(false)
@@ -227,17 +231,21 @@ export default function ClienteEntregaPage() {
     cantidadMax?: number
   ) => {
     const enPedido = data?.pedido?.detalle.find((d) => d.articulo_id === articuloId)
-    let precio = precioOverride ?? 0
-    let origen: "pedido" | "vieja" = "vieja"
-
-    if (enPedido) {
-      precio = precioOverride ?? enPedido.precio_final
-      origen = "pedido"
-    } else if (!precioOverride) {
-      const res = await fetch(`/api/chofer/articulo/precio-historico?clienteId=${clienteId}&articuloId=${articuloId}`)
+    const origen: "pedido" | "vieja" = enPedido ? "pedido" : "vieja"
+    // Precio y comprobante de origen: lo facturado (lo del pedido, contra la factura
+    // de ESE pedido, al neto facturado) o, si no está facturado en el sistema, el
+    // comprobante más reciente y el precio actual neto (regla del dueño 21/10/2026)
+    let precio = 0
+    let origenComp: OrigenDevolucion | null = null
+    try {
+      const pedidoQ = data?.pedido?.id ? `&pedidoId=${data.pedido.id}` : ""
+      const res = await fetch(`/api/chofer/articulo/precio-historico?clienteId=${clienteId}&articuloId=${articuloId}${pedidoQ}`)
       const d = await res.json()
-      precio = d.precio || 0
-    }
+      precio = Number(d.precio) || 0
+      origenComp = d.origen ?? null
+      if (typeof d.alicuota_iibb === "number") setDevAlicuotaIIBB(d.alicuota_iibb)
+    } catch {}
+    if (!origenComp?.exacto && !(precio > 0) && precioOverride) precio = precioOverride
 
     // No agregar duplicado — si ya está, no hacer nada
     if (devItems.some((x) => x.articulo_id === articuloId)) return
@@ -254,6 +262,8 @@ export default function ClienteEntregaPage() {
         motivo: "otro",
         condicion: "vendible",
         origen,
+        comprobante_venta_id: origenComp?.comprobante_venta_id ?? null,
+        origenComp,
       },
     ])
   }
@@ -622,8 +632,11 @@ export default function ClienteEntregaPage() {
                       <InputMonto decimales={0} soloPositivos value={item.cantidad} onChange={(n) => setDevItems((p) => p.map((x, i) => i === idx ? { ...x, cantidad: Math.trunc(n ?? 0) } : x))} className="h-auto w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-lg font-bold text-center" />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500 mb-1 block">Precio unit.</label>
-                      <InputMonto soloPositivos value={item.precio_venta_original} onChange={(n) => setDevItems((p) => p.map((x, i) => i === idx ? { ...x, precio_venta_original: n ?? 0 } : x))} className="h-auto w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-lg font-bold text-center" />
+                      <label className="text-xs text-gray-500 mb-1 block">
+                        Precio unit. {item.origenComp?.fiscal ? "neto" : "final"}
+                        {item.origenComp?.numero_comprobante ? ` · ${item.origenComp.tipo_comprobante} ${item.origenComp.numero_comprobante}` : ""}
+                      </label>
+                      <InputMonto soloPositivos disabled={!!item.origenComp?.exacto} value={item.precio_venta_original} onChange={(n) => setDevItems((p) => p.map((x, i) => i === idx ? { ...x, precio_venta_original: n ?? 0 } : x))} className="h-auto w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-lg font-bold text-center" />
                     </div>
                   </div>
                   <div>
@@ -657,8 +670,9 @@ export default function ClienteEntregaPage() {
                 <>
                   <div className="bg-green-50 rounded-xl px-4 py-3 flex justify-between items-center">
                     <span className="font-medium text-green-700">Total devolución:</span>
-                    <span className="font-bold text-green-700 text-xl">{formatCurrency(devItems.reduce((s, i) => s + i.cantidad * i.precio_venta_original, 0))}</span>
+                    <span className="font-bold text-green-700 text-xl">{formatCurrency(valorDevolucionConOrigen(devItems.map((i) => ({ cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, origen: i.origenComp })), devAlicuotaIIBB).total)}</span>
                   </div>
+                  <p className="text-xs text-gray-500 px-1">Tal cual fue facturado: neto + IVA + percepciones, menos el 10% si esa factura fue contado. Es lo que descuenta del cobro y el importe de la NC.</p>
                   <button onClick={guardarDevolucion} disabled={guardandoDev} className="w-full py-5 bg-amber-500 text-white rounded-2xl text-xl font-bold active:scale-95 disabled:opacity-50">
                     {guardandoDev ? "Guardando..." : "Registrar Devolución"}
                   </button>

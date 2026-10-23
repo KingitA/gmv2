@@ -1,11 +1,16 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { previewPrecioArticulo } from "@/lib/actions/pedidos"
+import { resolverOrigenesDevolucion } from "@/lib/cobranzas/origen-devolucion"
 
-// GET /api/chofer/articulo/precio-historico?clienteId=&articuloId=
-// Retorna el último precio de venta de un artículo para un cliente específico.
-// Usado para calcular el precio de devoluciones de mercadería vieja.
+// GET /api/chofer/articulo/precio-historico?clienteId=&articuloId=[&pedidoId=]
+// Precio y comprobante de origen de un artículo que el cliente devuelve (regla
+// del dueño 21/10/2026, lib/cobranzas/origen-devolucion.ts):
+//  - si está en un comprobante del sistema (o en el del pedido que se entrega):
+//    el precio FACTURADO (neto si fue factura) y ese comprobante;
+//  - si no: el comprobante más reciente del cliente del tipo que corresponde y
+//    el precio actual del cliente (neto si va por factura), editable.
+// `origen` + `alicuota_iibb` alcanzan para valuar con valorDevolucionConOrigen.
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
   if (auth.error) return auth.error
@@ -15,68 +20,24 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const clienteId = searchParams.get("clienteId")
     const articuloId = searchParams.get("articuloId")
+    const pedidoId = searchParams.get("pedidoId")
 
     if (!clienteId || !articuloId) {
       return NextResponse.json({ error: "clienteId y articuloId son requeridos" }, { status: 400 })
     }
 
-    // Buscar en kardex: última venta de este artículo a este cliente
-    const { data: kardex } = await supabase
-      .from("kardex")
-      .select("precio_unitario_final, fecha, numero_comprobante, tipo_comprobante")
-      .eq("cliente_id", clienteId)
-      .eq("articulo_id", articuloId)
-      .eq("tipo_movimiento", "venta")
-      .order("fecha", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (kardex) {
-      return NextResponse.json({
-        precio: Number(kardex.precio_unitario_final),
-        fecha: kardex.fecha,
-        comprobante: kardex.numero_comprobante,
-        tipo_comprobante: kardex.tipo_comprobante,
-        fuente: "kardex",
-      })
-    }
-
-    // Fallback: buscar en comprobantes_venta_detalle
-    const { data: detalle } = await supabase
-      .from("comprobantes_venta_detalle")
-      .select(`
-        precio_unitario, created_at,
-        comprobante:comprobantes_venta!inner(
-          cliente_id, fecha, numero_comprobante, tipo_comprobante
-        )
-      `)
-      .eq("articulo_id", articuloId)
-      .eq("comprobantes_venta.cliente_id", clienteId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (detalle) {
-      return NextResponse.json({
-        precio: Number(detalle.precio_unitario),
-        fecha: (detalle.comprobante as any)?.fecha,
-        comprobante: (detalle.comprobante as any)?.numero_comprobante,
-        tipo_comprobante: (detalle.comprobante as any)?.tipo_comprobante,
-        fuente: "comprobante",
-      })
-    }
-
-    // Nunca se le facturó: el precio al que le iría facturado hoy (motor de
-    // precios del cliente: lista, método, bonificaciones).
-    try {
-      const p = await previewPrecioArticulo(clienteId, articuloId)
-      return NextResponse.json({ precio: p.precio, fecha: null, comprobante: null, fuente: "vigente" })
-    } catch (e: any) {
-      console.error("[chofer] precio vigente:", e?.message)
-    }
+    const { origenes, contexto } = await resolverOrigenesDevolucion(supabase as any, clienteId, [articuloId], { pedidoId })
+    const o = origenes.get(articuloId)!
+    const precio = o.exacto ? o.precio : o.precio_sugerido
     return NextResponse.json({
-      precio: null,
-      mensaje: "No se encontraron ventas previas de este artículo al cliente",
+      precio: precio ?? null,
+      comprobante: o.numero_comprobante,
+      tipo_comprobante: o.tipo_comprobante,
+      comprobante_venta_id: o.comprobante_venta_id,
+      fuente: o.exacto ? "comprobante" : "vigente",
+      origen: o,
+      alicuota_iibb: contexto.alicuota_iibb,
+      ...(precio == null ? { mensaje: "No se pudo calcular el precio: cargalo a mano." } : {}),
     })
   } catch (error: any) {
     console.error("[chofer] Error en precio-historico:", error)

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { esUuid } from "@/lib/mobile/uuid"
+import { prepararRenglonesDevolucion } from "@/lib/cobranzas/origen-devolucion"
 
 /**
  * POST /api/viajante/devolucion — devolución registrada en la calle (Fase E).
@@ -16,7 +17,8 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
     const body = await request.json()
-    const { cliente_id, pedido_id, items, observaciones } = body
+    const { cliente_id, pedido_id, observaciones } = body
+    let items = body.items
 
     if (!cliente_id || !Array.isArray(items) || !items.length) {
       return NextResponse.json({ error: "cliente_id e items son requeridos" }, { status: 400 })
@@ -43,6 +45,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: `Condición inválida: ${i.condicion}` }, { status: 400 })
       }
     }
+
+    // Cada renglón contra su comprobante de origen y, si está facturado en el
+    // sistema, al precio facturado (regla del dueño 21/10/2026)
+    items = await prepararRenglonesDevolucion(supabase, cliente_id, items, { pedidoId: pedido_id })
 
     const montoTotal = items.reduce(
       (s: number, i: any) => s + Number(i.precio_venta_original || 0) * Number(i.cantidad || 0),

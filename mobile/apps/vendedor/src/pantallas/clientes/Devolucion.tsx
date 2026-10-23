@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
 import { useNoEnviados, useParamEstado } from "@gm/core"
 import { fecha, parseMonto } from "@gm/formato"
-import { valorDevolucion } from "@gm/vendedor"
+import { elegirOrigenDevolucion, origenDesdeComprado, valorDevolucionConOrigen, type OrigenDevolucion } from "@gm/vendedor"
 import { COND_VACIA, DS, type Articulo, type Comprado } from "../../datasets"
 import { buscarCatalogo } from "../../datos/busqueda"
 import { rechazosDe, useCatalogo, useCliente, useCuenta, useEncolar, uuidv4 } from "../../datos/hooks"
@@ -31,6 +31,8 @@ interface ItemDev {
   comprobante_venta_id: string | null
   fecha_venta_original: string | null
   nunca_facturado: boolean
+  /** Comprobante de origen y cómo se valúa (regla del dueño 21/10/2026). Falta en borradores viejos */
+  origen_comp?: OrigenDevolucion | null
 }
 
 const CONDICIONES: { valor: ItemDev["condicion"]; label: string; hint: string }[] = [
@@ -91,14 +93,19 @@ const Foto = ({ url }: { url: string | null }) =>
 
 // ─── /clientes/:id/devolucion ────────────────────────────────────────────────
 
-/** Valor de la devolución (= servidor, sin percepciones): neto + IVA si la factura original es fiscal, −10% si tuvo contado. */
-function valorEstimado(items: Array<{ cantidad: number; precio_venta_original: number; comprobante_venta_id: string | null }>, comprados: Comprado[]): number {
-  const orig = items.map((i) => comprados.find((c) => c.comprobante_venta_id && c.comprobante_venta_id === i.comprobante_venta_id))
-  return valorDevolucion({
-    renglones: items.map((i) => ({ subtotal: i.cantidad * i.precio_venta_original })),
-    aplica10: orig.some((c) => !!c?.bonificado_contado),
-    conIva: orig.some((c) => !!c && ["FA", "FB", "FC"].includes(c.tipo_comprobante)),
-  }).total
+/**
+ * Valor de la devolución (= servidor y NC, regla del dueño 21/10/2026): cada renglón tal cual fue
+ * facturado — neto e IVA del renglón, percepción IVA si esa factura la llevó, IIBB vigente del
+ * cliente, −10% si fue contado.
+ */
+function valorEstimado(items: ItemDev[], comprados: Comprado[], alicuotaIIBB: number): number {
+  return valorDevolucionConOrigen(
+    items.map((i) => {
+      const c = comprados.find((x) => x.comprobante_venta_id && x.comprobante_venta_id === i.comprobante_venta_id)
+      return { cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, origen: i.origen_comp ?? (c ? origenDesdeComprado(c) : null) }
+    }),
+    alicuotaIIBB,
+  ).total
 }
 
 export function Devolucion() {
@@ -166,6 +173,7 @@ export function Devolucion() {
 
   const agregarComprado = (c: Comprado) => {
     if (items.some((i) => i.articulo_id === c.articulo_id)) return
+    const origen = origenDesdeComprado(c)
     setBorrador((prev) => ({
       ...prev,
       items: [
@@ -175,11 +183,12 @@ export function Devolucion() {
           descripcion: c.descripcion,
           sku: c.sku,
           cantidad: 1,
-          precio_venta_original: c.ultimo_precio,
+          precio_venta_original: origen.precio ?? c.ultimo_precio,
           condicion: "vendible",
           comprobante_venta_id: c.comprobante_venta_id,
           fecha_venta_original: c.ultima_fecha?.slice(0, 10) || null,
           nunca_facturado: false,
+          origen_comp: origen,
         },
       ],
     }))
@@ -187,7 +196,8 @@ export function Devolucion() {
 
   const updateItem = (idx: number, patch: Partial<ItemDev>) => setBorrador((prev) => ({ ...prev, items: prev.items.map((i, n) => (n === idx ? { ...i, ...patch } : i)) }))
 
-  const total = items.reduce((s, i) => s + i.cantidad * i.precio_venta_original, 0)
+  // Lo que descuenta del cobro y el importe de la NC (no el neto suelto)
+  const total = valorEstimado(items, cuenta?.comprados ?? [], cuenta?.contexto_devolucion?.alicuota_iibb ?? 0)
 
   const irAlCatalogo = (texto: string) => navigate(`/clientes/${id}/devolucion/catalogo${texto.trim() ? `?q=${encodeURIComponent(texto.trim())}` : ""}`)
 
@@ -219,7 +229,7 @@ export function Devolucion() {
           observaciones: obs || null,
           // Valor con la regla única del servidor (lib/cobranzas/valor-devolucion.ts) para bajar el
           // proyectado sin señal; el servidor recalcula el exacto (con percepciones) al sincronizar
-          valor_estimado: valorEstimado(items, cuenta.comprados),
+          valor_estimado: total,
         },
         `Devolución ${cuenta.cliente.nombre} ${formatCurrency(total)}`,
       )
@@ -289,12 +299,17 @@ export function Devolucion() {
                 />
               </div>
               <div>
-                <label className="mb-0.5 block text-[11px] text-gray-400">Precio unitario</label>
-                <MontoInput
-                  valor={i.precio_venta_original || 0}
-                  onCambio={(n) => updateItem(idx, { precio_venta_original: n })}
-                  className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-right font-bold"
-                />
+                <label className="mb-0.5 block text-[11px] text-gray-400">Precio unitario {i.origen_comp?.fiscal === false ? "final" : "neto"}</label>
+                {i.origen_comp?.exacto ? (
+                  // Facturado en el sistema: el precio es el de la factura y no se toca
+                  <p className="min-h-11 w-full rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-right font-bold text-gray-700">{formatCurrency(i.precio_venta_original)}</p>
+                ) : (
+                  <MontoInput
+                    valor={i.precio_venta_original || 0}
+                    onCambio={(n) => updateItem(idx, { precio_venta_original: n })}
+                    className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-right font-bold"
+                  />
+                )}
               </div>
             </div>
 
@@ -397,6 +412,7 @@ export function DevolucionCatalogo() {
   const { id } = useParams<{ id: string }>()
   const volver = useVolver()
   const { cliente } = useCliente(id)
+  const { cuenta } = useCuenta(id)
   const { indice, cargando, vacio } = useCatalogo()
   const [q, setQ] = useBusqueda("q")
   const [borrador, setBorrador] = useBorrador(id)
@@ -409,10 +425,15 @@ export function DevolucionCatalogo() {
 
   const resultados = useMemo(() => buscarCatalogo(indice, q), [indice, q])
 
-  // Artículo nunca facturado a este cliente: entra al precio ACTUAL (motor local = previewPrecioArticulo)
+  // Artículo no facturado en el sistema: precio ACTUAL (neto si va por factura) y se asocia al
+  // comprobante más reciente del cliente del tipo que corresponde (cliente todo facturado ⇒ NC A
+  // aunque el artículo sea de presupuesto) — regla del dueño 21/10/2026, = servidor
   const agregarDeCatalogo = (a: Articulo) => {
     if (!borrador.items.some((i) => i.articulo_id === a.id)) {
-      const precio = motor.precio(a.id)?.precio ?? 0
+      const p = motor.precio(a.id)
+      const va = p?.vaEnComprobante ?? "factura"
+      const precio = p ? (va === "factura" ? p.precioNeto : p.precio) : 0
+      const origen = elegirOrigenDevolucion(null, cuenta?.contexto_devolucion, va)
       setBorrador((prev) => ({
         ...prev,
         limpiarQ: true,
@@ -425,9 +446,10 @@ export function DevolucionCatalogo() {
             cantidad: 1,
             precio_venta_original: precio,
             condicion: "vendible",
-            comprobante_venta_id: null,
+            comprobante_venta_id: origen.comprobante_venta_id,
             fecha_venta_original: null,
             nunca_facturado: true,
+            origen_comp: origen,
           },
         ],
       }))

@@ -197,3 +197,7 @@ Reglas del dueño:
 - Rechazar un cobro de una rendición pide permiso de Caja (solo admin).
 - Barra del ERP: número rojo en Finanzas → "Pendientes de revisar" (`/caja/pendientes`, solo admin: el dueño la sacó de Clientes el 21/10) con lo que espera más de una semana (`/api/pendientes/alertas`). En la bandeja, los cobros ya rendidos dicen "rendido, en camino a oficina" y las devoluciones muestran el nombre de quien las aceptó.
 - Migración `20261021_cobranza_anular_v8.sql` (la aplica el dueño): anular un cobro que había generado una REV de 10 % contado libera **todas** las imputaciones de esa REV (antes solo las de los comprobantes del cobro y el otro comprobante quedaba "pagado" sin serlo). Repara el caso que ya quedó así (URQUIZA PRES 0001-00000012, $155.005,43).
+
+## Devoluciones tal cual fueron facturadas (22/10)
+
+Ver `docs/PENDIENTES-APPS.md` → "Devoluciones tal cual facturado" (D1 vendedor, D2 chofer, D3 datos de prueba).

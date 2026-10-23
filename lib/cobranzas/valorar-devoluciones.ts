@@ -1,18 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { valorDevolucion } from "@/lib/cobranzas/valor-devolucion"
-import { calcularPercepciones, type ClientePercepcion } from "@/lib/comprobantes/calcular-percepciones"
-import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
+import { valorDevolucionConOrigen, type OrigenDevolucion, type ValorDevolucionResult } from "@/lib/cobranzas/valor-devolucion"
+import { alicuotaIIBBVigente, origenesDeRenglones } from "@/lib/cobranzas/origen-devolucion"
+import type { ClientePercepcion } from "@/lib/comprobantes/calcular-percepciones"
 
 /**
- * Valúa devoluciones EN PROCESO de un cliente con la regla única de
- * lib/cobranzas/valor-devolucion.ts, resolviendo desde la base lo que el
- * motor puro no conoce:
- *  - aplica_10: la factura original tiene bonificación contado viva (misma
- *    detección que las pantallas de cobro: NC/REV viva cuyo texto
- *    "Bonificación contado…" menciona el número del comprobante original).
- *  - con_iva: el documento futuro será fiscal (original FA/FB/FC/ND*) → NCA/…
- *    con IVA y percepciones; original PRES (o sin original) → REV sin IVA.
- *  - percepciones: mismas funciones que la emisión de la NC.
+ * Valúa devoluciones de un cliente con la regla única de
+ * lib/cobranzas/valor-devolucion.ts (regla del dueño 21/10/2026: tal cual fue
+ * facturado). Cada renglón contra SU comprobante de origen
+ * (lib/cobranzas/origen-devolucion.ts): neto e IVA del renglón facturado,
+ * percepción IVA si ese comprobante la llevó, IIBB vigente, 10% si fue contado.
  *
  * La usan la ficha del vendedor, la vista del chofer, las APIs de cobro y la
  * emisión de la NC: todos ven EL MISMO número, al centavo.
@@ -20,16 +16,21 @@ import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 
 export interface DevolucionValorada {
   devolucion_id: string
+  /** Algún renglón sale con el 10% contado */
   aplica_10: boolean
+  /** Algún renglón va en NC fiscal (A/B) */
   con_iva: boolean
   neto: number
   iva: number
   percepciones: number
-  /** Lo que vale la devolución completa en un cobro (y su NC futura) */
+  /** Lo que vale la devolución completa en un cobro (= NC + REV) */
   total: number
+  /** Desglose completo (parte fiscal / parte REV, por renglón) */
+  valor: ValorDevolucionResult
+  /** Renglones valuados (aceptados o en proceso; los rechazados no cuentan) con su origen */
+  renglones: Array<{ id: string; articulo_id: string; cantidad: number; precio_venta_original: number; comprobante_venta_id: string | null; origen: OrigenDevolucion }>
+  alicuota_iibb: number
 }
-
-const FISCALES = new Set(["FA", "FB", "FC", "ND", "NDA", "NDB", "NDC"])
 
 export async function valorarDevoluciones(
   supabase: SupabaseClient,
@@ -41,82 +42,66 @@ export async function valorarDevoluciones(
     clienteId: string
     devolucionIds: string[]
     /** Ficha del cliente si el caller ya la tiene (evita re-consultarla) */
-    cliente?: (ClientePercepcion & { id?: string }) | null
+    cliente?: (ClientePercepcion & { id?: string; cuit?: string | null }) | null
   },
 ): Promise<Map<string, DevolucionValorada>> {
   const out = new Map<string, DevolucionValorada>()
   if (!devolucionIds.length) return out
 
-  const [{ data: detalle }, { data: bonifs }, clienteRow] = await Promise.all([
+  const [{ data: detalle }, clienteRow] = await Promise.all([
     supabase
       .from("devoluciones_detalle")
-      .select("devolucion_id, subtotal, comprobante_venta_id")
+      .select("id, devolucion_id, articulo_id, cantidad, precio_venta_original, estado_renglon, comprobante_venta_id")
       .in("devolucion_id", devolucionIds),
-    supabase
-      .from("comprobantes_venta")
-      .select("observaciones")
-      .eq("cliente_id", clienteId)
-      .in("tipo_comprobante", ["REV", "NCA", "NCB", "NCC"])
-      .is("anulado_en", null)
-      .neq("estado_pago", "anulado")
-      .ilike("observaciones", "%Bonificación contado%"),
-    cliente
+    cliente && "cuit" in cliente
       ? Promise.resolve(cliente)
       : supabase
           .from("clientes")
-          .select("id, condicion_iva, exento_iva, exento_iibb, provincia, percepcion_iibb")
+          .select("id, cuit, condicion_iva, exento_iva, exento_iibb, provincia, percepcion_iibb")
           .eq("id", clienteId)
           .single()
           .then((r) => r.data as any),
   ])
 
-  const compIds = [...new Set((detalle || []).map((d: any) => d.comprobante_venta_id).filter(Boolean))]
-  const { data: origs } = compIds.length
-    ? await supabase.from("comprobantes_venta").select("id, tipo_comprobante, numero_comprobante").in("id", compIds)
-    : { data: [] as any[] }
-  const origDe = new Map((origs || []).map((c: any) => [c.id, c]))
-  const bonifObs = (bonifs || []).map((b: any) => String(b.observaciones || ""))
+  // Rechazados (o en 0) no valen nada
+  const vivos = (detalle || []).filter((d: any) => d.estado_renglon !== "rechazado" && Number(d.cantidad) > 0)
+  const [origenes, alicuota] = await Promise.all([
+    origenesDeRenglones(
+      supabase,
+      clienteId,
+      vivos.map((d: any) => ({ articulo_id: d.articulo_id, comprobante_venta_id: d.comprobante_venta_id, precio_venta_original: Number(d.precio_venta_original) || 0 })),
+      clienteRow,
+    ),
+    alicuotaIIBBVigente(supabase, (clienteRow || {}) as any),
+  ])
 
-  // Alícuota IIBB: una sola vez por cliente, igual que la emisión
-  let tasaIIBB = 0
-  const cli = (clienteRow || {}) as ClientePercepcion
-  try {
-    tasaIIBB = await resolverAlicuotaIIBB(supabase, cli as any)
-  } catch {
-    tasaIIBB = Number(cli.percepcion_iibb) || 0
-  }
-  const cliConTasa = { ...cli, percepcion_iibb: tasaIIBB }
-
-  const porDev = new Map<string, any[]>()
-  for (const d of detalle || []) {
+  const porDev = new Map<string, DevolucionValorada["renglones"]>()
+  vivos.forEach((d: any, i: number) => {
     if (!porDev.has(d.devolucion_id)) porDev.set(d.devolucion_id, [])
-    porDev.get(d.devolucion_id)!.push(d)
-  }
+    porDev.get(d.devolucion_id)!.push({
+      id: d.id,
+      articulo_id: d.articulo_id,
+      cantidad: Number(d.cantidad) || 0,
+      precio_venta_original: Number(d.precio_venta_original) || 0,
+      comprobante_venta_id: d.comprobante_venta_id ?? null,
+      origen: origenes[i],
+    })
+  })
 
   for (const devId of devolucionIds) {
     const renglones = porDev.get(devId) || []
-    const comps = renglones.map((r: any) => origDe.get(r.comprobante_venta_id)).filter(Boolean)
-    const conIva = comps.some((c: any) => FISCALES.has(c.tipo_comprobante))
-    const aplica10 = comps.some((c: any) => bonifObs.some((o) => o.includes(c.numero_comprobante)))
-    const v = valorDevolucion({
-      renglones: renglones.map((r: any) => ({ subtotal: Number(r.subtotal) || 0 })),
-      aplica10,
-      conIva,
-      percepcionesDe: conIva
-        ? (neto) => {
-            const p = calcularPercepciones(neto, cliConTasa, true)
-            return (p.percepcion_iva || 0) + (p.percepcion_iibb || 0)
-          }
-        : undefined,
-    })
+    const v = valorDevolucionConOrigen(renglones, alicuota)
     out.set(devId, {
       devolucion_id: devId,
-      aplica_10: aplica10,
-      con_iva: conIva,
+      aplica_10: renglones.some((r) => r.origen.bonificado_contado),
+      con_iva: renglones.some((r) => r.origen.fiscal),
       neto: v.neto,
       iva: v.iva,
       percepciones: v.percepciones,
       total: v.total,
+      valor: v,
+      renglones,
+      alicuota_iibb: alicuota,
     })
   }
   return out

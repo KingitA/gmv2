@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { prepararRenglonesDevolucion } from "@/lib/cobranzas/origen-devolucion"
 
 /**
  * POST /api/mostrador/devolucion — devolución en mostrador (Fase D).
@@ -23,11 +24,16 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
     const body = await request.json()
-    const { cliente_id, pedido_id, items, observaciones } = body
+    const { cliente_id, pedido_id, observaciones } = body
+    let items = body.items
 
     if (!cliente_id || !items?.length) {
       return NextResponse.json({ error: "cliente_id e items son requeridos" }, { status: 400 })
     }
+
+    // Cada renglón contra su comprobante de origen y, si está facturado en el
+    // sistema, al precio facturado (regla del dueño 21/10/2026)
+    items = await prepararRenglonesDevolucion(supabase, cliente_id, items, { pedidoId: pedido_id })
 
     const montoTotal = (items as any[]).reduce(
       (s, i) => s + Number(i.precio_venta_original || 0) * Number(i.cantidad || 0),
