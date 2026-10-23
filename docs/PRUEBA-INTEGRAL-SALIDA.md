@@ -63,11 +63,11 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 ## Fase 0 — Preparación
 
 - [x] 0.1 Auditoría: base, código y cuentas de Juan (23/10).
-- [ ] 0.2 Código: estado "Sistema viejo" en las pantallas. Fuera de la cola, del armado de viajes, del calendario de pedidos sueltos y de los pedidos cobrables (ERP, ficha del vendedor y del chofer). Rama `prueba-integral`.
-- [ ] 0.3 SQL `supabase/migrations/20261023_prueba_integral.sql` (Juan lo aplica en Supabase): agrega el estado e instala cuatro funciones que no hacen nada hasta que se las llama:
+- [x] 0.2 Código: estado "Sistema viejo" en las pantallas. Fuera de la cola, del armado de viajes, del calendario de pedidos sueltos y de los pedidos cobrables (ERP, ficha del vendedor y del chofer). Rama `prueba-integral`.
+- [x] 0.3 SQL `supabase/migrations/20261023_prueba_integral.sql` (Juan lo aplica en Supabase): agrega el estado e instala cuatro funciones que no hacen nada hasta que se las llama:
   - pasar a "Sistema viejo" (con simulacro);
   - limpieza complementaria de viajes, remitos de viaje y preparación del depósito (con simulacro).
-- [ ] 0.4 Pasar la rama a main y desplegar **antes** de mover los pedidos. Así ninguna pantalla se encuentra con un estado que no conoce.
+- [ ] 0.4 Pasar la rama a main y desplegar **antes** de mover los pedidos. Así ninguna pantalla se encuentra con un estado que no conoce. (En main 23/10, 1ec4f89; SQL aplicado por Juan y verificado 23/10; falta confirmar que Vercel lo publicó.)
 - [ ] 0.5 Avisar a los otros agentes el día y la hora de la puesta a cero.
 - [ ] 0.6 Anotar en `docs/PENDIENTES-APPS.md` que las apps muestren "Sistema viejo" con nombre lindo (hoy mostrarían el texto crudo).
 
