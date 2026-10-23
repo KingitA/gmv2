@@ -90,7 +90,19 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   - Todavía no hay pedidos de prueba, así que se pasan todos, también los viejos de 1190, 199 y 556.
   - Durante la prueba, cada mañana, para mover los pedidos reales nuevos sin tocar los de prueba: `SELECT pedidos_pasar_a_sistema_viejo(now(), '{1190,199,556}', 'PASAR');`
 - [x] 1.6 Foto después (23/10, 14:45): 1.937 pedidos (1.640 en Sistema viejo y 297 eliminados), 12 comprobantes (todos con CAE, suman $0), 12 asientos, 6 imputaciones, 3 cheques (echeqs propios), 0 cobros, devoluciones, billetera, comisiones cobradas, viajes y preparaciones; saldo de todos los clientes $0; clientes, artículos y proveedores sin cambios. Copias: archivo_pruebas.*_20261023_1444, *_20261023_144512 y pedidos_estado_previo_20261023_144528.
-- [ ] 1.7 Juan carga los saldos reales de bancos y caja.
+- [x] 1.7 Juan cargó los saldos (23/10, 15:00; "Ajuste manual de saldo" en Finanzas). **Saldos de partida, para controlar al final:**
+
+| Cuenta | Saldo inicial | Nota |
+|---|---|---|
+| Banco Credicoop | $13.443.379,93 | real |
+| Banco Nación | $97.838,56 | real |
+| Banco Provincia | $525.328,78 | real |
+| MercadoPago | $1.806.871,54 | real |
+| Caja (chica) | $100.000,00 | redondo, para la prueba |
+| Caja (grande) | $10.000.000,00 | redondo, para la prueba |
+| Cheques en cartera | ninguno | si entra un cheque en la prueba, se ve cómo funciona |
+
+  Al terminar: cada caja y banco tiene que dar el saldo inicial más lo que entró en la prueba y menos lo que salió, y cada movimiento tiene que tener su origen (cobro, rendición, entrega de fondo, gasto).
 - [x] 1.8 Verificar en cero (23/10, 14:50, en el ERP):
   - Pendientes de revisar: "Está todo al día".
   - Caja del día: 0 movimientos y efectivo esperado $0.
@@ -106,11 +118,19 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Fase 2 — Importación de deudas del sistema viejo
 
-- [ ] 2.1 `/apertura` con el reporte "Comprobantes Impagos de Clientes" del sistema viejo. Vista previa: no falta ningún cliente y el total da igual al reporte.
+**Revisión del reporte real** (`pruebafacimpagasclientesxcodigo.chr`, del 23/10). Lo leí en mi PC con el mismo lector que usa `/apertura`, sin tocar la base:
+- 1.859 renglones de 249 clientes; total pendiente $675.632.433,83 (igual al total general del reporte).
+- **Hoy `/apertura` no deja confirmar este archivo**: alcanza con que un solo cliente tenga error para frenar todo, y hay unos 34 con error (ver problemas 5 a 9).
+- Los clientes de prueba en el sistema viejo:
+  - 1190 y 199 no deben nada;
+  - **556 debe $3.784.286,00**, en 2 presupuestos del 12/06/2026: 0001-00117929 por $548.283,00 y 0001-00117930 por $3.236.003,00.
+- **Para no frenar la prueba**: armé `C:\Users\INTEL PC1\Desktop\apertura-prueba-556.chr`, con **solo los 2 renglones de 556**, tal cual el original. La vista previa local da 0 errores. La importación completa queda como tarea antes del pase (problemas 5 a 9).
+
+- [ ] 2.1 `/apertura` con `apertura-prueba-556.chr`. La vista previa tiene que mostrar 1 cliente, 2 presupuestos y $3.784.286,00, sin errores.
 - [ ] 2.2 Confirmar la carga.
-- [ ] 2.3 Verificar la deuda de 1190, 199 y 556 (si tienen) en la ficha del ERP, en la app vendedor y en la antigüedad de deuda: los tres tienen que dar lo mismo que el reporte.
+- [ ] 2.3 La deuda de 556 ($3.784.286,00, con fecha 12/06) tiene que verse igual en la ficha del ERP, en la app vendedor, en la app chofer y en la antigüedad de deuda (más de 120 días).
 - [ ] 2.4 Los comprobantes de la apertura **no** generan comisión.
-- [ ] 2.5 Si ninguno de los 3 tiene deuda vieja, la apertura de 1 o 2 comprobantes viejos para uno de ellos se arma a mano (vista previa juntos).
+- [ ] 2.5 (antes del pase, no frena la prueba) Importación completa: resolver los problemas 5 a 9 y repetir la vista previa con el reporte de ese día.
 
 ## Fase 3 — Venta desde la app Vendedor
 
@@ -215,6 +235,11 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 2 | 1.9 | Las apps (vendedor, chofer, depósito) solo dejan iniciar sesión con el mail; tienen que aceptar también el nombre de usuario, como el ERP | Apps (agente de cada app) + servidor si hace falta | Anotado 23/10 |
 | 3 | 1.9 | App chofer, billetera: con gastos en cero muestra "−$0,00" (signo menos sobre cero). Detalle visual | App chofer | Anotado 23/10 |
 | 4 | 1.9 | App depósito: "Recibir mercadería" muestra 2 recepciones pendientes. No es parte de esta prueba (compras), pero conviene confirmar si son reales o de prueba | Juan decide | Anotado 23/10 |
+| 5 | 2 | **Apertura: un cliente con error frena todo el archivo.** Con el reporte real son unos 34 clientes con error, así que no se puede importar nada. Conviene que deje importar los que están bien y muestre aparte los que hay que corregir | Servidor (/apertura) | Anotado 23/10 |
+| 6 | 2 | **Apertura: renglones que no son comprobantes.** 72 renglones en 15 clientes comunes ($65,4 M) tienen descripciones libres del sistema viejo: "CHEQUE RECH (YASH)", "ECHEQ", "10%", "COMISION JULIO", nombres de personas (casi todos en GRONDONA CHRISTIAN, cód. 1000). Hay que decidir cómo entran, por ejemplo como nota de débito o de crédito interna según el signo | Juan decide + servidor | Anotado 23/10 |
+| 7 | 2 | **Apertura: cuentas de empleados, socios y viajantes** (15 cuentas, 805 renglones, $12,7 M: retiros, sueldos, comisiones, diferencias de rendición). ¿Entran a la cuenta personal de cada uno o se cargan a mano? | Juan decide + servidor | Anotado 23/10 |
+| 8 | 2 | **Apertura: 17 clientes cuyo saldo no cuadra.** El reporte trae dos columnas de saldo y el lector compara con la primera. La segunda coincide siempre con la suma de lo pendiente. Ejemplo: DELLI GUSTAVO (169) tiene $2.923.875,09 en una y $2.804.921,57 en la otra. Hay que saber cuál es la deuda real en el sistema viejo | Juan confirma + servidor | Anotado 23/10 |
+| 9 | 2 | **Apertura: clientes que faltan o que tienen el código cruzado.** 765 LA PAMPEANA DISTRIBUIDORA y 766 YOU JUNJUN no existen en gmv2. El 56 es "SANJUMATO S.A." en el reporte y "ERCILIA S.A.C.I." en gmv2, y el 1381 es "DING DAFU" en el reporte y "KE WUJIN" en gmv2: **la deuda iría al cliente equivocado** | Oficina (clientes) | Anotado 23/10 |
 
 ## Anexo — números de referencia
 
