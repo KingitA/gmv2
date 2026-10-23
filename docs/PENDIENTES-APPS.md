@@ -29,7 +29,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | App Vendedor v0.4.0 (dos cajitas, retiro, 10 % contado, Resumen) | App Vendedor | Hecho 20/10 (merge 78ee8a0), APK v0.4.0 |
 | App Vendedor v0.4.1 (la rendición propone efectivo − retiros) y v0.4.2 (la ficha explica el proyectado, "A favor del cliente") | Cuentas corrientes (auditoría 21/10, con OK de Juan) | Hecho 21/10 (ccff0fb, 29b07c5), APK v0.4.2 instalada en el NuStar |
 | V1 — Cobrar: créditos ya usados por un cobro sin rendir figuran "disponibles" (riesgo de usarlos dos veces) | Cuentas corrientes | **Hecho 21/10 en el servidor (460c095)**: el servidor no lo frenaba; ahora reserva lo tomado por cobros sin confirmar, rechaza el segundo uso y la ficha manda el disponible real. La app no necesita cambios. |
-| V2 — Cobrar: el renglón del pedido muestra el TOTAL del pedido y no lo que debe | App Vendedor | Pendiente |
+| ~~V2 — Cobrar: el renglón del pedido muestra el TOTAL del pedido y no lo que debe~~ | App Vendedor | Hecho 23/10, APK v0.4.3 |
 | V3 — Comisiones: "Mercadería cobrada" lista comisiones y "Comisiones ganadas" dice $0 | Cuentas corrientes | Pendiente — revisar después de la puesta a cero + "Poner al día" |
 | App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único, cobrado duplicado al sincronizar, "debe" del buscador) | App Chofer | Hecho 21/10 (merge 246e87f), APK v0.3.0 instalada en el NuStar |
 | App Chofer v0.3.1 (borrador del cobro, pedido del viaje primero, "$0"/"A favor", ficha explica el saldo, valor de devolución, sobrante, viajes viejos) | App Chofer | Hecho 21/10 (merge 7d62a2c), APK v0.3.1 instalada en el NuStar |
@@ -38,7 +38,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | Recepción: la base rechazaba "faltante" (web y APK) | App Depósito | Hecho 20/10, migración `20261020d_recepciones_estado_faltante.sql` aplicada 21/10 y probada (la operación que fallaba 1.156 veces ahora guarda) |
 | Artículos dados de baja: matching sin bajas, reactivar desde Artículos/Depósito, historial de quién | Servidor (sesión búsquedas/formatos) | Hecho 20/10 (bef0ecd + 570cc2c), migraciones `20261020_pedidos_articulo_real` y `20261020b_articulos_bajas` aplicadas |
 | Devoluciones "tal cual fue facturado" — servidor, NC/REV y pantallas web | Sesión precios (con OK de Juan; toca `lib/cobranzas`) | Hecho 22/10 (rama `devoluciones-nc-exacta`, merge en main) — ver "Devoluciones tal cual facturado" abajo |
-| D1 — APK Vendedor con el valor de devolución nuevo (el código ya está) | App Vendedor | Pendiente: compilar, probar en el NuStar y publicar |
+| ~~D1 — APK Vendedor con el valor de devolución nuevo~~ | App Vendedor | Hecho 23/10, APK v0.4.3 instalada en el NuStar |
 | D2 — APK Chofer con el valor de devolución nuevo (el código ya está) | App Chofer | Pendiente: compilar, probar en el NuStar y publicar |
 | D3 — Poner en 0 las devoluciones de prueba antes de producción (dato sucio) | Cuentas corrientes / oficina | Pendiente (día del corte) |
 
@@ -46,7 +46,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |
 |---|---|---|---|
-| Vendedor | v0.4.2 (versionCode 11) | 21/10 | Devoluciones tal cual facturado (22/10) → D1 |
+| Vendedor | v0.4.3 (versionCode 12) | 23/10 | — |
 | Chofer | v0.3.1 (versionCode 7) | 21/10 | Devoluciones tal cual facturado (22/10) → D2 |
 | Depósito | v0.3.0 (versionCode 8) | 20/10 | — |
 
@@ -70,7 +70,7 @@ Las hizo la sesión de cuentas corrientes con el OK de Juan (tocan `mobile/apps/
 0. **NuStar — pantalla blanca al reabrir una app cerrada a la fuerza** (visto 2 veces el 21/10 con la app Vendedor, después de `am force-stop`): logcat `cr_ChildProcessConn: Failed to establish the service connection`; WebView 155.0.8059.43 y Chrome 155.0.8059.79. Se arregla reiniciando el equipo. No es código de la app; conviene actualizar el WebView desde Play Store y probar si se repite al deslizar la app desde Recientes (lo que hace un usuario).
 
 1. ~~**V1 — créditos usados dos veces.**~~ **Resuelto en el servidor 21/10 (460c095)** — la app ya recibe el disponible real; queda el texto original como referencia: En Cobrar, URQUIZA muestra disponibles el a cuenta de $14.011,02 y el anticipo de $170.019, que ya usa el cobro de $122.000 del 14/10 todavía sin rendir (marca `[CREDITOS:…]`). Hace falta que el servidor descuente de cada crédito lo que tienen tomado los cobros pendientes (como `en_cobro` hace con los comprobantes) y que la app lo muestre. Primero confirmar si el servidor ya rechaza el segundo uso.
-2. **V2 — total del pedido vs. lo que debe.** El renglón del pedido #001454 dice $8.646.266,97 (total) y el cliente debe $155.005,43 de ese pedido; se ve recién abriendo la flechita. Mostrar "debe $X" como número principal y el total chico.
+2. ~~**V2 — total del pedido vs. lo que debe.**~~ **Hecho 23/10 (v0.4.3):** si el pedido tiene comprobantes, el número grande es lo que debe (suma de sus saldos) y abajo chico "debe · de $total"; el título ya no se corta. El renglón del pedido #001454 dice $8.646.266,97 (total) y el cliente debe $155.005,43 de ese pedido; se ve recién abriendo la flechita. Mostrar "debe $X" como número principal y el total chico.
 3. **V3 — comisiones.** La lista "Mercadería cobrada" sale del cálculo viejo y "Comisiones ganadas" de la cuenta personal (todavía sin "Poner al día"): no coinciden. Revisarlo el día de la puesta a cero.
 
 ## App Chofer → v0.3.0 HECHA (21/10/2026, merge 246e87f, instalada en el NuStar)
@@ -139,7 +139,10 @@ Detalle en MOBILE.md §17 "v0.3.0".
 - Tests: `packages/core/test/valor-devolucion.test.ts` (caso $1.143, percepción en NC chica, IVA del renglón, mixta, asociación, réplica vieja). 361/361.
 - **Validado en solo lectura** con las FA 0007-00000001…05 y PRES 0001-00000017/18: devolver todo da el total facturado al centavo (la 0007-00000003 difiere solo en el IIBB: el cliente es de Buenos Aires y hoy es 0 %, regla del IIBB vigente).
 
-### D1 — App Vendedor (agente de la app Vendedor)
+### D1 — App Vendedor (agente de la app Vendedor) — HECHO 23/10, v0.4.3
+
+Revisado el código de 188385d (misma función que la NC, precio facturado bloqueado, `valor_estimado` = total que se ve). Probado con el mock (FA $1.500 neto → $1.815). Queda para la calle: comparar con la NC que emite la oficina en un caso real.
+
 
 El código **ya está** en `mobile/apps/vendedor` (commit 188385d): `pantallas/clientes/Devolucion.tsx` (cada ítem guarda `origen_comp`; lo facturado se muestra sin poder editar el precio; "Precio unitario neto/final"; el total es `valorDevolucionConOrigen` con `contexto_devolucion.alicuota_iibb`; desde el catálogo entra con el neto del motor y `elegirOrigenDevolucion`) y `datasets.ts` (tipos). Falta:
 1. Subir versión (`version.json` 0.4.3) y CHANGELOG.

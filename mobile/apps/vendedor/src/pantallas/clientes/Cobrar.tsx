@@ -637,7 +637,7 @@ export function Cobrar() {
                       <button onClick={() => togglePedido(p)} disabled={!p.cobrable && !comps.length} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left">
                         <span className="shrink-0 text-lg">{seleccionado ? "☑" : parcialComps ? "◪" : p.cobrable || comps.length ? "☐" : "•"}</span>
                         <div className="min-w-0">
-                          <p className="truncate font-bold text-gray-900">Pedido {p.numero_pedido ? `#${p.numero_pedido}` : ""}</p>
+                          <p className="font-bold leading-tight text-gray-900">Pedido {p.numero_pedido ? `#${p.numero_pedido}` : ""}</p>
                           <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                             <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${estado.cls}`}>{estado.label}</span>
                             {p.pago_contado_10 && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">✓ 10% CONTADO</span>}
@@ -648,6 +648,12 @@ export function Cobrar() {
                       <div className="flex shrink-0 items-center gap-2 text-right">
                         {selPedido ? (
                           <MontoInput valor={pedidosSel[p.id]!} onCambio={(v) => setPedidosSel((prev) => ({ ...prev, [p.id]: Math.min(Math.max(0, v), p.total) }))} className={CLS_MONTO} />
+                        ) : comps.length > 0 ? (
+                          // V2 (21/10): lo que debe de este pedido es el número grande; el total, chico
+                          <div>
+                            <p className="font-bold text-gray-900">{formatCurrency(comps.reduce((s, cp) => s + Math.max(0, cp.saldo_pendiente), 0))}</p>
+                            <p className="text-[11px] text-gray-400">debe · de {formatCurrency(p.total)}</p>
+                          </div>
                         ) : (
                           <p className="font-bold text-gray-900">{formatCurrency(p.total)}</p>
                         )}
