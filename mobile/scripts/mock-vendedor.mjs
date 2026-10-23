@@ -87,7 +87,7 @@ const clienteDe = (id) => S.clientes.find((c) => c.id === id)
 function filaCC(id) {
   const c = clienteDe(id), k = S.cc.get(id)
   if (!c || !k) return null
-  const pedidosCobro = S.pedidos.filter((p) => p.cliente_id === id && p.estado !== "en_venta").map((p) => ({ id: p.id, numero_pedido: p.numero_pedido, fecha: p.fecha, estado: p.estado, total: p.total, pago_contado_10: !!p.pago_contado_10, anticipo_pago_id: p.anticipo_pago_id || null, facturado: false, cobrable: !p.anticipo_pago_id && p.total > 0 }))
+  const pedidosCobro = S.pedidos.filter((p) => p.cliente_id === id && p.estado !== "en_venta").map((p) => ({ id: p.id, numero_pedido: p.numero_pedido, fecha: p.fecha, estado: p.estado, total: p.total, pago_contado_10: !!p.pago_contado_10, anticipo_pago_id: p.anticipo_pago_id || null, facturado: !!p.facturado, cobrable: !p.facturado && !p.anticipo_pago_id && p.total > 0 }))
   return {
     id, cliente: { ...c, pendiente_verificacion: 0, devoluciones_en_proceso: 0, actualizado_at: c.actualizado_at || null, actualizado_por_nombre: c.actualizado_por_nombre || null },
     comprobantes: k.comprobantes.filter((x) => x.saldo_pendiente > 0), creditos: [], a_cuenta: [], total_a_favor: 0, pedidos_cobrables: [], pedidos_cobro: pedidosCobro,
@@ -355,7 +355,17 @@ createServer(async (req, res) => {
       const a = S.f.precios_articulos.find((x) => x.sku === url.searchParams.get("sku"))
       if (a) { a.precio_base = Number(url.searchParams.get("base")); S.seq++ }
     }
-    if (url.pathname === "/__mock/estado-pedido") { const p = S.pedidos.find((x) => x.numero_pedido === url.searchParams.get("numero")); if (p) { p.estado = url.searchParams.get("estado"); S.seq++ } }
+    if (url.pathname === "/__mock/estado-pedido") { const p = S.pedidos.find((x) => x.numero_pedido === url.searchParams.get("numero")); if (p) {
+      p.estado = url.searchParams.get("estado")
+      // facturado (= ERP): el pedido tiene su factura; ?debe= deja un saldo parcial (caso V2 del 21/10)
+      if (p.estado === "facturado") {
+        p.facturado = true
+        const k = S.cc.get(p.cliente_id)
+        const debe = url.searchParams.has("debe") ? Number(url.searchParams.get("debe")) : p.total
+        if (k && !k.comprobantes.some((x) => x.pedido_id === p.id)) k.comprobantes.push({ id: randomUUID(), tipo_comprobante: "FA", numero_comprobante: `0001-9${p.numero_pedido}`, fecha: p.fecha, total_factura: p.total, saldo_pendiente: r2(debe), estado_pago: "parcial", pedido_id: p.id, en_cobro: 0, en_cobro_contado: 0, nc_contado: r2(p.total * 0.1) })
+      }
+      S.seq++
+    } }
     return json(200, {
       red: S.red, seq: S.seq,
       pedidos: S.pedidos.map((p) => ({ numero: p.numero_pedido, local_id: p.local_id, estado: p.estado, cliente: clienteDe(p.cliente_id)?.nombre, total: p.total, creaciones: p.creaciones, precios_garantizados: p.precios_garantizados, precios_al: p.precios_al, capturado_at: p.capturado_at, renglones: p.detalle.map((d) => `${d.cantidad} x ${d.precio_final}`) })),
