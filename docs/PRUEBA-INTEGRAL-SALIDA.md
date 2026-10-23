@@ -126,10 +126,15 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   - **556 debe $3.784.286,00**, en 2 presupuestos del 12/06/2026: 0001-00117929 por $548.283,00 y 0001-00117930 por $3.236.003,00.
 - **Para no frenar la prueba**: armé `C:\Users\INTEL PC1\Desktop\apertura-prueba-556.chr`, con **solo los 2 renglones de 556**, tal cual el original. La vista previa local da 0 errores. La importación completa queda como tarea antes del pase (problemas 5 a 9).
 
-- [ ] 2.1 `/apertura` con `apertura-prueba-556.chr`. La vista previa tiene que mostrar 1 cliente, 2 presupuestos y $3.784.286,00, sin errores.
-- [ ] 2.2 Confirmar la carga.
-- [ ] 2.3 La deuda de 556 ($3.784.286,00, con fecha 12/06) tiene que verse igual en la ficha del ERP, en la app vendedor, en la app chofer y en la antigüedad de deuda (más de 120 días).
-- [ ] 2.4 Los comprobantes de la apertura **no** generan comisión.
+- [x] 2.1 `/apertura` con `apertura-prueba-556.chr`. La vista previa tiene que mostrar 1 cliente, 2 presupuestos y $3.784.286,00, sin errores.
+- [x] 2.2 Confirmar la carga (Juan, 23/10 ~15:05).
+- [x] 2.3 La deuda de 556 ($3.784.286,00 al 12/06) se ve igual en todos lados (23/10, 15:11):
+  - base: 2 PRES "APERTURA GM" y libro $3.784.286,00;
+  - ficha del ERP: "Nos debe $3.784.286";
+  - antigüedad del tablero de Finanzas: "más de 90 días" $3.784.286;
+  - app vendedor, después de "Actualizar": $3.784.286,00 con PRES 0001-00117929 y 0001-00117930 pendientes.
+  - La app chofer se ve en la 6.1 (hoy no tiene viaje).
+- [x] 2.4 Los comprobantes de la apertura **no** generan comisión (0 comisiones). Fiscales nuevos: 0 (los 2 comprobantes nuevos son PRES).
 - [ ] 2.5 (antes del pase, no frena la prueba) Importación completa: resolver los problemas 5 a 9 y repetir la vista previa con el reporte de ese día.
 
 ## Fase 3 — Venta desde la app Vendedor
@@ -235,11 +240,24 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 2 | 1.9 | Las apps (vendedor, chofer, depósito) solo dejan iniciar sesión con el mail; tienen que aceptar también el nombre de usuario, como el ERP | Apps (agente de cada app) + servidor si hace falta | Anotado 23/10 |
 | 3 | 1.9 | App chofer, billetera: con gastos en cero muestra "−$0,00" (signo menos sobre cero). Detalle visual | App chofer | Anotado 23/10 |
 | 4 | 1.9 | App depósito: "Recibir mercadería" muestra 2 recepciones pendientes. No es parte de esta prueba (compras), pero conviene confirmar si son reales o de prueba | Juan decide | Anotado 23/10 |
-| 5 | 2 | **Apertura: un cliente con error frena todo el archivo.** Con el reporte real son unos 34 clientes con error, así que no se puede importar nada. Conviene que deje importar los que están bien y muestre aparte los que hay que corregir | Servidor (/apertura) | Anotado 23/10 |
-| 6 | 2 | **Apertura: renglones que no son comprobantes.** 72 renglones en 15 clientes comunes ($65,4 M) tienen descripciones libres del sistema viejo: "CHEQUE RECH (YASH)", "ECHEQ", "10%", "COMISION JULIO", nombres de personas (casi todos en GRONDONA CHRISTIAN, cód. 1000). Hay que decidir cómo entran, por ejemplo como nota de débito o de crédito interna según el signo | Juan decide + servidor | Anotado 23/10 |
-| 7 | 2 | **Apertura: cuentas de empleados, socios y viajantes** (15 cuentas, 805 renglones, $12,7 M: retiros, sueldos, comisiones, diferencias de rendición). ¿Entran a la cuenta personal de cada uno o se cargan a mano? | Juan decide + servidor | Anotado 23/10 |
-| 8 | 2 | **Apertura: 17 clientes cuyo saldo no cuadra.** El reporte trae dos columnas de saldo y el lector compara con la primera. La segunda coincide siempre con la suma de lo pendiente. Ejemplo: DELLI GUSTAVO (169) tiene $2.923.875,09 en una y $2.804.921,57 en la otra. Hay que saber cuál es la deuda real en el sistema viejo | Juan confirma + servidor | Anotado 23/10 |
-| 9 | 2 | **Apertura: clientes que faltan o que tienen el código cruzado.** 765 LA PAMPEANA DISTRIBUIDORA y 766 YOU JUNJUN no existen en gmv2. El 56 es "SANJUMATO S.A." en el reporte y "ERCILIA S.A.C.I." en gmv2, y el 1381 es "DING DAFU" en el reporte y "KE WUJIN" en gmv2: **la deuda iría al cliente equivocado** | Oficina (clientes) | Anotado 23/10 |
+| 5 | 2 | **Apertura: un cliente con error frena todo el archivo.** Con el reporte real hay unos 34 clientes con error, así que no se importa nada. Que importe los que están bien y muestre aparte los que hay que corregir | Servidor (/apertura) | Pendiente |
+| 6 | 2 | **Apertura: renglones que no son comprobantes.** 72 renglones en 15 clientes comunes ($65,4 M) con texto libre ("CHEQUE RECH (YASH)", "ECHEQ", "10%", "COMISION JULIO", nombres de personas; casi todos en GRONDONA CHRISTIAN, cód. 1000). **Decisión de Juan (23/10): entran como AJUSTE**, lo mismo que hace hoy "Ajustar saldo" en la cuenta corriente del cliente, con el texto original como concepto | Servidor (/apertura) | Decidido, falta hacerlo |
+| 7 | 2 | **Apertura: cuentas de empleados, socios y viajantes** (15 cuentas, 805 renglones, $12,7 M: retiros, sueldos, comisiones, diferencias de rendición). **Decisión de Juan (23/10): van a la cuenta personal de cada uno**, y lo que no es comprobante entra como ajuste (igual que el problema 6) | Servidor (/apertura) | Decidido, falta hacerlo |
+| 8 | 2 | **Apertura: 17 clientes cuyo saldo "no cuadra".** El reporte trae dos columnas de saldo y el lector compara con la primera. **Juan confirmó (23/10) que la buena es la segunda**: por ejemplo DELLI GUSTAVO (169) debe $2.804.921,57, que es la suma de lo pendiente. Hay que cambiar el lector para que compare con la segunda columna | Servidor (lector del .chr) | Decidido, falta hacerlo |
+| 9 | 2 | **Apertura: clientes que faltan o cambiaron de dueño** (detalle abajo). Con CUIT distinto, **la deuda iría al cliente equivocado** hasta que se actualicen en gmv2. Falta además el listado completo de clientes que están en el sistema viejo y no en gmv2 | Oficina (clientes) + Claude arma el listado | Pendiente |
+
+### Detalle del problema 9
+
+Juan (23/10): el 56 y el 1381 cambiaron de nombre estos días, y tienen otro CUIT.
+
+| Código | En el sistema viejo | En gmv2 | Qué hay que hacer |
+|---|---|---|---|
+| 56 | SANJUMATO S.A., CUIT 30-71698039-8 | ERCILIA S.A.C.I., CUIT 30-51852124-8 | Actualizar en gmv2 |
+| 1381 | DING DAFU, CUIT 20-96309098-7 | KE WUJIN, CUIT 27-95098430-4 | Actualizar en gmv2 |
+| 765 | LA PAMPEANA DISTRIBUIDORA S.A., CUIT 30-71835473-7 | no existe | Darlo de alta |
+| 766 | YOU JUNJUN, CUIT 20-95333922-7 | no existe | Darlo de alta |
+
+El reporte de impagos solo trae a los clientes que deben. Para el listado completo hace falta exportar del sistema viejo **todos** los clientes (código, nombre y CUIT); con eso armo la comparación contra gmv2.
 
 ## Anexo — números de referencia
 
