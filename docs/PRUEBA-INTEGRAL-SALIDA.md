@@ -164,7 +164,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   - el resto, completo.
 - [x] 4.3b **001942** (FITTERER, lista Bahía): los 3 renglones marcados **faltante** (0 preparado), para ver qué hace el sistema con un pedido que no tiene nada para entregar.
 - [x] 4.4 Los 4 pasaron a "Pendiente Facturación". La ficha del pedido en el ERP muestra quién preparó y cuándo ("Juan Cruz · 18:19–18:21"), y cada renglón tiene un color (rojo faltante, naranja parcial, verde completo). Ver problema 14.
-- [ ] 4.5 (se ve en la 5.3) Al generar los comprobantes: el 001941 tiene que salir **por lo preparado**, sin el BATMAN y con 30 PACKx2 en vez de 36. El 001942 no debería generar comprobante, o tiene que avisar que no hay nada para facturar.
+- [ ] 4.5 (se ve en la 5.3) Al generar los comprobantes, el 001941 tiene que salir **por lo preparado**: sin el BATMAN y con 30 PACKx2 en vez de 36. Es decir **$638.813,76** ($722.880,96 − $57.697,44 del BATMAN − 6 × $4.394,96), y su comisión baja en la misma proporción. El 001942 no debería generar comprobante, o tiene que avisar que no hay nada para facturar.
 
 ## Fase 5 — Gestión en el ERP
 
@@ -261,7 +261,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 12 | 3 | Artículo "Cepillo Dent BATMAN/M.MARAVILLA" con proveedor "INEXISTENTE", y "PACKx2 ULTRA BLANCO x90g" sin rubro. Son datos de artículos para corregir | Oficina (artículos) | Anotado 23/10 |
 | 13 | 3.2 | **No se puede marcar un pedido como contado al venderlo.** Ni la app vendedor ni el ERP tienen esa opción. Hoy el 10 % contado solo aparece al **cobrar** (app vendedor, chofer o /caja), y el pedido lo registra recién ahí. Juan espera poder marcarlo al tomar el pedido | App vendedor + ERP (Juan define cómo) | Anotado 23/10 |
 | 14 | 4.4 | ERP, ficha del pedido después de preparar: el renglón muestra lo **pedido** (36 u.) y un color, pero no **cuánto se preparó** (30 de 36), y el total sigue diciendo $722.880,96 como si fuera completo. Conviene mostrar "preparado 30 de 36" y el total que se va a facturar | ERP (pantalla) | Anotado 23/10 |
-| 15 | 4.5 | **GRAVE: al generar el comprobante se factura lo PEDIDO y no lo PREPARADO.** `generar` (app/api/comprobantes-venta/generar/route.ts:222-284) saltea los renglones FALTANTE, pero en un renglón PARCIAL usa la cantidad pedida: el 001941 saldría con 36 PACKx2 cuando se prepararon 30. El cliente pagaría 6 unidades que no recibe, y lo mismo pasaría con la comisión y el stock. Visto leyendo el código; todavía no se generó nada | Servidor | **Arreglar antes de la 5.3** |
+| 15 | 4.5 | **GRAVE: al generar el comprobante se factura lo PEDIDO y no lo PREPARADO.** `generar` (app/api/comprobantes-venta/generar/route.ts:222-284) saltea los renglones FALTANTE, pero en un renglón PARCIAL usa la cantidad pedida: el 001941 saldría con 36 PACKx2 cuando se prepararon 30. El cliente pagaría 6 unidades que no recibe, y lo mismo pasaría con la comisión y el stock. Visto leyendo el código, antes de generar nada | Servidor | **Arreglado 23/10** (`lib/pedidos/cantidad-a-facturar.ts`): el comprobante y el kardex (y con él la comisión) usan lo preparado en los renglones PARCIAL. Falta verlo en la 5.3 |
 
 ### Detalle del problema 9
 

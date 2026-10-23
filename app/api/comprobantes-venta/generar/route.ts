@@ -13,6 +13,7 @@ import {
 import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificacion"
 import { vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
 import { sincronizarKardexPedido } from "@/lib/kardex/sincronizar-pedido"
+import { cantidadAFacturar } from "@/lib/pedidos/cantidad-a-facturar"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
           cuit, direccion, exento_iva, exento_iibb, provincia, percepcion_iibb, vendedor_id
         ),
         detalle:pedidos_detalle(
-          id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item, metodo_facturacion_item,
+          id, articulo_id, cantidad, cantidad_preparada, precio_final, precio_base, es_bonificado, estado_item, metodo_facturacion_item,
           precio_lista, descuento_propio_pct, bonif_general_pct, bonif_viajante_pct, contado, bonif_merc_origen,
           articulo:articulos!pedidos_detalle_articulo_id_fkey(
             id, descripcion, sku, iva_ventas, categoria, iva_compras, marca_id, proveedor_id, segmento_precio
@@ -219,7 +220,9 @@ export async function POST(request: Request) {
     for (const det of pedido.detalle) {
       const art = det.articulo
       if (!art) continue
-      if (det.estado_item === "FALTANTE" || (det.cantidad ?? 0) <= 0) continue
+      // Se factura lo que sale del depósito: faltante no va, parcial va por lo preparado
+      const cantidad = cantidadAFacturar(det)
+      if (cantidad <= 0) continue
 
       // El método del ítem se decidió al CREAR el pedido (resolverListaSegmento: incluye
       // la condición por segmento y por proveedor) y quedó en metodo_facturacion_item.
@@ -266,8 +269,8 @@ export async function POST(request: Request) {
         ivaIncluido    = true
       }
 
-      const subtotalNeto  = round2(precioUnitario * det.cantidad)
-      const subtotalIva   = round2(ivaUnitario * det.cantidad)
+      const subtotalNeto  = round2(precioUnitario * cantidad)
+      const subtotalIva   = round2(ivaUnitario * cantidad)
       const subtotalFinal = round2(subtotalNeto + subtotalIva)
 
       const segmento = detectarSegmento(art)
@@ -281,7 +284,7 @@ export async function POST(request: Request) {
         articulo_id: det.articulo_id,
         descripcion: art.descripcion || "",
         sku: art.sku || "",
-        cantidad: det.cantidad,
+        cantidad,
         precioUnitario,
         precioAntesIva: precioUnitario,
         precioBase,

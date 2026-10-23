@@ -2,6 +2,7 @@ import { insertarKardex } from "./insertar-kardex"
 import { buildKardexDescuentos } from "./descuentos"
 import { getComisionPorcentaje, calcularComisionMonto } from "@/lib/comisiones/calcular"
 import { nowArgentina } from "@/lib/utils"
+import { cantidadAFacturar } from "@/lib/pedidos/cantidad-a-facturar"
 
 /**
  * Sincroniza el kardex de un pedido con sus renglones (pedidos_detalle).
@@ -42,7 +43,7 @@ const esBlanco = (m: string | null | undefined) => m === "Factura (21% IVA)" || 
 const claveDe = (articuloId: string, bonif: boolean) => `${articuloId}|${bonif ? 1 : 0}`
 
 const DETALLE_COLS =
-  "id, articulo_id, cantidad, estado_item, es_bonificado, precio_base, precio_final, precio_lista, " +
+  "id, articulo_id, cantidad, cantidad_preparada, estado_item, es_bonificado,precio_base, precio_final, precio_lista, " +
   "descuento_propio_pct, bonif_general_pct, bonif_viajante_pct, lista_precio_id, metodo_facturacion_item, precio_costo, " +
   "articulos:articulo_id(id, sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, segmento_precio, stock_actual, precio_compra)"
 
@@ -54,7 +55,7 @@ function valoresLinea(
   listaPedido: string | null,
 ) {
   const art = det.articulos || {}
-  const cantidad = Number(det.cantidad || 0)
+  const cantidad = cantidadAFacturar(det) // parcial: lo preparado, igual que el comprobante
   const bonif = det.es_bonificado === true
   const oferta = Number(det.descuento_propio_pct || 0)
   const g = bonif ? 0 : Number(det.bonif_general_pct || 0)
@@ -214,7 +215,7 @@ export async function sincronizarKardexPedido(
 
   const detPorClave = new Map<string, any[]>()
   for (const d of detalle) {
-    if (d.estado_item === "FALTANTE" || Number(d.cantidad || 0) <= 0) continue
+    if (cantidadAFacturar(d) <= 0) continue
     const k = claveDe(d.articulo_id, d.es_bonificado === true)
     if (!detPorClave.has(k)) detPorClave.set(k, [])
     detPorClave.get(k)!.push(d)
