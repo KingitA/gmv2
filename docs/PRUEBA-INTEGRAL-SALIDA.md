@@ -17,6 +17,15 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 4. **Estado nuevo "Sistema viejo"** para los pedidos reales cargados antes del corte (ya entregados y cobrados en el otro sistema): salen de la cola del depósito, del armado de viajes y de los "pedidos cobrables" de las fichas. Los 30 movidos también terminan ahí, que es su estado real.
 5. **El stock no es real** (hay artículos con stock nulo): no se controla ni se devuelve.
 6. **Clientes de prueba: 1190, 199 y 556**, con lista Neco presupuesto. Se puede cambiar alguno a lista Bahía, pero **sin tocar el método de facturación**.
+7. **Cada cliente paga por un camino distinto** (23/10), para ver cómo se comporta cada uno:
+
+| Cliente | Cómo paga | Qué se prueba |
+|---|---|---|
+| **1190** CHEN XIANG RONG (Punta Alta) | **Al chofer, con la entrega bloqueada** hasta que pague | Bloqueo de entrega, cobro contado con 10 % (REV), desbloqueo y entrega, rendición del chofer |
+| **199** DISTRIBUIDORA URQUIZA (Punta Alta) | **Al vendedor, desde la app** | Entrega a cuenta corriente, cobro del vendedor (efectivo + cheque), retiro de comisión, rendición del vendedor, comisión ganada |
+| **556** FITTERER SANTAGADA (Bahía Blanca) | **En la oficina, desde /caja** | Entrega a cuenta corriente, pago por transferencia en /caja (pendiente hasta controlar el banco), "imputar a lo más viejo" o "dejar a cuenta" |
+
+   Si querés cambiar quién paga por dónde, se cambia esta tabla y listo.
 
 ## Lo que encontré en la auditoría (23/10)
 
@@ -80,10 +89,11 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 - [x] 1.5 `SELECT * FROM pedidos_sistema_viejo_simulacro(now(), '{}');` → `SELECT pedidos_pasar_a_sistema_viejo(now(), '{}', 'PASAR');`
   - Todavía no hay pedidos de prueba, así que se pasan todos, también los viejos de 1190, 199 y 556.
   - Durante la prueba, cada mañana, para mover los pedidos reales nuevos sin tocar los de prueba: `SELECT pedidos_pasar_a_sistema_viejo(now(), '{1190,199,556}', 'PASAR');`
-- [x] 1.6 Foto después (23/10, 14:45): 1.937 pedidos (1.640 en Sistema viejo y 297 eliminados), 12 comprobantes (todos con CAE, suman $0), 12 asientos, 6 imputaciones, 3 cheques (echeqs propios), 0 cobros, devoluciones, billetera, comisiones cobradas, viajes y preparaciones; saldo de todos los clientes $0; clientes, artículos y proveedores sin cambios. Copias: archivo_pruebas.*_20261023_1444, *_20261023_144512 y pedidos_estado_previo_20261023_144528. Tienen que quedar: los 12 con CAE, los 3 echeqs propios, todos los clientes, artículos y proveedores, y todos los pedidos (en "Sistema viejo" o "Eliminado").
+- [x] 1.6 Foto después (23/10, 14:45): 1.937 pedidos (1.640 en Sistema viejo y 297 eliminados), 12 comprobantes (todos con CAE, suman $0), 12 asientos, 6 imputaciones, 3 cheques (echeqs propios), 0 cobros, devoluciones, billetera, comisiones cobradas, viajes y preparaciones; saldo de todos los clientes $0; clientes, artículos y proveedores sin cambios. Copias: archivo_pruebas.*_20261023_1444, *_20261023_144512 y pedidos_estado_previo_20261023_144528.
 - [ ] 1.7 Juan carga los saldos reales de bancos y caja.
 - [ ] 1.8 Verificar en cero: tu cuenta personal, billetera de vendedor y de chofer, comisiones cobradas, viajes (ninguno), saldos de todos los clientes, cola del depósito vacía.
 - [ ] 1.9 Borrar datos o volver a iniciar sesión en las 3 apps del NuStar. Verificar que muestran todo en cero y la cola vacía.
+- [ ] 1.10 `/personal` → "Poner al día" en la cuenta de Juan: tiene que dar comisiones $0 (pendiente V3 del agente vendedor: "Mercadería cobrada" y "Comisiones ganadas" tienen que coincidir).
 
 ## Fase 2 — Importación de deudas del sistema viejo
 
@@ -96,8 +106,8 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 ## Fase 3 — Venta desde la app Vendedor
 
 - [ ] 3.1 Pedido a 199 (URQUIZA) con varios artículos de distintas marcas y rubros, alguno bonificado (prueba la condición por proveedor con 10 %).
-- [ ] 3.2 Pedido a 1190 marcado contado.
-- [ ] 3.3 Pedido a 556.
+- [ ] 3.2 Pedido a 1190 marcado **contado** (lo va a pagar al chofer).
+- [ ] 3.3 Pedido a 556 (cuenta corriente: lo paga en la oficina).
 - [ ] 3.4 Un pedido hecho **sin señal** (modo avión) que se envía al volver: no se duplica.
 - [ ] 3.5 Cambiar a un cliente de lista Neco a lista Bahía (sin tocar método) y hacerle un pedido: los precios cambian como corresponde.
 - [ ] 3.6 Los pedidos llegan al ERP con los mismos precios y totales que mostró la app.
@@ -118,17 +128,18 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 - [ ] 5.3 Generar comprobantes: **solo PRES**. Consulta: fiscales nuevos = 0.
 - [ ] 5.4 Los PRES suman a la cuenta del cliente.
 - [ ] 5.5 Armar el viaje: solo ofrece pedidos de prueba; asignar chofer (Juan) y vehículo.
-- [ ] 5.6 Bloquear la entrega de un cliente (retener entregas): el chofer ve el aviso.
+- [ ] 5.6 Bloquear la entrega de **1190** hasta que pague (retener entregas): el chofer ve el aviso.
 - [ ] 5.7 Entregar fondo al chofer: aparece en su billetera.
 - [ ] 5.8 Despachar el viaje.
 
 ## Fase 6 — Entregas desde la app Chofer
 
 - [ ] 6.1 El viaje aparece con sus paradas y el saldo de cada cliente (deuda vieja + viaje, sin contar dos veces).
-- [ ] 6.2 199: entrega completa y cobro **parcial** en efectivo + un cheque.
-- [ ] 6.3 1190: entrega y cobro contado total con el 10 %: sale **REV**, nunca NC.
-- [ ] 6.4 Una devolución de un renglón, atada a su presupuesto.
-- [ ] 6.5 Cliente bloqueado: no se entrega y el pedido vuelve.
+- [ ] 6.2 **1190 (paga al chofer):** la app no deja entregar mientras no pague.
+- [ ] 6.3 1190 paga contado total con el 10 % → sale **REV**, nunca NC → se desbloquea y se entrega.
+- [ ] 6.4 **199 (paga al vendedor):** entrega completa a cuenta corriente, sin cobrar. Una devolución de un renglón, atada a su presupuesto.
+- [ ] 6.5 **556 (paga en la oficina):** entrega completa a cuenta corriente, sin cobrar.
+- [ ] 6.5b (opcional) Bloqueado que no paga: no se entrega y el pedido vuelve sin viaje.
 - [ ] 6.6 Un gasto del viaje (nafta).
 - [ ] 6.7 Parte del recorrido sin señal: todo sincroniza al volver, sin duplicados.
 - [ ] 6.8 Finalizar: la app propone lo que hay que entregar (efectivo cobrado + fondo − gastos).
@@ -137,18 +148,25 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 - [ ] 7.1 La rendición aparece en Caja → Pendientes de revisar.
 - [ ] 7.2 Rendir con una diferencia chica a propósito (por ejemplo $1.000 de menos): va a la cuenta personal del chofer.
-- [ ] 7.3 Confirmar: los cobros entran a la cuenta de los clientes, el cheque queda en cartera, el pedido entregado pasa a "entregado" y el bloqueado vuelve sin viaje.
+- [ ] 7.3 Confirmar: el cobro de 1190 entra a su cuenta (saldo $0) y los pedidos entregados pasan a "entregado".
 - [ ] 7.4 La devolución **no** se confirma sola: espera al depósito.
 - [ ] 7.5 Depósito acepta la devolución (un renglón sí y otro con la cantidad cambiada).
 - [ ] 7.6 La oficina emite la **REV** de la devolución desde la bandeja. Consulta: fiscales nuevos = 0.
 
 ## Fase 8 — Rendición del vendedor
 
-- [ ] 8.1 El vendedor cobra en la calle lo que quedó debiendo, en efectivo y por transferencia.
+- [ ] 8.1 **199 (paga al vendedor):** el vendedor cobra desde la app una parte en efectivo y otra con un cheque (pago parcial: queda saldo).
 - [ ] 8.2 El vendedor retira su comisión desde la app.
 - [ ] 8.3 El vendedor envía la rendición: propone efectivo − retiros.
 - [ ] 8.4 La oficina confirma: la transferencia queda pendiente hasta controlar el banco.
 - [ ] 8.5 Rechazar un pago a propósito: vuelve a la deuda del cliente, no al vendedor.
+
+## Fase 8b — Pago en la oficina (/caja)
+
+- [ ] 8b.1 **556 (paga en la oficina):** registrar en /caja una transferencia por una parte de la deuda: queda pendiente hasta controlar el banco.
+- [ ] 8b.2 Confirmarla: baja el saldo de 556.
+- [ ] 8b.3 Registrar un pago sin comprobante indicado: aparecen "Imputar a lo más viejo" y "Dejar a cuenta". Probar una de las dos.
+- [ ] 8b.4 La ficha de 556 muestra lo mismo en el ERP, en la app vendedor y en la app chofer.
 
 ## Fase 9 — Billeteras, cuentas y comisiones
 
@@ -156,7 +174,6 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 - [ ] 9.2 Billetera del vendedor: plata en mano con los cheques como unidades; en la cuenta personal, comisiones a favor y el retiro en contra.
 - [ ] 9.3 La comisión se gana **solo** sobre comprobantes saldados del todo; la devolución y el 10 % contado la bajan.
 - [ ] 9.4 La misma comisión se ve igual en la app vendedor, en `/personal` y en el Playroom.
-- [ ] 9.5 Imputación: un pago sin comprobante → "Imputar a lo más viejo" o "Dejar a cuenta".
 - [ ] 9.6 Saldos de 1190, 199 y 556: ERP = app vendedor = app chofer = antigüedad.
 - [ ] 9.7 La caja del día cuadra con todo lo confirmado.
 - [ ] 9.8 Consulta final: **cero comprobantes fiscales nuevos** desde que empezó la prueba.
