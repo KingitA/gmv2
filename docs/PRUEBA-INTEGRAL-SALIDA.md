@@ -139,6 +139,8 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Fase 3 — Venta desde la app Vendedor
 
+> **Todo pedido de prueba lleva "PRUEBA" en las observaciones**, para que nadie de la oficina o del depósito lo prepare o despache de verdad. Desde el lunes 26/10 la oficina sigue importando e imprimiendo pedidos reales como siempre: van a aparecer en la cola junto con los de prueba, y Juan trabaja solo los suyos.
+
 - [ ] 3.1 Pedido a 199 (URQUIZA) con varios artículos de distintas marcas y rubros, alguno bonificado (prueba la condición por proveedor con 10 %).
 - [ ] 3.2 Pedido a 1190 marcado **contado** (lo va a pagar al chofer).
 - [ ] 3.3 Pedido a 556 (cuenta corriente: lo paga en la oficina).
