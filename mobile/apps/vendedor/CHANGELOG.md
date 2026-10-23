@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.3 (versionCode 12) — 2026-10-23
+
+- Devoluciones tal cual fueron facturadas (mismo valor que la NC, precio facturado bloqueado); en Cobrar el pedido muestra lo que debe y no su total; tope de reintentos del envío
+
 ## v0.4.2 (versionCode 11) — 2026-10-21
 
 - Ficha del cliente: el saldo proyectado muestra de dónde sale (cobros sin confirmar, 10% contado, devoluciones) y dice A favor cuando corresponde
