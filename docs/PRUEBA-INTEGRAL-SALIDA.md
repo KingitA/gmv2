@@ -91,8 +91,17 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   - Durante la prueba, cada mañana, para mover los pedidos reales nuevos sin tocar los de prueba: `SELECT pedidos_pasar_a_sistema_viejo(now(), '{1190,199,556}', 'PASAR');`
 - [x] 1.6 Foto después (23/10, 14:45): 1.937 pedidos (1.640 en Sistema viejo y 297 eliminados), 12 comprobantes (todos con CAE, suman $0), 12 asientos, 6 imputaciones, 3 cheques (echeqs propios), 0 cobros, devoluciones, billetera, comisiones cobradas, viajes y preparaciones; saldo de todos los clientes $0; clientes, artículos y proveedores sin cambios. Copias: archivo_pruebas.*_20261023_1444, *_20261023_144512 y pedidos_estado_previo_20261023_144528.
 - [ ] 1.7 Juan carga los saldos reales de bancos y caja.
-- [ ] 1.8 Verificar en cero: tu cuenta personal, billetera de vendedor y de chofer, comisiones cobradas, viajes (ninguno), saldos de todos los clientes, cola del depósito vacía.
-- [ ] 1.9 Borrar datos o volver a iniciar sesión en las 3 apps del NuStar. Verificar que muestran todo en cero y la cola vacía.
+- [x] 1.8 Verificar en cero (23/10, 14:50, en el ERP):
+  - Pendientes de revisar: "Está todo al día".
+  - Caja del día: 0 movimientos y efectivo esperado $0.
+  - /personal: las 17 cuentas en $0, la de Juan también.
+  - Ficha de URQUIZA: saldo $0 y pedidos viejos en "sistema viejo".
+  - Cola del depósito (web): 0 pedidos.
+  - Viajes: ninguno.
+- [x] 1.9 Apps del NuStar (23/10, 14:55): datos borrados (`pm clear`), equipo reiniciado y Juan inició sesión de nuevo.
+  - Vendedor 0.4.3: plata en mano $0, cuenta $0, 9 clientes en $0. Cobrar a URQUIZA: "Sin comprobantes" y "No hay pedidos sin facturar" (antes ofrecía los pedidos viejos).
+  - Chofer 0.3.2: sin viaje; billetera $0 y cuenta $0.
+  - Depósito 0.3.0: 0 pedidos para preparar.
 - [ ] 1.10 `/personal` → "Poner al día" en la cuenta de Juan: tiene que dar comisiones $0 (pendiente V3 del agente vendedor: "Mercadería cobrada" y "Comisiones ganadas" tienen que coincidir).
 
 ## Fase 2 — Importación de deudas del sistema viejo
@@ -202,7 +211,10 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 | # | Fase | Qué pasó | Quién lo arregla | Estado |
 |---|---|---|---|---|
-| 1 | Auditoría | Los pedidos viejos (impresos) figuraban como "cobrables a cuenta" en las fichas del ERP, del vendedor y del chofer | Servidor (estado Sistema viejo) | En la rama |
+| 1 | Auditoría | Los pedidos viejos (impresos) figuraban como "cobrables a cuenta" en las fichas del ERP, del vendedor y del chofer | Servidor (estado Sistema viejo) | Arreglado, en main 23/10 |
+| 2 | 1.9 | Las apps (vendedor, chofer, depósito) solo dejan iniciar sesión con el mail; tienen que aceptar también el nombre de usuario, como el ERP | Apps (agente de cada app) + servidor si hace falta | Anotado 23/10 |
+| 3 | 1.9 | App chofer, billetera: con gastos en cero muestra "−$0,00" (signo menos sobre cero). Detalle visual | App chofer | Anotado 23/10 |
+| 4 | 1.9 | App depósito: "Recibir mercadería" muestra 2 recepciones pendientes. No es parte de esta prueba (compras), pero conviene confirmar si son reales o de prueba | Juan decide | Anotado 23/10 |
 
 ## Anexo — números de referencia
 
