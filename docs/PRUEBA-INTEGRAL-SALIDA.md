@@ -211,10 +211,10 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Fase 6 — Entregas desde la app Chofer
 
-- [ ] 6.1 El viaje aparece con sus paradas y el saldo de cada cliente (deuda vieja + viaje, sin contar dos veces).
+- [x] 6.1 El viaje aparece en la app chofer con sus 3 paradas y con los carteles que corresponden: en FITTERER "🔒 NO ENTREGAR SIN COBRAR — DEBE MUCHO DE LO ANTERIOR" y "COBRAR SÍ O SÍ" (Juan, 25/10).
 - [ ] 6.2 **1190 CHEN ("Cobrar viaje"):** cobro del pedido contado con el 10 % → tiene que salir **REV**, nunca NC. Después, entrega.
 - [ ] 6.3 **199 URQUIZA:** entrega completa a cuenta corriente, sin cobrar (le cobra el vendedor en la Fase 8). Una devolución de un renglón, atada a su presupuesto.
-- [ ] 6.4 **556 FITTERER (bloqueado):** la app no deja entregar si no cobra lo anterior. Sugerencia: que **no pague** y el pedido **vuelva sin viaje** (6.5), así después paga en /caja (Fase 8b) y se prueban los dos caminos.
+- [✗] 6.4 **556 FITTERER (bloqueado): FALLÓ.** La app **dejó marcarlo "entregado" sin cobrar** (25/10, 12:39, motivo de no cobro "No estaba el que paga"). Ver problema 23. Sugerencia: que **no pague** y el pedido **vuelva sin viaje** (6.5), así después paga en /caja (Fase 8b) y se prueban los dos caminos.
 - [ ] 6.5 El pedido no entregado vuelve sin viaje, y su comprobante y su deuda quedan como estaban.
 - [ ] 6.6 Un gasto del viaje (nafta).
 - [ ] 6.7 Parte del recorrido sin señal: todo sincroniza al volver, sin duplicados.
@@ -300,6 +300,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 20 | 5 | **Dónde va el botón del problema 19:** en el modal del pedido. Cuando el pedido ya tiene comprobantes emitidos, aparece **"Anular comprobantes"** (hoy están "Ver comprobantes", "Vista previa", "Imprimir", "Registrar pago" y "Editar pedido"). Flujo de Juan (25/10): (1) emitir comprobantes; (2) el cliente quiere refacturar, o se cambió la lista en el medio; (3) **anular comprobantes**, con un solo botón y todos juntos; (4) modificar las condiciones; (5) repreciar el pedido; (6) volver a emitir **sin tocar cantidades**, con todo lo que implica: la cuenta corriente se ajusta a lo nuevo, la comisión también, y las apps del chofer y del vendedor ven el comprobante nuevo | ERP + servidor | Anotado 25/10 |
 | 21 | 5.5 | Hoja del viaje: el comprobante figura **"PRES 0001-0001-00000021"**, con el punto de venta repetido. Tendría que decir "PRES 0001-00000021" | ERP (pantalla) | Anotado 25/10 |
 | 22 | 5.5 | Bultos en **0** en los 3 pedidos y en la hoja de ruta: nadie los carga, ni el depósito al terminar de preparar ni la oficina. ¿Quién los carga y cuándo? | Juan decide + app depósito | Anotado 25/10 |
+| 23 | 6.4 | **GRAVE: la entrega bloqueada no se bloquea.** Con "NO ENTREGAR SIN COBRAR" en la parada, la app chofer dejó marcar FITTERER como **entregado** sin ningún cobro. El cartel es solo visual (mobile/apps/chofer/src/pantallas/Viaje.tsx:193) y el servidor tampoco lo frena (PATCH /api/chofer/viaje/[id]/parada no mira bloquear_entrega). **Regla de Juan (25/10):** mientras no se cobre lo exigido, la app **no permite** "entregado" ni "entregado parcial" y muestra **"Si no salda lo solicitado, retirar el pedido"**; solo deja "no entregado". El servidor tiene que rechazarlo también, por si llega desde una app vieja | App chofer + servidor | Anotado 25/10 |
 
 ### Detalle del problema 9
 
