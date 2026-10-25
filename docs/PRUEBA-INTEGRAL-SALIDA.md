@@ -230,11 +230,20 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Fase 7 — Rendición del chofer en el ERP
 
-- [ ] 7.1 La rendición aparece en Caja → Pendientes de revisar.
-- [ ] 7.2 Rendir con una diferencia chica a propósito (por ejemplo $1.000 de menos): va a la cuenta personal del chofer.
-- [ ] 7.3 Confirmar: el cobro de 1190 entra a su cuenta (saldo $0) y los pedidos entregados pasan a "entregado".
-- [ ] 7.4 La devolución **no** se confirma sola: espera al depósito.
-- [ ] 7.5 Depósito acepta la devolución (un renglón sí y otro con la cantidad cambiada).
+- [x] 7.1 La rendición apareció en Caja → Pendientes de revisar.
+- [x] 7.2 Se rindieron **$44.000** (declaró $45.000), con $1.000 de menos a propósito, más el cheque.
+  - **Caja chica:** de $50.000 a **$94.000**.
+  - **Cuenta personal de Juan (194):** "diferencia_rendicion" **debe $1.000**.
+  - **Billetera del chofer:** queda con **$1.000** "en mano" (problema 29).
+- [x] 7.3 Rendición confirmada; el viaje quedó **"completado"**.
+  - **001939 y 001940** pasaron a "entregado". El **001941** (no entregado) volvió a **"listo para enviar" sin viaje**.
+  - **Cheque** $100.000: de "en verificación" a **"EN_CARTERA"**.
+  - **CHEN:** el cobro de $100.000 quedó imputado al PRES 0001-00000022. Salió la **REV 0001-00000018 por $15.432,91** (10 % contado, **sin CAE**) y se cruzó con el mismo PRES. El PRES quedó "parcial" con **$38.896,14** pendiente, que baja cuando salga la REV de la devolución.
+  - El 10 % se calculó sobre los **$154.329,05 completos**, naftalinas devueltas incluidas: confirma el problema 26.
+  - **FITTERER:** los $20.000 bajaron su deuda a **$4.403.099,76**. Quedaron **a cuenta**, sin imputar a ningún comprobante (se decide en la 8b).
+- [x] 7.4 Las devoluciones **no** se confirmaron solas al rendir: quedaron esperando al depósito.
+- [x] 7.5 Depósito revisó: **DEV-00002 rechazada** (la duplicada, queda en $0) y **aceptadas DEV-00001** ($23.502,72), **DEV-00003** ($292.094,40) y **DEV-00004** ($1.502,94).
+  - Consecuencia del problema 25: CHEN pagó calculando las dos devoluciones. Con una sola aceptada, cuando salga su REV va a quedar **debiendo unos $15.393,42**.
 - [ ] 7.6 La oficina emite la **REV** de la devolución desde la bandeja. Consulta: fiscales nuevos = 0.
 
 ## Fase 8 — Rendición del vendedor
@@ -314,6 +323,8 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 26 | 6.2 | **Revisar: el 10 % contado también se descuenta sobre lo devuelto.** La app cobró $154.329,05 × 0,9 − $47.005,44 = $91.890,70. Si el 10 % va sobre lo que efectivamente se paga, sería ($154.329,05 − $47.005,44) × 0,9 = $96.591,25. Con la devolución duplicada, la diferencia es $4.700,54. **Juan define cuál es la regla**; se controla con la REV que salga al confirmar la rendición | Juan decide + agente cuentas corrientes / app chofer | Anotado 25/10 |
 | 27 | 6.2 | La parada de CHEN quedó con "Cobró $100.000,00 de $154.329,05 exigidos". Lo exigido no descuenta devoluciones ni 10 %, así que parece un cobro incompleto cuando en realidad sobró plata | App chofer / servidor | Anotado 25/10 |
 | 28 | 6.3 | **Devolución de un artículo de otro pedido.** Las 3 bolsas residuo 45x60 quedaron atadas al PRES 0001-00000020, que no tiene ese artículo, a $500,98. Hay que definir qué pasa cuando lo devuelto no está en ningún comprobante de gmv2 (por ejemplo, porque se vendió en el sistema viejo): a qué comprobante se ata y a qué precio | Juan decide + agente cuentas corrientes | Anotado 25/10 |
+| 29 | 7.2 | **Revisar: la diferencia de rendición puede contarse dos veces.** Los $1.000 que faltaron quedaron como **deuda en la cuenta personal** de Juan y, a la vez, como **$1.000 "en mano" en la billetera del chofer** ("queda en billetera del cobrador"). Si en la próxima rendición la app le pide entregar esos $1.000, los paga dos veces. Hay que definir si la diferencia va a la cuenta personal **o** queda en la billetera, no a los dos | Agente cuentas corrientes | Anotado 25/10 |
+| 30 | 7.2 | Textos del movimiento de diferencia con números sin formato: "faltan $1000.0000000000000000", "declaró $45000.00". Tienen que decir $1.000,00 y $45.000,00 (docs/FORMATOS.md) | Servidor | Anotado 25/10 |
 
 ### Detalle del problema 9
 
