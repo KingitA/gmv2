@@ -336,15 +336,93 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Fase 10 — Cierre
 
-- [ ] 10.1 Repasar "Problemas encontrados" y decidir quién arregla cada uno.
-- [ ] 10.2 Anotar los números de los pedidos de prueba (para borrarlos el día del pase).
-- [ ] 10.3 El día del pase a producción:
-  - puesta a cero;
-  - limpieza complementaria;
-  - borrar los pedidos de prueba por número;
-  - pasar a "Sistema viejo" todo lo cargado hasta ese momento;
-  - apertura con el reporte de ese día;
-  - saldos de bancos y caja.
+- [x] 10.1 Repasar los problemas y decidir quién arregla cada uno (25/10). El resumen está abajo, en "Resumen para repartir".
+- [x] 10.2 Lo que dejó la prueba en la base. Lo borra la puesta a cero del día del pase, **salvo lo marcado como "no lo borra"**:
+  - pedidos de prueba **001939, 001940, 001941 y 001942**, con sus renglones, kardex y comisiones "vendidas". **No lo borra la puesta a cero: hace falta un script** (10.4);
+  - viaje **PRUEBA** (56311891…) y el viaje cancelado "BAHIA · 24/10": los borra la limpieza complementaria;
+  - PRES 0001-00000019 a 0001-00000022 y los 2 de la apertura de 556; REV 0001-00000018 a 0001-00000023;
+  - devoluciones DEV-00001 a DEV-00004;
+  - cobros, el cheque Credicoop n.º 1, los movimientos de billetera y de caja, las comisiones ganadas y los asientos de la cuenta personal de Juan;
+  - stock: los movimientos de salida y entrada de la prueba. El stock no es real, así que no se devuelve;
+  - lista de 556: quedó en **Bahía** (3.5). Decidir si vuelve a Neco;
+  - app vendedor: borrador "Pedido a medio cargar · CHEN XIANG RONG".
+- [ ] 10.3 El día del pase a producción, en este orden:
+  1. avisar a los agentes y a la oficina;
+  2. `SELECT cc_puesta_a_cero('PONER A CERO');` (antes, el simulacro);
+  3. `SELECT prueba_limpieza('LIMPIAR');` (antes, el simulacro);
+  4. borrar los 4 pedidos de prueba (script de la 10.4);
+  5. `SELECT pedidos_pasar_a_sistema_viejo(now(), '{}', 'PASAR');`, sin excluir a nadie;
+  6. apertura con el reporte de impagos **de ese día** (antes hay que resolver los problemas 5 a 9);
+  7. cargar los saldos de bancos y cajas;
+  8. "Poner al día" en `/personal`;
+  9. borrar los datos de las apps en los equipos o volver a iniciar sesión.
+- [ ] 10.4 Script para borrar los pedidos de prueba por número (con simulacro y copia en archivo_pruebas): lo armo cuando Juan lo pida, antes del pase.
+
+## Resumen para repartir (25/10)
+
+**43 problemas anotados: 3 cerrados (1, 15 y 38) y 40 abiertos.**
+
+### Antes de pasar a producción (tocan plata o frenan el pase)
+
+| # | Qué | Quién |
+|---|---|---|
+| 23 | La entrega bloqueada no se bloquea: el chofer puede entregar sin cobrar | App chofer + servidor |
+| 25 | Se puede devolver dos veces lo mismo (más de lo vendido) | App chofer + servidor |
+| 33 | El 10 % contado se calcula sobre mercadería ya devuelta (URQUIZA: $29.359,74 de más) | Agente cuentas corrientes + app vendedor |
+| 26 | La app chofer cobra de menos cuando hay devoluciones y 10 % contado | App chofer |
+| 29 / 36 | Las billeteras quedan con plata "fantasma" después de rendir (chofer $1.000, vendedor −$10.000) | Agente cuentas corrientes |
+| 37 | /caja no descuenta lo que el cliente ya tiene a cuenta: el cliente paga de más | ERP (/caja) |
+| 17 / 39 | Pedido con todo faltante: queda trabado y aparece como cobrable | ERP + servidor |
+| 5 a 8 | La apertura no puede importar el reporte real (un error frena todo, texto libre como ajuste, cuentas del personal, segunda columna de saldo) | Servidor (/apertura) |
+| 9 | Clientes 56 y 1381 con otro dueño y otro CUIT; 765 y 766 no existen; falta el listado completo | Oficina + listado de Claude |
+| 10 / 41 / 42 | Las comisiones se muestran mal: "sin cobrar" inflado, "mercadería cobrada" sin devoluciones, Playroom en $0 | Servidor + app vendedor |
+
+### Importantes para el día a día
+
+| # | Qué | Quién |
+|---|---|---|
+| 16 / 19 / 20 | Cambiar condiciones después de preparar, y botón "Anular comprobantes" para refacturar | ERP + servidor |
+| 13 | Marcar un pedido como contado al venderlo | App vendedor + ERP |
+| 2 | Iniciar sesión en las apps con el nombre de usuario | Las 3 apps |
+| 43 | El gasto del chofer queda "a revisar" para siempre | ERP + servidor |
+| 27 | La parada dice "cobró de menos" cuando sobró plata | App chofer / servidor |
+| 31 / 32 | App vendedor: el pedido no muestra las reversas; la plata en mano no descuenta el retiro | App vendedor |
+| 14 | No se ve "preparado 30 de 36" ni el total que se va a facturar | ERP |
+| 22 | Nadie carga los bultos | Juan define + app depósito |
+
+### Detalles visuales y datos
+
+| # | Qué | Quién |
+|---|---|---|
+| 3 | "−$0,00" en la billetera del chofer | App chofer |
+| 11 | Pedidos sin número en la lista de comisiones | Servidor |
+| 21 | "PRES 0001-0001-…" en la hoja de ruta | ERP |
+| 24 | "No entregado" pide dos textos | App chofer |
+| 30 | Números sin formato en los textos de la rendición | Servidor |
+| 40 | El chofer figura como "d6ac25bb" en el tablero | ERP |
+| 12 | Artículo con proveedor "INEXISTENTE" y otro sin rubro | Oficina |
+
+### Decisiones pendientes de Juan
+
+| # | Qué hay que decidir |
+|---|---|
+| 4 | Las 2 recepciones de mercadería pendientes de la app depósito, ¿son reales? |
+| 18 | Numeración de los PRES nuevos y de los del sistema viejo |
+| 28 | Qué pasa con la devolución de un artículo que no está en ningún comprobante de gmv2 |
+| 34 | Color de un cheque que paga factura y presupuesto a la vez (hoy: más del 50 % presupuesto = negro) |
+| 35 | ¿Confirmar la rendición alcanza como control de la transferencia, o va a "por confirmar"? |
+| 43 | Dónde y cuándo aprueba la oficina los gastos del chofer |
+| 22 | Quién carga los bultos y cuándo |
+| 13 | Cómo se marca el contado al vender |
+
+### Por responsable (para pasarle a cada agente)
+
+- **Agente app chofer:** 3, 23, 24, 25, 26, 27 y 2.
+- **Agente app vendedor:** 2, 13, 31, 32, 33 (cálculo del 10 %) y 41.
+- **Agente app depósito:** 2 y 22.
+- **Agente cuentas corrientes:** 28, 29, 33, 35 y 36.
+- **Servidor / ERP:** 5 a 8, 10, 11, 14, 16, 17, 19, 20, 21, 30, 37, 39, 40, 42 y 43, más la parte de servidor de 23 y 25.
+- **Oficina:** 9 y 12, el borrador de la app vendedor y la lista de 556.
 
 ---
 
@@ -372,7 +450,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 12 | 3 | Artículo "Cepillo Dent BATMAN/M.MARAVILLA" con proveedor "INEXISTENTE", y "PACKx2 ULTRA BLANCO x90g" sin rubro. Son datos de artículos para corregir | Oficina (artículos) | Anotado 23/10 |
 | 13 | 3.2 | **No se puede marcar un pedido como contado al venderlo.** Ni la app vendedor ni el ERP tienen esa opción. Hoy el 10 % contado solo aparece al **cobrar** (app vendedor, chofer o /caja), y el pedido lo registra recién ahí. Juan espera poder marcarlo al tomar el pedido | App vendedor + ERP (Juan define cómo) | Anotado 23/10 |
 | 14 | 4.4 / 5 | (Juan lo vio también en el modal de edición y en el de un pedido ya facturado, que dice "TOTAL $722.881" cuando el PRES es de $638.813,76) ERP, ficha del pedido después de preparar: el renglón muestra lo **pedido** (36 u.) y un color, pero no **cuánto se preparó** (30 de 36), y el total sigue diciendo $722.880,96 como si fuera completo. Conviene mostrar "preparado 30 de 36" y el total que se va a facturar | ERP (pantalla) | Anotado 23/10 |
-| 15 | 4.5 | **GRAVE: al generar el comprobante se factura lo PEDIDO y no lo PREPARADO.** `generar` (app/api/comprobantes-venta/generar/route.ts:222-284) saltea los renglones FALTANTE, pero en un renglón PARCIAL usa la cantidad pedida: el 001941 saldría con 36 PACKx2 cuando se prepararon 30. El cliente pagaría 6 unidades que no recibe, y lo mismo pasaría con la comisión y el stock. Visto leyendo el código, antes de generar nada | Servidor | **Arreglado 23/10** (`lib/pedidos/cantidad-a-facturar.ts`): el comprobante y el kardex (y con él la comisión) usan lo preparado en los renglones PARCIAL. Falta verlo en la 5.3 |
+| 15 | 4.5 | **GRAVE: al generar el comprobante se factura lo PEDIDO y no lo PREPARADO.** `generar` (app/api/comprobantes-venta/generar/route.ts:222-284) saltea los renglones FALTANTE, pero en un renglón PARCIAL usa la cantidad pedida: el 001941 saldría con 36 PACKx2 cuando se prepararon 30. El cliente pagaría 6 unidades que no recibe, y lo mismo pasaría con la comisión y el stock. Visto leyendo el código, antes de generar nada | Servidor | **Arreglado 23/10** (`lib/pedidos/cantidad-a-facturar.ts`): el comprobante y el kardex (y con él la comisión) usan lo preparado en los renglones PARCIAL. **Verificado en la 5.3** (PRES 0021 por $638.813,76 y comisión $15.838,36) |
 | 16 | 5.1 / 5.2 | **Después de preparar se bloquea todo, no solo los artículos.** Cuando el depósito termina el último artículo, el pedido pasa a "Pendiente Facturación" y solo se edita la condición de entrega. **Regla de Juan (23/10):** los artículos y las cantidades sí quedan bloqueados (son los del depósito), pero la **modalidad y las condiciones** (lista, método de facturación, condición de pago, descuentos por segmento, contado 10 %) se tienen que poder cambiar **hasta que el pedido esté facturado**, y al guardar se **reprecia solo** | ERP + servidor (Juan define) | Anotado 23/10 |
 | 17 | 5.3 | **Pedido con todo faltante.** "Generar" muestra "Comprobantes generados exitosamente:" con la lista vacía, no genera nada y el pedido queda en "Pendiente Facturación" para siempre. Juan quiere poder **volverlo a "pendiente"** (para prepararlo cuando haya mercadería) o **pasarlo a eliminado**. Además el mensaje tendría que decir "no hay nada para facturar: todo faltante" | ERP + servidor | Anotado 23/10 |
 | 18 | 5.3 | Observación: los PRES nuevos se numeran **0001-00000019…** y los de la apertura conservan el número del sistema viejo, **0001-00117929…**, en el mismo punto de venta. Hoy no chocan, pero en la cuenta del cliente conviven dos numeraciones. Hay que decidir si gmv2 sigue la numeración del sistema viejo, usa otro punto de venta o se deja así | Juan decide | Anotado 23/10 |
@@ -390,7 +468,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 30 | 7.2 | Textos del movimiento de diferencia con números sin formato: "faltan $1000.0000000000000000", "declaró $45000.00". Tienen que decir $1.000,00 y $45.000,00 (docs/FORMATOS.md) | Servidor | Anotado 25/10 |
 | 31 | 8.1 | App vendedor, pedido facturado: muestra los PRES pero **no las reversas** (devoluciones, 10 %) que bajaron el saldo. El vendedor ve $2.015.618 sin entender por qué no es $2.309.215,56 | App vendedor | Anotado 25/10 |
 | 32 | 8.2 | App vendedor, inicio: "Plata de la empresa en tu mano" **no descuenta el retiro** mientras la rendición no se envía (dice $1.000.000; tendría que decir $990.000). La pantalla de Rendiciones sí lo descuenta bien, y después de rendir muestra $0,00 | App vendedor | Anotado 25/10 |
-| 33 | 8.1 | **Revisar al confirmar: el 10 % contado de URQUIZA se calculó sobre los totales originales**, mercadería devuelta incluida. La app cobró $2.015.618,22 − $230.921,56. Si las devoluciones ya se revirtieron a precio lleno, el 10 % tendría que ir sobre lo que queda ($201.561,82): el cliente se lleva **$29.359,74 de más**. En CHEN no pasó porque la devolución se revirtió al 90 %. Se controla con la REV del 10 % que salga al confirmar. **Juan confirmó (25/10) que el cobro contado con 10 % fue a propósito**: lo que hay que revisar es la base del cálculo | Agente cuentas corrientes / app vendedor | Anotado 25/10 |
+| 33 | 8.1 | **Revisar al confirmar: el 10 % contado de URQUIZA se calculó sobre los totales originales**, mercadería devuelta incluida. La app cobró $2.015.618,22 − $230.921,56. Si las devoluciones ya se revirtieron a precio lleno, el 10 % tendría que ir sobre lo que queda ($201.561,82): el cliente se lleva **$29.359,74 de más**. En CHEN no pasó porque la devolución se revirtió al 90 %. **Confirmado en la 8.4: REV 0001-00000022 por $230.921,56.** **Juan confirmó (25/10) que el cobro contado con 10 % fue a propósito**: lo que hay que revisar es la base del cálculo | Agente cuentas corrientes / app vendedor | Anotado 25/10 |
 | 34 | 7.3 | **Color de un cheque que paga blanco y negro a la vez.** Hoy (lib/actions/color-cheque.ts): si más del 50 % de lo que paga el cheque va a presupuestos, el cheque es **NEGRO**; si no, incluido el 50/50 exacto, es **BLANCO**. La oficina puede elegirlo a mano al confirmar. Un cheque de $100.000 que paga $50.000 de factura y $50.000 de presupuesto queda entero **BLANCO**. ¿Es la regla que quiere Juan? | Juan decide | Anotado 25/10 |
 | 35 | 8.4 | **La transferencia del vendedor entró directo al banco al confirmar la rendición.** La regla 21 dice que las transferencias quedan pendientes hasta que se controla el banco. Hay que definir si confirmar la rendición alcanza como control, o si tiene que ir a "Transf. por confirmar" de la caja | Juan decide + agente cuentas corrientes | Anotado 25/10 |
 | 36 | 8.4 | **La billetera del vendedor quedó en −$10.000 después de rendir.** Movimientos: cobros $1.784.600 − retiro $10.000 − rendición $1.784.600 = −$10.000. La rendición descontó el cobro completo en vez de $1.774.600 (lo cobrado menos el retiro, que ya estaba en la cuenta personal). Si la app muestra "plata en mano −$10.000", la próxima rendición le pediría $10.000 de menos. Es pariente del problema 29 | Agente cuentas corrientes | Anotado 25/10 |
