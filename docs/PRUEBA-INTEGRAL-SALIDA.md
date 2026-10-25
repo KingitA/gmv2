@@ -269,9 +269,20 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   - La app muestra el pedido 001939 en "Facturados" por $2.015.618 con los 2 PRES, pero **sin las reversas** de las devoluciones (problema 31).
 - [x] 8.2 Retiro de **$10.000** desde la app. La cuenta personal de Juan pasó a **debe $11.000**: $1.000 de la diferencia del chofer + $10.000 del retiro, que es lo correcto (regla 13: el retiro baja la plata en mano y se debita de la cuenta). Pero la tarjeta de inicio "Plata de la empresa en tu mano" sigue diciendo **$1.000.000** en vez de $990.000 (problema 32).
 - [x] 8.3 Rendición enviada a la oficina. La app propuso bien: "cobraste $1.000.000, retiraste $10.000, llevás **$990.000**". La transferencia no se cuenta como plata en mano, y está bien.
-- [ ] 8.3b Comisión ganada: **todavía ninguna**, y es correcto. La comisión se gana cuando el comprobante queda **saldado del todo** (regla 27) y el PRES de CHEN todavía debe $17.743,69. Los de URQUIZA quedan saldados recién al confirmar este cobro.
-- [ ] 8.4 La oficina confirma: la transferencia queda pendiente hasta controlar el banco.
-- [ ] 8.5 Rechazar un pago a propósito: vuelve a la deuda del cliente, no al vendedor.
+- [x] 8.3b (antes de confirmar) Comisión ganada: **todavía ninguna**, y es correcto. La comisión se gana cuando el comprobante queda **saldado del todo** (regla 27) y el PRES de CHEN todavía debe $17.743,69. Los de URQUIZA quedan saldados recién al confirmar este cobro.
+- [x] 8.4 Rendición del vendedor confirmada (25/10, 13:33), "como si el efectivo hubiese entrado a caja grande".
+  - **Caja grande:** de $10.000.000 a **$10.990.000**.
+  - **Credicoop:** de $13.443.379,93 a **$14.227.979,93**. La transferencia de $784.600 **entró directo al banco** al confirmar (problema 35).
+  - **URQUIZA saldado ($0):** el cobro quedó imputado ($174.354,64 al PRES 0019 y $1.610.245,36 al PRES 0020). Salió la **REV 0001-00000022 por $230.921,56** (10 % contado, sin CAE) y el ajuste de $96,66 por redondeo. Ambos PRES quedaron "pagado".
+  - **El 10 % se calculó sobre los totales originales**: confirma el problema 33, con **$29.359,74 de descuento de más**.
+  - **Comisión ganada**, acreditada en la cuenta personal de Juan:
+    - PRES 0001-00000020: $42.457,46 ("cobrado $1.610.245,36 de $1.790.928,36");
+    - PRES 0001-00000019: $8.717,73;
+    - total **$51.175,19**.
+  - **Cuenta personal de Juan (194): a favor $40.175,19** = $51.175,19 de comisión − $10.000 del retiro − $1.000 de la diferencia del chofer.
+  - **Billetera del vendedor: −$10.000** (problema 36).
+  - Fiscales nuevos: 0.
+- [ ] 8.5 Rechazar un pago a propósito: vuelve a la deuda del cliente, no al vendedor. (No se hizo en la rendición del vendedor; se puede probar en /caja.)
 
 ## Fase 8b — Pago en la oficina (/caja)
 
@@ -348,6 +359,8 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 32 | 8.2 | App vendedor, inicio: "Plata de la empresa en tu mano" **no descuenta el retiro** (dice $1.000.000; tendría que decir $990.000). La pantalla de Rendiciones sí lo descuenta bien | App vendedor | Anotado 25/10 |
 | 33 | 8.1 | **Revisar al confirmar: el 10 % contado de URQUIZA se calculó sobre los totales originales**, mercadería devuelta incluida. La app cobró $2.015.618,22 − $230.921,56. Si las devoluciones ya se revirtieron a precio lleno, el 10 % tendría que ir sobre lo que queda ($201.561,82): el cliente se lleva **$29.359,74 de más**. En CHEN no pasó porque la devolución se revirtió al 90 %. Se controla con la REV del 10 % que salga al confirmar. **Juan confirmó (25/10) que el cobro contado con 10 % fue a propósito**: lo que hay que revisar es la base del cálculo | Agente cuentas corrientes / app vendedor | Anotado 25/10 |
 | 34 | 7.3 | **Color de un cheque que paga blanco y negro a la vez.** Hoy (lib/actions/color-cheque.ts): si más del 50 % de lo que paga el cheque va a presupuestos, el cheque es **NEGRO**; si no, incluido el 50/50 exacto, es **BLANCO**. La oficina puede elegirlo a mano al confirmar. Un cheque de $100.000 que paga $50.000 de factura y $50.000 de presupuesto queda entero **BLANCO**. ¿Es la regla que quiere Juan? | Juan decide | Anotado 25/10 |
+| 35 | 8.4 | **La transferencia del vendedor entró directo al banco al confirmar la rendición.** La regla 21 dice que las transferencias quedan pendientes hasta que se controla el banco. Hay que definir si confirmar la rendición alcanza como control, o si tiene que ir a "Transf. por confirmar" de la caja | Juan decide + agente cuentas corrientes | Anotado 25/10 |
+| 36 | 8.4 | **La billetera del vendedor quedó en −$10.000 después de rendir.** Movimientos: cobros $1.784.600 − retiro $10.000 − rendición $1.784.600 = −$10.000. La rendición descontó el cobro completo en vez de $1.774.600 (lo cobrado menos el retiro, que ya estaba en la cuenta personal). Si la app muestra "plata en mano −$10.000", la próxima rendición le pediría $10.000 de menos. Es pariente del problema 29 | Agente cuentas corrientes | Anotado 25/10 |
 
 ### Detalle del problema 9
 
