@@ -212,13 +212,21 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 ## Fase 6 — Entregas desde la app Chofer
 
 - [x] 6.1 El viaje aparece en la app chofer con sus 3 paradas y con los carteles que corresponden: en FITTERER "🔒 NO ENTREGAR SIN COBRAR — DEBE MUCHO DE LO ANTERIOR" y "COBRAR SÍ O SÍ" (Juan, 25/10).
-- [ ] 6.2 **1190 CHEN ("Cobrar viaje"):** cobro del pedido contado con el 10 % → tiene que salir **REV**, nunca NC. Después, entrega.
-- [ ] 6.3 **199 URQUIZA:** entrega completa a cuenta corriente, sin cobrar (le cobra el vendedor en la Fase 8). Una devolución de un renglón, atada a su presupuesto.
-- [✗] 6.4 **556 FITTERER (bloqueado): FALLÓ.** La app **dejó marcarlo "entregado" sin cobrar** (25/10, 12:39, motivo de no cobro "No estaba el que paga"). Ver problema 23. Sugerencia: que **no pague** y el pedido **vuelva sin viaje** (6.5), así después paga en /caja (Fase 8b) y se prueban los dos caminos.
+- [x] 6.2 **1190 CHEN ("Cobrar viaje")**, 25/10 a las 13:02. Devolución de las naftalinas (vencidas, no vendibles), cobro contado con el 10 % y entrega.
+  - La app pidió **$91.890,70** y se pagó con un **cheque Credicoop de $100.000 a 31 días** (vence el 25/11). Sobran **$8.109,30**.
+  - El cobro quedó "pendiente de rendición" con la marca [10% CONTADO], y el cheque "EN_VERIFICACION" (no entra a cartera hasta confirmar).
+  - **Pero se cargaron DOS devoluciones de las mismas 6 naftalinas** (DEV-00001 y DEV-00002, $23.502,72 cada una): se devolvieron 12 de 6 vendidas (problema 25).
+  - Los $91.890,70 salen de $154.329,05 × 0,9 − $47.005,44: el 10 % se aplicó **antes** de restar las devoluciones (problema 26).
+  - La REV del 10 % sale al confirmar la rendición (7.x).
+- [x] 6.3 **199 URQUIZA:** entregado sin cobrar (13:04), con dos devoluciones:
+  - **DEV-00003:** las 240 bolsas consorcio 60x90 de este pedido, vendibles, $292.094,40, atada al PRES 0001-00000019 (el de ARNANUK). Correcto.
+  - **DEV-00004:** 3 bolsas residuo 45x60 de **otro pedido**, vendibles, $1.502,94. Quedó atada al PRES 0001-00000020, que **no tiene ese artículo** (problema 28).
+- [✗] 6.4 **556 FITTERER (bloqueado): FALLÓ.** La app **dejó marcarlo "entregado" sin cobrar** (25/10, 12:39, motivo de no cobro "No estaba el que paga"). Ver problema 23.
+- [x] 6.4b Corregido a mano: la parada de FITTERER pasó a **"no entregado"** (motivo "No pagó"). La app pide además "por qué no cobró", un segundo texto que sobra (problema 24). Después, "pasate que junté algo": **cobro de $20.000 en efectivo** a cuenta de lo anterior, que quedó "pendiente de rendición". Sugerencia: que **no pague** y el pedido **vuelva sin viaje** (6.5), así después paga en /caja (Fase 8b) y se prueban los dos caminos.
 - [ ] 6.5 El pedido no entregado vuelve sin viaje, y su comprobante y su deuda quedan como estaban.
-- [ ] 6.6 Un gasto del viaje (nafta).
+- [x] 6.6 Gasto de **nafta $25.000** ("declarado"), descontado de la billetera.
 - [ ] 6.7 Parte del recorrido sin señal: todo sincroniza al volver, sin duplicados.
-- [ ] 6.8 Finalizar: la app propone lo que hay que entregar (efectivo cobrado + fondo − gastos).
+- [x] 6.8 Viaje finalizado (13:07), "en rendición". La app propone **$45.000 en efectivo + 1 cheque**: $50.000 de fondo + $20.000 cobrados − $25.000 de nafta. La billetera de la base da lo mismo. Muestra "cobrado $120.000" y "total a cobrar $6.546.041,59", que es el total del viaje menos las devoluciones ($340.602,78).
 
 ## Fase 7 — Rendición del chofer en el ERP
 
@@ -301,6 +309,11 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 21 | 5.5 | Hoja del viaje: el comprobante figura **"PRES 0001-0001-00000021"**, con el punto de venta repetido. Tendría que decir "PRES 0001-00000021" | ERP (pantalla) | Anotado 25/10 |
 | 22 | 5.5 | Bultos en **0** en los 3 pedidos y en la hoja de ruta: nadie los carga, ni el depósito al terminar de preparar ni la oficina. ¿Quién los carga y cuándo? | Juan decide + app depósito | Anotado 25/10 |
 | 23 | 6.4 | **GRAVE: la entrega bloqueada no se bloquea.** Con "NO ENTREGAR SIN COBRAR" en la parada, la app chofer dejó marcar FITTERER como **entregado** sin ningún cobro. El cartel es solo visual (mobile/apps/chofer/src/pantallas/Viaje.tsx:193) y el servidor tampoco lo frena (PATCH /api/chofer/viaje/[id]/parada no mira bloquear_entrega). **Regla de Juan (25/10):** mientras no se cobre lo exigido, la app **no permite** "entregado" ni "entregado parcial" y muestra **"Si no salda lo solicitado, retirar el pedido"**; solo deja "no entregado". El servidor tiene que rechazarlo también, por si llega desde una app vieja | App chofer + servidor | Anotado 25/10 |
+| 24 | 6.4 | App chofer: al marcar "no entregado" pide **dos textos**, por qué no se entregó y por qué no se cobró. Si no se entregó porque no pagó, el segundo sobra | App chofer | Anotado 25/10 |
+| 25 | 6.2 | **Se puede devolver dos veces lo mismo.** CHEN compró 6 naftalinas y la app aceptó dos devoluciones de 6 (DEV-00001 y DEV-00002), y el servidor también. La devolución no puede superar lo vendido menos lo ya devuelto. Además, la pantalla de la devolución muestra solo "devolución" y el monto: tiene que mostrar qué artículos y cuántos | App chofer + servidor | Anotado 25/10 |
+| 26 | 6.2 | **Revisar: el 10 % contado también se descuenta sobre lo devuelto.** La app cobró $154.329,05 × 0,9 − $47.005,44 = $91.890,70. Si el 10 % va sobre lo que efectivamente se paga, sería ($154.329,05 − $47.005,44) × 0,9 = $96.591,25. Con la devolución duplicada, la diferencia es $4.700,54. **Juan define cuál es la regla**; se controla con la REV que salga al confirmar la rendición | Juan decide + agente cuentas corrientes / app chofer | Anotado 25/10 |
+| 27 | 6.2 | La parada de CHEN quedó con "Cobró $100.000,00 de $154.329,05 exigidos". Lo exigido no descuenta devoluciones ni 10 %, así que parece un cobro incompleto cuando en realidad sobró plata | App chofer / servidor | Anotado 25/10 |
+| 28 | 6.3 | **Devolución de un artículo de otro pedido.** Las 3 bolsas residuo 45x60 quedaron atadas al PRES 0001-00000020, que no tiene ese artículo, a $500,98. Hay que definir qué pasa cuando lo devuelto no está en ningún comprobante de gmv2 (por ejemplo, porque se vendió en el sistema viejo): a qué comprobante se ata y a qué precio | Juan decide + agente cuentas corrientes | Anotado 25/10 |
 
 ### Detalle del problema 9
 
