@@ -263,9 +263,13 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Fase 8 — Rendición del vendedor
 
-- [ ] 8.1 **199 (paga al vendedor):** el vendedor cobra desde la app una parte en efectivo y otra con un cheque (pago parcial: queda saldo).
-- [ ] 8.2 El vendedor retira su comisión desde la app.
-- [ ] 8.3 El vendedor envía la rendición: propone efectivo − retiros.
+- [x] 8.1 **199 URQUIZA**, cobro desde la app vendedor (25/10, 13:24): **$1.000.000 en efectivo + transferencia Credicoop $784.600 = $1.784.600**, "pendiente de rendición". El resto se cerró con un **ajuste de $96,66**.
+  - El cobro salió con la marca **[10% CONTADO]**: la app aplicó el 10 % sobre los comprobantes. $2.015.618,22 − 10 % de los totales **originales** ($230.921,56) = $1.784.696,66 = $1.784.600 + $96,66. Ver problema 33.
+  - No hubo cheque en este cobro.
+  - La app muestra el pedido 001939 en "Facturados" por $2.015.618 con los 2 PRES, pero **sin las reversas** de las devoluciones (problema 31).
+- [x] 8.2 Retiro de **$10.000** desde la app. La cuenta personal de Juan pasó a **debe $11.000**: $1.000 de la diferencia del chofer + $10.000 del retiro, que es lo correcto (regla 13: el retiro baja la plata en mano y se debita de la cuenta). Pero la tarjeta de inicio "Plata de la empresa en tu mano" sigue diciendo **$1.000.000** en vez de $990.000 (problema 32).
+- [x] 8.3 Rendición enviada a la oficina. La app propuso bien: "cobraste $1.000.000, retiraste $10.000, llevás **$990.000**". La transferencia no se cuenta como plata en mano, y está bien.
+- [ ] 8.3b Comisión ganada: **todavía ninguna**, y es correcto. La comisión se gana cuando el comprobante queda **saldado del todo** (regla 27) y el PRES de CHEN todavía debe $17.743,69. Los de URQUIZA quedan saldados recién al confirmar este cobro.
 - [ ] 8.4 La oficina confirma: la transferencia queda pendiente hasta controlar el banco.
 - [ ] 8.5 Rechazar un pago a propósito: vuelve a la deuda del cliente, no al vendedor.
 
@@ -340,6 +344,10 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 28 | 6.3 | **Devolución de un artículo de otro pedido.** Las 3 bolsas residuo 45x60 quedaron atadas al PRES 0001-00000020, que no tiene ese artículo, a $500,98. Hay que definir qué pasa cuando lo devuelto no está en ningún comprobante de gmv2 (por ejemplo, porque se vendió en el sistema viejo): a qué comprobante se ata y a qué precio | Juan decide + agente cuentas corrientes | Anotado 25/10 |
 | 29 | 7.2 | **Revisar: la diferencia de rendición puede contarse dos veces.** Los $1.000 que faltaron quedaron como **deuda en la cuenta personal** de Juan y, a la vez, como **$1.000 "en mano" en la billetera del chofer** ("queda en billetera del cobrador"). Si en la próxima rendición la app le pide entregar esos $1.000, los paga dos veces. Hay que definir si la diferencia va a la cuenta personal **o** queda en la billetera, no a los dos | Agente cuentas corrientes | Anotado 25/10 |
 | 30 | 7.2 | Textos del movimiento de diferencia con números sin formato: "faltan $1000.0000000000000000", "declaró $45000.00". Tienen que decir $1.000,00 y $45.000,00 (docs/FORMATOS.md) | Servidor | Anotado 25/10 |
+| 31 | 8.1 | App vendedor, pedido facturado: muestra los PRES pero **no las reversas** (devoluciones, 10 %) que bajaron el saldo. El vendedor ve $2.015.618 sin entender por qué no es $2.309.215,56 | App vendedor | Anotado 25/10 |
+| 32 | 8.2 | App vendedor, inicio: "Plata de la empresa en tu mano" **no descuenta el retiro** (dice $1.000.000; tendría que decir $990.000). La pantalla de Rendiciones sí lo descuenta bien | App vendedor | Anotado 25/10 |
+| 33 | 8.1 | **Revisar al confirmar: el 10 % contado de URQUIZA se calculó sobre los totales originales**, mercadería devuelta incluida. La app cobró $2.015.618,22 − $230.921,56. Si las devoluciones ya se revirtieron a precio lleno, el 10 % tendría que ir sobre lo que queda ($201.561,82): el cliente se lleva **$29.359,74 de más**. En CHEN no pasó porque la devolución se revirtió al 90 %. Se controla con la REV del 10 % que salga al confirmar. ¿Juan quiso cobrarle contado a URQUIZA? | Juan confirma + agente cuentas corrientes / app vendedor | Anotado 25/10 |
+| 34 | 7.3 | **Color de un cheque que paga blanco y negro a la vez.** Hoy (lib/actions/color-cheque.ts): si más del 50 % de lo que paga el cheque va a presupuestos, el cheque es **NEGRO**; si no, incluido el 50/50 exacto, es **BLANCO**. La oficina puede elegirlo a mano al confirmar. Un cheque de $100.000 que paga $50.000 de factura y $50.000 de presupuesto queda entero **BLANCO**. ¿Es la regla que quiere Juan? | Juan decide | Anotado 25/10 |
 
 ### Detalle del problema 9
 
