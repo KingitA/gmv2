@@ -296,9 +296,12 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Fase 9 — Billeteras, cuentas y comisiones
 
-- [✗] 9.1 Billetera del chofer: después de rendir quedó en **$1.000** y no en $0. La diferencia está **también** en la cuenta personal (problema 29). Además, en el tablero de Finanzas figura como "Billetera d6ac25bb", sin nombre (problema 40).
-- [~] 9.2 Billetera del vendedor:
-  - **Plata en mano: −$10.000** (problema 36).
+- [~] 9.1 Billetera del chofer.
+  - **La app chofer muestra bien** (capturas del 25/10, 13:44): efectivo en mano **$0,00**, 0 cheques, "Tu cuenta: a favor $54.429,71 · Retiros $10.000,00", viaje PRUEBA "FINALIZADO" y la nafta "a revisar en oficina" (problema 43).
+  - **En la base y en el tablero de Finanzas**, la billetera del chofer quedó en **$1.000** y no en $0. La diferencia está **también** en la cuenta personal (problema 29). Además, en el tablero de Finanzas figura como "Billetera d6ac25bb", sin nombre (problema 40).
+- [~] 9.2 Billetera del vendedor.
+  - **La app vendedor muestra bien**: "Plata de la empresa en tu mano $0,00", "Tu cuenta $54.429,71 a tu favor", "Comisiones ganadas $65.429,71", "Retiros $10.000,00" y "Para retirar $54.429,71".
+  - **En la base y en el tablero de Finanzas** quedó en **−$10.000** (problema 36). En los movimientos de la app se ve la causa: cobro $1.000.000 + transferencia $784.600 − retiro $10.000 − rendición $1.784.600.
   - **Cuenta personal, bien:** comisiones $65.429,71 a favor, menos el retiro de $10.000 y la diferencia de $1.000 = **$54.429,71 a favor**. Se ve igual en `/personal` y en el "para retirar" de la app (API).
 - [x] 9.3 La comisión se ganó **solo** en los comprobantes saldados:
   - URQUIZA, PRES 19 y 20: $51.175,19;
@@ -308,14 +311,16 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   La devolución y el 10 % la bajaron en proporción a lo cobrado.
 - [✗] 9.4 **No se ve igual en todos lados:**
   - `/personal` y la cuenta personal: bien;
-  - app vendedor, "Mercadería cobrada": muestra **$65.822,31** para el 001939, cuando se acreditaron $51.175,19, porque no descuenta las devoluciones (problema 41). El 001941 está bien ($14.254,52);
+  - app vendedor, "Mercadería cobrada" (confirmado con captura): muestra **$65.822,31** para el 001939, con "6 SKUs" (incluye las bolsas devueltas),, cuando se acreditaron $51.175,19, porque no descuenta las devoluciones (problema 41). El 001941 está bien ($14.254,52);
   - **Playroom, comisiones cobradas de octubre: $0** (problema 42).
 - [~] 9.6 Saldos en el **ERP** (fuente única `/api/clientes/saldos`, real = proyectado) y en la antigüedad, todos iguales a la base:
   - **CHEN $17.743,69**, que la antigüedad del tablero muestra como "corriente";
   - **URQUIZA $0**;
   - **FITTERER −$20.000 (a favor)**.
 
-  Faltan las capturas de la app vendedor y de la app chofer.
+  Falta la captura de "Mis clientes" de la app vendedor. La app chofer ya no tiene viaje, así que no muestra clientes.
+- [x] 9.9 App depósito (captura): 0 pedidos para preparar y 0 devoluciones pendientes. El 001942 (todo faltante) no aparece en la cola.
+- [ ] 9.10 App vendedor: en el inicio quedó un **"Pedido a medio cargar · CHEN XIANG RONG (1 artículo)"**. Es un borrador de la prueba que no se envió: hay que borrarlo antes del pase.
 - [x] 9.7 **Caja y bancos cuadran al peso** con los saldos de partida (1.7):
 
 | Cuenta | Inicio | Movimientos de la prueba | Final |
@@ -384,7 +389,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 29 | 7.2 | **Revisar: la diferencia de rendición puede contarse dos veces.** Los $1.000 que faltaron quedaron como **deuda en la cuenta personal** de Juan y, a la vez, como **$1.000 "en mano" en la billetera del chofer** ("queda en billetera del cobrador"). Si en la próxima rendición la app le pide entregar esos $1.000, los paga dos veces. Hay que definir si la diferencia va a la cuenta personal **o** queda en la billetera, no a los dos | Agente cuentas corrientes | Anotado 25/10 |
 | 30 | 7.2 | Textos del movimiento de diferencia con números sin formato: "faltan $1000.0000000000000000", "declaró $45000.00". Tienen que decir $1.000,00 y $45.000,00 (docs/FORMATOS.md) | Servidor | Anotado 25/10 |
 | 31 | 8.1 | App vendedor, pedido facturado: muestra los PRES pero **no las reversas** (devoluciones, 10 %) que bajaron el saldo. El vendedor ve $2.015.618 sin entender por qué no es $2.309.215,56 | App vendedor | Anotado 25/10 |
-| 32 | 8.2 | App vendedor, inicio: "Plata de la empresa en tu mano" **no descuenta el retiro** (dice $1.000.000; tendría que decir $990.000). La pantalla de Rendiciones sí lo descuenta bien | App vendedor | Anotado 25/10 |
+| 32 | 8.2 | App vendedor, inicio: "Plata de la empresa en tu mano" **no descuenta el retiro** mientras la rendición no se envía (dice $1.000.000; tendría que decir $990.000). La pantalla de Rendiciones sí lo descuenta bien, y después de rendir muestra $0,00 | App vendedor | Anotado 25/10 |
 | 33 | 8.1 | **Revisar al confirmar: el 10 % contado de URQUIZA se calculó sobre los totales originales**, mercadería devuelta incluida. La app cobró $2.015.618,22 − $230.921,56. Si las devoluciones ya se revirtieron a precio lleno, el 10 % tendría que ir sobre lo que queda ($201.561,82): el cliente se lleva **$29.359,74 de más**. En CHEN no pasó porque la devolución se revirtió al 90 %. Se controla con la REV del 10 % que salga al confirmar. **Juan confirmó (25/10) que el cobro contado con 10 % fue a propósito**: lo que hay que revisar es la base del cálculo | Agente cuentas corrientes / app vendedor | Anotado 25/10 |
 | 34 | 7.3 | **Color de un cheque que paga blanco y negro a la vez.** Hoy (lib/actions/color-cheque.ts): si más del 50 % de lo que paga el cheque va a presupuestos, el cheque es **NEGRO**; si no, incluido el 50/50 exacto, es **BLANCO**. La oficina puede elegirlo a mano al confirmar. Un cheque de $100.000 que paga $50.000 de factura y $50.000 de presupuesto queda entero **BLANCO**. ¿Es la regla que quiere Juan? | Juan decide | Anotado 25/10 |
 | 35 | 8.4 | **La transferencia del vendedor entró directo al banco al confirmar la rendición.** La regla 21 dice que las transferencias quedan pendientes hasta que se controla el banco. Hay que definir si confirmar la rendición alcanza como control, o si tiene que ir a "Transf. por confirmar" de la caja | Juan decide + agente cuentas corrientes | Anotado 25/10 |
@@ -395,6 +400,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 40 | 9.1 | La billetera y las rendiciones del chofer figuran como **"d6ac25bb"** (un pedazo del código del usuario) en el tablero de Finanzas, en vez de "Juan Cruz" | ERP (tablero) | Anotado 25/10 |
 | 41 | 9.4 | **App vendedor, "Mercadería cobrada": la comisión del pedido no descuenta las devoluciones.** El 001939 muestra $65.822,31 (comisión pactada × 90 %), pero se acreditaron $51.175,19 porque se devolvieron 240 bolsas. Es el pendiente V3 de la app vendedor ("Mercadería cobrada" y "Comisiones ganadas" tienen que coincidir) | App vendedor + servidor (/api/vendedor/comisiones) | Anotado 25/10 |
 | 42 | 9.4 | **Playroom, comisiones: $0 en octubre.** El tablero lee las comisiones "cobradas" de la tabla vieja, que desde la etapa 3 de cuentas corrientes ya no se escribe. Tiene que leer la comisión acreditada en la cuenta personal | Servidor (Playroom) | Anotado 25/10 |
+| 43 | 9.1 | **El gasto de nafta ($25.000) quedó "a revisar en oficina" después de rendir.** La rendición se confirmó, pero el gasto sigue "declarado": nadie lo aprobó ni lo rechazó. Hay que definir dónde lo revisa la oficina, si tiene que hacerlo antes de confirmar la rendición, o si confirmar la rendición ya lo aprueba | ERP + servidor (Juan define) | Anotado 25/10 |
 
 ### Detalle del problema 9
 
