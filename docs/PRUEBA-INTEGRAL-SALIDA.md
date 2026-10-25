@@ -296,13 +296,38 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Fase 9 — Billeteras, cuentas y comisiones
 
-- [ ] 9.1 Billetera del chofer: plata en mano = 0 después de rendir; la cuenta personal tiene la diferencia.
-- [ ] 9.2 Billetera del vendedor: plata en mano con los cheques como unidades; en la cuenta personal, comisiones a favor y el retiro en contra.
-- [ ] 9.3 La comisión se gana **solo** sobre comprobantes saldados del todo; la devolución y el 10 % contado la bajan.
-- [ ] 9.4 La misma comisión se ve igual en la app vendedor, en `/personal` y en el Playroom.
-- [ ] 9.6 Saldos de 1190, 199 y 556: ERP = app vendedor = app chofer = antigüedad.
-- [ ] 9.7 La caja del día cuadra con todo lo confirmado.
-- [ ] 9.8 Consulta final: **cero comprobantes fiscales nuevos** desde que empezó la prueba.
+- [✗] 9.1 Billetera del chofer: después de rendir quedó en **$1.000** y no en $0. La diferencia está **también** en la cuenta personal (problema 29). Además, en el tablero de Finanzas figura como "Billetera d6ac25bb", sin nombre (problema 40).
+- [~] 9.2 Billetera del vendedor:
+  - **Plata en mano: −$10.000** (problema 36).
+  - **Cuenta personal, bien:** comisiones $65.429,71 a favor, menos el retiro de $10.000 y la diferencia de $1.000 = **$54.429,71 a favor**. Se ve igual en `/personal` y en el "para retirar" de la app (API).
+- [x] 9.3 La comisión se ganó **solo** en los comprobantes saldados:
+  - URQUIZA, PRES 19 y 20: $51.175,19;
+  - FITTERER, PRES 21: $14.254,52, que es su comisión de $15.838,36 × 90 % por el contado;
+  - **CHEN no**, porque todavía debe $17.743,69, y está bien.
+
+  La devolución y el 10 % la bajaron en proporción a lo cobrado.
+- [✗] 9.4 **No se ve igual en todos lados:**
+  - `/personal` y la cuenta personal: bien;
+  - app vendedor, "Mercadería cobrada": muestra **$65.822,31** para el 001939, cuando se acreditaron $51.175,19, porque no descuenta las devoluciones (problema 41). El 001941 está bien ($14.254,52);
+  - **Playroom, comisiones cobradas de octubre: $0** (problema 42).
+- [~] 9.6 Saldos en el **ERP** (fuente única `/api/clientes/saldos`, real = proyectado) y en la antigüedad, todos iguales a la base:
+  - **CHEN $17.743,69**, que la antigüedad del tablero muestra como "corriente";
+  - **URQUIZA $0**;
+  - **FITTERER −$20.000 (a favor)**.
+
+  Faltan las capturas de la app vendedor y de la app chofer.
+- [x] 9.7 **Caja y bancos cuadran al peso** con los saldos de partida (1.7):
+
+| Cuenta | Inicio | Movimientos de la prueba | Final |
+|---|---|---|---|
+| Caja chica | $100.000 | −$50.000 fondo, +$44.000 rendición del chofer, +$3.980.790 FITTERER | **$4.074.790** |
+| Caja grande | $10.000.000 | +$990.000 rendición del vendedor | **$10.990.000** |
+| Credicoop | $13.443.379,93 | +$784.600 transferencia de URQUIZA | **$14.227.979,93** |
+| Nación, Provincia, MercadoPago | sin cambios | — | sin cambios |
+| Cheques en cartera | ninguno | +1 cheque de CHEN, NEGRO, $100.000 | 1 cheque |
+
+  Los $25.000 de nafta salieron del fondo del chofer, no de una caja: $50.000 de fondo − $25.000 de nafta + $20.000 cobrados − $1.000 faltantes = los $44.000 que entraron.
+- [x] 9.8 **Cero comprobantes fiscales nuevos** desde el inicio de la prueba (23/10, 14:45). Todo lo que se emitió: 6 PRES (4 de pedidos y 2 de la apertura) y 6 REV (3 del 10 % contado y 3 de devoluciones), todos sin CAE.
 
 ## Fase 10 — Cierre
 
@@ -367,6 +392,9 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 37 | 8b | **/caja: el "Total a pagar" no descuenta la plata que el cliente ya tiene a cuenta.** El resumen chico dice "a favor / a cuenta −$20.000 · Saldo de la cuenta $4.403.099,76", pero el total grande y el cálculo del 10 % usan $4.423.099,76. El cliente terminó pagando de más y quedó con $20.000 a favor. La pantalla tiene que ofrecer **usar lo que está a cuenta** (lo aplica la oficina, regla 39) y mostrar el total neto | ERP (/caja) | Anotado 25/10 |
 | 38 | 8b | **¿El 10 % contado corresponde sobre la deuda vieja?** El 10 % de FITTERER ($442.309,98) incluyó los 2 PRES de junio que vinieron del sistema viejo ($3.784.286,00 → $378.428,60 de descuento). **Juan (25/10): sí, el 10 % contado también aplica a la deuda vieja.** Está bien como funciona | — | **Cerrado: no es error** |
 | 39 | 8b | **Imputar ofrece como anticipo un pedido que no se va a facturar.** El modal de imputación propuso el pedido 001942 (todo faltante, "Sin facturar (anticipo)") por $115.545,25. Un pedido con todos sus renglones faltantes no tendría que aparecer como cobrable. Es la misma raíz que el problema 17 | ERP + servidor | Anotado 25/10 |
+| 40 | 9.1 | La billetera y las rendiciones del chofer figuran como **"d6ac25bb"** (un pedazo del código del usuario) en el tablero de Finanzas, en vez de "Juan Cruz" | ERP (tablero) | Anotado 25/10 |
+| 41 | 9.4 | **App vendedor, "Mercadería cobrada": la comisión del pedido no descuenta las devoluciones.** El 001939 muestra $65.822,31 (comisión pactada × 90 %), pero se acreditaron $51.175,19 porque se devolvieron 240 bolsas. Es el pendiente V3 de la app vendedor ("Mercadería cobrada" y "Comisiones ganadas" tienen que coincidir) | App vendedor + servidor (/api/vendedor/comisiones) | Anotado 25/10 |
+| 42 | 9.4 | **Playroom, comisiones: $0 en octubre.** El tablero lee las comisiones "cobradas" de la tabla vieja, que desde la etapa 3 de cuentas corrientes ya no se escribe. Tiene que leer la comisión acreditada en la cuenta personal | Servidor (Playroom) | Anotado 25/10 |
 
 ### Detalle del problema 9
 
