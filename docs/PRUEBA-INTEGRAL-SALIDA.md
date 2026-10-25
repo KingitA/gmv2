@@ -191,19 +191,31 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   - 001940: $7.222,82.
   - **001941: bajó de $17.922,67 a $15.838,36** (sin el BATMAN y con 30 PACKx2), lo que confirma que el arreglo del problema 15 también corrige la comisión.
   - 001942: sus renglones de comisión y de kardex se borraron al intentar generar, porque no tiene nada para facturar.
-- [ ] 5.5 Armar el viaje: solo ofrece pedidos de prueba; asignar chofer (Juan) y vehículo.
-- [ ] 5.6 Bloquear la entrega de **1190** hasta que pague (retener entregas): el chofer ve el aviso.
-- [ ] 5.7 Entregar fondo al chofer: aparece en su billetera.
-- [ ] 5.8 Despachar el viaje.
+- [x] 5.5 Viaje **"PRUEBA"** del 25/10 (PUNTA ALTA + BAHIA, chofer Juan Cruz, sin vehículo). Lleva 3 paradas con 3 pedidos: 1 URQUIZA (#001939), 2 CHEN (#001940) y 3 FITTERER (#001941). El 001942 (todo faltante) no se subió. Los números de la hoja coinciden con la base:
+  - este viaje: $3.102.358,37;
+  - saldos anteriores: $3.784.286,00 (la apertura de FITTERER);
+  - total a cobrar: $6.886.644,37;
+  - "cobrar sí o sí": $3.938.615,05 (lo anterior de FITTERER más el pedido de CHEN).
+  - Aparece además un viaje "BAHIA · 24/10" creado el 23/10 a las 18:36 y **cancelado**; no lleva nada.
+- [x] 5.6 Instrucciones por parada (**cambio de Juan, 25/10**):
+  - **URQUIZA**: sale sin condición.
+  - **CHEN**: "Cobrar viaje", es decir que tiene que pagar este pedido.
+  - **FITTERER**: **entrega bloqueada** si no cobra lo anterior, con la nota "DEBE MUCHO DE LO ANTERIOR" y "cobrar sí o sí $3.784.286,00".
+
+  El bloqueo es de la parada, no del cliente: la ficha de FITTERER no queda retenida. Que el chofer vea el aviso se controla en la 6.1.
+- [x] 5.7 Fondo de **$50.000 de caja chica** al chofer (25/10, 12:28):
+  - caja chica: de $100.000 a **$50.000**;
+  - billetera del chofer: **+$50.000** ("A cuenta viaje PRUEBA");
+  - movimiento de caja: "TRANSFERENCIA_INTERNA" de la caja a la billetera.
+- [x] 5.8 Viaje **despachado**: los 3 pedidos pasaron a "en viaje".
 
 ## Fase 6 — Entregas desde la app Chofer
 
 - [ ] 6.1 El viaje aparece con sus paradas y el saldo de cada cliente (deuda vieja + viaje, sin contar dos veces).
-- [ ] 6.2 **1190 (paga al chofer):** la app no deja entregar mientras no pague.
-- [ ] 6.3 1190 paga contado total con el 10 % → sale **REV**, nunca NC → se desbloquea y se entrega.
-- [ ] 6.4 **199 (paga al vendedor):** entrega completa a cuenta corriente, sin cobrar. Una devolución de un renglón, atada a su presupuesto.
-- [ ] 6.5 **556 (paga en la oficina):** entrega completa a cuenta corriente, sin cobrar.
-- [ ] 6.5b (opcional) Bloqueado que no paga: no se entrega y el pedido vuelve sin viaje.
+- [ ] 6.2 **1190 CHEN ("Cobrar viaje"):** cobro del pedido contado con el 10 % → tiene que salir **REV**, nunca NC. Después, entrega.
+- [ ] 6.3 **199 URQUIZA:** entrega completa a cuenta corriente, sin cobrar (le cobra el vendedor en la Fase 8). Una devolución de un renglón, atada a su presupuesto.
+- [ ] 6.4 **556 FITTERER (bloqueado):** la app no deja entregar si no cobra lo anterior. Sugerencia: que **no pague** y el pedido **vuelva sin viaje** (6.5), así después paga en /caja (Fase 8b) y se prueban los dos caminos.
+- [ ] 6.5 El pedido no entregado vuelve sin viaje, y su comprobante y su deuda quedan como estaban.
 - [ ] 6.6 Un gasto del viaje (nafta).
 - [ ] 6.7 Parte del recorrido sin señal: todo sincroniza al volver, sin duplicados.
 - [ ] 6.8 Finalizar: la app propone lo que hay que entregar (efectivo cobrado + fondo − gastos).
@@ -279,12 +291,15 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 11 | 3.7 | **Comisiones del vendedor: pedidos sin número.** En la lista, 001940, 001941 y 001942 aparecen como "—": el kardex no guarda el número del pedido cuando el pedido viene de la app (pasa en 9.143 de 11.279 renglones del último mes). Conviene tomar el número del pedido y no del kardex | Servidor | Anotado 23/10 |
 | 12 | 3 | Artículo "Cepillo Dent BATMAN/M.MARAVILLA" con proveedor "INEXISTENTE", y "PACKx2 ULTRA BLANCO x90g" sin rubro. Son datos de artículos para corregir | Oficina (artículos) | Anotado 23/10 |
 | 13 | 3.2 | **No se puede marcar un pedido como contado al venderlo.** Ni la app vendedor ni el ERP tienen esa opción. Hoy el 10 % contado solo aparece al **cobrar** (app vendedor, chofer o /caja), y el pedido lo registra recién ahí. Juan espera poder marcarlo al tomar el pedido | App vendedor + ERP (Juan define cómo) | Anotado 23/10 |
-| 14 | 4.4 / 5 | (Juan también lo vio en el modal de edición) ERP, ficha del pedido después de preparar: el renglón muestra lo **pedido** (36 u.) y un color, pero no **cuánto se preparó** (30 de 36), y el total sigue diciendo $722.880,96 como si fuera completo. Conviene mostrar "preparado 30 de 36" y el total que se va a facturar | ERP (pantalla) | Anotado 23/10 |
+| 14 | 4.4 / 5 | (Juan lo vio también en el modal de edición y en el de un pedido ya facturado, que dice "TOTAL $722.881" cuando el PRES es de $638.813,76) ERP, ficha del pedido después de preparar: el renglón muestra lo **pedido** (36 u.) y un color, pero no **cuánto se preparó** (30 de 36), y el total sigue diciendo $722.880,96 como si fuera completo. Conviene mostrar "preparado 30 de 36" y el total que se va a facturar | ERP (pantalla) | Anotado 23/10 |
 | 15 | 4.5 | **GRAVE: al generar el comprobante se factura lo PEDIDO y no lo PREPARADO.** `generar` (app/api/comprobantes-venta/generar/route.ts:222-284) saltea los renglones FALTANTE, pero en un renglón PARCIAL usa la cantidad pedida: el 001941 saldría con 36 PACKx2 cuando se prepararon 30. El cliente pagaría 6 unidades que no recibe, y lo mismo pasaría con la comisión y el stock. Visto leyendo el código, antes de generar nada | Servidor | **Arreglado 23/10** (`lib/pedidos/cantidad-a-facturar.ts`): el comprobante y el kardex (y con él la comisión) usan lo preparado en los renglones PARCIAL. Falta verlo en la 5.3 |
 | 16 | 5.1 / 5.2 | **Después de preparar se bloquea todo, no solo los artículos.** Cuando el depósito termina el último artículo, el pedido pasa a "Pendiente Facturación" y solo se edita la condición de entrega. **Regla de Juan (23/10):** los artículos y las cantidades sí quedan bloqueados (son los del depósito), pero la **modalidad y las condiciones** (lista, método de facturación, condición de pago, descuentos por segmento, contado 10 %) se tienen que poder cambiar **hasta que el pedido esté facturado**, y al guardar se **reprecia solo** | ERP + servidor (Juan define) | Anotado 23/10 |
 | 17 | 5.3 | **Pedido con todo faltante.** "Generar" muestra "Comprobantes generados exitosamente:" con la lista vacía, no genera nada y el pedido queda en "Pendiente Facturación" para siempre. Juan quiere poder **volverlo a "pendiente"** (para prepararlo cuando haya mercadería) o **pasarlo a eliminado**. Además el mensaje tendría que decir "no hay nada para facturar: todo faltante" | ERP + servidor | Anotado 23/10 |
 | 18 | 5.3 | Observación: los PRES nuevos se numeran **0001-00000019…** y los de la apertura conservan el número del sistema viejo, **0001-00117929…**, en el mismo punto de venta. Hoy no chocan, pero en la cuenta del cliente conviven dos numeraciones. Hay que decidir si gmv2 sigue la numeración del sistema viejo, usa otro punto de venta o se deja así | Juan decide | Anotado 23/10 |
 | 19 | 5 | **Rehacer los comprobantes cuando el cliente cambia cómo quiere que se le facture.** Pasa en la calle: "le pedí al vendedor todo factura", o mitad y mitad, o todo presupuesto. **Flujo que pide Juan (23/10):** (1) se emiten los comprobantes; (2) el cliente dice que lo quería distinto; (3) se **anulan** los comprobantes (PRES → REV; FA → NC, fiscal en producción); (4) el pedido vuelve a quedar con las **condiciones editables** (lista, método, condición de pago, descuentos), pero no los artículos; (5) se **reprecia**; (6) se **vuelven a emitir** según las reglas nuevas. **Hoy**, anular un comprobante emite la reversa, devuelve el stock y anula el remito, pero **el pedido queda en "Facturado"**: no se puede editar ni volver a generar. Si el pedido salió en varios comprobantes (como URQUIZA, con ARNANUK aparte), hay que anularlos todos antes de rehacerlos. Va junto con el problema 16. **Juan (25/10): la anulación no tiene que ser de a un comprobante: un solo botón "Anular pedido facturado" cancela todos sus comprobantes juntos.** Lo que ya hace bien la anulación de hoy, comprobante por comprobante: **cuenta corriente** (asienta la reversa en el haber del cliente y la cruza con el original, así el saldo vuelve a como estaba antes de emitir); **comisión** (vuelve a liquidar y, como el comprobante deja de estar saldado, revierte la comisión ganada si ya se había acreditado); **stock** (lo devuelve); **remito** (lo anula). Ojo con un detalle: si el cliente ya había pagado parte, la plata queda **a favor** del cliente y hay que imputarla al comprobante nuevo | ERP + servidor | Anotado 23/10, ampliado 25/10 |
+| 20 | 5 | **Dónde va el botón del problema 19:** en el modal del pedido. Cuando el pedido ya tiene comprobantes emitidos, aparece **"Anular comprobantes"** (hoy están "Ver comprobantes", "Vista previa", "Imprimir", "Registrar pago" y "Editar pedido"). Flujo de Juan (25/10): (1) emitir comprobantes; (2) el cliente quiere refacturar, o se cambió la lista en el medio; (3) **anular comprobantes**, con un solo botón y todos juntos; (4) modificar las condiciones; (5) repreciar el pedido; (6) volver a emitir **sin tocar cantidades**, con todo lo que implica: la cuenta corriente se ajusta a lo nuevo, la comisión también, y las apps del chofer y del vendedor ven el comprobante nuevo | ERP + servidor | Anotado 25/10 |
+| 21 | 5.5 | Hoja del viaje: el comprobante figura **"PRES 0001-0001-00000021"**, con el punto de venta repetido. Tendría que decir "PRES 0001-00000021" | ERP (pantalla) | Anotado 25/10 |
+| 22 | 5.5 | Bultos en **0** en los 3 pedidos y en la hoja de ruta: nadie los carga, ni el depósito al terminar de preparar ni la oficina. ¿Quién los carga y cuándo? | Juan decide + app depósito | Anotado 25/10 |
 
 ### Detalle del problema 9
 
