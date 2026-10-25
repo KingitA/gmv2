@@ -286,9 +286,12 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Fase 8b — Pago en la oficina (/caja)
 
-- [ ] 8b.1 **556 (paga en la oficina):** registrar en /caja una transferencia por una parte de la deuda: queda pendiente hasta controlar el banco.
-- [ ] 8b.2 Confirmarla: baja el saldo de 556.
-- [ ] 8b.3 Registrar un pago sin comprobante indicado: aparecen "Imputar a lo más viejo" y "Dejar a cuenta". Probar una de las dos.
+- [x] 8b.1 **556 FITTERER en /caja** (25/10, 13:38). Juan registró un cobro **en efectivo de $3.980.790 a caja chica, con 10 % contado**, sobre los 3 PRES: los 2 de la apertura más el 0001-00000021.
+  - Se confirmó en el acto, como manda la regla del efectivo en oficina.
+  - **Caja chica:** de $94.000 a **$4.074.790**.
+  - Salió la **REV 0001-00000023 por $442.309,98** (10 % de $4.423.099,76, sin CAE). Los 3 PRES quedaron "pagado".
+- [x] 8b.2 **Saldo de FITTERER: −$20.000 (a favor).** Los $20.000 que había dado al chofer no se tuvieron en cuenta al calcular el cobro: pagó todo y además le quedan $20.000 a favor (problema 37). Al cobro le sobran $0,22 sin imputar.
+- [~] 8b.3 Al imputar los $0,22 que sobraron, aparecen "Proponer lo más viejo" y "Dejar a cuenta". Pero el modal ofrece como anticipo el **pedido 001942 por $115.545,25**, que es el pedido con todo faltante que no se va a facturar nunca (problema 39). También muestra el 001941 como "$722.880,96 Saldado", que es el total del pedido y no lo facturado (problema 14).
 - [ ] 8b.4 La ficha de 556 muestra lo mismo en el ERP, en la app vendedor y en la app chofer.
 
 ## Fase 9 — Billeteras, cuentas y comisiones
@@ -361,6 +364,9 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 34 | 7.3 | **Color de un cheque que paga blanco y negro a la vez.** Hoy (lib/actions/color-cheque.ts): si más del 50 % de lo que paga el cheque va a presupuestos, el cheque es **NEGRO**; si no, incluido el 50/50 exacto, es **BLANCO**. La oficina puede elegirlo a mano al confirmar. Un cheque de $100.000 que paga $50.000 de factura y $50.000 de presupuesto queda entero **BLANCO**. ¿Es la regla que quiere Juan? | Juan decide | Anotado 25/10 |
 | 35 | 8.4 | **La transferencia del vendedor entró directo al banco al confirmar la rendición.** La regla 21 dice que las transferencias quedan pendientes hasta que se controla el banco. Hay que definir si confirmar la rendición alcanza como control, o si tiene que ir a "Transf. por confirmar" de la caja | Juan decide + agente cuentas corrientes | Anotado 25/10 |
 | 36 | 8.4 | **La billetera del vendedor quedó en −$10.000 después de rendir.** Movimientos: cobros $1.784.600 − retiro $10.000 − rendición $1.784.600 = −$10.000. La rendición descontó el cobro completo en vez de $1.774.600 (lo cobrado menos el retiro, que ya estaba en la cuenta personal). Si la app muestra "plata en mano −$10.000", la próxima rendición le pediría $10.000 de menos. Es pariente del problema 29 | Agente cuentas corrientes | Anotado 25/10 |
+| 37 | 8b | **/caja: el "Total a pagar" no descuenta la plata que el cliente ya tiene a cuenta.** El resumen chico dice "a favor / a cuenta −$20.000 · Saldo de la cuenta $4.403.099,76", pero el total grande y el cálculo del 10 % usan $4.423.099,76. El cliente terminó pagando de más y quedó con $20.000 a favor. La pantalla tiene que ofrecer **usar lo que está a cuenta** (lo aplica la oficina, regla 39) y mostrar el total neto | ERP (/caja) | Anotado 25/10 |
+| 38 | 8b | **¿El 10 % contado corresponde sobre la deuda vieja?** El 10 % de FITTERER ($442.309,98) incluyó los 2 PRES de junio que vinieron del sistema viejo ($3.784.286,00 → $378.428,60 de descuento). Hay que definir si el contado aplica a comprobantes de la apertura o solo a lo nuevo | Juan decide | Anotado 25/10 |
+| 39 | 8b | **Imputar ofrece como anticipo un pedido que no se va a facturar.** El modal de imputación propuso el pedido 001942 (todo faltante, "Sin facturar (anticipo)") por $115.545,25. Un pedido con todos sus renglones faltantes no tendría que aparecer como cobrable. Es la misma raíz que el problema 17 | ERP + servidor | Anotado 25/10 |
 
 ### Detalle del problema 9
 
