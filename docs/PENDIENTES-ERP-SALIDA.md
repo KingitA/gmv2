@@ -1,4 +1,4 @@
-# Pendientes del ERP y del servidor para salir a producción — 26/10/2026 En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
+# Pendientes del ERP y del servidor para salir a producción — 26/10/2026
 
 **Para:** agentes de **Cuentas corrientes**, **Frontend**, **Listas de precios y descuentos** y **Hojas de ruta / viajes y cobranzas**.
 **De:** sesión "prueba integral de salida de mercadería", con Juan.
@@ -60,11 +60,11 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | 37 | /caja: el total no descuenta lo que el cliente tiene a cuenta | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | 35 | Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | ~~25~~ | ~~Tope de devolución en el servidor (lado servidor de C2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
-| 23 | El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1) | Hojas de ruta/viajes y cobranzas | Pendiente |
-| 27 | La parada dice "cobró de menos" cuando sobró | Hojas de ruta/viajes y cobranzas | Pendiente |
-| 22 | Cargar bultos o pallets en el ERP antes de finalizar el viaje | Hojas de ruta/viajes y cobranzas | Pendiente |
-| 43 | Aprobar los gastos del viaje al aceptar la rendición | Hojas de ruta/viajes y cobranzas | Pendiente |
-| 21 | Hoja del viaje: "PRES 0001-0001-…" | Hojas de ruta/viajes y cobranzas | Pendiente |
+| 23 | El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1) | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
+| 27 | La parada dice "cobró de menos" cuando sobró | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
+| 22 | Cargar bultos o pallets en el ERP antes de finalizar el viaje | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
+| 43 | Aprobar los gastos del viaje al aceptar la rendición | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
+| 21 | Hoja del viaje: "PRES 0001-0001-…" | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
 | 13 | Pedido con 10 % contado desde la venta (lado servidor de V1) | Listas de precios y descuentos | Pendiente |
 | 16 | Condiciones editables hasta facturar, y repreciar al guardar | Listas de precios y descuentos | Pendiente |
 | 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | Pendiente |
