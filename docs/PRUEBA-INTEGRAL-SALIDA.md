@@ -387,11 +387,11 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 16 / 19 / 20 | Cambiar condiciones después de preparar, y botón "Anular comprobantes" para refacturar | ERP + servidor |
 | 13 | Marcar un pedido como contado al venderlo | App vendedor + ERP | **Decisión de Juan (26/10):** al **finalizar el pedido** en la app aparece un cartel con un **checkbox de 10 % contado**. Si el cliente ya tiene el contado por defecto, aparece tildado; si no, se puede tildar ahí. Afecta el **total del pedido en vivo**: mientras se levanta el pedido en la calle, el total ya se ve con el 10 % incluido si corresponde | Decidido 26/10, falta hacerlo |
 | 2 | Iniciar sesión en las apps con el nombre de usuario | Las 3 apps |
-| 43 | El gasto del chofer queda "a revisar" para siempre | ERP + servidor | **Decisión de Juan (26/10):** los gastos se aprueban **en la rendición**: al aceptarla, la oficina carga el gasto (nafta, camión, peón, hotel u otro) asociado al **vehículo** o al concepto que corresponda | Decidido 26/10, falta hacerlo |
+| 43 | El gasto del chofer queda "a revisar" para siempre | ERP + servidor | **Decisión de Juan (26/10):** los gastos se aprueban **en la rendición**: al aceptarla, la oficina carga el gasto (nafta, camión, peón, hotel u otro) asociado al **vehículo** o al concepto que corresponda | Decidido 26/10; hecho 26/10 (839f9db) |
 | 27 | La parada dice "cobró de menos" cuando sobró plata | App chofer / servidor |
 | 31 / 32 | App vendedor: el pedido no muestra las reversas; la plata en mano no descuenta el retiro | App vendedor |
 | 14 | No se ve "preparado 30 de 36" ni el total que se va a facturar | ERP |
-| 22 | Nadie carga los bultos | Juan define + app depósito | **Decisión de Juan (26/10):** por ahora los bultos se cargan **en el ERP**, en cualquier momento antes de finalizar el viaje; al despachar ya deberían estar. Pueden ser **bultos o pallets**. **No bloquea**: un pedido sin bultos se despacha igual, sin alerta | Decidido 26/10, falta hacerlo |
+| 22 | Nadie carga los bultos | Juan define + app depósito | **Decisión de Juan (26/10):** por ahora los bultos se cargan **en el ERP**, en cualquier momento antes de finalizar el viaje; al despachar ya deberían estar. Pueden ser **bultos o pallets**. **No bloquea**: un pedido sin bultos se despacha igual, sin alerta | Decidido 26/10; hecho 26/10 (e0b8b3f) |
 
 ### Detalles visuales y datos
 
@@ -482,7 +482,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 40 | 9.1 | La billetera y las rendiciones del chofer figuran como **"d6ac25bb"** (un pedazo del código del usuario) en el tablero de Finanzas, en vez de "Juan Cruz" | ERP (tablero) | Anotado 25/10 |
 | 41 | 9.4 | **App vendedor, "Mercadería cobrada": la comisión del pedido no descuenta las devoluciones.** El 001939 muestra $65.822,31 (comisión pactada × 90 %), pero se acreditaron $51.175,19 porque se devolvieron 240 bolsas. Es el pendiente V3 de la app vendedor ("Mercadería cobrada" y "Comisiones ganadas" tienen que coincidir) | App vendedor + servidor (/api/vendedor/comisiones) | **Hecho 26/10 por el agente vendedor (ea55e14)**: la lista sale de la cuenta personal; 001939 = $51.175,19 |
 | 42 | 9.4 | **Playroom, comisiones: $0 en octubre.** El tablero lee las comisiones "cobradas" de la tabla vieja, que desde la etapa 3 de cuentas corrientes ya no se escribe. Tiene que leer la comisión acreditada en la cuenta personal | Servidor (Playroom) | Anotado 25/10 |
-| 43 | 9.1 | **El gasto de nafta ($25.000) quedó "a revisar en oficina" después de rendir.** La rendición se confirmó, pero el gasto sigue "declarado": nadie lo aprobó ni lo rechazó. Hay que definir dónde lo revisa la oficina, si tiene que hacerlo antes de confirmar la rendición, o si confirmar la rendición ya lo aprueba | ERP + servidor (Juan define) | Anotado 25/10 |
+| 43 | 9.1 | **El gasto de nafta ($25.000) quedó "a revisar en oficina" después de rendir.** La rendición se confirmó, pero el gasto sigue "declarado": nadie lo aprobó ni lo rechazó. Hay que definir dónde lo revisa la oficina, si tiene que hacerlo antes de confirmar la rendición, o si confirmar la rendición ya lo aprueba | ERP + servidor (Juan define) | Hecho 26/10 (839f9db) |
 
 ### Detalle del problema 9
 

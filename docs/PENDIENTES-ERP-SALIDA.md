@@ -63,7 +63,7 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | ~~23~~ | ~~El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1)~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
 | ~~27~~ | ~~La parada dice "cobró de menos" cuando sobró~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
 | ~~22~~ | ~~Cargar bultos o pallets en el ERP antes de finalizar el viaje~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (e0b8b3f, falta que Juan aplique `supabase/migrations/20261026_pedidos_pallets.sql`) |
-| 43 | Aprobar los gastos del viaje al aceptar la rendición | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas) |
+| ~~43~~ | ~~Aprobar los gastos del viaje al aceptar la rendición~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (839f9db, falta que Juan aplique `supabase/migrations/20261026b_viajes_gastos_aprobacion.sql`) |
 | ~~21~~ | ~~Hoja del viaje: "PRES 0001-0001-…"~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
 | 13 | Pedido con 10 % contado desde la venta (lado servidor de V1) | Listas de precios y descuentos | Pendiente |
 | 16 | Condiciones editables hasta facturar, y repreciar al guardar | Listas de precios y descuentos | Pendiente |
@@ -217,6 +217,8 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 - [ ] Al **aceptar la rendición**, la oficina aprueba o carga cada gasto (nafta, camión, peón, hotel u otro), asociado al **vehículo** o al concepto.
 - [ ] Queda aprobado con quién y cuándo.
 - [ ] La app chofer deja de mostrarlo "a revisar".
+
+**HECHO 26/10 (839f9db):** en **/caja → Controlar rendición**, si la rendición es de un viaje aparece "Gastos del viaje": cada gasto declarado viene **aprobado por defecto**, con su **concepto** (nafta, camión, peón, hotel, peaje, comida, cubierta u otro) y el **vehículo** (por defecto el del viaje); se puede rechazar con motivo. `POST /api/finanzas/rendiciones/[id]/confirmar` recibe `gastos: [{ id, aprobar, categoria?, vehiculo_id?, motivo? }]`: si quedan gastos sin decidir o un rechazo sin motivo, no confirma (400). Se aplican **después** de confirmar con `viaje_gasto_resolver` (queda `revisado_por` / `revisado_at`); si alguno falla, la rendición queda confirmada y se avisa (se resuelve desde el arqueo del viaje). No toca la cuenta de la rendición (gastos congelados al declarar, 20260929). **Migración `20261026b_viajes_gastos_aprobacion.sql`**: `viajes_gastos.vehiculo_id` y el concepto 'camion' (sin aplicar: el vehículo no se guarda y camión pasa a "otro"). Lógica en `lib/viajes/gastos-rendicion.ts`. **Lo de la prueba:** la nafta de $25.000 del viaje PRUEBA sigue "declarado" (la rendición ya estaba confirmada); se aprueba desde el arqueo del viaje o la borra la puesta a cero.
 
 ### #21 — "PRES 0001-0001-00000021" en la hoja del viaje
 
