@@ -1,7 +1,8 @@
 import { useOverlay, useParamEstado } from "@gm/core"
 import { DS, type BilleteraData } from "../datasets"
-import { useBilletera, useMe, useRefrescarAlEntrar } from "../datos/hooks"
-import { fechaHora, formatCurrency, Pantalla, SinDescargar, SinEnviar, useToast } from "../ui"
+import { useBilletera, useMe, useRefrescarAlEntrar, useViaje } from "../datos/hooks"
+import { transferenciasDelViaje } from "../datos/overlay"
+import { fechaHora, formatCurrency, formatResta, nombreGasto, Pantalla, SinDescargar, SinEnviar, useToast } from "../ui"
 import { GastoHoja } from "./GastoHoja"
 
 // Billetera del chofer (= app/chofer/billetera/page.tsx): efectivo en mano (cobros sin
@@ -59,6 +60,9 @@ export function Billetera() {
   useRefrescarAlEntrar(DS.billetera)
 
   const viajeActivo = me?.viaje_activo ?? null
+  // #35: las transferencias no son plata en mano ni se rinden; se ven aparte con su estado
+  const { viaje: viajeVista } = useViaje(viajeActivo?.id)
+  const transferencias = viajeVista ? transferenciasDelViaje(viajeVista) : []
   const sinEnviar = data ? data.cobros.filter((c) => c.estado === "sin_enviar") : []
   const rechazados = data ? data.cobros.filter((c) => c.estado === "rechazado") : []
   const efectivoSinEnviar = sinEnviar.reduce((s, c) => s + (c.metodos.every((m) => m === "Efectivo") ? c.monto : 0), 0)
@@ -93,7 +97,7 @@ export function Billetera() {
             <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
               <div><p className="text-blue-200">Cobros</p><p className="font-bold">{formatCurrency(data.desglose.cobros_efectivo)}</p></div>
               <div><p className="text-blue-200">A cuenta viaje</p><p className="font-bold">{formatCurrency(data.desglose.fondo_viaje)}</p></div>
-              <div><p className="text-blue-200">Gastos</p><p className="font-bold text-red-200">−{formatCurrency(data.desglose.gastos)}</p></div>
+              <div><p className="text-blue-200">Gastos</p><p className="font-bold text-red-200">{formatResta(data.desglose.gastos)}</p></div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2 border-t border-blue-500 pt-3 text-sm">
               <span className="rounded-full bg-blue-600 px-3 py-1">🧾 {data.cheques_cantidad} {data.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano · {formatCurrency(data.desglose.cheques_monto)}</span>
@@ -104,6 +108,24 @@ export function Billetera() {
 
           {/* ── 2. TU cuenta (personal): diferencias de rendición, mercadería que retiraste, pagos que hiciste ── */}
           <CajaCuentaPersonal data={data} />
+
+          {transferencias.length > 0 && (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
+              <p className="text-sm font-bold text-sky-900">🏦 Transferencias de este viaje</p>
+              <p className="text-xs text-sky-800">No son plata en mano y no se rinden: las confirma oficina cuando entran al banco.</p>
+              <div className="mt-2 divide-y divide-sky-100">
+                {transferencias.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between gap-2 py-2 text-sm">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-gray-800">{t.cliente}</p>
+                      <p className="text-xs text-gray-500">{t.estado === "confirmada" ? "✓ confirmada" : t.estado === "sin_enviar" ? "sin enviar" : "a confirmar en oficina"}</p>
+                    </div>
+                    <p className="shrink-0 font-bold text-sky-800">{formatCurrency(t.monto)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-2">
             <button onClick={() => setTab("cobros")} className={`min-h-11 flex-1 rounded-xl py-2 text-sm font-bold ${tab === "cobros" ? "bg-blue-600 text-white" : "border border-gray-200 bg-white text-gray-600"}`}>Cobros</button>
@@ -144,10 +166,10 @@ export function Billetera() {
               {data.gastos.map((g) => (
                 <div key={g.id} className={`flex items-center justify-between rounded-xl border bg-white px-4 py-3 shadow-sm ${g.local ? "border-amber-300" : "border-gray-100"}`}>
                   <div className="min-w-0">
-                    <p className="text-sm font-bold capitalize text-gray-800">{g.categoria}{g.observaciones ? <span className="font-normal text-gray-500"> · {g.observaciones}</span> : null}</p>
-                    <p className="text-xs text-gray-400">{g.viaje ? `${g.viaje} · ` : ""}{fechaHora(g.created_at)} · {g.local ? <SinEnviar /> : g.estado === "aprobado" ? "aprobado" : "a revisar en oficina"}</p>
+                    <p className="text-sm font-bold capitalize text-gray-800">{nombreGasto(g.categoria)}{g.observaciones ? <span className="font-normal text-gray-500"> · {g.observaciones}</span> : null}</p>
+                    <p className="text-xs text-gray-400">{g.viaje ? `${g.viaje} · ` : ""}{fechaHora(g.created_at)} · {g.local ? <SinEnviar /> : g.estado === "aprobado" ? "✓ aprobado" : g.estado === "rechazado" ? <span className="font-bold text-red-600">✕ rechazado{g.motivo_rechazo ? `: ${g.motivo_rechazo}` : ""}</span> : "a revisar en oficina"}</p>
                   </div>
-                  <p className="text-lg font-bold text-red-500">−{formatCurrency(g.monto)}</p>
+                  <p className={`text-lg font-bold ${g.estado === "rechazado" ? "text-gray-400 line-through" : "text-red-500"}`}>{formatResta(g.monto)}</p>
                 </div>
               ))}
               {data.fondos.length === 0 && data.gastos.length === 0 && <p className="py-8 text-center text-gray-400">Sin gastos ni plata recibida.</p>}

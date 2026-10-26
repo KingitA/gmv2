@@ -274,6 +274,8 @@ export function Cobrar() {
         pedidos_anticipo: r.pedidos_anticipo,
         contado_general: r.contado_general,
         ajuste_redondeo: ajusteRedondeo,
+        // Solo para el equipo sin señal: cuánto cubre de lo exigido además de la plata (#23/#27)
+        descuento_estimado: round2((r.contado_general ? r.bonificacionEstimada : 0) + Math.max(0, ajusteRedondeo)),
         cobros_extra: [],
         // Clientes agregados: cada uno con SU selección; el servidor reparte los medios de pago
         ...(extras.length
@@ -287,6 +289,7 @@ export function Cobrar() {
                 pedidos_contado: x.res!.pedidos_contado,
                 pedidos_anticipo: x.res!.pedidos_anticipo,
                 contado_general: x.res!.contado_general,
+                descuento_estimado: x.res!.contado_general ? x.res!.bonificacionEstimada : 0,
               })),
             }
           : {}),

@@ -27,7 +27,42 @@ export const estadoCuentaVacio = (): EstadoCuenta => ({ sel: {}, contadoPedidos:
 /** Los datos de la réplica que hacen falta para cobrarle a un cliente. */
 export interface DatosCuenta {
   cobro: CuentaCobro
-  devoluciones: Array<{ id: string; monto_total: number; valor_cobro?: number; estado: string; local?: boolean }>
+  devoluciones: Array<{
+    id: string
+    monto_total: number
+    valor_cobro?: number
+    /** La factura de origen ya tenía el 10 % contado: el valor ya viene neto */
+    aplica_10?: boolean
+    estado: string
+    local?: boolean
+    numero_devolucion?: string
+    devoluciones_detalle?: Array<{ cantidad: number; precio_venta_original: number; comprobante_venta_id?: string | null; estado_renglon?: string | null; articulos?: { sku: string | null; descripcion: string } | null }>
+  }>
+}
+
+/**
+ * #26: una devolución que todavía no tiene su NC, contra un comprobante que se cobra CONTADO en este
+ * cobro, el servidor la termina revirtiendo al 90 % (la base del 10 % es lo que el cliente se queda:
+ * total − devuelto, `devueltoPorComprobante`). Entonces el 10 % de ESE comprobante baja en el 10 % de
+ * lo devuelto contra él. Ej.: PRES $100.000, devolución $10.000 → se cobran $81.000, no $80.000.
+ * Devuelve, por comprobante, el valor de lo devuelto contra él (renglón por renglón, a su valor).
+ * Una devolución que ya vino neta del 10 % (`aplica_10`) o sin origen por renglón (réplica vieja) no cuenta.
+ */
+export function devueltoSinNcPorComprobante(devoluciones: DatosCuenta["devoluciones"]): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const d of devoluciones) {
+    if (d.aplica_10) continue
+    const renglones = (d.devoluciones_detalle ?? []).filter((x) => x.estado_renglon !== "rechazado")
+    const bruto = renglones.reduce((s, x) => s + (Number(x.cantidad) || 0) * (Number(x.precio_venta_original) || 0), 0)
+    if (!(bruto > 0)) continue
+    const valor = valorDeDevolucion(d)
+    for (const x of renglones) {
+      if (!x.comprobante_venta_id) continue
+      const parte = (valor * (Number(x.cantidad) || 0) * (Number(x.precio_venta_original) || 0)) / bruto
+      out.set(x.comprobante_venta_id, r2((out.get(x.comprobante_venta_id) ?? 0) + parte))
+    }
+  }
+  return out
 }
 
 /**
@@ -108,7 +143,14 @@ export function resumenCuenta(datos: DatosCuenta | null | undefined, e: EstadoCu
   const dtosHechos = new Set(datos?.cobro.dtos_hechos ?? [])
   const devPendientes = (datos?.devoluciones ?? []).filter((d) => d.estado === "pendiente")
   let bonificacion = 0
-  if (e.contadoGeneral) for (const cp of comprobantes) bonificacion += ncContadoDe(cp, e.sel[cp.id] ?? 0, dtosHechos)
+  if (e.contadoGeneral) {
+    // #26: lo devuelto en este cobro (sin NC todavía) no lleva el 10 %: sale de la base de su comprobante
+    const devueltoSinNc = e.incluirDevoluciones ? devueltoSinNcPorComprobante(devPendientes) : new Map<string, number>()
+    for (const cp of comprobantes) {
+      const nc = ncContadoDe(cp, e.sel[cp.id] ?? 0, dtosHechos)
+      bonificacion += nc > 0 ? Math.max(0, nc - r2((devueltoSinNc.get(cp.id) ?? 0) * 0.1)) : 0
+    }
+  }
   bonificacion = r2(bonificacion)
   const totalImputado = r2(Object.values(e.sel).reduce((s, v) => s + v, 0))
   // Las devoluciones descuentan por su VALOR (= la NC futura), no por el bruto

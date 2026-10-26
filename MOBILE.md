@@ -2153,6 +2153,30 @@ pantalla. El importe de los cheques en la rendición NO va ("1 cheque" alcanza; 
 - Tests: `packages/core/test/chofer-031.test.ts`. Verificado contra el mock en el navegador (selector,
   ficha, borrador restaurado tras recargar).
 
+### v0.3.3 (26/10/2026): pendientes de la prueba integral de salida (C1–C6)
+
+Detalle y casos en `docs/PENDIENTES-APPS-SALIDA.md` §3. Tests: `packages/core/test/chofer-salida.test.ts`.
+
+- **Entrega bloqueada (C1, #23)**: `entrega_bloqueada` de la hoja; el overlay la deriva sin señal con
+  `cobroCumple` (`@gm/cobro`) sumando el 10 %/ajuste del cobro local (`descuento_estimado` en el payload
+  de `viaje.cobrar` → `descuentos_cobro`) y bajando `minimo_exigido` con lo devuelto sin enviar. Un cobro
+  que no cubre lo exigido **no cierra** una parada bloqueada (`cierreDeParadaPorCobro({ bloqueada })`).
+  La hoja de resultado solo ofrece "No entregué" con `TEXTO_ENTREGA_BLOQUEADA`.
+- **Tope de devolución (C2, #25)**: `devolvible` en `chofer_viaje_clientes` (opcional: réplica vieja =
+  sin tope en el equipo, lo frena el servidor) + lo cargado sin enviar → `datos/devolucion-tope.ts`.
+  Ficha, selector y lista muestran los renglones (`RenglonesDevolucion` en `ui.tsx`).
+- **Contado con devoluciones (C3, #26)**: devolución sin NC contra un comprobante bonificado en el cobro
+  → su 10 % baja en el 10 % de lo devuelto (`devueltoSinNcPorComprobante`). Usa `aplica_10` y
+  `devoluciones_detalle.comprobante_venta_id` de la ficha.
+- **Un solo texto (C4, #24)**, **sin "−$0,00" (C5, #3, `formatResta`)**, gastos aprobados/rechazados y
+  "Camión" (#43, `nombreGasto`).
+- **Transferencias aparte (C6, #35)**: fuera de la rendición; la billetera las lista desde la réplica del
+  viaje (`transferenciasDelViaje` en el overlay) porque la billetera del servidor ya no las trae.
+- Mock: parada 5 bloqueada **y** con cobro exigido (el servidor solo bloquea si hay algo exigido),
+  `devolvible`, tope 409, transferencia en pago aparte `pendiente`, origen exacto en `precio-historico`.
+  Verificado en el navegador: bloqueo, tope ("podés devolver hasta 2" → "ya se devolvieron 2 de 2"),
+  renglones en la ficha, "Gastos $0,00".
+
 ### Probar sin backend
 `cd mobile && node scripts/mock-chofer.mjs` (3997) → `apps/chofer/.env.development.local` con
 `VITE_API_BASE=http://localhost:3997` → `npm run dev:chofer` → http://localhost:5173 (cualquier

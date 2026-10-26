@@ -15,6 +15,23 @@ import { errorCuit, fecha, fechaHora as fechaHoraAR, fechaISO, moneda, numero, p
 // Formatos únicos del sistema (docs/FORMATOS.md): $1.000,32 · dd/mm/aaaa · xx-xxxxxxxx-x
 /** "$1.000,32" (= moneda de @gm/formato; el nombre queda por los llamadores). */
 export const formatCurrency = (n: number | null | undefined) => moneda(Number(n) || 0)
+/** Un importe que se RESTA (gastos, saldos): "−$1.500,00"; en cero, "$0,00" sin signo (#3: nada de signos sobre cero). */
+/** Qué se devuelve (#25: la lista mostraba solo "devolución" y el monto): "6 × NAFTALINA" por renglón; los rechazados por depósito, tachados. */
+export function RenglonesDevolucion({ renglones, className = "" }: { renglones?: Array<{ cantidad: number; estado_renglon?: string | null; articulos?: { descripcion?: string | null; sku?: string | null } | null }> | null; className?: string }) {
+  if (!renglones?.length) return null
+  return (
+    <ul className={`mt-0.5 space-y-0.5 text-xs ${className}`}>
+      {renglones.map((r, i) => (
+        <li key={i} className={r.estado_renglon === "rechazado" ? "text-gray-400 line-through" : ""}>
+          {String(Math.round(Number(r.cantidad) * 1000) / 1000).replace(".", ",")} × {r.articulos?.descripcion || r.articulos?.sku || "Artículo"}
+        </li>
+      ))}
+    </ul>
+  )
+}
+export const formatResta = (n: number | null | undefined) => (Math.abs(Number(n) || 0) > 0.005 ? `−${moneda(Math.abs(Number(n)))}` : moneda(0))
+/** Concepto de un gasto del viaje: la oficina puede poner "camion" al aprobar (#43). */
+export const nombreGasto = (c: string | null | undefined) => ({ camion: "Camión", peon: "Peón" } as Record<string, string>)[String(c || "").toLowerCase()] ?? String(c || "Gasto")
 export const round2 = (n: number) => redondear(n)
 
 /** "09/10/2026": fecha (DATE o timestamp) en el día calendario de Argentina. */

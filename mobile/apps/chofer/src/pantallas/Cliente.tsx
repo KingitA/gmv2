@@ -6,7 +6,7 @@ import { agregarAlBorrador } from "../datos/borrador-devolucion"
 import { valorDeDevolucion } from "../datos/cuenta-cobro"
 import { cierreAConservar, esIdLocal, keyDeIdLocal } from "../datos/overlay"
 import { rechazosDe, useClienteViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
-import { AvisosBcra, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, SinEnviar, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
+import { AvisosBcra, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, RenglonesDevolucion, SinEnviar, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
 
 // Ficha del cliente en el viaje (= app/chofer/[viajeId]/cliente/[clienteId]/page.tsx):
 // pedido con sus renglones (deslizar para devolver), saldo y devoluciones, cobros
@@ -198,6 +198,7 @@ export function Cliente() {
                 <div key={dev.id} className="flex items-center justify-between rounded-xl bg-green-50 px-3 py-2 text-sm">
                   <div>
                     <p className="font-medium text-green-800">↩ Devolución {dev.local ? "" : dev.numero_devolucion}</p>
+                    <RenglonesDevolucion renglones={dev.devoluciones_detalle} className="text-green-900" />
                     {dev.local ? (
                       <SinEnviar />
                     ) : (
@@ -233,7 +234,12 @@ export function Cliente() {
                   {p.local ? (
                     <SinEnviar rechazado={p.local.estado === "rechazado"} texto={p.local.estado === "rechazado" ? "rechazado" : p.local.estado === "enviando" ? "enviando…" : "sin enviar"} />
                   ) : (
-                    <span className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">{p.estado === "pendiente_rendicion" ? "Pendiente rendición" : "Confirmado"}</span>
+                    // #35: "pendiente" = transferencia de la calle; no se rinde, la confirma oficina en Caja
+                    p.estado === "pendiente" ? (
+                      <span className="rounded-full bg-sky-100 px-2 py-1 text-xs text-sky-800">🏦 Transferencia · a confirmar en oficina</span>
+                    ) : (
+                      <span className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">{p.estado === "pendiente_rendicion" ? "Pendiente rendición" : "Confirmado"}</span>
+                    )
                   )}
                   <p className="mt-0.5 text-xs text-gray-400">{fechaHora(p.created_at)}</p>
                 </div>

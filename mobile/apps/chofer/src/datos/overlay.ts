@@ -8,7 +8,7 @@
 // marca "sin enviar"; una operación rechazada por el servidor NO cuenta (se muestra aparte).
 
 import type { ItemOutbox } from "@gm/core"
-import { cierreDeParadaPorCobro } from "@gm/cobro"
+import { cierreDeParadaPorCobro, cobroCumple } from "@gm/cobro"
 import { moneda, redondear } from "@gm/formato"
 import { claveDelCliente, montoDelPrincipal, repartirMetodos } from "@gm/cobro/conjunto"
 import type {
@@ -142,6 +142,9 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
       if (!par) continue
       par.cobrado = r2(par.cobrado + parte.monto)
       par.pagos.push(pagoLocal(op, parte.monto, parte.metodos, parte.principal ? p : { contado_general: false, ajuste_redondeo: 0 }))
+      // El 10 % contado y el ajuste también cubren lo exigido (#27), igual que en el servidor
+      const desc = parte.principal ? Number(p.descuento_estimado) || 0 : Number((p.clientes_extra || []).find((x) => x.cliente_id === parte.cliente_id)?.descuento_estimado) || 0
+      if (desc > 0) par.descuentos_cobro = r2((par.descuentos_cobro ?? 0) + desc)
     }
     sumarDinero(p.metodos, 1)
     for (const ex of p.cobros_extra || []) {
@@ -176,6 +179,8 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
       par.devuelto = r2(par.devuelto + total)
       // Lo devuelto en el viaje baja el total a cobrar (misma regla que el servidor: saldoDeParada)
       par.total_a_cobrar = r2(par.total_a_cobrar - total)
+      // …y lo exigido, que viene NETO de lo devuelto (#27)
+      if (par.minimo_exigido > 0) par.minimo_exigido = r2(Math.max(0, par.minimo_exigido - total))
     }
   }
 
@@ -201,7 +206,8 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
     if (!par || yaEnReplica(op, p, clavesServidor)) continue
     const resultadoPosterior = viv.some((o) => o.tipo === "viaje.parada" && o.seq > op.seq && (o.payload as OpParada).parada_id === par.id)
     if (resultadoPosterior) continue
-    const cierre = cierreDeParadaPorCobro({ estado: par.estado, bultos: par.bultos, tienePedidos: par.pedidos.length > 0, minimoExigido: par.minimo_exigido, cobrado: par.cobrado })
+    // Bloqueada sin cubrir lo exigido: el cobro entra pero la parada NO se cierra (#23, = servidor)
+    const cierre = cierreDeParadaPorCobro({ estado: par.estado, bultos: par.bultos, tienePedidos: par.pedidos.length > 0, minimoExigido: par.minimo_exigido, cobrado: par.cobrado, descuentos: par.descuentos_cobro ?? 0, bloqueada: par.bloquear_entrega })
     if (cierre) Object.assign(par, { ...cierre, motivo_no_entrega: null, resuelto_at: op.capturadoAt, resultadoSinEnviar: true, cerradaPorCobro: op.key })
   }
 
@@ -215,7 +221,12 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
     dinero.efectivo_en_mano = r2(dinero.efectivo_en_mano - monto)
   }
 
-  for (const p of paradas) p.cobro_cumplido = p.cobrado + 0.01 >= p.minimo_exigido
+  // Misma regla que el servidor (@gm/cobro): lo cobrado más el 10 % contado / ajuste cubre lo exigido.
+  // Bloqueada y sin cubrir ⇒ solo se puede marcar "no entregado" (#23).
+  for (const p of paradas) {
+    p.cobro_cumplido = cobroCumple({ minimoExigido: p.minimo_exigido, cobrado: p.cobrado, descuentos: p.descuentos_cobro ?? 0 })
+    p.entrega_bloqueada = !!p.bloquear_entrega && !p.cobro_cumplido
+  }
 
   let estado = v.viaje.estado
   const inicioPendiente = estado === "despachado" && de<OpIniciar>(viv, "viaje.iniciar").some((x) => x.p.viaje_id === v.id)
@@ -246,6 +257,23 @@ export function cierreAConservar(v: ViajeVista, clienteId: string, pagoId: strin
     // "Cobrar sí o sí" sin alcanzar el mínimo: el servidor pide el motivo (nunca bloquea)
     ...(cobradoSin + 0.01 < par.minimo_exigido ? { motivo_no_cobro: `Cobro anulado: quedó cobrado ${moneda(cobradoSin)} de ${moneda(par.minimo_exigido)} exigidos` } : {}),
   }
+}
+
+/**
+ * Transferencias del viaje, aparte (#35): no son plata en mano ni van a la rendición; las confirma
+ * oficina en Caja. Desde el 26/10 el servidor guarda la parte digital de un cobro como un pago
+ * `pendiente` (a confirmar) que pasa a `confirmado`. Un cobro sin enviar con transferencia figura
+ * como "sin enviar".
+ */
+export function transferenciasDelViaje(v: ViajeVista): Array<{ id: string; cliente: string; monto: number; estado: "a_confirmar" | "confirmada" | "sin_enviar" }> {
+  const out: Array<{ id: string; cliente: string; monto: number; estado: "a_confirmar" | "confirmada" | "sin_enviar" }> = []
+  for (const p of v.paradas)
+    for (const pago of p.pagos) {
+      const monto = r2(pago.metodos.filter((m) => m.tipo === "transferencia" || m.tipo === "deposito").reduce((s, m) => s + (Number(m.monto) || 0), 0))
+      if (!(monto > 0)) continue
+      out.push({ id: `${pago.id}:tr`, cliente: p.cliente_nombre, monto, estado: pago.local ? "sin_enviar" : pago.estado === "confirmado" ? "confirmada" : "a_confirmar" })
+    }
+  return out
 }
 
 /** Paradas que todavía hay que resolver antes de rendir (misma regla que el servidor). */
@@ -311,7 +339,9 @@ export function clienteVisible(c: ClienteViajeRow, ops: ItemOutbox[]): ClienteVi
         valor_cobro: total,
         estado: "pendiente",
         local: true,
-        devoluciones_detalle: p.items.map((i, n) => ({ id: `${p.id}:${n}`, articulo_id: i.articulo_id, cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, motivo: i.motivo, condicion: i.condicion, articulos: { sku: i.sku, descripcion: i.descripcion } })),
+        // Origen por renglón y si ya venía con el 10 %: el cobro contado lo necesita (#26)
+        aplica_10: p.items.some((i) => !!i.origen_comp?.bonificado_contado),
+        devoluciones_detalle: p.items.map((i, n) => ({ id: `${p.id}:${n}`, articulo_id: i.articulo_id, cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, motivo: i.motivo, condicion: i.condicion, comprobante_venta_id: i.comprobante_venta_id ?? i.origen_comp?.comprobante_venta_id ?? null, articulos: { sku: i.sku, descripcion: i.descripcion } })),
       },
       ...out.devoluciones,
     ]

@@ -7,7 +7,7 @@ import {
 } from "../datos/cuenta-cobro"
 import { moneda, redondear } from "@gm/formato"
 const r2 = (n: number) => redondear(n)
-import { formatCurrency, formatDateAR, MontoInput } from "../ui"
+import { formatCurrency, formatDateAR, MontoInput, RenglonesDevolucion } from "../ui"
 
 // La cuenta de UN cliente dentro del cobro: pedidos y comprobantes seleccionables, "Incluir
 // devoluciones como crédito" y "10% contado a todo". Es la MISMA pantalla para el cliente de la
@@ -160,6 +160,7 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir,
             <div>
               <p className="font-bold text-amber-800">Incluir devoluciones como crédito</p>
               <p className="text-sm text-amber-600">{formatCurrency(devPendientes.reduce((s, d) => s + valorDeDevolucion(d), 0))}{devPendientes.some((d) => d.local) ? " (incluye una sin enviar)" : ""}</p>
+              {devPendientes.map((d) => <RenglonesDevolucion key={d.id} renglones={d.devoluciones_detalle} className="text-amber-800" />)}
             </div>
             <button onClick={() => onChange({ ...estado, incluirDevoluciones: !estado.incluirDevoluciones })} className={`h-7 w-14 rounded-full ${estado.incluirDevoluciones ? "bg-green-500" : "bg-gray-300"}`} aria-label="Incluir devoluciones">
               <span className={`mx-1 block h-5 w-5 rounded-full bg-white shadow ${estado.incluirDevoluciones ? "translate-x-7" : ""}`} />
