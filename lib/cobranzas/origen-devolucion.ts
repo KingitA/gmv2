@@ -28,8 +28,10 @@ import {
  *       cliente (regla de Juan 26/10, #28). Antes iba al PRES más reciente, que
  *       no tenía el artículo, y le bajaba la comisión (URQUIZA, PRES 0001-00000020).
  *       El respaldo se crea al guardar la devolución, en $0 y sin renglones.
- *     - va en BLANCO → la factura más reciente (la NC con CAE necesita un
- *       comprobante asociado real, RG 4540; un 0002-00000001 inventado lo rechaza AFIP).
+ *     - va en BLANCO → la NC sale SIN comprobante asociado, ni en ARCA ni en el
+ *       sistema (Juan 26/10: no se le miente a nadie). A ARCA se le informa el
+ *       período (PeriodoAsoc, RG 4540; generar-nc-reversa). Antes se asociaba a
+ *       la factura más reciente, que no tenía el artículo.
  *
  * Percepción IVA: la lleva la NC si el comprobante de origen la llevaba (neto
  * de ese comprobante por encima del mínimo y cliente RI no excluido).
@@ -201,28 +203,12 @@ export async function origenesComprados(supabase: SupabaseClient, clienteId: str
 /** Contexto para valuar sin señal: alícuota IIBB vigente y comprobantes más recientes (fiscal / presupuesto). */
 export async function contextoDevolucion(supabase: SupabaseClient, clienteId: string, clienteIn?: ClienteDev | null): Promise<ContextoDevolucion> {
   const cliente = await leerCliente(supabase, clienteId, clienteIn)
-  const hoy = hoyISO()
-  const ultimoDe = async (tipos: string[]) => {
-    const { data } = await supabase
-      .from("comprobantes_venta")
-      .select("id, tipo_comprobante, numero_comprobante, fecha, total_neto, percepcion_iva, pedido_id, created_at")
-      .eq("cliente_id", clienteId)
-      .in("tipo_comprobante", tipos)
-      .is("anulado_en", null)
-      .neq("estado_pago", "anulado")
-      .lte("fecha", hoy)
-      .order("fecha", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    return (data as CompRow | null) ?? null
-  }
-  const [alicuota, fiscal, respaldo] = await Promise.all([alicuotaIIBBVigente(supabase, cliente), ultimoDe(FISCALES), comprobanteRespaldo(supabase, clienteId)])
-  const bonificados = await bonificadosDe(supabase, clienteId, [fiscal].filter(Boolean) as CompRow[])
+  const [alicuota, respaldo] = await Promise.all([alicuotaIIBBVigente(supabase, cliente), comprobanteRespaldo(supabase, clienteId)])
   const sinPrecio = { exacto: false, precio: null, iva_unitario: null }
   return {
     alicuota_iibb: alicuota,
-    ultimo_fiscal: fiscal ? origenDe(fiscal, cliente, bonificados, sinPrecio) : null,
+    // Blanco sin comprobante con el artículo → sin asociado (NC con período a ARCA, #28)
+    ultimo_fiscal: null,
     // Negro sin comprobante con el artículo → respaldo 0002-00000001 (#28). Si
     // todavía no existe va sin id: prepararRenglonesDevolucion lo crea al guardar.
     ultimo_presupuesto: respaldo

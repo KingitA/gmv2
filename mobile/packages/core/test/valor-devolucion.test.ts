@@ -95,10 +95,10 @@ describe("valorDevolucionConOrigen — tal cual fue facturado (21/10/2026)", () 
 
   it("#28: negro sin comprobante con el artículo → PRES de respaldo 0002-00000001 (sin 10%, sin id hasta guardarse)", () => {
     const respaldo = { comprobante_venta_id: null, tipo_comprobante: "PRES", numero_comprobante: "0002-00000001", fiscal: false, percepcion_iva: false, bonificado_contado: false, exacto: false, precio: null, iva_unitario: null }
-    const ctx = { alicuota_iibb: 3, ultimo_fiscal: fa({ comprobante_venta_id: "fa-ult", exacto: false, precio: null }), ultimo_presupuesto: respaldo }
+    // El servidor ya no manda "última factura": blanco va sin asociado (NC con período a ARCA)
+    const ctx = { alicuota_iibb: 3, ultimo_fiscal: null, ultimo_presupuesto: respaldo }
     expect(elegirOrigenDevolucion(null, ctx, "presupuesto")).toMatchObject({ numero_comprobante: "0002-00000001", fiscal: false, bonificado_contado: false })
-    // Blanco: sigue la factura más reciente (la NC con CAE necesita un asociado real)
-    expect(elegirOrigenDevolucion(null, ctx, "factura")).toMatchObject({ comprobante_venta_id: "fa-ult", fiscal: true })
+    expect(elegirOrigenDevolucion(null, ctx, "factura")).toMatchObject({ comprobante_venta_id: null, fiscal: true, percepcion_iva: false, bonificado_contado: false })
   })
 
   it("réplica vieja de comprados (sin campos de origen): fiscal por tipo, exacto, 21%", () => {
