@@ -156,6 +156,10 @@ export interface ParadaParaCierre {
   minimoExigido: number
   /** Cobrado en la parada INCLUYENDO el cobro que se acaba de registrar */
   cobrado: number
+  /** 10 % contado y ajuste de los cobros: también cubren lo exigido (#27). Opcional (APK viejas). */
+  descuentos?: number
+  /** "NO ENTREGAR SIN COBRAR" (#23). Opcional (APK viejas). */
+  bloqueada?: boolean
 }
 export interface CierrePorCobro {
   estado: "entregado" | "solo_cobro"
@@ -163,12 +167,25 @@ export interface CierrePorCobro {
   motivo_no_cobro: string | null
 }
 
+// #23 (regla de Juan, 25/10): con "NO ENTREGAR SIN COBRAR", si lo cobrado no llega a lo exigido
+// la parada NO se cierra como entregada: queda pendiente y el chofer cobra más o marca "no entregado".
+export const TEXTO_ENTREGA_BLOQUEADA = "Si no salda lo solicitado, retirar el pedido"
+export const CODIGO_ENTREGA_BLOQUEADA = "ENTREGA_BLOQUEADA"
+
+export function cobroCumple(p: { minimoExigido: number; cobrado: number; descuentos?: number }): boolean {
+  return num(p.minimoExigido) <= 0 || num(p.cobrado) + num(p.descuentos) + 0.01 >= num(p.minimoExigido)
+}
+
 export function cierreDeParadaPorCobro(p: ParadaParaCierre): CierrePorCobro | null {
   if (p.estado !== "pendiente") return null
-  const cumplido = num(p.cobrado) + 0.01 >= num(p.minimoExigido)
+  const cumplido = cobroCumple(p)
+  if (p.bloqueada && !cumplido) return null
+  const desc = num(p.descuentos)
   return {
     estado: p.tienePedidos ? "entregado" : "solo_cobro",
     bultos_entregados: p.tienePedidos ? num(p.bultos) : null,
-    motivo_no_cobro: cumplido ? null : `Cobró ${pesos(p.cobrado)} de ${pesos(p.minimoExigido)} exigidos (parada cerrada al registrar el cobro)`,
+    motivo_no_cobro: cumplido
+      ? null
+      : `Cobró ${pesos(p.cobrado)}${desc > 0.005 ? ` (+ ${pesos(desc)} de 10 % contado / ajuste)` : ""} de ${pesos(p.minimoExigido)} exigidos (parada cerrada al registrar el cobro)`,
   }
 }

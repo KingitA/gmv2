@@ -513,7 +513,7 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
           const hoja = await armarHojaRuta(supabase, viajeId)
           const par = hoja?.paradas.find((p) => p.id === fila.id)
           const cierre = par
-            ? cierreDeParadaPorCobro({ estado: par.estado, bultos: par.bultos, tienePedidos: par.pedidos.length > 0, minimoExigido: par.minimo_exigido, cobrado: par.cobrado })
+            ? cierreDeParadaPorCobro({ estado: par.estado, bultos: par.bultos, tienePedidos: par.pedidos.length > 0, minimoExigido: par.minimo_exigido, cobrado: par.cobrado, descuentos: par.descuentos_cobro, bloqueada: par.bloquear_entrega })
             : null
           if (cierre) {
             const { error: cierreErr } = await supabase

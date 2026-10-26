@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth"
 import { accesoViajeChofer } from "@/lib/viajes/chofer"
 import { armarHojaRuta } from "@/lib/viajes/hoja-ruta"
 import { moneda } from "@/lib/formato"
+import { CODIGO_ENTREGA_BLOQUEADA, TEXTO_ENTREGA_BLOQUEADA } from "@/lib/cobranzas/reglas-cobro"
 
 const ESTADOS = ["pendiente", "entregado", "entregado_parcial", "no_entregado", "solo_cobro"]
 
@@ -11,7 +12,11 @@ const ESTADOS = ["pendiente", "entregado", "entregado_parcial", "no_entregado", 
 // Body: { parada_id, estado, bultos_entregados?, motivo_no_entrega?, motivo_no_cobro? }
 //  - no_entregado / entregado_parcial → motivo_no_entrega obligatorio.
 //  - Si oficina marcó "cobrar sí o sí" y lo cobrado no alcanza → motivo_no_cobro
-//    obligatorio. NUNCA bloquea: deja constancia para el cotejo en oficina.
+//    obligatorio: deja constancia para el cotejo en oficina.
+//  - #23: si además marcó "NO ENTREGAR SIN COBRAR" (bloquear_entrega) y lo cobrado
+//    (incluidos los cobros pendientes de rendición, el 10 % contado y el ajuste) no
+//    llega a lo exigido, NO se puede marcar entregado ni entregado parcial: 409
+//    { codigo: "ENTREGA_BLOQUEADA" }. Solo queda "no entregado".
 //  - estado 'pendiente' reabre la parada (corrección) mientras el viaje siga en curso.
 export async function PATCH(
   request: NextRequest,
@@ -58,13 +63,24 @@ export async function PATCH(
     if (["no_entregado", "entregado_parcial"].includes(body.estado) && !motivoEntrega) {
       return NextResponse.json({ error: "Contá por qué no se entregó todo", falta: "motivo_no_entrega" }, { status: 400 })
     }
+    if (parada.entrega_bloqueada && ["entregado", "entregado_parcial"].includes(body.estado)) {
+      return NextResponse.json(
+        {
+          error: `${TEXTO_ENTREGA_BLOQUEADA}. Oficina pidió cobrar ${moneda(parada.minimo_exigido)} y hay cobrado ${moneda(parada.cobrado + parada.descuentos_cobro)}: solo se puede marcar «no entregado».`,
+          codigo: CODIGO_ENTREGA_BLOQUEADA,
+          minimo_exigido: parada.minimo_exigido,
+          cobrado: parada.cobrado,
+        },
+        { status: 409 },
+      )
+    }
     if (body.estado === "solo_cobro" && parada.pedidos.length) {
       return NextResponse.json({ error: "Esta parada tiene mercadería para entregar" }, { status: 400 })
     }
     if (!parada.cobro_cumplido && !motivoCobro) {
       return NextResponse.json(
         {
-          error: `Oficina pidió cobrar sí o sí ${moneda(parada.minimo_exigido)} y hay cobrado ${moneda(parada.cobrado)}: contá por qué no se cobró`,
+          error: `Oficina pidió cobrar sí o sí ${moneda(parada.minimo_exigido)} y hay cobrado ${moneda(parada.cobrado + parada.descuentos_cobro)}: contá por qué no se cobró`,
           falta: "motivo_no_cobro",
         },
         { status: 400 },
