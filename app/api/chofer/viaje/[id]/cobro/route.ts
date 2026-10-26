@@ -345,7 +345,7 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
       }
     }
 
-    const { pago_id, dedup } = await crearCobranza(supabase, {
+    const { pago_id, dedup, partes } = await crearCobranza(supabase, {
       idempotency_key: idempotency_key || null,
       cliente_id,
       vendedor_id: null, // chofer = usuario (profiles), no vendedor; se traza por creado_por/viaje
@@ -479,7 +479,9 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
           })
           // Billetera del titular: también la plata del cliente extra (la rendición la debita)
           if (!extra.dedup) {
-            await asentarCobroEnBilletera(supabase, { titularId: viaje.chofer_id, pagoId: extra.pago_id, monto: montoEx, metodos: ex.metodos, usuarioId: auth.user.id, fecha: nowArgentina() })
+            // #35: solo la parte física (las transferencias se confirman en /caja)
+            const fisicaEx = extra.partes.find((pt) => !pt.digital)
+            if (fisicaEx) await asentarCobroEnBilletera(supabase, { titularId: viaje.chofer_id, pagoId: fisicaEx.pago_id, monto: fisicaEx.monto, metodos: fisicaEx.detalles.map((d) => ({ tipo: d.tipo_pago })), usuarioId: auth.user.id, fecha: nowArgentina() })
           }
         } catch (exErr: any) {
           console.error("[chofer/cobro] cobro extra falló:", ex.cliente_id, exErr?.message)
@@ -489,7 +491,10 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
 
     // Billetera del chofer: referenciada AL PAGO, para que cobranza_anular la revierta al anular
     // (lib/cobranzas/billetera-chofer.ts). Antes iba referenciada al viaje y la anulación no la tocaba.
-    await asentarCobroEnBilletera(supabase, { titularId: viaje.chofer_id, pagoId: pago.id, monto: Number(monto_total), metodos, usuarioId: auth.user.id, fecha: nowArgentina() })
+    // #35 (26/10): solo la plata física entra a la billetera; la transferencia es otro
+    // pago, 'pendiente', que la oficina confirma en /caja (no va en la rendición).
+    const fisica = partes.find((pt) => !pt.digital)
+    if (fisica) await asentarCobroEnBilletera(supabase, { titularId: viaje.chofer_id, pagoId: fisica.pago_id, monto: fisica.monto, metodos: fisica.detalles.map((d) => ({ tipo: d.tipo_pago })), usuarioId: auth.user.id, fecha: nowArgentina() })
 
     // ── Cobrar CIERRA la parada (lib/cobranzas/reglas-cobro.ts) ──
     // Si la parada del cliente estaba pendiente queda "entregado" (o "solo cobro" si no llevaba

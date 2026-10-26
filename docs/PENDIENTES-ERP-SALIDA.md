@@ -58,7 +58,7 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | 10, 11, 42 | Comisiones: "sin cobrar" inflado, pedidos sin número, Playroom en $0 | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | ~~30~~ | ~~Números sin formato en los textos de la rendición~~ | Cuentas corrientes | **Hecho 26/10** en la misma migración (`fmt_moneda`) |
 | 37 | /caja: el total no descuenta lo que el cliente tiene a cuenta | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
-| 35 | Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| ~~35~~ | ~~Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | ~~25~~ | ~~Tope de devolución en el servidor (lado servidor de C2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | 23 | El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1) | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
 | 27 | La parada dice "cobró de menos" cuando sobró | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
@@ -161,6 +161,8 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 - [ ] Ejemplo de Juan: el 26/10 se anota la transferencia y se confirma; el 27/10 el chofer rinde y esa transferencia ya está aceptada y no forma parte de la rendición.
 - [ ] Coordinar con las apps (C6 y V5): la rendición propuesta deja de incluirlas.
 - [ ] Revisar también la rendición del chofer y `rendicion_crear` / `rendicion_confirmar`: hoy mueven transferencias junto con el efectivo.
+
+**HECHO 26/10 (cuentas corrientes), sin migración:** `crearCobranza` (`lib/cobranzas/crear.ts`, la usan `/api/viajante/cobro` y `/api/chofer/viaje/[id]/cobro`) parte el cobro de la calle: parte física (efectivo, cheque papel) → `pendiente_rendicion` (billetera + rendición); parte digital (transferencia, depósito, echeq) → otro pago **`pendiente`** (`/caja` → "Transf. por confirmar", confirmable ahí; recién al confirmar entra al banco y a la cuenta del cliente). Imputaciones repartidas en orden (primero la digital); `[CREDITOS]`/`[AJUSTE]`/anticipo con la física, `[10% CONTADO]` con las dos (la NC sale una vez por comprobante). Clave de idempotencia derivada para la parte digital. La billetera solo anota la plata física. La rendición ya no incluye transferencias de cobros nuevos (sigue tomando solo `pendiente_rendicion`). La hoja de ruta, la parada del chofer y la ficha del cliente en el viaje cuentan también los pagos `pendiente` como cobrados (si no, el bloqueo de entrega #23 los ignoraba). Test: `mobile/packages/core/test/cobro-transferencia-aparte.test.ts`.
 
 ### #37 — /caja no descuenta lo que el cliente tiene a cuenta
 

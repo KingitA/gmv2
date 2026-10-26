@@ -1,5 +1,6 @@
 import { chequeDuplicadoDe, ErrorReglaCobranza, errorDeRpcCobranza, mensajeChequeDuplicado } from "./errores"
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { createHash } from "crypto"
 
 /**
  * Alta transaccional de una cobranza vía RPC `cobranza_crear`
@@ -73,7 +74,103 @@ export interface CrearCobranzaParams {
   imputaciones?: Array<{ comprobante_id: string; monto_imputado: number }>
 }
 
+/** Transferencia, depósito o echeq: plata que viaja por el banco, nunca en la mano del cobrador */
+export function esDetalleDigital(d: Pick<DetalleInput, "tipo_pago" | "color_cheque" | "cheque">): boolean {
+  if (d.tipo_pago === "transferencia" || d.tipo_pago === "deposito") return true
+  return d.tipo_pago === "cheque" && (d.color_cheque === "ECHEQ" || Boolean(d.cheque?.es_echeq))
+}
+
+/** Clave de idempotencia derivada (UUID estable) para la parte digital de un cobro partido */
+function claveDerivada(clave: string, sufijo: string): string {
+  const h = createHash("md5").update(`${clave}:${sufijo}`).digest("hex")
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`
+}
+
+export interface ParteCobranza {
+  pago_id: string
+  monto: number
+  estado: "pendiente" | "pendiente_rendicion"
+  /** true = transferencias/echeqs: se confirman en /caja, no van a la rendición ni a la billetera */
+  digital: boolean
+  detalles: DetalleInput[]
+  dedup: boolean
+}
+
+/**
+ * Alta de un cobro. Regla del dueño (26/10, #35): las TRANSFERENCIAS (y depósitos
+ * y echeqs) NO pasan por la rendición. Un cobro de la calle (pendiente_rendicion)
+ * que las trae se parte:
+ *  - parte física (efectivo, cheque papel) → pendiente_rendicion: billetera y rendición;
+ *  - parte digital → 'pendiente': /caja → "Transf. por confirmar"; la oficina la
+ *    confirma cuando ve la plata en el banco, y recién ahí entra a la cuenta.
+ * Las imputaciones se reparten en orden (primero la parte digital, que se confirma
+ * antes); el resto del pago queda a cuenta como siempre. Las marcas de la
+ * confirmación ([CREDITOS], [AJUSTE], anticipo) viajan con la parte física; la de
+ * contado [10% CONTADO] con las dos (la NC sale una sola vez por comprobante).
+ * `pago_id` = la parte física si la hay (los llamadores le cuelgan billetera,
+ * fotos, devoluciones y anticipos); `partes` = todas.
+ */
 export async function crearCobranza(
+  supabase: SupabaseClient,
+  params: CrearCobranzaParams,
+): Promise<{ pago_id: string; dedup: boolean; partes: ParteCobranza[] }> {
+  const digitales = params.detalles.filter(esDetalleDigital)
+  const fisicos = params.detalles.filter((d) => !esDetalleDigital(d))
+  const r2 = (n: number) => Math.round(n * 100) / 100
+
+  if (params.estado !== "pendiente_rendicion" || !digitales.length) {
+    const r = await crearCobranzaRpc(supabase, params)
+    return { ...r, partes: [{ pago_id: r.pago_id, monto: params.monto, estado: params.estado, digital: false, detalles: params.detalles, dedup: r.dedup }] }
+  }
+
+  // Todo digital: un solo pago, pendiente de la oficina (no de rendición)
+  if (!fisicos.length) {
+    const r = await crearCobranzaRpc(supabase, { ...params, estado: "pendiente" })
+    return { ...r, partes: [{ pago_id: r.pago_id, monto: params.monto, estado: "pendiente", digital: true, detalles: params.detalles, dedup: r.dedup }] }
+  }
+
+  // Mixto: dos pagos
+  const montoDigital = r2(digitales.reduce((s, d) => s + Number(d.monto || 0), 0))
+  const montoFisico = r2(params.monto - montoDigital)
+  const imps = (params.imputaciones || []).map((i) => ({ ...i }))
+  const impsDigital: typeof imps = []
+  let resto = montoDigital
+  for (const i of imps) {
+    if (resto <= 0.005) break
+    const toma = r2(Math.min(Number(i.monto_imputado), resto))
+    if (toma > 0.005) {
+      impsDigital.push({ comprobante_id: i.comprobante_id, monto_imputado: toma })
+      i.monto_imputado = r2(Number(i.monto_imputado) - toma)
+      resto = r2(resto - toma)
+    }
+  }
+  const impsFisico = imps.filter((i) => Number(i.monto_imputado) > 0.005)
+  const obs = params.observaciones || ""
+  const obsDigital = [obs.includes("[10% CONTADO]") ? "[10% CONTADO]" : "", "Transferencia del cobro en la calle: se confirma en Caja (no va en la rendición)"]
+    .filter(Boolean)
+    .join(" · ")
+
+  const fisico = await crearCobranzaRpc(supabase, { ...params, monto: montoFisico, detalles: fisicos, imputaciones: impsFisico })
+  const digital = await crearCobranzaRpc(supabase, {
+    ...params,
+    idempotency_key: params.idempotency_key ? claveDerivada(params.idempotency_key, "digital") : null,
+    estado: "pendiente",
+    monto: montoDigital,
+    detalles: digitales,
+    imputaciones: impsDigital,
+    observaciones: obsDigital,
+  })
+  return {
+    pago_id: fisico.pago_id,
+    dedup: fisico.dedup,
+    partes: [
+      { pago_id: fisico.pago_id, monto: montoFisico, estado: "pendiente_rendicion", digital: false, detalles: fisicos, dedup: fisico.dedup },
+      { pago_id: digital.pago_id, monto: montoDigital, estado: "pendiente", digital: true, detalles: digitales, dedup: digital.dedup },
+    ],
+  }
+}
+
+async function crearCobranzaRpc(
   supabase: SupabaseClient,
   params: CrearCobranzaParams,
 ): Promise<{ pago_id: string; dedup: boolean }> {

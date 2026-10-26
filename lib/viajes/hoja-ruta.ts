@@ -162,7 +162,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
           pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, numero_comprobante_pago, cheque_id),
           imputaciones(comprobante_id, monto_imputado, comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante, punto_venta, numero_comprobante, pedido_id))`)
         .eq("viaje_id", viajeId)
-        .in("estado", ["pendiente_rendicion", "confirmado"])
+        .in("estado", ["pendiente_rendicion", "pendiente", "confirmado"]) // "pendiente" = transferencia de la calle a confirmar en /caja (#35)
         .order("created_at", { ascending: true }),
       supabase.from("viajes_fondos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),
       supabase.from("viajes_gastos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),

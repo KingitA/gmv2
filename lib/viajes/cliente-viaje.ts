@@ -116,7 +116,7 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
     .select("id, monto, estado, created_at, idempotency_key")
     .eq("viaje_id", viajeId)
     .eq("cliente_id", clienteId)
-    .in("estado", ["pendiente_rendicion", "confirmado"])
+    .in("estado", ["pendiente_rendicion", "pendiente", "confirmado"]) // "pendiente" = transferencia de la calle a confirmar en /caja (#35)
 
   // Devoluciones registradas en este viaje para este cliente
   const { data: devoluciones } = await supabase
