@@ -169,6 +169,11 @@ Es el hallazgo 14 de la auditoría de cuentas corrientes ("el chofer ve las devo
 
 ### V1 — Checkbox "10 % por pago contado" al finalizar el pedido, con total en vivo (#13)
 
+> **Lado servidor HECHO 26/10 (listas de precios, 8f907c8). El campo es `bonif_pedido.contado_todo`:** `true` tildado, `false` destildado, sin la clave = según cada condición. Va dentro del `bonif_pedido` que la app ya manda en el outbox del pedido (sin señal anda igual). Le gana a segmento, ficha y condiciones por proveedor/marca.
+> - **Cómo arranca:** `contadoPorDefectoCliente(fichaFilas, condiciones)` de `@gm/pricing` → `"todo"` (tildado), `"parcial"` (algún segmento o proveedor: mostrarlo como "parcial — según cada proveedor" y dejar tildar o destildar todo) o `"nada"`.
+> - **Por artículo:** `resolverContadoItem(cond, bonif_pedido, fichaFilas, segmento, esEspecial)` dice si ese artículo va contado. La lista Especial nunca va contado.
+> - **Total en vivo:** total del pedido − 10 % de los artículos que van contado (el 10 % sale en NC/REV aparte al facturar, igual que el servidor).
+
 **Qué pasó:** Juan quiso tomar el pedido de CHEN como contado y **no encontró dónde**. Hoy el 10 % solo aparece al **cobrar**.
 
 **Regla de Juan (26/10):**

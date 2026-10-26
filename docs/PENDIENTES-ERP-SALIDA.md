@@ -65,9 +65,9 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | ~~22~~ | ~~Cargar bultos o pallets en el ERP antes de finalizar el viaje~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (e0b8b3f, falta que Juan aplique `supabase/migrations/20261026_pedidos_pallets.sql`) |
 | ~~43~~ | ~~Aprobar los gastos del viaje al aceptar la rendición~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (839f9db, falta que Juan aplique `supabase/migrations/20261026b_viajes_gastos_aprobacion.sql`) |
 | ~~21~~ | ~~Hoja del viaje: "PRES 0001-0001-…"~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
-| 13 | Pedido con 10 % contado desde la venta (lado servidor de V1) | Listas de precios y descuentos | **En curso 26/10** (listas de precios) |
-| 16 | Condiciones editables hasta facturar, y repreciar al guardar | Listas de precios y descuentos | **En curso 26/10** (listas de precios) |
-| 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | **En curso 26/10**: listas de precios arma el plan (ver §5) |
+| ~~13~~ | ~~Pedido con 10 % contado desde la venta (lado servidor de V1)~~ | Listas de precios y descuentos | **Hecho 26/10** (8f907c8, ver §5): campo `bonif_pedido.contado_todo`. Falta la app (V1) |
+| ~~16~~ | ~~Condiciones editables hasta facturar, y repreciar al guardar~~ | Listas de precios y descuentos | **Hecho 26/10** (8f907c8, ver §5) |
+| 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | **Plan listo 26/10 (ver §5), esperando 3 respuestas de Juan.** Lo de listas de precios (#16) ya está |
 | 17, 39 | Pedido con todo faltante: volver a pendiente o eliminar; que no aparezca como cobrable | Frontend | Pendiente |
 | 14 | Mostrar "preparado 30 de 36" y el total a facturar | Frontend | Pendiente |
 | 34 | Cambiar el color del cheque en /caja y en la cartera | Frontend | Pendiente |
@@ -239,6 +239,14 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 
 ### #13 — Pedido con 10 % contado desde la venta (lado servidor de V1)
 
+> **Hecho 26/10 (8f907c8) — lado servidor y ERP.** No tocar sin hablar con listas de precios.
+> - **Campo:** `pedidos.bonif_pedido.contado_todo` (jsonb existente, **sin migración**): `true` = checkbox tildado (todo el pedido contado), `false` = destildado (nada contado), ausente/`null` = cada artículo según su segmento, ficha y condición por proveedor/marca. Tildado o destildado **le gana a todo** (`resolverContadoItem` en `lib/pricing/resolver.ts`); la lista Especial nunca va contado.
+> - **Cómo arranca el checkbox:** `contadoPorDefectoCliente(fichaFilas, condiciones)` (en `@gm/pricing`) → `"todo"` (tildado), `"parcial"` (algún segmento o condición: mostrarlo sin definir y dejar tildar/destildar) o `"nada"`.
+> - **Outbox de la app:** va dentro del `bonif_pedido` que ya manda la app al crear/confirmar el pedido (`{ ..., contado_todo: true }`). `createPedido` y `aplicarCondicionesPedidoVendedor` lo guardan; `normalizarBonifPedido` lo conserva.
+> - **Al facturar:** cada renglón queda con `pedidos_detalle.contado` y `generar` emite la NC/REV del 10 % de esos comprobantes (lo de siempre, no cambió). Al repreciar se respeta.
+> - **ERP:** en la ficha del pedido, "10 % por pago contado en TODO el pedido": Según cada segmento / Sí / No.
+> - **Pendiente:** la pantalla de la app (V1, agente vendedor). La REV del 10 % la emite `generar` como siempre: no hace falta nada de cuentas corrientes.
+
 **Decisión de Juan:**
 - [ ] Al finalizar el pedido en la app, un checkbox "10 % por pago contado": tildado por defecto si el cliente lo tiene, y tildable si no.
 - [ ] El **total del pedido en vivo** lo incluye.
@@ -246,6 +254,13 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 - [ ] Definí con el agente vendedor el campo y el formato del outbox, y con cuentas corrientes cómo se emite la REV.
 
 ### #16 — Condiciones editables hasta facturar, y repreciar al guardar
+
+> **Hecho 26/10 (8f907c8).** No tocar sin hablar con listas de precios.
+> - `lib/pedidos/estados.ts` → `puedeEditarCondiciones(estado)`: estados editables **y `pendiente_facturacion`**. `motivoBloqueo` lo explica.
+> - Servidor (`lib/actions/pedidos.ts`): `actualizarEncabezadoPedido` acepta en `pendiente_facturacion` las condiciones (`CAMPOS_CONDICIONES`: listas y métodos general y por segmento, `bonif_pedido`, `bonif_mercaderia_pct`) + la entrega; **si cambia alguna, reprecia solo** (precios de cuando se tomó el pedido, "precio cerrado") y `recalcularTotalPedido` resincroniza el kardex. `guardarCondicionesPedido` y `repreciarPedido` usan `assertCondicionesEditables` (estado + **sin comprobantes vivos**).
+> - Artículos, cantidades, precios a mano y cupos de mercadería siguen con `esPedidoEditable` (bloqueados después de preparar).
+> - ERP `/clientes-pedidos/[id]`: los controles de condiciones usan `condEditable`; un solo "Guardar" (reprecia una vez).
+> - "Condición de pago" a nivel pedido = el contado 10 % (#13). La forma de pago de la ficha del cliente no es del pedido.
 
 **Qué pasó:** después de que el depósito termina el último artículo, el pedido pasa a "Pendiente Facturación" y en el ERP **se bloquea todo** salvo la condición de entrega (`lib/pedidos/estados.ts`: `ESTADOS_EDITABLES`, `puedeEditarEntrega`).
 
@@ -285,6 +300,26 @@ Todo lo que eso implica:
 **Detalles a tener en cuenta:**
 - [ ] Un pedido puede tener varios comprobantes (URQUIZA tuvo 2, por la condición de ARNANUK).
 - [ ] Si el cliente ya había pagado una parte, esa plata queda a favor y la oficina la aplica al comprobante nuevo (regla 39 de la auditoría).
+
+#### Plan (listas de precios, 26/10) — para acordar con cuentas corrientes y frontend
+
+Idea: **anular = volver el pedido a "Pendiente Facturación"**. Desde ahí rige lo que ya está hecho en #16 (condiciones editables, reprecio solo) y se vuelve a generar con el botón de siempre. No hace falta un estado nuevo.
+
+1. **Servidor — cuentas corrientes:** `anularComprobantesPedido(supabase, pedidoId, usuarioId)` en `lib/` (sacando el cuerpo de `/api/comprobantes-venta/[id]/anular` a una función reutilizable, sin cambiar lo que hace por comprobante) y la ruta `POST /api/pedidos/[id]/anular-comprobantes`.
+   - Anula **todos** los comprobantes vivos del pedido: los propios (`pedido_id`) y las NC/REV del **10 % contado** que les quedaron imputadas (`lib/comprobantes/comprobantes-de-pedido.ts` ya los junta). Orden: primero las del 10 % contado, después los originales; los fiscales antes que las REV.
+   - **Reintentable:** si se corta a la mitad, al volver a llamar anula solo lo que sigue vivo.
+   - La plata que ya estaba imputada queda **a favor** del cliente (no se reimputa sola).
+   - Al terminar, sin comprobantes vivos: `pedidos.estado = "pendiente_facturacion"` y `sincronizarKardexPedido`.
+2. **Listas de precios (yo):**
+   - en `lib/pedidos/estados.ts`, la regla de qué estados permiten anular y el paso a `pendiente_facturacion`, que solo puede hacer esta acción;
+   - revisar que `generar` vuelva a emitir con las cantidades preparadas (`cantidad-a-facturar.ts`) y las condiciones nuevas.
+3. **Frontend:** botón **"Anular comprobantes"** en el modal del pedido (`/clientes-pedidos`), visible con comprobantes vivos. Antes de anular, un modal que liste qué se va a anular (número, tipo, importe) y avise si hay **fiscales** (la NC con CAE no se puede deshacer). Al terminar, el modal muestra "Pendiente Facturación: cambiá las condiciones (o Repreciar) y volvé a generar".
+4. **Apps:** nada. Ven los comprobantes nuevos por las réplicas de siempre.
+
+**Preguntas para Juan antes de programar:**
+- (a) ¿Hasta qué estado se puede anular? Propuesta: facturado, listo para retirar/enviar y **también en viaje y entregado** (el cliente puede pedir refacturar después de recibir). El estado del viaje no cambia: solo los comprobantes.
+- (b) ¿El 10 % contado se anula junto? Propuesta: **sí**. Si el pedido nuevo sigue siendo contado, `generar` emite el nuevo 10 % sobre los comprobantes nuevos.
+- (c) Lo que el cliente ya pagó queda a favor. ¿Lo imputa la oficina a mano (regla 39), o se imputa solo al comprobante nuevo al volver a generar? Propuesta: **solo**, si el pago estaba imputado a comprobantes de ese mismo pedido.
 
 ---
 
