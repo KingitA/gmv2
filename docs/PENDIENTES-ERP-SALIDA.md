@@ -60,11 +60,11 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | 37 | /caja: el total no descuenta lo que el cliente tiene a cuenta | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | ~~35~~ | ~~Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | ~~25~~ | ~~Tope de devolución en el servidor (lado servidor de C2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
-| 23 | El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1) | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
-| 27 | La parada dice "cobró de menos" cuando sobró | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
-| 22 | Cargar bultos o pallets en el ERP antes de finalizar el viaje | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
-| 43 | Aprobar los gastos del viaje al aceptar la rendición | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
-| 21 | Hoja del viaje: "PRES 0001-0001-…" | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
+| ~~23~~ | ~~El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1)~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
+| ~~27~~ | ~~La parada dice "cobró de menos" cuando sobró~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
+| 22 | Cargar bultos o pallets en el ERP antes de finalizar el viaje | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas) |
+| 43 | Aprobar los gastos del viaje al aceptar la rendición | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas) |
+| ~~21~~ | ~~Hoja del viaje: "PRES 0001-0001-…"~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
 | 13 | Pedido con 10 % contado desde la venta (lado servidor de V1) | Listas de precios y descuentos | Pendiente |
 | 16 | Condiciones editables hasta facturar, y repreciar al guardar | Listas de precios y descuentos | Pendiente |
 | 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | Pendiente |
@@ -186,10 +186,18 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 - [ ] Solo deja `no_entregado`.
 - [ ] El texto que muestra la app es **"Si no salda lo solicitado, retirar el pedido"**. La app hace su parte (C1).
 
+**HECHO 26/10 (daab2b3, hojas de ruta/viajes y cobranzas):**
+- `PATCH /api/chofer/viaje/[id]/parada` responde **409** `{ error, codigo: "ENTREGA_BLOQUEADA", minimo_exigido, cobrado }` si la parada tiene `bloquear_entrega` y lo cubierto no llega a lo exigido. Solo acepta `no_entregado` (y `pendiente` para reabrir). "Lo cubierto" = cobros del viaje (también pendientes de rendición) + 10 % contado y ajuste (`descuentos_cobro`). El `error` empieza con "Si no salda lo solicitado, retirar el pedido". Por el outbox (`viaje.parada`) llega como rechazo definitivo con ese texto y código.
+- **Segunda puerta que también estaba abierta:** registrar un cobro cerraba la parada como "entregado" aunque no llegara a lo exigido (`cierreDeParadaPorCobro`). Ahora, si la parada está bloqueada y no cumple, el cobro se registra pero **la parada queda pendiente**.
+- La hoja de ruta (`lib/viajes/hoja-ruta.ts`, también `GET /api/chofer/viaje/[id]` y el dataset de la app) trae **`entrega_bloqueada`** (bloqueada y sin cumplir). La web del chofer (`/chofer/[viajeId]`) solo ofrece "No entregué" y muestra el texto.
+- Constantes compartidas en `lib/cobranzas/reglas-cobro.ts` (`@gm/cobro`): `TEXTO_ENTREGA_BLOQUEADA`, `CODIGO_ENTREGA_BLOQUEADA`, `cobroCumple`. Tests: `mobile/packages/core/test/entrega-bloqueada.test.ts`.
+
 ### #27 — La parada dice "cobró de menos" cuando sobró
 
 - [ ] La parada de CHEN quedó con "Cobró $100.000,00 de $154.329,05 exigidos (parada cerrada al registrar el cobro)". Lo exigido no descontó las devoluciones ni el 10 % contado, y en realidad sobró plata. El texto sale de `lib/cobranzas/reglas-cobro.ts`.
 - [ ] Lo exigido tiene que ser **neto** de devoluciones y del 10 % si corresponde, con la misma base que `saldoDeParada`.
+
+**HECHO 26/10 (daab2b3):** `minimo_exigido` es ahora **neto de lo devuelto en el viaje** (misma base que `saldoDeParada` / `total_a_cobrar`) y la parada trae **`descuentos_cobro`**: el 10 % contado y el ajuste de los cobros del viaje (pendientes: lo que bajan del saldo además de la plata; ya rendido: los créditos NC/REV aplicados a los comprobantes del viaje). `cobro_cumplido` = cobrado + descuentos ≥ exigido. El texto del cierre lo muestra aparte: "Cobró $70.000,00 (+ $9.000,00 de 10 % contado / ajuste) de $90.000,00 exigidos". Verificado con el viaje PRUEBA en solo lectura: CHEN cubrió $100.000 + $36.585,36 de REV sobre $154.329,05 → le faltan $17.743,69, lo mismo que quedó debiendo cuando se rechazó DEV-00002 (en la calle, con esa devolución pendiente, daba cumplido). Los textos ya grabados en paradas viejas no se reescriben.
 
 ### #22 — Bultos en el ERP
 
@@ -211,6 +219,8 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 ### #21 — "PRES 0001-0001-00000021" en la hoja del viaje
 
 - [ ] El punto de venta se repite. Tiene que decir **"PRES 0001-00000021"**.
+
+**HECHO 26/10 (daab2b3):** la hoja (pantalla, PDF y app chofer) usa `numeroVisible()` de `lib/viajes/hoja-ruta.ts`: el `numero_comprobante` ya trae el punto de venta. Dice "PRES 0001-00000021" (verificado con el viaje PRUEBA).
 
 ---
 

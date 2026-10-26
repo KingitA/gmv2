@@ -64,11 +64,21 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 - **26/10 — Transferencias fuera de la rendición (#35, lado servidor de C6 y V5), ya en main:** un cobro con transferencia/depósito/echeq ahora crea **dos pagos** en el servidor: el físico (efectivo + cheque papel, `pendiente_rendicion`) y el digital (`pendiente`, se confirma en /caja). Respuesta de `/api/viajante/cobro`: `pagos[]` trae una entrada por pago, la digital con `transferencia_a_confirmar: true`. La billetera del servidor solo suma la parte física y **la rendición propuesta (`pagos_pendientes`) ya no trae transferencias**. Las apps: mostrar las transferencias aparte con su estado (`pendiente` = "a confirmar en oficina", `confirmado` = "confirmada"), a quién y cuánto; no sumarlas a "plata en mano" ni a la rendición. El overlay sin señal: un cobro con transferencia que todavía no salió no debe sumar la transferencia a la mano.
 - **26/10 — PRES del sistema viejo con punto de venta 2 (#18):** los PRES de la apertura se graban "0002-…"; los de gmv2 siguen en "0001-…". Si la app arma o compara números de PRES, no asumir PV 1.
 
+### Avisos del servidor (hojas de ruta/viajes y cobranzas)
+
+- **26/10 — Entrega bloqueada en el servidor (#23, lado servidor de C1), ya en main (daab2b3):**
+  - Cada parada del viaje (`GET /api/chofer/viaje/[id]` → `paradas`, dataset `chofer_viajes`) trae **`entrega_bloqueada: boolean`** = `bloquear_entrega` y todavía no cubrió lo exigido. **Usá ese campo** para deshabilitar "Entregué todo" / "Entregué una parte"; no recalcules la regla. Para lo que todavía no se envió, el overlay ya recalcula `cobro_cumplido`: pasale también los descuentos (ver abajo) y derivá `entrega_bloqueada = bloquear_entrega && !cobro_cumplido`.
+  - Texto y código compartidos en `@gm/cobro`: `TEXTO_ENTREGA_BLOQUEADA` ("Si no salda lo solicitado, retirar el pedido") y `CODIGO_ENTREGA_BLOQUEADA` ("ENTREGA_BLOQUEADA"). `cobroCumple({ minimoExigido, cobrado, descuentos })` es la regla.
+  - Si igual llega un "entregado"/"entregado_parcial" de una parada bloqueada, el outbox `viaje.parada` lo **rechaza** (definitivo, no reintenta) con `codigo: "ENTREGA_BLOQUEADA"` y un `error` legible. Mostralo tal cual.
+  - **Cobrar ya no cierra una parada bloqueada que no cumplió**: el cobro entra, pero la parada queda pendiente. En el overlay, `cierreDeParadaPorCobro` acepta dos campos nuevos opcionales: `bloqueada` (= `bloquear_entrega`) y `descuentos`. Pasalos para que el equipo sin señal haga lo mismo que el servidor. Sin ellos se comporta como antes.
+- **26/10 — Lo exigido neto (#27), ya en main (daab2b3):** `minimo_exigido` ahora viene **neto de lo devuelto en el viaje**, y la parada trae **`descuentos_cobro`** (10 % contado y ajuste de los cobros del viaje). `cobro_cumplido` = cobrado + descuentos_cobro ≥ minimo_exigido. Si la app muestra "COBRAR SÍ O SÍ" / "cobró X de Y", usá esos campos tal cual.
+- **26/10 — Número de comprobante (#21):** en la hoja, `pedidos[].comprobantes[].numero` ahora es "0001-00000021" (antes "0001-0001-00000021").
+
 ## 2. Quién hace qué (anotá "en curso" antes de empezar)
 
 | Tarea | Área | Depende del servidor | Estado |
 |---|---|---|---|
-| C1 — Bloqueo de entrega real (#23) | App Chofer | Sí: hojas de ruta/viajes y cobranzas rechaza en el servidor | Pendiente |
+| C1 — Bloqueo de entrega real (#23) | App Chofer | Sí: hojas de ruta/viajes y cobranzas — **servidor listo 26/10 (daab2b3)**, ver "Avisos del servidor (hojas de ruta)" | Pendiente (ya se puede hacer) |
 | C2 — No devolver más de lo vendido; mostrar qué se devuelve (#25) | App Chofer | Sí: cuentas corrientes pone el tope en el servidor | Pendiente |
 | C3 — Cobro con devoluciones + 10 % contado: valuar la devolución como el servidor (#26) | App Chofer | No | Pendiente |
 | C4 — "No entregado" con un solo texto si fue por falta de pago (#24) | App Chofer | No | Pendiente |
