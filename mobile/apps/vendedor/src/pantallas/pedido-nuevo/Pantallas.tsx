@@ -484,9 +484,33 @@ export function Carrito() {
       pie={
         <div className="border-t border-gray-200 bg-white p-4">
           <div className="mx-auto max-w-2xl space-y-2">
+            {/* V1 (#13, regla del dueño 26/10): 10 % por pago contado al finalizar; tildado si el
+                cliente lo tiene por defecto. El total ya lo descuenta (la NC/REV sale aparte al facturar). */}
+            {(() => {
+              const tildado = p.contado.todo ?? p.contado.inicial === "todo"
+              const parcial = p.contado.todo === null && p.contado.inicial === "parcial"
+              return (
+                <label className="flex min-h-11 items-center gap-3 rounded-xl border border-gray-200 px-3 py-2">
+                  <input
+                    type="checkbox" className="h-6 w-6 accent-emerald-600" checked={tildado}
+                    ref={(el) => { if (el) el.indeterminate = parcial }}
+                    onChange={(e) => p.setContadoTodo(e.target.checked)}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold text-gray-800">10 % descuento pago contado</span>
+                    <span className="block text-xs text-gray-500">
+                      {parcial ? "Parcial: según cada proveedor o segmento. Tildalo para todo el pedido." : tildado ? "Sale una NC aparte al facturar." : "Tildalo si el cliente paga contado."}
+                    </span>
+                  </span>
+                </label>
+              )
+            })()}
             <div className="flex items-center justify-between text-lg">
               <span className="text-gray-500">Total ({p.totalItems} ítems)</span>
-              <span className="text-2xl font-bold text-gray-900">{formatCurrency(p.total)}</span>
+              <span className="text-right">
+                <span className="block text-2xl font-bold text-gray-900">{formatCurrency(p.totalFinal)}</span>
+                {p.contado.descuento > 0.005 && <span className="block text-xs text-gray-500">{formatCurrency(p.total)} − 10 % contado {formatCurrency(p.contado.descuento)}</span>}
+              </span>
             </div>
             {vencidos && <p className="text-xs font-bold text-red-700">Precios sin actualizar hace más de 24 hs: el total es orientativo. El pedido se factura al precio del sistema cuando ingrese.</p>}
             {sinPrecio.length > 0 && <p className="text-sm font-medium text-red-600">Hay {sinPrecio.length} artículo(s) sin precio en este equipo: quitalos para poder confirmar.</p>}

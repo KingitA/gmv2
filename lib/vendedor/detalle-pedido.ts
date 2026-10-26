@@ -26,7 +26,7 @@ export async function cargarDetallePedido(supabase: any, vendedorIds: string[], 
   // Comprobantes y remitos del pedido (para abrir los PDF desde la app)
   const [{ data: comprobantes }, { data: remitos }, { data: fichaRows }, { data: condMarcaPed }, { data: condProvPed }, { data: condMarcaCli }, { data: condProvCli }] =
     await Promise.all([
-      supabase.from("comprobantes_venta").select("id, tipo_comprobante, numero_comprobante, anulado_en, estado_pdf").eq("pedido_id", id).is("anulado_en", null),
+      supabase.from("comprobantes_venta").select("id, tipo_comprobante, numero_comprobante, anulado_en, estado_pdf, total_factura, saldo_pendiente").eq("pedido_id", id).is("anulado_en", null),
       supabase.from("remitos").select("id, tipo_remito, numero_remito, estado_pdf").eq("pedido_id", id).eq("estado", "activo"),
       supabase.from("bonificaciones").select("tipo, segmento, porcentaje").eq("cliente_id", clienteId).eq("activo", true).in("tipo", ["general", "viajante", "mercaderia"]),
       supabase.from("pedido_marca_condicion").select("marca_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("pedido_id", id),
@@ -92,10 +92,62 @@ export async function cargarDetallePedido(supabase: any, vendedorIds: string[], 
     }
   }
 
+  const cuentaPedido = await cuentaDelPedido(supabase, comprobantes ?? [])
+
   return {
     pedido,
     comprobantes: comprobantes ?? [],
+    cuenta_pedido: cuentaPedido,
     remitos: remitos ?? [],
     descuentos: { segmentos, condiciones, solo_este_pedido: !!ovr },
+  }
+}
+
+const DEBITOS = new Set(["FA", "FB", "FC", "PRES"])
+const r2 = (n: number) => Math.round(n * 100) / 100
+
+/**
+ * CUENTA DEL PEDIDO (V3, #31 del 26/10): comprobantes del pedido − reversas/NC aplicadas
+ * (devoluciones, 10 % contado) − pagos = lo que debe. Las reversas salen de las imputaciones
+ * con `credito_comprobante_id` a los comprobantes del pedido (la REV del 10 % contado no tiene
+ * pedido_id: está imputada a sus PRES). Lo que no cierra (ajuste de redondeo) va aparte.
+ * null = el pedido no tiene comprobantes de débito.
+ */
+async function cuentaDelPedido(supabase: any, comprobantes: any[]) {
+  const debitos = comprobantes.filter((c) => DEBITOS.has(c.tipo_comprobante))
+  if (!debitos.length) return null
+  const { data: imps, error } = await supabase
+    .from("imputaciones")
+    .select("comprobante_id, monto_imputado, pago_id, credito_comprobante_id, credito:comprobantes_venta!imputaciones_credito_comprobante_id_fkey(id, tipo_comprobante, numero_comprobante, observaciones, anulado_en, estado_pago, estado_pdf)")
+    .in("comprobante_id", debitos.map((c) => c.id))
+    .eq("estado", "confirmado")
+  if (error) throw error
+  const reversas = new Map<string, { id: string; tipo_comprobante: string; numero_comprobante: string; motivo: string; monto: number; estado_pdf: string | null }>()
+  let pagado = 0
+  for (const i of imps || []) {
+    const monto = Number(i.monto_imputado) || 0
+    if (!i.credito_comprobante_id) {
+      pagado += monto
+      continue
+    }
+    const cr: any = Array.isArray(i.credito) ? i.credito[0] : i.credito
+    if (!cr || cr.anulado_en || cr.estado_pago === "anulado") continue
+    const obs = String(cr.observaciones || "")
+    const motivo = obs.startsWith("Devolución") ? obs.split(/\s+/).slice(0, 2).join(" ") : /contado/i.test(obs) ? "10% contado" : obs.split(/[—·\[]/)[0].trim() || "Crédito"
+    const r = reversas.get(cr.id) || { id: cr.id, tipo_comprobante: cr.tipo_comprobante, numero_comprobante: cr.numero_comprobante, motivo, monto: 0, estado_pdf: cr.estado_pdf ?? null }
+    r.monto = r2(r.monto + monto)
+    reversas.set(cr.id, r)
+  }
+  const total = r2(debitos.reduce((s, c) => s + Number(c.total_factura || 0), 0))
+  const debe = r2(debitos.reduce((s, c) => s + Math.max(0, Number(c.saldo_pendiente || 0)), 0))
+  const totalReversas = r2([...reversas.values()].reduce((s, r) => s + r.monto, 0))
+  pagado = r2(pagado)
+  return {
+    total,
+    reversas: [...reversas.values()],
+    total_reversas: totalReversas,
+    pagado,
+    ajuste: r2(total - totalReversas - pagado - debe),
+    debe,
   }
 }

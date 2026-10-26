@@ -95,14 +95,14 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 | ~~C4 — "No entregado" con un solo texto si fue por falta de pago (#24)~~ | App Chofer | No | **Hecho 26/10 — App Chofer v0.3.3** |
 | ~~C5 — "−$0,00" en la billetera (#3)~~ | App Chofer | No | **Hecho 26/10 — App Chofer v0.3.3** |
 | ~~C6 — Transferencias fuera de la rendición (#35)~~ | App Chofer | Sí: cuentas corrientes — **servidor listo 26/10 (f1b5db2)** | **Hecho 26/10 — App Chofer v0.3.3** |
-| V1 — Checkbox 10 % contado al finalizar el pedido y total en vivo (#13) | App Vendedor | No: el servidor ya está (listas de precios, 8f907c8, campo `bonif_pedido.contado_todo`) | **En curso 26/10 (sesión APK Vendedor)** |
-| V2 — Cobrar con 10 % contado: la base no incluye lo ya devuelto (#33) | App Vendedor | Sí: cuentas corrientes (la REV del 10 %) — servidor listo 26/10 (`nc_contado`) | **En curso 26/10 (sesión APK Vendedor)** |
-| V3 — Pedido facturado: mostrar también las reversas (#31) | App Vendedor | No | **En curso 26/10 (sesión APK Vendedor)** |
-| V4 — "Plata de la empresa en tu mano" descuenta los retiros (#32) | App Vendedor | No | **En curso 26/10 (sesión APK Vendedor)** |
-| V5 — Transferencias fuera de la rendición (#35) | App Vendedor | Sí: cuentas corrientes — servidor listo 26/10 (f1b5db2) | **En curso 26/10 (sesión APK Vendedor)** |
+| ~~V1 — Checkbox 10 % contado al finalizar el pedido y total en vivo (#13)~~ | App Vendedor | — | **Hecho 26/10** (APK pendiente de compilar con lo que falte) |
+| ~~V2 — Cobrar con 10 % contado: la base no incluye lo ya devuelto (#33)~~ | App Vendedor | — | **Hecho 26/10: sin cambios en la app** (ya usa `nc_contado` tal cual desde v0.4.0) |
+| ~~V3 — Pedido facturado: mostrar también las reversas (#31)~~ | App Vendedor | — | **Hecho 26/10** |
+| ~~V4 — "Plata de la empresa en tu mano" descuenta los retiros (#32)~~ | App Vendedor | — | **Hecho 26/10** |
+| ~~V5 — Transferencias fuera de la rendición (#35)~~ | App Vendedor | — | **Hecho 26/10** |
 | ~~V6 — "Mercadería cobrada" = "Comisiones ganadas" (#41)~~ | App Vendedor | — | **Hecho 26/10** (ea55e14, APK v0.4.4 compilada). Validado: 001939 = $51.175,19 |
-| T1 — Iniciar sesión con **nombre de usuario** (#2) — **toca `@gm/core` (las 3 apps)** | **App Vendedor** hace el cambio en core y en el servidor del login; chofer y depósito solo recompilan | Sí (endpoint del login, ver T1) | **En curso 26/10 (sesión APK Vendedor)** |
-| D1 — Recompilar con el login nuevo (T1) | App Depósito | — | Esperando T1 (sesión App Depósito atenta; la v0.3.1 ya está en `main`, sin instalar) |
+| T1 — Iniciar sesión con **nombre de usuario** (#2) — **toca `@gm/core` (las 3 apps)** | **App Vendedor** hace el cambio en core y en el servidor del login; chofer y depósito solo recompilan | Sí (endpoint del login, ver T1) | **Hecho 26/10, en `main`**: chofer y depósito solo recompilan |
+| D1 — Recompilar con el login nuevo (T1) | App Depósito | — | **T1 ya en `main` (26/10): recompilar** — Esperando T1 (sesión App Depósito atenta; la v0.3.1 ya está en `main`, sin instalar) |
 | D2 — Nada que hacer con bultos ni con pedidos todo faltante (solo para que lo sepas) | App Depósito | — | Informativo |
 | ~~D3 — `reiniciarPicking` para el "volver a pendiente" del #17 (lo usa Frontend)~~ | App Depósito | — | **Hecho 26/10** (ver §6 D3 y el aviso en PENDIENTES-ERP-SALIDA #17) |
 
@@ -233,6 +233,16 @@ Igual que C6:
 - [ ] La transferencia queda "a confirmar en oficina" hasta que /caja la confirma.
 
 **Ojo:** hoy, al confirmar la rendición del vendedor, la transferencia de $784.600 de URQUIZA **entró directo al banco**. Eso lo cambia el servidor.
+
+### Hecho por la App Vendedor (26/10) — para que nadie lo pise
+
+- **V1** — `bonif_pedido.contado_todo` desde el carrito (`pantallas/pedido-nuevo/Pantallas.tsx`, `contexto.tsx`, `datos/condiciones.ts`: `contadoInicial` / `descuentoContado` con `contadoPorDefectoCliente` y `resolverContadoItem` de `@gm/pricing`). Arranca tildado si la ficha tiene contado en todo; "parcial" se ve indeterminado. El total en vivo (carrito y barra del catálogo) es total − 10 % de lo que va contado; el precio de cada renglón no cambia.
+- **V2** — sin cambios: `Cobrar.tsx` usa `nc_contado` del servidor tal cual.
+- **V3** — `lib/vendedor/detalle-pedido.ts` devuelve **`cuenta_pedido`** `{ total, reversas[], total_reversas, pagado, ajuste, debe }` (reversas = imputaciones con `credito_comprobante_id` a los comprobantes del pedido: REV de devolución y del 10 %). La app lo muestra en el detalle del pedido ("Cuenta del pedido") y refresca ese pedido al abrirlo con señal; en Cobrar, el pedido desplegado tiene "Ver la cuenta del pedido". Validado con el 001939: $2.309.215,56 − $524.518,90 − $1.784.600 − ajuste $96,66 = $0.
+- **V4** — el outbox de `cobro.registrar` y `retiro.registrar` devuelve como réplica las filas `billetera` y `pagos_pendientes` (`filasBilleteraCaja` en `lib/mobile/sync/vendedor.ts`): el inicio ya no queda con la plata de antes del retiro si la re-lectura del dataset entero falla.
+- **V5** — `/api/vendedor/billetera` devuelve **`transferencias`** (últimos 30 días: `{ pago_id, fecha, cliente, monto, medio, estado: pendiente | confirmado }`); la billetera de la app las lista aparte ("a confirmar en oficina" / "confirmada" / "guardada en el equipo" si el cobro no salió). No suman a la mano.
+- **Avisos del servidor** — `ajustes_apertura` en Cobrar → Facturados ("Saldo del sistema anterior", no se tildan); movimiento `rendicion_retiros` = "Retiros ya descontados".
+- **T1** — login con usuario o mail: `lib/usuario-por-nombre.ts` (lo usan `loginUser` del ERP y `/api/mobile/auth/login`; sin "@" resuelve el mail igual que el ERP, mismos errores) y la pantalla de login de `@gm/core` ("Usuario o mail", campo de texto). El contrato no cambió (`{ email, password, app }`): las sesiones guardadas siguen.
 
 ### Lo que NO tiene que tocar la App Vendedor
 - **"Sin cobrar hasta $2.271.578,99"** (#10) incluye comisiones de pedidos en "Sistema viejo" y de pedidos eliminados. Lo arregla el servidor (cuentas corrientes). Cuando esté, la app lo muestra bien sin cambios.

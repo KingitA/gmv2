@@ -540,7 +540,7 @@ export function Cobrar() {
 
   const listaVacia =
     tab === "fact"
-      ? pedidosFacturados.length === 0 && compsSueltos.length === 0 && devoluciones.length === 0 && creditos.length === 0 && aCuenta.length === 0
+      ? pedidosFacturados.length === 0 && compsSueltos.length === 0 && devoluciones.length === 0 && creditos.length === 0 && aCuenta.length === 0 && !(cuenta?.ajustes_apertura?.length)
       : pedidosSinFacturar.length === 0
 
   return (
@@ -676,10 +676,36 @@ export function Cobrar() {
                     )}
 
                     {/* Comprobantes del pedido (afinar) */}
-                    {comps.length > 0 && expandido && <div className="space-y-1.5 border-t border-gray-100 bg-gray-50/60 px-3 pb-3 pt-2">{comps.map((cp) => filaComprobante(cp))}</div>}
+                    {comps.length > 0 && expandido && (
+                      <div className="space-y-1.5 border-t border-gray-100 bg-gray-50/60 px-3 pb-3 pt-2">
+                        {comps.map((cp) => filaComprobante(cp))}
+                        {/* V3 (#31): las REV/NC ya aplicadas (devoluciones, 10 % contado) no son deuda y no
+                            se listan acá; el detalle del pedido muestra la cuenta completa */}
+                        <button onClick={() => navigate(`/pedidos/${p.id}`)} className="min-h-11 w-full text-left text-xs font-bold text-emerald-700">
+                          Ver la cuenta del pedido (reversas, pagos) →
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )
               })}
+
+              {/* Deuda vieja que no es comprobante (#6/#7): solo se muestra, no se tilda. Lo que se
+                  cobre de más sobre los comprobantes queda a cuenta y la oficina lo imputa. */}
+              {tab === "fact" && !!cuenta?.ajustes_apertura?.length && (
+                <div className="space-y-1.5 pt-1">
+                  <p className="px-1 text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Saldo del sistema anterior</p>
+                  {cuenta.ajustes_apertura.map((a) => (
+                    <div key={a.id} className="flex items-center justify-between gap-2 rounded-xl border border-dashed border-gray-300 bg-white px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-gray-800">Ajuste: {a.concepto || "deuda anterior"}{a.numero ? ` (${a.numero})` : ""}</p>
+                        <p className="text-xs text-gray-400">{fecha(a.fecha)} · no se tilda: lo cobrado de más queda a cuenta</p>
+                      </div>
+                      <p className={`shrink-0 font-bold ${a.monto < 0 ? "text-green-700" : "text-gray-900"}`}>{a.monto < 0 ? "a favor " : ""}{formatCurrency(Math.abs(a.monto))}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {tab === "fact" && compsSueltos.length > 0 && (
                 <div className="space-y-1.5 pt-1">

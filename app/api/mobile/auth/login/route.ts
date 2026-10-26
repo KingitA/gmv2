@@ -1,21 +1,31 @@
 import { NextResponse } from "next/server"
 import { authClient, aSesionMovil, habilitado, nombreDe, rolesDe, tocarDispositivo } from "@/lib/mobile/auth-server"
 import type { AppMovil } from "@/lib/mobile/contrato"
+import { ERROR_LOGIN, usuarioPorNombre } from "@/lib/usuario-por-nombre"
 
 // POST /api/mobile/auth/login  { email, password, app }
+// `email` acepta también el NOMBRE DE USUARIO (#2, 26/10/2026): sin "@" se resuelve igual
+// que el login del ERP (lib/usuario-por-nombre.ts), con los mismos errores.
 // Devuelve SesionMovil (access + refresh token). Headers: X-Device-Id, X-App-Version.
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
-  const email = String(body?.email || "").trim()
+  const usuarioOEmail = String(body?.email || "").trim()
   const password = String(body?.password || "")
   const app = body?.app as AppMovil
-  if (!email || !password || !["vendedor", "chofer", "deposito"].includes(app)) {
+  if (!usuarioOEmail || !password || !["vendedor", "chofer", "deposito"].includes(app)) {
     return NextResponse.json({ error: "Faltan datos de ingreso." }, { status: 400 })
+  }
+
+  let email = usuarioOEmail
+  if (!usuarioOEmail.includes("@")) {
+    const u = await usuarioPorNombre(usuarioOEmail)
+    if (!u.ok) return NextResponse.json({ error: `${u.error}.` }, { status: 401 })
+    email = u.email
   }
 
   const { data, error } = await authClient().auth.signInWithPassword({ email, password })
   if (error || !data.session) {
-    return NextResponse.json({ error: "Email o contraseña incorrectos." }, { status: 401 })
+    return NextResponse.json({ error: `${ERROR_LOGIN}.` }, { status: 401 })
   }
 
   const roles = await rolesDe(data.user.id)

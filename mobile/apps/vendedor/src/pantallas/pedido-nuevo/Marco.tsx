@@ -74,7 +74,7 @@ function Contenido() {
         <div className="fixed inset-x-0 bottom-0 z-20 p-3">
           <button onClick={() => navigate(`/pedido/nuevo/${p.clienteId}/carrito`)} className="mx-auto flex w-full max-w-2xl items-center justify-between rounded-2xl bg-emerald-700 px-5 py-4 text-white shadow-lg">
             <span className="font-bold">🛒 {p.totalItems} ítems</span>
-            <span className="text-xl font-bold">{formatCurrency(p.total)}</span>
+            <span className="text-xl font-bold">{formatCurrency(p.totalFinal)}</span>
             <span className="font-medium">Ver pedido →</span>
           </button>
         </div>
@@ -351,15 +351,17 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
   const bonifIgualFicha = (["general", "viajante", "mercaderia", "contado"] as const).every((t) => SEGS.every((s) => (bonifParsed[t][s] ?? 0) === (fichaBonif[t]?.[s] ?? 0)))
   const provIgualFicha = !condProvSel || JSON.stringify(condProvSel) === JSON.stringify(fichaCond?.condProv ?? [])
   const marcaIgualFicha = !condMarcaSel || JSON.stringify(condMarcaSel) === JSON.stringify(fichaCond?.condMarca ?? [])
+  // El checkbox de contado del carrito (V1) no se toca desde acá: se conserva
+  const ctdoTodo = typeof cond.bonif?.contado_todo === "boolean" ? cond.bonif.contado_todo : undefined
   const nuevaCond: CondPedido = {
     metodo: metodoOv,
     lista: listaOv,
-    bonif: bonifIgualFicha ? null : bonifParsed,
+    bonif: ctdoTodo === undefined ? (bonifIgualFicha ? null : bonifParsed) : { ...(bonifIgualFicha ? {} : bonifParsed), contado_todo: ctdoTodo },
     ...(esNuevo && !provIgualFicha ? { condProv: condProvSel } : {}),
     ...(esNuevo && !marcaIgualFicha ? { condMarca: condMarcaSel } : {}),
     ...(cond.mercaderia ? { mercaderia: cond.mercaderia } : {}),
   }
-  const hayCambios = JSON.stringify(nuevaCond) !== JSON.stringify({ ...cond, bonif: bonifVacia(cond.bonif) ? null : cond.bonif })
+  const hayCambios = JSON.stringify(nuevaCond) !== JSON.stringify({ ...cond, bonif: bonifVacia(cond.bonif) && ctdoTodo === undefined ? null : cond.bonif })
   const hayOverride = !!cond.metodo || !!cond.lista || !bonifVacia(cond.bonif) || !!cond.condProv || !!cond.condMarca
   const selCls = "w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
 
@@ -673,7 +675,8 @@ export function condParaServidor(cond: CondPedido) {
   return {
     metodo_facturacion_pedido: cond.metodo || null,
     lista_precio_pedido_id: cond.lista || null,
-    bonif_pedido: bonifVacia(b) ? null : b,
+    // contado_todo (V1) viaja aunque no haya otros descuentos del pedido
+    bonif_pedido: bonifVacia(b) ? (typeof b?.contado_todo === "boolean" ? { contado_todo: b.contado_todo } : null) : b,
     // v0.4.0 (solo pedidos nuevos; el servidor los ignora al editar)
     ...(Array.isArray(cond.condProv) ? { condiciones_proveedor: cond.condProv } : {}),
     ...(Array.isArray(cond.condMarca) ? { condiciones_marca: cond.condMarca } : {}),

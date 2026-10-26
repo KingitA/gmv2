@@ -183,11 +183,26 @@ export interface CuentaCliente {
   habituales: Array<{ articulo_id: string; veces_pedido: number; cantidad_habitual: number }>
   /** Extracto del libro (= ERP, lib/cuenta-corriente/extracto.ts). null = no se pudo cargar; ausente = réplica vieja */
   movimientos?: MovimientoCC[] | null
+  /**
+   * Deuda del sistema viejo que NO es comprobante (#6/#7, 26/10): ajuste del libro mayor
+   * ("CHEQUE RECH", "10%", "SEGURO AUDI"…). Suma al saldo pero no se puede tildar al cobrar.
+   * monto + = debe, − = a favor. Ausente = servidor viejo
+   */
+  ajustes_apertura?: Array<{ id: string; fecha: string; concepto: string; numero: string | null; monto: number }>
   /** Para valuar devoluciones igual que el servidor (IIBB vigente, comprobante más reciente). Ausente = réplica vieja */
   contexto_devolucion?: ContextoDevolucion | null
 }
 
 // ─── Pedidos ─────────────────────────────────────────────────────────────────
+
+export interface CuentaPedido {
+  total: number
+  reversas: Array<{ id: string; tipo_comprobante: string; numero_comprobante: string; motivo: string; monto: number; estado_pdf: string | null }>
+  total_reversas: number
+  pagado: number
+  ajuste: number
+  debe: number
+}
 
 export interface DetallePedido {
   id: string
@@ -225,6 +240,8 @@ export interface PedidoVendedor {
   }
   comprobantes: Array<{ id: string; tipo_comprobante: string; numero_comprobante: string; estado_pdf: string | null }>
   remitos: Array<{ id: string; tipo_remito: string; numero_remito: string; estado_pdf: string | null }>
+  /** Cuenta del pedido (V3, #31): total − reversas/NC − pagado − ajuste = debe. Ausente = réplica vieja; null = sin comprobantes */
+  cuenta_pedido?: CuentaPedido | null
   descuentos: {
     segmentos: Array<{ segmento: Segmento; general: { pct: number; origen: string }; viajante: { pct: number; origen: string }; mercaderia: { pct: number; origen: string } }>
     condiciones: Array<{ ambito: string; origen: string; nombre: string; dto_general_pct: number; dto_viajante_pct: number; dto_mercaderia_pct: number }>
@@ -241,8 +258,9 @@ export interface CondPedido {
   metodo: string
   /** "" = lista del cliente */
   lista: string
-  /** null = bonificaciones de la ficha. general/contado: v0.4.0 (contado = 10 | 0 por segmento) */
-  bonif: { general?: BonifSeg | null; viajante?: BonifSeg | null; mercaderia?: BonifSeg | null; contado?: BonifSeg | null } | null
+  /** null = bonificaciones de la ficha. general/contado: v0.4.0 (contado = 10 | 0 por segmento).
+   *  contado_todo: checkbox "10 % pago contado" al finalizar (V1, #13): true/false le gana a todo */
+  bonif: { general?: BonifSeg | null; viajante?: BonifSeg | null; mercaderia?: BonifSeg | null; contado?: BonifSeg | null; contado_todo?: boolean | null } | null
   /** Condiciones por proveedor/marca SOLO este pedido: lista COMPLETA (ausente = las de la ficha). Solo pedidos nuevos */
   condProv?: CondicionProveedor[] | null
   condMarca?: CondicionMarca[] | null

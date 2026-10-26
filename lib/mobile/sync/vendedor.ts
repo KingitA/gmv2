@@ -337,6 +337,19 @@ async function detallesComision(ctx: CtxSync, vendedorIds: string[], pedidoIds: 
   return out
 }
 
+/**
+ * Filas "billetera" y "pagos_pendientes" solas: parche BARATO que devuelven el cobro y el
+ * retiro (V4, #32 del 26/10). El dataset entero (comisiones + detalles) es pesado y si su
+ * re-lectura fallaba el inicio seguía mostrando la plata en mano de antes del retiro.
+ */
+export async function filasBilleteraCaja(ctx: CtxSync): Promise<FilaReplica[]> {
+  const [bill, pendientes] = await Promise.all([
+    llamarGET(billeteraGET, ctx, "/api/vendedor/billetera"),
+    llamarGET(pagosPendientesGET, ctx),
+  ])
+  return [{ id: "billetera", ...bill }, { id: "pagos_pendientes", ...pendientes }]
+}
+
 /** Pedidos más recientes de cada lista de comisiones cuyo detalle viaja al equipo. */
 export const TOPE_DETALLE_COMISIONES = 150
 

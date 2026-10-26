@@ -20,6 +20,20 @@ export interface CuentaPersonal {
   retiros: number
 }
 
+/**
+ * Transferencia / depósito / echeq cobrado en la calle (#35, regla del dueño 26/10/2026):
+ * NO va a la rendición ni a la mano; la oficina la confirma en /caja cuando entra al banco.
+ */
+export interface TransferenciaCalle {
+  pago_id: string
+  fecha: string
+  cliente: string
+  monto: number
+  medio: string
+  /** pendiente = a confirmar en oficina · confirmado = confirmada · sin_enviar = guardada en el equipo */
+  estado: "pendiente" | "confirmado" | "sin_enviar"
+}
+
 export interface BilleteraData {
   /** Plata de la EMPRESA en la mano: efectivo cobrado − retiros sin rendir */
   balance: number
@@ -35,7 +49,9 @@ export interface BilleteraData {
   faltante_declarado?: number
   comisiones_pendientes: unknown[]
   total_pendiente_comisiones: number
-  historial: Array<{ id: string; tipo: string; medio: string | null; monto: number; concepto: string | null; fecha: string }>
+  historial: Array<{ id: string; tipo: string; medio: string | null; monto: number; concepto: string | null; fecha: string; referencia_tipo?: string | null }>
+  /** Últimos 30 días (servidor desde 26/10). Ausente = servidor viejo */
+  transferencias?: TransferenciaCalle[]
 }
 
 export interface OpRetiro { monto: number; observaciones?: string | null }
@@ -45,6 +61,27 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 /** Retiros cargados acá que todavía no llegaron al servidor. */
 export function retirosSinEnviar(ops: ItemOutbox[]): number {
   return r2(ops.filter((o) => o.tipo === "retiro.registrar" && o.estado !== "enviado" && o.estado !== "rechazado").reduce((s, o) => s + Number((o.payload as OpRetiro)?.monto || 0), 0))
+}
+
+/** Transferencias de cobros guardados en el equipo y todavía sin enviar (no suman a la mano). */
+export function transferenciasSinEnviar(ops: ItemOutbox[]): TransferenciaCalle[] {
+  const out: TransferenciaCalle[] = []
+  for (const o of ops) {
+    if (o.tipo !== "cobro.registrar" || o.estado === "enviado" || o.estado === "rechazado") continue
+    const p = o.payload as { metodos?: Array<{ tipo: string; monto: number; es_echeq?: boolean }> }
+    const dig = (p?.metodos || []).filter((m) => m.tipo === "transferencia" || m.tipo === "deposito" || (m.tipo === "cheque" && m.es_echeq))
+    if (!dig.length) continue
+    out.push({
+      pago_id: `local:${o.key}`,
+      fecha: o.capturadoAt,
+      // etiqueta = "Cobro {cliente} $total"
+      cliente: (o.etiqueta || "").replace(/^Cobro\s+/, "").replace(/\s+\$[\d.,]+$/, ""),
+      monto: r2(dig.reduce((s, m) => s + Number(m.monto || 0), 0)),
+      medio: [...new Set(dig.map((m) => (m.tipo === "cheque" ? "echeq" : m.tipo)))].join(" + "),
+      estado: "sin_enviar",
+    })
+  }
+  return out
 }
 
 /** Aplica los retiros sin enviar a la fila de la billetera (puro: lo prueban los tests). */
@@ -73,6 +110,10 @@ export function useBilletera() {
   const { fila, cargando } = useFilaBilletera<BilleteraData>("billetera")
   const ops = useNoEnviados()
   const sinEnviar = retirosSinEnviar(ops)
-  const data = useMemo(() => billeteraVisible(fila ?? null, sinEnviar), [fila, sinEnviar])
+  const transfLocales = useMemo(() => transferenciasSinEnviar(ops), [ops])
+  const data = useMemo(() => {
+    const b = billeteraVisible(fila ?? null, sinEnviar)
+    return b && transfLocales.length ? { ...b, transferencias: [...transfLocales, ...(b.transferencias || [])] } : b
+  }, [fila, sinEnviar, transfLocales])
   return { data, cargando, retirosSinEnviar: sinEnviar }
 }

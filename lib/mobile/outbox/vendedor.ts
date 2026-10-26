@@ -39,7 +39,7 @@ import { vigenciaDelPedido } from "@/lib/vendedor/vigencia-precios"
 import type { FilaReplica } from "../contrato"
 import { conCaptura, type CapturaPedido } from "../contexto-captura"
 import { insumosAFecha, verificarPreciosCapturados } from "../precios-integridad"
-import { cargarClientesVendedor, cargarCuentaCliente, cargarPedidosVendedor, cargarViajeVendedor, vendedorIdsDe } from "../sync/vendedor"
+import { cargarClientesVendedor, cargarCuentaCliente, cargarPedidosVendedor, cargarViajeVendedor, filasBilleteraCaja, vendedorIdsDe } from "../sync/vendedor"
 import { esUuid } from "../uuid"
 import { fechaISO } from "@/lib/formato"
 import { subirFotosPendientes } from "@/lib/cobranzas/fotos"
@@ -91,6 +91,11 @@ async function parchePedido(ctx: CtxOutbox, pedidoId: string): Promise<ParcheRep
 }
 
 /** Un parche que falla no debe convertir en "transitoria" una operación YA aplicada. */
+/** Billetera y rendición propuesta al instante (V4): la plata en mano no queda vieja. */
+async function parcheBilletera(ctx: CtxOutbox): Promise<ParcheReplica> {
+  return { dataset: "vendedor_billetera", upserts: await filasBilleteraCaja(ctx), deletes: [] }
+}
+
 async function parches(...fns: Array<() => Promise<ParcheReplica | ParcheReplica[]>>): Promise<ParcheReplica[]> {
   const out: ParcheReplica[] = []
   for (const fn of fns) {
@@ -504,7 +509,7 @@ const cobroRegistrar: HandlerDef<Record<string, any>> = {
     const comprobante_urls = [...(Array.isArray(resto.comprobante_urls) ? resto.comprobante_urls : []), ...subidas.map((f) => f.url)]
     const r = await llamarRuta(cobroPOST, ctx, { ruta: "/api/viajante/cobro", method: "POST", body: { ...resto, comprobante_urls, idempotency_key: m.idempotency_key } })
     const clienteIds: string[] = [...new Set<string>(m.payload.clientes.map((c: any) => c.cliente_id).filter(esUuid))]
-    return { ...r, replica: await parches(...clienteIds.map((id) => () => parcheCliente(ctx, id))) }
+    return { ...r, replica: await parches(...clienteIds.map((id) => () => parcheCliente(ctx, id)), () => parcheBilletera(ctx)) }
   },
 }
 
@@ -613,7 +618,7 @@ const retiroRegistrar: HandlerDef<{ monto: number; observaciones?: string | null
         observaciones: m.payload.observaciones || null,
         idempotencyKey: m.idempotency_key,
       })
-      return { ...r }
+      return { ...r, replica: await parches(() => parcheBilletera(ctx)) }
     } catch (e) {
       if (e instanceof ErrorRetiro && e.status < 500) throw new RechazoNegocio(e.message, e.codigo)
       throw e

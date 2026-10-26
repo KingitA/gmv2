@@ -1,8 +1,8 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
-import { createAdminClient } from "@/lib/supabase/admin"
 import { getHomeForRoles } from "@/lib/role-utils"
+import { usuarioPorNombre } from "@/lib/usuario-por-nombre"
 
 /**
  * Login por nombre de usuario + contraseña.
@@ -11,21 +11,11 @@ import { getHomeForRoles } from "@/lib/role-utils"
  */
 export async function loginUser(nombreUsuario: string, password: string) {
     const supabase = await createClient()
-    const adminClient = createAdminClient()
 
-    // Buscar usuario por nombre (case-insensitive)
-    const { data: usuario } = await adminClient
-        .from("usuarios")
-        .select("id, email, nombre, estado, debe_cambiar_password")
-        .ilike("nombre", nombreUsuario.trim())
-        .single()
-
-    if (!usuario) {
-        return { success: false, error: "Usuario o contraseña incorrectos" }
-    }
-
-    if (usuario.estado !== "activo") {
-        return { success: false, error: "Tu cuenta está inactiva. Contactá al administrador." }
+    // Buscar usuario por nombre (case-insensitive) — regla única con las apps (lib/usuario-por-nombre.ts)
+    const usuario = await usuarioPorNombre(nombreUsuario)
+    if (!usuario.ok) {
+        return { success: false, error: usuario.error }
     }
 
     // Autenticar con Supabase Auth usando el email interno del usuario
@@ -65,7 +55,7 @@ export async function loginUser(nombreUsuario: string, password: string) {
         user: {
             id: data.user.id,
             nombre: usuario.nombre,
-            estado: usuario.estado,
+            estado: "activo", // usuarioPorNombre ya rechazó a los inactivos
             roles,
         },
     }

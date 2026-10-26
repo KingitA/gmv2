@@ -1531,6 +1531,16 @@ por revisión de la oficina.
     "… no tiene precio de venta". Réplica: las bonificaciones del cliente incluyen `mercaderia` y `contado`.
 - Tests: `mobile/packages/core/test/vendedor-040.test.ts`.
 
+### Pendientes de la prueba de salida (26/10/2026)
+
+Detalle y archivos en `docs/PENDIENTES-APPS-SALIDA.md` ("Hecho por la App Vendedor"). Reglas nuevas:
+- **Login**: "Usuario o mail" (las 3 apps, `@gm/core`); sin "@" el servidor resuelve el mail con `lib/usuario-por-nombre.ts`, igual que el ERP.
+- **10 % contado al vender**: checkbox en el carrito = `bonif_pedido.contado_todo`; el total en vivo descuenta el 10 % de lo que va contado (la NC/REV sale aparte al facturar).
+- **Cuenta del pedido**: el detalle muestra facturado − reversas/NC − pagado − ajuste = debe (`cuenta_pedido`).
+- **Plata en mano**: cobro y retiro devuelven la billetera como réplica (no depende de re-leer el dataset entero).
+- **Transferencias**: no son plata en mano ni van a la rendición; la billetera las lista con su estado.
+- **Deuda vieja que no es comprobante** (`ajustes_apertura`): se ve en Cobrar, no se tilda.
+
 ### Resultados de las pruebas (21/09/2026)
 Mock del ERP (`mobile/scripts/mock-vendedor.mjs`, idempotencia real) con el **catálogo real** de
 solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos escritos en producción.
