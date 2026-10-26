@@ -67,7 +67,7 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | ~~21~~ | ~~Hoja del viaje: "PRES 0001-0001-…"~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
 | ~~13~~ | ~~Pedido con 10 % contado desde la venta (lado servidor de V1)~~ | Listas de precios y descuentos | **Hecho 26/10** (8f907c8, ver §5): campo `bonif_pedido.contado_todo`. Falta la app (V1) |
 | ~~16~~ | ~~Condiciones editables hasta facturar, y repreciar al guardar~~ | Listas de precios y descuentos | **Hecho 26/10** (8f907c8, ver §5) |
-| 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | **Listas de precios: hecho 26/10** (reglas en `lib/pedidos/anulacion-pedido.ts`, ver §5). **Falta:** cuentas corrientes (anular todo junto + ruta) y frontend (botón y modal) |
+| 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | **Listas de precios: hecho 26/10** (reglas en `lib/pedidos/anulacion-pedido.ts`, ver §5). **Falta:** cuentas corrientes (anular todo junto + ruta: **en curso 26/10**) y frontend (botón y modal) |
 | 17, 39 | Pedido con todo faltante: volver a pendiente o eliminar; que no aparezca como cobrable | Frontend | Pendiente |
 | 14 | Mostrar "preparado 30 de 36" y el total a facturar | Frontend | Pendiente |
 | 34 | Cambiar el color del cheque en /caja y en la cartera | Frontend | Pendiente |
