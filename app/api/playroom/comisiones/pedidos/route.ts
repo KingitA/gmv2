@@ -2,6 +2,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
 import { fechaISO } from '@/lib/formato'
+import { comisionesGanadas } from '@/lib/comisiones/ganadas'
+import { sinPedidosExcluidos } from '@/lib/comisiones/pedidos-sin-comision'
 
 export async function GET(req: NextRequest) {
   try {
@@ -17,10 +19,52 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'viajante_id, from, to requeridos' }, { status: 400 })
     }
 
-    const dateField = tipo === 'cobrada' ? 'fecha_comprobante_cobrado' : 'fecha'
+    // COBRADA = comisión ganada en la cuenta personal (#42, lib/comisiones/ganadas.ts),
+    // agrupada por pedido. El monto del pedido sale de la tabla pedidos.
+    if (tipo === 'cobrada') {
+      const ganadas = await comisionesGanadas(supabase, { desde: dateFrom, hasta: dateTo, vendedorId: viajanteId })
+      const porPedido = new Map<string, { comision: number; fecha_cobro: string; cliente_id: string | null; skus: Set<string> }>()
+      for (const g of ganadas) {
+        const pid = g.pedido_id ?? 'sin_pedido'
+        const a = porPedido.get(pid) || { comision: 0, fecha_cobro: '', cliente_id: g.cliente_id, skus: new Set<string>() }
+        a.comision += g.monto
+        if (g.fecha > a.fecha_cobro) a.fecha_cobro = g.fecha
+        for (const l of g.lineas) if (l.articulo_id) a.skus.add(l.articulo_id)
+        porPedido.set(pid, a)
+      }
+      const pedidoIds = [...porPedido.keys()].filter((id) => id !== 'sin_pedido')
+      const { data: peds } = pedidoIds.length
+        ? await supabase.from('pedidos').select('id, numero_pedido, fecha, total').in('id', pedidoIds)
+        : { data: [] as any[] }
+      const pedMap = new Map((peds ?? []).map((p: any) => [p.id, p]))
+      const cliIds = [...new Set([...porPedido.values()].map((a) => a.cliente_id).filter(Boolean))] as string[]
+      const { data: clis } = cliIds.length
+        ? await supabase.from('clientes').select('id, nombre_razon_social, nombre').in('id', cliIds)
+        : { data: [] as any[] }
+      const cliMap = new Map((clis ?? []).map((c: any) => [c.id, c.nombre_razon_social ?? c.nombre ?? c.id]))
+      const pedidos = [...porPedido.entries()]
+        .map(([pid, a]) => {
+          const p: any = pedMap.get(pid)
+          return {
+            pedido_id: pid,
+            numero_pedido: p?.numero_pedido ?? '—',
+            cliente_id: a.cliente_id,
+            cliente_nombre: cliMap.get(a.cliente_id ?? '') ?? '—',
+            fecha: p?.fecha ? fechaISO(p.fecha) : a.fecha_cobro,
+            fecha_cobro: a.fecha_cobro || null,
+            total_monto: Number(p?.total ?? 0),
+            total_comision: Math.round(a.comision * 100) / 100,
+            cantidad_skus: a.skus.size,
+          }
+        })
+        .sort((a, b) => b.total_comision - a.total_comision)
+      return NextResponse.json({ pedidos, fuente: 'cuenta_personal' })
+    }
+
+    const dateField = 'fecha'
 
     const PAGE_SIZE = 1000
-    const kardexRows: any[] = []
+    let kardexRows: any[] = []
     let offset = 0
     while (true) {
       let q = supabase
@@ -34,8 +78,6 @@ export async function GET(req: NextRequest) {
         .gte(dateField, startOfDayArgentina(dateFrom))
         .lte(dateField, endOfDayArgentina(dateTo))
 
-      if (tipo === 'cobrada') q = q.eq('comprobante_cobrado', true)
-
       // ORDER BY estable: sin él la paginación duplica/pierde filas
       q = q.order('id', { ascending: true })
 
@@ -47,6 +89,8 @@ export async function GET(req: NextRequest) {
       offset += PAGE_SIZE
     }
 
+    // Sin pedidos eliminados ni del sistema viejo (#10)
+    kardexRows = await sinPedidosExcluidos(supabase, kardexRows)
     if (!kardexRows.length) return NextResponse.json({ pedidos: [] })
 
     type PedidoAgg = {

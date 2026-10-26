@@ -987,6 +987,7 @@ export async function createPedido(data: {
         vendedor_id: clienteInfo.vendedor_id ?? null,
         provincia_destino: clienteInfo.provincia ?? null,
         pedido_id: pedido.id,
+        numero_pedido: pedido.numero_pedido ?? null, // #11: las listas mostraban "—"
         lista_precio_id: item.listaUsadaId,
         metodo_facturacion: metodoColor,
         color_dinero: colorDinero,
