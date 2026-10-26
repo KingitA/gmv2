@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requirePermiso } from "@/lib/auth"
 import { colorOverride, resolverColorPendientes } from "@/lib/actions/color-cheque"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
+import { aplicarDecisiones, gastosSinResolver, normalizarDecisiones, validarDecisiones } from "@/lib/viajes/gastos-rendicion"
 
 /**
  * POST /api/finanzas/rendiciones/[id]/confirmar — oficina confirma una
@@ -13,7 +14,12 @@ import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
  *
  * Body: { caja_destino_tipo?: "CAJA", caja_destino_id, efectivo_declarado?,
  *         pagos_verificados?, forzar_diferencia?,
- *         colores_cheque?: { [pago_id]: "BLANCO" | "NEGRO" } }
+ *         colores_cheque?: { [pago_id]: "BLANCO" | "NEGRO" },
+ *         gastos?: [{ id, aprobar, categoria?, vehiculo_id?, motivo? }] }
+ *
+ * #43: si la rendición es de un viaje con gastos declarados sin resolver, hay
+ * que aprobarlos o rechazarlos acá (con concepto y vehículo). Se validan antes
+ * de confirmar y se aplican después (lib/viajes/gastos-rendicion.ts).
  */
 export async function POST(
   request: NextRequest,
@@ -36,6 +42,14 @@ export async function POST(
 
     if (!caja_destino_id) {
       return NextResponse.json({ error: "caja_destino_id es requerido" }, { status: 400 })
+    }
+
+    // #43: gastos del viaje — cada uno declarado necesita su decisión
+    const decisionesGastos = normalizarDecisiones(body.gastos) ?? []
+    const gastosPend = await gastosSinResolver(supabase, rendicionId)
+    if (gastosPend.ids.length) {
+      const errGastos = validarDecisiones(gastosPend.ids, decisionesGastos)
+      if (errGastos) return NextResponse.json({ error: errGastos, gastos_sin_resolver: gastosPend.ids }, { status: 400 })
     }
 
     // El RPC confirma los pagos dentro de SQL (sin pasar por confirmarCobranza),
@@ -86,6 +100,12 @@ export async function POST(
       )
     }
 
+    // #43: aprobar / rechazar los gastos del viaje (la rendición ya quedó confirmada;
+    // si algo falla se avisa y se resuelve desde el arqueo del viaje)
+    const gastosErrores = gastosPend.viajeId && decisionesGastos.length
+      ? await aplicarDecisiones(supabase, gastosPend.viajeId, decisionesGastos.filter((d) => gastosPend.ids.includes(d.id)), auth.user.id)
+      : []
+
     // Post-confirmación por pago confirmado: comisiones 'cobrada', billetera
     // y bonificación 10% diferida (MARCA_CONTADO) — mismo módulo que Revisión
     // de Pagos, para que la rendición no saltee el descuento.
@@ -113,6 +133,7 @@ export async function POST(
       ...data,
       bonificacion_total: bonifTotal || undefined,
       bonificacion_errores: bonifErrores.length ? bonifErrores : undefined,
+      gastos_errores: gastosErrores.length ? gastosErrores : undefined,
     })
   } catch (error: any) {
     console.error("[finanzas/rendiciones/confirmar] error:", error)
