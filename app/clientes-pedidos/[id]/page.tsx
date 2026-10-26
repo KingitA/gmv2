@@ -3,10 +3,10 @@
 import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { agregarItemPedido, eliminarItemPedido, guardarItemsPedido, repreciarPedido, actualizarEncabezadoPedido, guardarCondicionesPedido } from "@/lib/actions/pedidos"
+import { agregarItemPedido, eliminarItemPedido, guardarItemsPedido, actualizarEncabezadoPedido, guardarCondicionesPedido } from "@/lib/actions/pedidos"
 import { MercaderiaCuposPedido } from "@/components/pedidos/MercaderiaCuposPedido"
 import { SegmentacionCondiciones, condRowsToProveedor, condRowsToMarca, EMPTY_SEGMENTACION, type SegmentacionValue } from "@/components/pedidos/SegmentacionCondiciones"
-import { esPedidoEditable, puedeEditarEntrega, transicionesManuales, motivoBloqueo, ESTADO_LABEL } from "@/lib/pedidos/estados"
+import { esPedidoEditable, puedeEditarCondiciones, puedeEditarEntrega, transicionesManuales, motivoBloqueo, ESTADO_LABEL } from "@/lib/pedidos/estados"
 import { SEGMENTOS_BONIF, SEGMENTO_LABEL, normalizarBonifPedido, type SegmentoBonif } from "@/lib/pricing/segmento"
 import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
@@ -133,6 +133,8 @@ export default function PedidoEditPage() {
           const v = ovr?.[tipo]?.[seg]
           form[`${tipo}.${seg}`] = typeof v === "number" ? numero(v, 0, 2) : ""
         }
+      // Checkbox "10 % contado" de todo el pedido (#13): "si" | "no" | "" (cada artículo según su condición)
+      form.contado_todo = ovr?.contado_todo === true ? "si" : ovr?.contado_todo === false ? "no" : ""
       setBonifPedidoForm(form)
 
       // Condiciones por marca / proveedor (pedido pisa ficha), con nombre
@@ -256,39 +258,25 @@ export default function PedidoEditPage() {
         const n = parseMonto(mercTodo)
         headerUpdate.bonif_mercaderia_pct = mercTodo.trim() === "" || n == null ? null : n
       }
-      // El servidor aplica la traba por estado: si el pedido ya no es editable,
-      // solo toma condicion_entrega (y el estado si es una transición válida).
+      // El servidor aplica la traba por estado: editable = todo; preparado sin
+      // facturar = condiciones + entrega (#16); si no, solo condicion_entrega (y el
+      // estado si es una transición válida). Si cambia una condición, el servidor
+      // reprecia solo (precios de cuando se tomó el pedido) y resincroniza el kardex.
       const editableAhora = esPedidoEditable(pedido?.estado)
-      await actualizarEncabezadoPedido(id, headerUpdate)
+      const condEditableAhora = puedeEditarCondiciones(pedido?.estado)
+      // Condiciones por proveedor/marca "solo este pedido": UN solo Guardar.
+      const cambioCond = condEditableAhora && JSON.stringify(segPedido) !== JSON.stringify(segPedidoInicial)
+      // Si además cambian las condiciones por proveedor/marca, reprecia guardarCondicionesPedido (una sola vez)
+      await actualizarEncabezadoPedido(id, headerUpdate, { repreciar: !cambioCond })
+      if (cambioCond) {
+        await guardarCondicionesPedido(id, {
+          proveedor: condRowsToProveedor(segPedido.proveedor),
+          marca: condRowsToMarca(segPedido.marca),
+        })
+      }
 
       if (editableAhora) {
-        // Condiciones por proveedor/marca "solo este pedido": UN solo Guardar.
-        // guardarCondicionesPedido ya re-precia las líneas.
-        const cambioCond = JSON.stringify(segPedido) !== JSON.stringify(segPedidoInicial)
-        if (cambioCond) {
-          await guardarCondicionesPedido(id, {
-            proveedor: condRowsToProveedor(segPedido.proveedor),
-            marca: condRowsToMarca(segPedido.marca),
-          })
-        }
-
-        // Si cambió lista/método (general o por segmento) del pedido, las líneas
-        // se re-precian: el cambio tiene que llegar a la factura, no quedar en el
-        // encabezado. Se hace ANTES de aplicar ediciones manuales de precio para
-        // que un precio tocado a mano en esta misma pantalla no se pise.
-        const CAMPOS_PRECIO = [
-          "metodo_facturacion_pedido", "lista_precio_pedido_id",
-          "lista_limpieza_pedido_id", "metodo_limpieza_pedido",
-          "lista_perf0_pedido_id", "metodo_perf0_pedido",
-          "lista_perf_plus_pedido_id", "metodo_perf_plus_pedido",
-        ] as const
-        const cambioBonif =
-          JSON.stringify(normalizarBonifPedido(headerUpdate.bonif_pedido)) !== JSON.stringify(normalizarBonifPedido((pedido as any)?.bonif_pedido))
-        const cambioPrecio = cambioBonif || "bonif_mercaderia_pct" in headerUpdate || CAMPOS_PRECIO.some((k) => (headerUpdate[k] || null) !== ((pedido as any)?.[k] || null))
-        if (cambioPrecio && !cambioCond && esPedidoEditable(headerForm.estado)) {
-          await repreciarPedido(id)
-        }
-
+        // Precios tocados a mano: DESPUÉS del reprecio, para que no se pisen
         const changes = Object.entries(itemEdits).map(([itemId, edit]) => ({ id: itemId, ...edit }))
         if (changes.length > 0) await guardarItemsPedido(id, changes)
       }
@@ -344,6 +332,8 @@ export default function PedidoEditPage() {
       }
       if (Object.keys(seg).length) out[tipo] = seg
     }
+    if (bonifPedidoForm.contado_todo === "si") out.contado_todo = true
+    else if (bonifPedidoForm.contado_todo === "no") out.contado_todo = false
     return normalizarBonifPedido(out)
   }
   // % de la ficha (la congelada al tomar el pedido) para un tipo/segmento (segmento específico > "todos")
@@ -374,12 +364,14 @@ export default function PedidoEditPage() {
   }
 
   const estadoColor = ESTADO_COLORS[pedido?.estado] || "bg-slate-100 text-slate-700 border-slate-300"
-  // Trabas por estado (lib/pedidos/estados.ts): editable = todo; si no, solo forma de entrega.
+  // Trabas por estado (lib/pedidos/estados.ts): editable = todo; preparado sin facturar =
+  // condiciones (lista, método, descuentos, contado) + entrega (#16); si no, solo forma de entrega.
   const editable = esPedidoEditable(pedido?.estado)
+  const condEditable = puedeEditarCondiciones(pedido?.estado)
   const entregaEditable = puedeEditarEntrega(pedido?.estado)
   const bloqueo = motivoBloqueo(pedido?.estado)
   const opcionesEstado = [pedido?.estado, ...transicionesManuales(pedido?.estado)].filter(Boolean) as string[]
-  const puedeGuardar = editable || entregaEditable || opcionesEstado.length > 1
+  const puedeGuardar = editable || condEditable || entregaEditable || opcionesEstado.length > 1
   const liveTotal = items.map(i => getDisplayItem(i)).reduce((sum, i) => sum + (i.precio_final ?? 0) * (i.cantidad ?? 0), 0)
   const hasUnsaved = Object.keys(itemEdits).length > 0
 
@@ -472,7 +464,7 @@ export default function PedidoEditPage() {
                   <Select
                     value={headerForm.metodo_facturacion_pedido || "__heredar__"}
                     onValueChange={(v) => setHeaderForm({ ...headerForm, metodo_facturacion_pedido: v === "__heredar__" ? "" : v })}
-                    disabled={!editable}
+                    disabled={!condEditable}
                   >
                     <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -514,7 +506,7 @@ export default function PedidoEditPage() {
                   <Select
                     value={headerForm.lista_precio_pedido_id || "__heredar__"}
                     onValueChange={(v) => setHeaderForm({ ...headerForm, lista_precio_pedido_id: v === "__heredar__" ? "" : v })}
-                    disabled={!editable}
+                    disabled={!condEditable}
                   >
                     <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -549,7 +541,7 @@ export default function PedidoEditPage() {
                       <Select
                         value={(headerForm as any)[metodoKey] || "__heredar__"}
                         onValueChange={(v) => setHeaderForm({ ...headerForm, [metodoKey]: v === "__heredar__" ? "" : v })}
-                        disabled={!editable}
+                        disabled={!condEditable}
                       >
                         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -562,7 +554,7 @@ export default function PedidoEditPage() {
                       <Select
                         value={(headerForm as any)[listaKey] || "__heredar__"}
                         onValueChange={(v) => setHeaderForm({ ...headerForm, [listaKey]: v === "__heredar__" ? "" : v })}
-                        disabled={!editable}
+                        disabled={!condEditable}
                       >
                         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -609,7 +601,7 @@ export default function PedidoEditPage() {
                                     className={`h-8 text-right pr-6 tabular-nums ${val !== "" ? "border-amber-400 bg-amber-50" : ""}`}
                                     value={val}
                                     placeholder={ficha != null ? numero(ficha, 0, 2) : "0"}
-                                    disabled={!editable}
+                                    disabled={!condEditable}
                                     inputMode="decimal"
                                     onChange={(e) => setBonifPedidoForm((prev) => ({ ...prev, [`${tipo}.${seg}`]: e.target.value.replace(/[^\d.,]/g, "") }))}
                                   />
@@ -622,7 +614,7 @@ export default function PedidoEditPage() {
                             <Select
                               value={bonifPedidoForm[`contado.${seg}`] || "__hereda__"}
                               onValueChange={(v) => setBonifPedidoForm((prev) => ({ ...prev, [`contado.${seg}`]: v === "__hereda__" ? "" : v }))}
-                              disabled={!editable}
+                              disabled={!condEditable}
                             >
                               <SelectTrigger className={`h-8 text-xs ${bonifPedidoForm[`contado.${seg}`] ? "border-amber-400 bg-amber-50" : ""}`}><SelectValue /></SelectTrigger>
                               <SelectContent>
@@ -638,9 +630,24 @@ export default function PedidoEditPage() {
                   </table>
                 </div>
                 <div className="mt-3 flex items-center gap-2">
+                  <Label className="text-xs text-slate-500">10 % por pago contado en TODO el pedido</Label>
+                  <Select
+                    value={bonifPedidoForm.contado_todo || "__hereda__"}
+                    onValueChange={(v) => setBonifPedidoForm((prev) => ({ ...prev, contado_todo: v === "__hereda__" ? "" : v }))}
+                    disabled={!condEditable}
+                  >
+                    <SelectTrigger className={`h-8 w-56 text-xs ${bonifPedidoForm.contado_todo ? "border-amber-400 bg-amber-50" : ""}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__hereda__">Según cada segmento / condición</SelectItem>
+                      <SelectItem value="si">Sí, todo el pedido contado</SelectItem>
+                      <SelectItem value="no">No, nada contado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
                   <Label className="text-xs text-slate-500">Mercadería bonificada en TODO el pedido</Label>
                   <div className="relative w-28">
-                    <Input className={`h-8 text-right pr-6 tabular-nums ${mercTodo !== "" ? "border-amber-400 bg-amber-50" : ""}`} value={mercTodo} placeholder="hereda" disabled={!editable} inputMode="decimal"
+                    <Input className={`h-8 text-right pr-6 tabular-nums ${mercTodo !== "" ? "border-amber-400 bg-amber-50" : ""}`} value={mercTodo} placeholder="hereda" disabled={!condEditable} inputMode="decimal"
                       onChange={(e) => setMercTodo(e.target.value.replace(/[^\d.,]/g, ""))} />
                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">%</span>
                   </div>
@@ -648,7 +655,7 @@ export default function PedidoEditPage() {
                 </div>
                 {/* Condiciones por marca / proveedor: las de la FICHA se ven; las del PEDIDO se editan
                     (solo este pedido, pisan a la ficha para esa mercadería y se facturan aparte). */}
-                {(condSegmento.some((c: any) => c.origen === "ficha") || editable) && (
+                {(condSegmento.some((c: any) => c.origen === "ficha") || condEditable) && (
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 space-y-2">
                     <p className="font-bold text-slate-500 uppercase tracking-wide text-[10px]">Condiciones por marca / proveedor (van en comprobante aparte)</p>
                     {condSegmento.filter((c: any) => c.origen === "ficha").map((c: any) => (
@@ -661,7 +668,7 @@ export default function PedidoEditPage() {
                           ? <span className="text-teal-700 font-semibold"> · pisada por este pedido</span> : null}
                       </p>
                     ))}
-                    {editable && (
+                    {condEditable && (
                       <div className="pt-1 space-y-2">
                         <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wide">Solo este pedido</p>
                         <SegmentacionCondiciones listas={listasPrecio} value={segPedido} onChange={setSegPedido} />

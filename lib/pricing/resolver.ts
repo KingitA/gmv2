@@ -10,6 +10,7 @@
 import type { MetodoFacturacion } from "./calculator"
 import {
   SEGMENTO_BONIF,
+  SEGMENTOS_BONIF,
   normalizarBonifPedido,
   bonifSegAFilas,
   type Segmento,
@@ -270,8 +271,9 @@ function filaFicha(filas: FilaBonifTipo[], tipo: string, segmento: Segmento): Fi
 const definidoNum = (v: unknown) => v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v))
 
 /**
- * ¿El ítem sale con 10% por pago contado? Jerarquía: condición marca/proveedor
- * (si lo define) > "solo este pedido" por segmento > ficha (segmento > todos).
+ * ¿El ítem sale con 10% por pago contado? Jerarquía: checkbox "todo el pedido"
+ * (bonif_pedido.contado_todo, #13) > condición marca/proveedor (si lo define) >
+ * "solo este pedido" por segmento > ficha (segmento > todos).
  * La lista Especial nunca lleva contado (neto fijo + IVA).
  */
 export function resolverContadoItem(
@@ -282,10 +284,37 @@ export function resolverContadoItem(
   esEspecial = false,
 ): boolean {
   if (esEspecial) return false
+  const bp = normalizarBonifPedido(bonifPedido)
+  if (typeof bp?.contado_todo === "boolean") return bp.contado_todo
   if (cond && cond.contado !== null && cond.contado !== undefined) return !!cond.contado
-  const ov = normalizarBonifPedido(bonifPedido)?.contado?.[SEGMENTO_BONIF[segmento]]
+  const ov = bp?.contado?.[SEGMENTO_BONIF[segmento]]
   if (typeof ov === "number") return ov > 0
   return (filaFicha(fichaFilas, "contado", segmento)?.porcentaje || 0) > 0
+}
+
+/**
+ * Cómo arranca el checkbox "10 % por pago contado" al finalizar un pedido (#13):
+ *  - "todo": la ficha del cliente tiene contado en todos los segmentos → tildado;
+ *  - "parcial": solo algún segmento o alguna condición por proveedor/marca → la app
+ *    lo muestra sin definir (cada artículo según su condición) y el vendedor puede
+ *    tildarlo (todo contado) o destildarlo (nada contado);
+ *  - "nada": destildado.
+ * Tildar/destildar = bonif_pedido.contado_todo true/false (le gana a todo).
+ */
+export function contadoPorDefectoCliente(
+  fichaFilas: FilaBonifTipo[],
+  condiciones: Array<{ contado?: boolean | null }> = [],
+): "todo" | "parcial" | "nada" {
+  const conContado = SEGMENTOS_BONIF.filter((key) => {
+    const deTipo = fichaFilas.filter((b) => b.tipo === "contado")
+    const fila = deTipo.find((b) => b.segmento === key) || deTipo.find((b) => b.segmento === null || b.segmento === "")
+    return (Number(fila?.porcentaje) || 0) > 0
+  }).length
+  const condConContado = condiciones.some((c) => c?.contado === true)
+  const condSinContado = condiciones.some((c) => c?.contado === false)
+  if (conContado === SEGMENTOS_BONIF.length && !condSinContado) return "todo"
+  if (conContado > 0 || condConContado) return "parcial"
+  return "nada"
 }
 
 /**

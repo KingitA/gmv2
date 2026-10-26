@@ -61,6 +61,10 @@ export function detectarSegmentoBonif(articulo: ArticuloSegmentable): SegmentoBo
  * Un 0 explícito es un valor ("sin descuento en este pedido"), no "heredar".
  * contado: { segmento: 10 | 0 } — 10 = ese segmento sale con 10% por pago
  * contado (NC/REV aparte al facturar), 0 = no.
+ * contado_todo: true | false — el checkbox "10 % por pago contado" al finalizar
+ * el pedido (#13, regla del dueño 26/10/2026): vale para TODO el pedido y le
+ * gana a todo lo demás (segmento, ficha y condiciones por proveedor/marca).
+ * Ausente/null = cada ítem según su condición, segmento y ficha.
  */
 export type BonifPorSegmento = Partial<Record<SegmentoBonif, number>>
 export interface BonifPedido {
@@ -68,6 +72,7 @@ export interface BonifPedido {
   viajante?: BonifPorSegmento | null
   mercaderia?: BonifPorSegmento | null
   contado?: BonifPorSegmento | null
+  contado_todo?: boolean | null
 }
 
 export const TIPOS_BONIF_PEDIDO = ["general", "viajante", "mercaderia", "contado"] as const
@@ -90,6 +95,7 @@ export function normalizarBonifPedido(input: any): BonifPedido | null {
     }
     if (Object.keys(seg).length) out[tipo] = seg
   }
+  if (typeof input.contado_todo === "boolean") out.contado_todo = input.contado_todo
   return Object.keys(out).length ? out : null
 }
 

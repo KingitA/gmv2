@@ -45,6 +45,18 @@ export function esPedidoEditable(estado: string | null | undefined): boolean {
   return !!estado && (ESTADOS_EDITABLES as readonly string[]).includes(estado)
 }
 
+/**
+ * Condiciones del pedido (lista, método de facturación, descuentos por segmento,
+ * contado 10 %, mercadería %, condiciones por proveedor/marca). Regla del dueño
+ * (23/10/2026, #16): los ARTÍCULOS y CANTIDADES se bloquean al preparar (son los
+ * del depósito), pero las condiciones se pueden cambiar hasta que el pedido esté
+ * FACTURADO; al guardar se reprecia solo. Además del estado, el servidor exige que
+ * el pedido no tenga comprobantes vivos (assertCondicionesEditables).
+ */
+export function puedeEditarCondiciones(estado: string | null | undefined): boolean {
+  return esPedidoEditable(estado) || estado === "pendiente_facturacion"
+}
+
 /** Eliminar (baja lógica) sigue la misma regla que editar. */
 export function puedeEliminarPedido(estado: string | null | undefined): boolean {
   return esPedidoEditable(estado)
@@ -95,6 +107,8 @@ export function motivoBloqueo(estado: string | null | undefined): string | null 
   const label = (ESTADO_LABEL[estado || ""] || estado || "").toLowerCase()
   if (estado === "eliminado") return "Este pedido está eliminado y no se puede modificar."
   if (estado === "sistema_viejo") return "Este pedido se cargó antes del pase a producción: se entregó y cobró en el sistema viejo. No se puede modificar."
+  if (puedeEditarCondiciones(estado))
+    return `Este pedido ya está ${label}: los artículos y las cantidades quedaron como los preparó el depósito. Hasta facturarlo podés cambiar las condiciones (lista, método, descuentos, contado) y la forma de entrega.`
   if (puedeEditarEntrega(estado))
     return `Este pedido ya está ${label}: no se puede modificar. Solo podés cambiar la forma de entrega. Si hay que corregir algo, hacé un pedido nuevo.`
   return `Este pedido ya está ${label} y no se puede modificar. Si hay que corregir algo, hacé un pedido nuevo.`
