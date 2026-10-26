@@ -531,9 +531,11 @@ export async function POST(request: Request) {
             p_usuario_id: auth.user.id,
           })
           if (impErr) {
-            // "sin saldo disponible/pendiente" es esperable cuando el crédito se agotó
+            // "sin saldo disponible/pendiente" es esperable cuando el crédito se
+            // agotó o el origen ya no debe nada (el PRES de respaldo 0002-00000001
+            // está en $0, #28): se sigue con el próximo origen, no se corta.
             console.warn("[cc_imputar_credito] NC", comprobante.id, "→", origenId, impErr.message)
-            break
+            continue
           }
           if (Number(impRes?.credito_saldo_restante) >= 0) break // crédito agotado
         }
