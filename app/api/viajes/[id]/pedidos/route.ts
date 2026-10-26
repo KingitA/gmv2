@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireOficina, errorJson, sincronizarParadas } from "@/lib/viajes/servidor"
 import { viajeEditable, pedidoAsignableAViaje } from "@/lib/viajes/estados"
+import { ESTADOS_CARGA_BULTOS, palletsDePedidos } from "@/lib/viajes/bultos"
 
 // GET /api/viajes/[id]/pedidos
 // Pedidos del viaje + CANDIDATOS: pedidos sin viaje, en cualquier estado previo
@@ -106,9 +107,12 @@ export async function GET(
     // #205, 211, 209, 224…). La consulta sigue pidiendo los más viejos primero por el tope de 500.
     candidatos.sort((a, b) => String(a.numero_pedido).localeCompare(String(b.numero_pedido), "es", { numeric: true }))
 
+    // #22: bultos y pallets se cargan acá hasta finalizar el viaje
+    const pallets = await palletsDePedidos(supabase, (asignados || []).map((p: any) => p.id))
     return NextResponse.json({
       editable: viajeEditable(viaje.estado),
-      pedidos: (asignados || []).map(forma),
+      carga_editable: (ESTADOS_CARGA_BULTOS as readonly string[]).includes(viaje.estado),
+      pedidos: (asignados || []).map((p: any) => ({ ...forma(p), pallets: pallets.get(p.id) || 0 })),
       candidatos: candidatos.map(forma),
     })
   } catch (error: any) {
@@ -189,6 +193,63 @@ export async function POST(
     return NextResponse.json({ success: true, agregados, quitados, rechazados })
   } catch (error: any) {
     console.error("[viajes] Error en POST pedidos:", error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+}
+
+// PATCH /api/viajes/[id]/pedidos — #22: cargar bultos y/o pallets de un pedido
+// del viaje. Se puede en cualquier momento antes de finalizar el viaje
+// (programado, despachado, en curso). No bloquea nada: sin bultos se despacha igual.
+// Body: { pedido_id, bultos?, pallets? }  (enteros ≥ 0)
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireOficina()
+  if (auth.error) return auth.error
+  try {
+    const supabase = await createClient()
+    const { id } = await params
+    const body = await request.json()
+    if (!body.pedido_id) return errorJson("pedido_id es requerido")
+
+    const entero = (v: unknown) => {
+      const n = Number(v)
+      return Number.isInteger(n) && n >= 0 && n <= 9999 ? n : null
+    }
+    const cambios: Record<string, number> = {}
+    if (body.bultos !== undefined) {
+      const n = entero(body.bultos)
+      if (n === null) return errorJson("Bultos inválidos (entero de 0 a 9999)")
+      cambios.bultos = n
+    }
+    if (body.pallets !== undefined) {
+      const n = entero(body.pallets)
+      if (n === null) return errorJson("Pallets inválidos (entero de 0 a 9999)")
+      cambios.pallets = n
+    }
+    if (!Object.keys(cambios).length) return errorJson("Nada para cambiar")
+
+    const { data: viaje } = await supabase.from("viajes").select("id, estado").eq("id", id).single()
+    if (!viaje) return errorJson("Viaje no encontrado", 404)
+    if (!(ESTADOS_CARGA_BULTOS as readonly string[]).includes(viaje.estado)) {
+      return errorJson("El viaje ya se finalizó: no se cambian los bultos")
+    }
+
+    const { data: hechos, error } = await supabase
+      .from("pedidos")
+      .update(cambios)
+      .eq("id", body.pedido_id)
+      .eq("viaje_id", id)
+      .select("id")
+    if (error) {
+      if (/pallets/i.test(error.message)) return errorJson("Falta aplicar la migración 20261026_pedidos_pallets.sql para cargar pallets", 500)
+      throw error
+    }
+    if (!hechos?.length) return errorJson("El pedido no está en este viaje", 404)
+    return NextResponse.json({ success: true, ...cambios })
+  } catch (error: any) {
+    console.error("[viajes] Error en PATCH pedidos (bultos):", error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

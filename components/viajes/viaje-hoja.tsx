@@ -10,6 +10,7 @@ import { toast } from "sonner"
 import { formatCurrency, formatDateTimeAR } from "@/lib/utils"
 import type { HojaRuta, ParadaHoja } from "@/lib/viajes/hoja-ruta"
 import { ESTADO_LABEL } from "@/lib/pedidos/estados"
+import { textoCarga } from "@/lib/viajes/bultos"
 
 // La hoja de ruta en pantalla: paradas en orden, con la instrucción de oficina
 // (cobrar sí o sí lo anterior / lo de este viaje, candado de entrega, nota) y,
@@ -284,7 +285,10 @@ function Parada({
           )}
         </span>
 
-        <span className="text-right font-medium tabular-nums">{p.bultos}</span>
+        <span className="text-right font-medium tabular-nums" title={textoCarga(p.bultos, p.pallets) || "Sin bultos cargados"}>
+          {p.bultos}
+          {p.pallets > 0 && <span className="block text-[11px] font-normal text-neutro-500">{p.pallets} pal.</span>}
+        </span>
         <span className="text-right tabular-nums">{formatCurrency(p.total_viaje)}</span>
         {conCobranza && (
           <span className={`text-right tabular-nums ${p.saldo_anterior > 0.01 ? "font-medium text-red-700" : "text-slate-400"}`}>
@@ -357,7 +361,7 @@ function Parada({
                 <span key={ped.id} className="inline-flex items-center gap-1.5 rounded border bg-white px-2 py-0.5 text-xs">
                   <span className="font-semibold">#{ped.numero}</span>
                   <span className="text-muted-foreground">{ESTADO_LABEL[ped.estado] || ped.estado}</span>
-                  <span className="inline-flex items-center gap-0.5"><Package className="h-3 w-3" />{ped.bultos}</span>
+                  <span className="inline-flex items-center gap-0.5"><Package className="h-3 w-3" />{ped.bultos}{ped.pallets > 0 && ` + ${ped.pallets} pal.`}</span>
                   {ped.comprobantes.map((c) => <span key={c.id} className="text-slate-500">{c.tipo} {c.numero}</span>)}
                   {ped.comprobantes.length === 0 && <span className="text-amber-700">sin facturar</span>}
                   {ped.remitos.length === 0 && <span className="text-amber-700">sin remito</span>}

@@ -12,13 +12,14 @@ import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { ESTADO_LABEL } from "@/lib/pedidos/estados"
 import { localMatch } from "@/lib/search/local-match"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
 
 // Pedidos del viaje + candidatos para subir en lote. Los candidatos son pedidos
 // sin viaje, en cualquier estado previo a salir, de clientes de las zonas del
 // viaje (o de cualquier zona con "Ver todas").
 
 type Ped = {
-  id: string; numero: string; fecha: string; estado: string; total: number; bultos: number
+  id: string; numero: string; fecha: string; estado: string; total: number; bultos: number; pallets?: number
   cliente_nombre: string; localidad: string; vendedor: string
 }
 
@@ -26,6 +27,7 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
   const [asignados, setAsignados] = useState<Ped[]>([])
   const [candidatos, setCandidatos] = useState<Ped[]>([])
   const [editable, setEditable] = useState(false)
+  const [cargaEditable, setCargaEditable] = useState(false)
   const [todas, setTodas] = useState(false)
   const [seleccion, setSeleccion] = useState<string[]>([])
   const [filtro, setFiltro] = useState("")
@@ -41,6 +43,7 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
       setAsignados(data.pedidos || [])
       setCandidatos(data.candidatos || [])
       setEditable(Boolean(data.editable))
+      setCargaEditable(Boolean(data.carga_editable))
       setSeleccion([])
     } catch (e: any) {
       toast.error(e?.message || "No se pudieron cargar los pedidos")
@@ -72,6 +75,25 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
     }
   }
 
+  // #22: bultos / pallets por pedido (se guardan al salir del campo; no bloquean el despacho)
+  const guardarCarga = async (p: Ped, campo: "bultos" | "pallets", valor: number) => {
+    if ((p[campo] || 0) === valor) return
+    setAsignados((prev) => prev.map((x) => (x.id === p.id ? { ...x, [campo]: valor } : x)))
+    try {
+      const res = await fetch(`/api/viajes/${viajeId}/pedidos`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pedido_id: p.id, [campo]: valor }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      onCambio()
+    } catch (e: any) {
+      toast.error(e?.message || "No se pudo guardar")
+      cargar()
+    }
+  }
+
   const visibles = useMemo(
     () => candidatos.filter((p) => !filtro.trim() || localMatch(filtro, p.cliente_nombre, p.localidad, p.numero, p.vendedor)),
     [candidatos, filtro],
@@ -85,11 +107,17 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
       <div>
         <h3 className="mb-2 font-semibold">
           En el viaje ({asignados.length}) · {asignados.reduce((s, p) => s + p.bultos, 0)} bultos ·{" "}
+          {asignados.some((p) => (p.pallets || 0) > 0) && <>{asignados.reduce((s, p) => s + (p.pallets || 0), 0)} pallets ·{" "}</>}
           {formatCurrency(asignados.reduce((s, p) => s + p.total, 0))}
         </h3>
+        {cargaEditable && (
+          <p className="mb-2 text-xs text-muted-foreground">Cargá los bultos o pallets de cada pedido (se puede hasta finalizar el viaje; un pedido sin bultos sale igual).</p>
+        )}
         <TablaPedidos
           pedidos={asignados}
           vacio="Todavía no hay pedidos en este viaje"
+          conPallets
+          onCarga={cargaEditable ? guardarCarga : undefined}
           accion={editable ? (p) => (
             <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" disabled={ocupado} onClick={() => mandar({ quitar: [p.id] })}>
               <X className="h-4 w-4" />
@@ -131,14 +159,22 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
 }
 
 function TablaPedidos({
-  pedidos, vacio, accion, seleccion, onSeleccion,
+  pedidos, vacio, accion, seleccion, onSeleccion, conPallets, onCarga,
 }: {
   pedidos: Ped[]
   vacio: string
   accion?: (p: Ped) => React.ReactNode
   seleccion?: string[]
   onSeleccion?: (ids: string[]) => void
+  conPallets?: boolean
+  onCarga?: (p: Ped, campo: "bultos" | "pallets", valor: number) => void
 }) {
+  const celdaCarga = (p: Ped, campo: "bultos" | "pallets") =>
+    onCarga ? (
+      <CampoCarga valor={p[campo] || 0} onGuardar={(n) => onCarga(p, campo, n)} etiqueta={`${campo === "bultos" ? "Bultos" : "Pallets"} del pedido #${p.numero}`} />
+    ) : (
+      p[campo] || 0
+    )
   const todos = !!seleccion && pedidos.length > 0 && pedidos.every((p) => seleccion.includes(p.id))
   return (
     <div className="max-h-[28rem] overflow-y-auto rounded-md border bg-white">
@@ -156,13 +192,14 @@ function TablaPedidos({
             <TableHead>Vendedor</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead className="text-right">Bultos</TableHead>
+            {conPallets && <TableHead className="text-right">Pallets</TableHead>}
             <TableHead className="text-right">Total</TableHead>
             {accion && <TableHead className="w-8" />}
           </TableRow>
         </TableHeader>
         <TableBody>
           {pedidos.length === 0 ? (
-            <TableRow><TableCell colSpan={9} className="py-6 text-center text-sm text-muted-foreground">{vacio}</TableCell></TableRow>
+            <TableRow><TableCell colSpan={10} className="py-6 text-center text-sm text-muted-foreground">{vacio}</TableCell></TableRow>
           ) : (
             pedidos.map((p) => (
               <TableRow key={p.id}>
@@ -182,7 +219,8 @@ function TablaPedidos({
                 <TableCell>{p.localidad}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">{p.vendedor}</TableCell>
                 <TableCell><Badge variant="secondary">{ESTADO_LABEL[p.estado] || p.estado}</Badge></TableCell>
-                <TableCell className="text-right">{p.bultos}</TableCell>
+                <TableCell className="text-right">{celdaCarga(p, "bultos")}</TableCell>
+                {conPallets && <TableCell className="text-right">{celdaCarga(p, "pallets")}</TableCell>}
                 <TableCell className="text-right">{formatCurrency(p.total)}</TableCell>
                 {accion && <TableCell>{accion(p)}</TableCell>}
               </TableRow>
@@ -191,5 +229,24 @@ function TablaPedidos({
         </TableBody>
       </Table>
     </div>
+  )
+}
+
+/** Entero ≥ 0 que se guarda al salir del campo (o con Enter). */
+function CampoCarga({ valor, onGuardar, etiqueta }: { valor: number; onGuardar: (n: number) => void; etiqueta: string }) {
+  const [texto, setTexto] = useState<number | null>(valor)
+  useEffect(() => { setTexto(valor) }, [valor])
+  const guardar = () => onGuardar(Math.max(0, Math.trunc(texto ?? 0)))
+  return (
+    <InputMonto
+      decimales={0}
+      soloPositivos
+      value={texto}
+      onChange={setTexto}
+      onBlur={guardar}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur() }}
+      aria-label={etiqueta}
+      className="ml-auto h-7 w-16 text-right"
+    />
   )
 }

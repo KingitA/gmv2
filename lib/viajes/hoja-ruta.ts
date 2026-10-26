@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { getSaldosClientes, saldoDeParada, valorDevolucionesDeViaje } from "@/lib/cuenta-corriente/saldo"
+import { palletsDePedidos } from "./bultos"
 import { fechaCorta, sumarDiasISO } from "@/lib/formato"
 
 /**
@@ -16,6 +17,8 @@ export interface PedidoHoja {
   estado: string
   total: number
   bultos: number
+  /** #22: pallets (además de los bultos) */
+  pallets: number
   vendedor: string
   comprobantes: Array<{ id: string; tipo: string; numero: string; total: number; saldo: number }>
   remitos: Array<{ id: string; tipo_remito: string; numero_remito: string; estado_pdf: string }>
@@ -61,6 +64,7 @@ export interface ParadaHoja {
   // calculado
   pedidos: PedidoHoja[]
   bultos: number
+  pallets: number
   total_viaje: number      // Σ pedidos de este viaje
   saldo_anterior: number   // saldo PROYECTADO del cliente SIN lo de este viaje (saldoDeParada)
   total_a_cobrar: number   // saldo_anterior + total_viaje − devuelto
@@ -109,6 +113,7 @@ export interface HojaRuta {
     paradas: number
     pedidos: number
     bultos: number
+    pallets: number
     total_viaje: number
     saldo_anterior: number
     total_a_cobrar: number
@@ -208,7 +213,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     ]),
   ].filter(Boolean) as string[]
 
-  const [{ data: clientes }, { data: comprobantes }, { data: remitos }, { data: usuarios }, saldos, saldosConViaje, { data: cajas }, { data: bancos }, { data: saldoBill }, devueltoPorCliente] =
+  const [{ data: clientes }, { data: comprobantes }, { data: remitos }, { data: usuarios }, saldos, saldosConViaje, { data: cajas }, { data: bancos }, { data: saldoBill }, devueltoPorCliente, palletsPorPedido] =
     await Promise.all([
       clienteIds.length
         ? supabase
@@ -250,6 +255,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
             .eq("cuenta_id", viaje.chofer_id)
         : Promise.resolve({ data: [] as any[] }),
       valorDevolucionesDeViaje(supabase, viajeId),
+      palletsDePedidos(supabase, pedidoIds),
     ])
 
   const nombreUsuario = new Map((usuarios || []).map((u: any) => [u.id, u.nombre as string]))
@@ -320,6 +326,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       estado: p.estado,
       total: Number(p.total) || 0,
       bultos: p.bultos || 0,
+      pallets: palletsPorPedido.get(p.id) || 0,
       vendedor: p.vendedores?.nombre || "",
       comprobantes: (compsPorPedido.get(p.id) || []).map((x) => ({
         id: x.id,
@@ -394,6 +401,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       resuelto_at: pa.resuelto_at,
       pedidos: pedidosHoja,
       bultos: pedidosHoja.reduce((s, p) => s + p.bultos, 0),
+      pallets: pedidosHoja.reduce((s, p) => s + p.pallets, 0),
       total_viaje: totalViaje,
       saldo_anterior: saldoAnterior,
       total_a_cobrar,
@@ -471,6 +479,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       paradas: paradasHoja.length,
       pedidos: todosPedidos.length,
       bultos: paradasHoja.reduce((s, p) => s + p.bultos, 0),
+      pallets: paradasHoja.reduce((s, p) => s + p.pallets, 0),
       total_viaje: r2(paradasHoja.reduce((s, p) => s + p.total_viaje, 0)),
       saldo_anterior: r2(paradasHoja.reduce((s, p) => s + p.saldo_anterior, 0)),
       total_a_cobrar: r2(paradasHoja.reduce((s, p) => s + p.total_a_cobrar, 0)),

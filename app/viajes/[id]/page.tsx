@@ -185,6 +185,7 @@ export default function ViajeDetallePage() {
             <span><b className="text-foreground">{t.paradas}</b> clientes</span>
             <span><b className="text-foreground">{t.pedidos}</b> pedidos</span>
             <span><b className="text-foreground">{t.bultos}</b> bultos</span>
+            {t.pallets > 0 && <span><b className="text-foreground">{t.pallets}</b> pallets</span>}
             {!porTransporte && <span>este viaje <b className="text-foreground">{formatCurrency(t.total_viaje)}</b></span>}
             {!porTransporte && t.minimo_exigido > 0 && <span className="text-red-700">cobrar sí o sí <b>{formatCurrency(t.minimo_exigido)}</b></span>}
           </div>
