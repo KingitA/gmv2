@@ -52,8 +52,8 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | # | Tarea | Dueño | Estado |
 |---|---|---|---|
 | ~~5, 6, 7, 8, 18~~ | ~~Apertura: importar el reporte real (no frenar todo, texto libre como ajuste, cuentas del personal, segunda columna de saldo, PRES viejos como PV 2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
-| 28 | Devolución de un artículo que no está en el comprobante: comprobante anterior o el 0002-00000001 | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
-| ~~29, 36~~ | ~~Billeteras con plata "fantasma" después de rendir~~ | Cuentas corrientes | **Hecho 26/10, falta que Juan aplique** `supabase/migrations/20261026_billeteras_sin_fantasma.sql` |
+| ~~28~~ | ~~Devolución de un artículo que no está en el comprobante: comprobante anterior o el 0002-00000001~~ | Cuentas corrientes | **Hecho 26/10** (negro); blanco sigue a la última factura, ver §3 |
+| ~~29, 36~~ | ~~Billeteras con plata "fantasma" después de rendir~~ | Cuentas corrientes | **Hecho 26/10**, migración aplicada y verificada (BILLETERA en $0, compensación de retiros $10.000) |
 | ~~33~~ | ~~El 10 % contado sobre mercadería ya devuelta (lado servidor de V2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | ~~10, 11, 42~~ | ~~Comisiones: "sin cobrar" inflado, pedidos sin número, Playroom en $0~~ | Cuentas corrientes | **Hecho 26/10, falta que Juan aplique** `supabase/migrations/20261026c_comisiones_salida.sql` (ver §3) |
 | ~~30~~ | ~~Números sin formato en los textos de la rendición~~ | Cuentas corrientes | **Hecho 26/10** en la misma migración (`fmt_moneda`) |
@@ -98,13 +98,19 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 **Qué pasó:** URQUIZA devolvió 3 bolsas residuo 45x60 "de otro pedido". La devolución quedó atada al PRES 0001-00000020, que **no tiene ese artículo**, a $500,98 (REV 0001-00000019). Eso además bajó un poco la comisión de ese PRES.
 
 **Regla de Juan (26/10):**
-- [ ] Se asocia a un **comprobante anterior** del cliente que tenga ese artículo: el de gmv2 o el de la apertura.
-- [ ] Si el artículo va en **negro**, sale **reversa**; si va en **blanco**, sale **nota de crédito**. Salvo que el cliente esté configurado todo negro o todo blanco: ahí manda el cliente.
-- [ ] Si **no existe ningún comprobante** con ese artículo (tampoco del sistema viejo), todas esas devoluciones se asocian a un único comprobante **0002-00000001**.
+- [x] Se asocia a un **comprobante anterior** del cliente que tenga ese artículo: el de gmv2 o el de la apertura.
+- [x] Si el artículo va en **negro**, sale **reversa**; si va en **blanco**, sale **nota de crédito**. Salvo que el cliente esté configurado todo negro o todo blanco: ahí manda el cliente.
+- [x] Si **no existe ningún comprobante** con ese artículo (tampoco del sistema viejo), todas esas devoluciones se asocian a un único comprobante **0002-00000001**.
 
 **Dónde:** `app/api/comprobantes-venta/generar-nc-reversa`, `valor-devolucion.ts`, `origen-devolucion.ts`.
 
 **Ojo con lo fiscal:** si el cliente tiene CUIT y el artículo va en blanco, esto **emite una NC con CAE**. En pruebas, solo clientes sin CUIT.
+
+**HECHO 26/10 (cuentas corrientes), sin migración** (`lib/cobranzas/origen-devolucion.ts`):
+- Con el artículo en un comprobante de gmv2 → el último que lo tiene, al precio facturado (ya era así). Los de la **apertura no traen artículos** (solo número, tipo y fecha), así que nunca se pueden elegir por artículo.
+- Sin comprobante con el artículo y va en **negro** (motor de precios: manda la configuración del cliente) → **REV asociada al PRES 0002-00000001 del cliente**, uno por cliente, en $0, sin renglones y sin libro mayor (no mueve saldo). Se crea solo al guardar la primera devolución que lo necesita (`asegurarComprobanteRespaldo`). La REV queda a favor del cliente y **no baja la comisión de ningún comprobante**. Antes iba al PRES más reciente (URQUIZA: PRES 0001-00000020).
+- Sin comprobante con el artículo y va en **blanco** → sigue a la **factura más reciente** del cliente: una NC con CAE necesita un comprobante asociado real (RG 4540) y un FA 0002-00000001 inventado lo rechaza AFIP. **Decisión pendiente de Juan** si se quiere otra cosa (p. ej., asociar por período en vez de por comprobante).
+- `generar-nc-reversa`: si un origen no tiene saldo (el respaldo en $0) sigue con el próximo en vez de cortar la imputación.
 
 ### #29 y #36 — Billeteras con plata "fantasma" después de rendir
 
