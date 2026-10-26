@@ -77,3 +77,32 @@ export async function resumenCuentaPersonal(supabase: SupabaseClient, clienteId:
     retiros: r2(retiros),
   }
 }
+
+/**
+ * Comisión GANADA por comprobante en la cuenta personal (renglones 'comision' que postea
+ * lib/comisiones/liquidar.ts, referidos al comprobante del cliente). Es la MISMA fuente que
+ * "Comisiones ganadas": ya descuenta devoluciones y contado (se calcula sobre la plata que
+ * pagó el cliente). V3 del 21/10: la lista "Mercadería cobrada" de la app sale de acá.
+ */
+export async function comisionGanadaPorComprobante(
+  supabase: SupabaseClient,
+  cuentaId: string,
+): Promise<Map<string, { monto: number; fecha: string | null }>> {
+  const { fetchAllRows } = await import("@/lib/supabase/fetch-all")
+  const movs = await fetchAllRows<any>(() =>
+    supabase
+      .from("cuenta_corriente_clientes")
+      .select("id, referencia_id, debe, haber, fecha")
+      .eq("cliente_id", cuentaId)
+      .eq("tipo_movimiento", "comision"),
+  )
+  const out = new Map<string, { monto: number; fecha: string | null }>()
+  for (const m of movs) {
+    if (!m.referencia_id) continue
+    const prev = out.get(m.referencia_id) || { monto: 0, fecha: null }
+    prev.monto = r2(prev.monto + Number(m.haber || 0) - Number(m.debe || 0))
+    if (m.fecha && (!prev.fecha || m.fecha > prev.fecha)) prev.fecha = m.fecha
+    out.set(m.referencia_id, prev)
+  }
+  return out
+}
