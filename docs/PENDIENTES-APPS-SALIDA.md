@@ -85,6 +85,11 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 - **26/10 — Gastos del chofer (#43), ya en main (839f9db):** la oficina los aprueba o rechaza al aceptar la rendición en /caja. Después de eso el gasto deja de estar `declarado` (queda `aprobado` o `rechazado`, con `motivo_rechazo`); la app no tiene que hacer nada más que mostrar ese estado (no "a revisar" si ya no está `declarado`). Puede venir el concepto nuevo `camion` (lo pone la oficina): mostralo como "Camión". El chofer sigue cargando con las categorías de siempre.
 - **26/10 — Número de comprobante (#21):** en la hoja, `pedidos[].comprobantes[].numero` ahora es "0001-00000021" (antes "0001-0001-00000021").
 
+### Avisos del servidor (frontend, rama `frontend-salida`, esperando OK para main)
+
+- **26/10 — Pedido con todo faltante (#17/#39, 3e44ea2):** un pedido en "Pendiente Facturación" con todos los renglones en faltante **ya no viene como cobrable** en la ficha del vendedor (`lib/vendedor/ficha-cliente.ts` → `pedidos_cobrables`) ni en el cliente del viaje del chofer (`lib/viajes/cliente-viaje.ts` → `pedidos`). Las apps no tienen que hacer nada; si alguna arma "anticipo" con su propia copia de pedidos (réplica offline), que salte los que tienen todos los renglones con `estado_item = "FALTANTE"`.
+- **26/10 — Color del cheque (#34, a9eecd3):** la oficina puede cambiar a mano el color de un cheque en Caja (antes de confirmar) y en la cartera. Las apps siguen mandando el color que calculan hoy; no cambia nada para ellas.
+
 ## 2. Quién hace qué (anotá "en curso" antes de empezar)
 
 | Tarea | Área | Depende del servidor | Estado |
