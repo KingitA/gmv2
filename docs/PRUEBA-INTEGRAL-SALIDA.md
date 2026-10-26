@@ -346,6 +346,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   - stock: los movimientos de salida y entrada de la prueba. El stock no es real, así que no se devuelve;
   - lista de 556: quedó en **Bahía** (3.5). Decidir si vuelve a Neco;
   - app vendedor: borrador "Pedido a medio cargar · CHEN XIANG RONG".
+  - las **2 recepciones de mercadería de prueba** de la app depósito (problema 4). **No lo borra la puesta a cero**: entran en el script de la 10.4.
 - [ ] 10.3 El día del pase a producción, en este orden:
   1. avisar a los agentes y a la oficina;
   2. `SELECT cc_puesta_a_cero('PONER A CERO');` (antes, el simulacro);
@@ -356,7 +357,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
   7. cargar los saldos de bancos y cajas;
   8. "Poner al día" en `/personal`;
   9. borrar los datos de las apps en los equipos o volver a iniciar sesión.
-- [ ] 10.4 Script para borrar los pedidos de prueba por número (con simulacro y copia en archivo_pruebas): lo armo cuando Juan lo pida, antes del pase.
+- [ ] 10.4 Script para borrar los pedidos de prueba por número y las 2 recepciones de prueba (con simulacro y copia en archivo_pruebas): lo armo cuando Juan lo pida, antes del pase.
 
 ## Resumen para repartir (25/10)
 
