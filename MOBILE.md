@@ -891,6 +891,11 @@ recorrido Anterior/Siguiente de Modificación de artículos (calculado sobre la 
   `deposito_ajustes_movil` audita cada ajuste (incluye el motivo) y evita la doble suma.
 - **Datos de artículo**: compare-and-set por campo; lo que otro cambió no se pisa y
   vuelve como rechazo explicando qué campo.
+- **Volver un pedido ya preparado a la cola** (26/10, para el "volver a pendiente" del #17 de
+  la prueba de salida): SIEMPRE con `reiniciarPicking` (`lib/deposito/picking.ts`), nunca
+  cambiando solo `pedidos.estado`. Deja cada renglón PENDIENTE, en 0 y sin dueño en
+  `picking_items`; si no, el pedido se ve "Listo" y los renglones quedan trabados a nombre
+  de quien los preparó (índice único). La app no cambia: le llega como un pendiente más.
 
 ### Renglón del artículo y ficha (22/09/2026, pedido del dueño tras el primer uso)
 **Problema:** la descripción iba en UNA línea a 22 px y se cortaba a los ~14 caracteres:

@@ -367,6 +367,7 @@ Idea: **anular = volver el pedido a "Pendiente Facturación"**. Desde ahí rige 
 **Qué tiene que pasar:**
 - [ ] "Generar" sobre un pedido sin nada para facturar avisa: **"No hay nada para facturar: todos los renglones están en faltante."**
 - [ ] El pedido se puede **volver a "pendiente"** (para prepararlo cuando haya mercadería; vuelve a la cola del depósito) **o pasar a "eliminado"**.
+  - **Aviso de App Depósito (26/10): para "volver a pendiente" usá `reiniciarPicking(supabase, pedidoId)` de `lib/deposito/picking.ts` — NO un `update` de `pedidos.estado`.** Si solo cambia el estado, los renglones siguen en FALTANTE (el pedido aparece "Listo" al 100 % en la web y en la APK) y quedan a nombre de quien los preparó (índice único `ux_picking_items_renglon`, aplicado 21/10): otro operario recibe "Ya lo preparó X" y no puede tocarlos. Verificado en el 001942: sus 3 renglones están en FALTANTE y a nombre de "Juan Cruz". La función pone cada renglón en PENDIENTE con cantidad 0 y sin dueño, cierra sesiones abiertas y recién al final cambia el estado (la cola nunca lo ve "Listo"). Solo acepta pedidos en `pendiente_facturacion` sin renglones facturados (409 `pedido_no_reiniciable` / `pedido_facturado`, mensaje legible) y es idempotente. "Eliminar" no necesita nada del depósito: el pedido sale solo de la cola.
 - [ ] Un pedido con todo faltante **no aparece como cobrable** en ningún lado: `components/pagos/ComprobantesSelector.tsx`, `lib/vendedor/ficha-cliente.ts`, `lib/viajes/cliente-viaje.ts`. Son los mismos lugares donde se excluyó `sistema_viejo`.
 
 ---

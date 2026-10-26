@@ -8,6 +8,8 @@
 
 > **App Vendedor (26/10):** V1–V5, T1 y los avisos que tocan a vendedor (ajustes de apertura, "Retiros ya descontados") en curso por la sesión APK Vendedor, en `main` (worktree `gmv2-vendedor`). Archivos que toca: `mobile/apps/vendedor/**`, `mobile/packages/core/test/vendedor-*.test.ts`, `mobile/scripts/mock-vendedor.mjs`, `mobile/scripts/fixture-vendedor.mjs`, la sección §18 de `MOBILE.md` y, **por T1**, el login compartido: `mobile/packages/core/src/auth/**`, la pantalla de login de `mobile/packages/core/src/ui/pantallas.tsx` y `app/api/mobile/auth/login/**`. **No los edites desde otra sesión**; si necesitás algo ahí, pedíselo a Juan.
 
+> **App Depósito (26/10):** D1 esperando T1; D3 hecho (ver §6). Archivos que son de esta sesión: `mobile/apps/deposito/**`, `mobile/packages/core/test/deposito-*.test.ts`, `mobile/scripts/mock-deposito.mjs`, la sección §17 de `MOBILE.md`, y del servidor del depósito: `lib/deposito/**` (picking, recepciones, devoluciones del depósito), `lib/mobile/sync/deposito.ts`, `lib/mobile/outbox/deposito.ts`, `app/api/deposito/**`, `app/deposito/**`. **No los edites desde otra sesión**; si necesitás algo ahí, pedíselo a Juan. En especial: el picking de un pedido (renglones, `picking_items`, sesiones) solo se toca con las funciones de `lib/deposito/picking.ts` — para volver un pedido a la cola, `reiniciarPicking` (D3).
+
 ---
 
 ## 1. De dónde salen estos pedidos
@@ -100,8 +102,9 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 | V5 — Transferencias fuera de la rendición (#35) | App Vendedor | Sí: cuentas corrientes — servidor listo 26/10 (f1b5db2) | **En curso 26/10 (sesión APK Vendedor)** |
 | ~~V6 — "Mercadería cobrada" = "Comisiones ganadas" (#41)~~ | App Vendedor | — | **Hecho 26/10** (ea55e14, APK v0.4.4 compilada). Validado: 001939 = $51.175,19 |
 | T1 — Iniciar sesión con **nombre de usuario** (#2) — **toca `@gm/core` (las 3 apps)** | **App Vendedor** hace el cambio en core y en el servidor del login; chofer y depósito solo recompilan | Sí (endpoint del login, ver T1) | **En curso 26/10 (sesión APK Vendedor)** |
-| D1 — Recompilar con el login nuevo (T1) | App Depósito | — | Esperando T1 |
+| D1 — Recompilar con el login nuevo (T1) | App Depósito | — | Esperando T1 (sesión App Depósito atenta; la v0.3.1 ya está en `main`, sin instalar) |
 | D2 — Nada que hacer con bultos ni con pedidos todo faltante (solo para que lo sepas) | App Depósito | — | Informativo |
+| ~~D3 — `reiniciarPicking` para el "volver a pendiente" del #17 (lo usa Frontend)~~ | App Depósito | — | **Hecho 26/10** (ver §6 D3 y el aviso en PENDIENTES-ERP-SALIDA #17) |
 
 ---
 
@@ -252,6 +255,15 @@ Igual que C6:
 - **Pedido con todo faltante (#17):** en la prueba, el 001942 se cerró con los 3 renglones faltantes y quedó en "Pendiente Facturación" para siempre. Lo resuelve el ERP: va a poder volverlo a "pendiente" o eliminarlo. **La app no cambia**, pero si un pedido vuelve a "pendiente", tiene que reaparecer en la cola como cualquier otro.
 - **Pedido preparado parcial:** el servidor ya factura **lo preparado** y no lo pedido (arreglo del 23/10, `lib/pedidos/cantidad-a-facturar.ts`). Sin cambios en la app.
 - **Las 2 "Recibir mercadería" pendientes** que se ven en el inicio son de prueba (#4): se borran antes del pase. No las proceses.
+
+### ~~D3 — Que un pedido "vuelto a pendiente" se pueda preparar de nuevo (#17)~~ · Hecho 26/10
+- **Problema que se evitó:** el "volver a pendiente" del #17 (lo programa Frontend) iba a dejar el pedido en la cola con los renglones en FALTANTE (se ve "Listo" al 100 %) y a nombre de quien los preparó: con el índice `ux_picking_items_renglon` (aplicado 21/10) nadie más podría prepararlo ("Ya lo preparó X"). En el 001942 los 3 renglones están a nombre de "Juan Cruz".
+- **Hecho:** `reiniciarPicking(supabase, pedidoId)` en `lib/deposito/picking.ts`: cada renglón queda PENDIENTE, cantidad 0 y sin dueño (igual que cuando un operario lo devuelve a pendiente), cierra sesiones abiertas y recién al final pasa el pedido a "pendiente". Solo desde `pendiente_facturacion` y sin renglones facturados; idempotente. Los bonificados se recalculan con el primer renglón que se prepare.
+- La cola del depósito (web y APK) lo muestra sin cambios en la app: el log de cambios lo manda a la réplica como un pedido pendiente más.
+- **Frontend:** usar esta función en el botón/endpoint del #17 (aviso escrito en PENDIENTES-ERP-SALIDA #17). No la llamé contra ningún pedido real: el 001942 queda para la prueba del #17.
+
+### Ya en `main` y sin instalar: v0.3.1 (26/10)
+Con el teclado abierto, Buscar esconde el pie y los contadores (más resultados a la vista), y en la cola "⇪ N sin enviar" ya no se parte en dos líneas. Compilada en `gmv2-deposito/dist-apks/deposito-v0.3.1.apk`; por pedido de Juan se instala junto con D1 (login nuevo) en una sola versión.
 
 ---
 
