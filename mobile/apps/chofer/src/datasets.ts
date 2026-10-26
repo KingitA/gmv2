@@ -55,6 +55,8 @@ export interface ChoferMe {
 
 export interface RemitoHoja { id: string; tipo_remito: string; numero_remito: string; estado_pdf: string }
 export interface PedidoHoja {
+  /** #22 */
+  pallets?: number
   id: string
   numero: string
   estado: string
@@ -99,15 +101,23 @@ export interface ParadaHoja {
   resuelto_at: string | null
   pedidos: PedidoHoja[]
   bultos: number
+  /** #22: pallets de la parada (los carga la oficina). Falta en réplicas viejas. */
+  pallets?: number
   total_viaje: number
   saldo_anterior: number
   total_a_cobrar: number
+  /** Lo exigido NETO de lo devuelto en el viaje (#27) */
   minimo_exigido: number
+  /** 10 % contado y ajuste de los cobros del viaje: también cubren lo exigido (#27). Falta en réplicas viejas. */
+  descuentos_cobro?: number
   cobrado: number
   cobrado_anterior: number
   cobrado_viaje: number
   devuelto: number
+  /** cobrado + descuentos_cobro ≥ minimo_exigido */
   cobro_cumplido: boolean
+  /** #23: "NO ENTREGAR SIN COBRAR" y todavía no cubrió lo exigido → solo se puede marcar "no entregado". Falta en réplicas viejas. */
+  entrega_bloqueada?: boolean
   pagos: PagoHoja[]
 }
 export interface GastoHoja {
@@ -161,8 +171,10 @@ export interface DevolucionRow {
   monto_total: number
   /** Lo que descuenta en el cobro = lo que valdrá la NC (regla única valor-devolucion: −10 % si la factura fue contado). Falta en réplicas viejas. */
   valor_cobro?: number
+  /** La factura de origen ya tenía el 10 % contado (el valor ya viene neto). Falta en réplicas viejas. */
+  aplica_10?: boolean
   estado: string
-  devoluciones_detalle?: Array<{ id: string; articulo_id: string; cantidad: number; precio_venta_original: number; motivo: string; condicion: string; articulos?: { sku: string | null; descripcion: string } | null }>
+  devoluciones_detalle?: Array<{ id: string; articulo_id: string; cantidad: number; precio_venta_original: number; motivo: string; condicion: string; comprobante_venta_id?: string | null; estado_renglon?: string | null; articulos?: { sku: string | null; descripcion: string } | null }>
   /** Registrada en este equipo y todavía sin enviar */
   local?: boolean
 }
@@ -249,6 +261,8 @@ export interface ClienteViajeRow {
   comprados: Comprado[]
   /** Para valuar devoluciones igual que el servidor (IIBB vigente, comprobante más reciente). Ausente = réplica vieja */
   contexto_devolucion?: ContextoDevolucion | null
+  /** #25: por (comprobante de origen, artículo) lo vendido y lo ya devuelto (= tope del servidor). Ausente = réplica vieja */
+  devolvible?: Array<{ comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number }> | null
 }
 
 // ─── Billetera (= GET /api/chofer/billetera) ─────────────────────────────────
@@ -256,7 +270,7 @@ export interface ClienteViajeRow {
 export interface CobroBilletera { id: string; fecha: string; cliente: string; viaje: string; monto: number; metodos: string[]; estado: "en_mano" | "en_rendicion" | "rendido" | "sin_enviar" | "rechazado"; error?: string | null; idempotency_key?: string | null }
 /** Cuenta personal del chofer (= su cuenta de cliente; cuentas corrientes etapa 3). null = la oficina no la vinculó. */
 export interface CuentaPersonalChofer { cliente_id: string; saldo_real: number; saldo_proyectado: number; a_favor: number; comisiones_ganadas: number; retiros: number }
-export interface GastoBilletera { id: string; viaje: string; categoria: string; monto: number; estado: string; observaciones: string | null; created_at: string; local?: boolean }
+export interface GastoBilletera { id: string; viaje: string; categoria: string; monto: number; estado: string; observaciones: string | null; created_at: string; local?: boolean; motivo_rechazo?: string | null }
 export interface FondoBilletera { id: string; viaje: string; monto: number; created_at: string }
 export interface BilleteraData {
   id: "billetera"
@@ -332,6 +346,8 @@ export interface OpCobrar {
   pedidos_anticipo?: Array<{ pedido_id: string; monto: number }>
   contado_general: boolean
   ajuste_redondeo: number
+  /** Lo que el 10 % contado y el ajuste bajan además de la plata (estimado en el equipo). Solo lo usa el overlay sin señal para "cobró lo exigido" (#23/#27); el servidor lo ignora. */
+  descuento_estimado?: number
   /** Legado (APK ≤ 0.2.1): otro cliente con un monto en efectivo a cuenta. Las apps nuevas mandan `clientes_extra`. */
   cobros_extra: Array<{ cliente_id: string; cliente_nombre?: string; metodos: MetodoPayload[]; imputaciones: [] }>
   /** Cobro conjunto: clientes agregados, cada uno con su selección. El servidor reparte `metodos` entre todos. */
@@ -348,6 +364,8 @@ export interface OpClienteExtra {
   pedidos_contado: string[]
   pedidos_anticipo: Array<{ pedido_id: string; monto: number }>
   contado_general: boolean
+  /** = OpCobrar.descuento_estimado, para la parada de este cliente */
+  descuento_estimado?: number
 }
 export interface OpCobroAnular { viaje_id: string; pago_id: string; cliente_id: string }
 export interface ItemDevolucion {

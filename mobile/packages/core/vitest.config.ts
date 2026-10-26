@@ -14,6 +14,7 @@ export default defineConfig({
       "@gm/cobro/conjunto": r("../../../lib/cobranzas/cobro-conjunto.ts"),
       "@gm/cobro": r("../../../lib/cobranzas/reglas-cobro.ts"),
       "@gm/formato": r("../../../lib/formato/index.ts"),
+      "@gm/core/ui": r("./src/ui/index.ts"),
       "@gm/core": r("./src/index.ts"),
     },
   },

@@ -82,7 +82,7 @@ function reset() {
       const viejo = r2(15000 + i * 1234.5)
       S.comprobantes.push({ id: uid(4100 + i), cliente_id: c.id, pedido_id: null, tipo_comprobante: "FA", numero_comprobante: `0003-${String(4000 + i).padStart(8, "0")}`, fecha: "2026-08-20", total_neto: r2(viejo / 1.21), total_factura: viejo, saldo_pendiente: viejo, estado_pago: "pendiente", anulado_en: null })
     }
-    S.paradas.push({ id: uid(2000 + i), viaje_id: viajeId, cliente_id: c.id, orden: i + 1, exigir_cobro_anterior: i === 3, exigir_cobro_actual: i === 1, bloquear_entrega: i === 4, motivo_bloqueo: i === 4 ? "Debe 2 facturas" : null, nota_oficina: i === 0 ? "Entregar por el fondo, preguntar por Marta" : null, estado: "pendiente", bultos_entregados: null, motivo_no_entrega: null, motivo_no_cobro: null, resuelto_at: null })
+    S.paradas.push({ id: uid(2000 + i), viaje_id: viajeId, cliente_id: c.id, orden: i + 1, exigir_cobro_anterior: i === 3, exigir_cobro_actual: i === 1 || i === 4, bloquear_entrega: i === 4, motivo_bloqueo: i === 4 ? "Debe 2 facturas" : null, nota_oficina: i === 0 ? "Entregar por el fondo, preguntar por Marta" : null, estado: "pendiente", bultos_entregados: null, motivo_no_entrega: null, motivo_no_cobro: null, resuelto_at: null })
   }
   // Cliente de AFUERA del viaje con deuda (para el cobro conjunto): una FA y un PRES
   S.comprobantes.push({ id: uid(4910), cliente_id: f.clientes[10].id, pedido_id: null, tipo_comprobante: "FA", numero_comprobante: "0003-00009010", fecha: "2026-09-10", total_neto: r2(20000 / 1.21), total_factura: 20000, saldo_pendiente: 20000, estado_pago: "pendiente", anulado_en: null })
@@ -97,7 +97,7 @@ reset()
 // ─── Vistas (= lib/viajes/hoja-ruta.ts y cliente-viaje.ts, simplificadas) ─────
 const clienteDe = (id) => S.f.clientes.find((c) => c.id === id)
 const viajeDe = (id) => S.viajes.find((v) => v.id === id)
-const pagosVivos = (viajeId, clienteId) => S.pagos.filter((p) => p.viaje_id === viajeId && (!clienteId || p.cliente_id === clienteId) && ["pendiente_rendicion", "confirmado"].includes(p.estado))
+const pagosVivos = (viajeId, clienteId) => S.pagos.filter((p) => p.viaje_id === viajeId && (!clienteId || p.cliente_id === clienteId) && ["pendiente_rendicion", "confirmado", "pendiente"].includes(p.estado))
 const compsDe = (clienteId) => S.comprobantes.filter((k) => k.cliente_id === clienteId && !k.anulado_en)
 
 function parada(pa) {
@@ -119,15 +119,19 @@ function parada(pa) {
   }))
   const cobrado = r2(pagos.reduce((s, p) => s + p.monto, 0))
   const devuelto = r2(S.devoluciones.filter((d) => d.viaje_id === pa.viaje_id && d.cliente_id === pa.cliente_id).reduce((s, d) => s + d.monto_total, 0))
-  const minimo = r2((pa.exigir_cobro_anterior ? Math.max(saldoAnterior, 0) : 0) + (pa.exigir_cobro_actual ? totalViaje : 0))
+  const bruto = r2((pa.exigir_cobro_anterior ? Math.max(saldoAnterior, 0) : 0) + (pa.exigir_cobro_actual ? totalViaje : 0))
+  const minimo = bruto > 0 ? r2(Math.max(0, bruto - devuelto)) : 0
+  const descuentos = r2(pagosVivos(pa.viaje_id, pa.cliente_id).reduce((s, p) => s + (p.descuento || 0), 0))
+  const cumplido = cobrado + descuentos + 0.01 >= minimo
   return {
     ...pa, cliente_nombre: c.nombre, direccion: c.direccion, localidad: c.localidad, telefono: c.telefono || "", vendedores: ["Vendedor Demo"],
     pedidos, bultos: pedidos.reduce((s, p) => s + p.bultos, 0), total_viaje: totalViaje, saldo_anterior: saldoAnterior, total_a_cobrar: r2(saldoAnterior + totalViaje),
-    minimo_exigido: minimo, cobrado, cobrado_anterior: 0, cobrado_viaje: cobrado, devuelto, cobro_cumplido: cobrado + 0.01 >= minimo, pagos,
+    minimo_exigido: minimo, descuentos_cobro: descuentos, cobrado, cobrado_anterior: 0, cobrado_viaje: cobrado, devuelto, cobro_cumplido: cumplido, entrega_bloqueada: !!pa.bloquear_entrega && !cumplido, pagos,
+    pallets: pa.orden === 1 ? 2 : null,
   }
 }
 function dinero(viajeId) {
-  const dets = pagosVivos(viajeId).flatMap((p) => p.detalles)
+  const dets = pagosVivos(viajeId).filter((p) => p.estado !== "pendiente").flatMap((p) => p.detalles)
   const suma = (tipos) => r2(dets.filter((d) => tipos.includes(d.tipo_pago)).reduce((s, d) => s + d.monto, 0))
   const fondo = r2(S.fondos.filter((f) => f.viaje_id === viajeId).reduce((s, f) => s + f.monto, 0))
   const gastos = S.gastos.filter((g) => g.viaje_id === viajeId)
@@ -153,8 +157,17 @@ function filaCliente(viajeId, clienteId) {
   const artDe = (id) => S.f.articulos.find((a) => a.id === id)
   const pend = compsDe(clienteId).filter((k) => k.saldo_pendiente > 0).map(({ id, tipo_comprobante, numero_comprobante, fecha, total_factura, saldo_pendiente }) => ({ id, tipo_comprobante, numero_comprobante, fecha, total_factura, saldo_pendiente }))
   const pagos = pagosVivos(viajeId, clienteId).map((p) => ({ id: p.id, monto: p.monto, estado: p.estado, created_at: p.created_at, idempotency_key: p.idempotency_key || null }))
-  const devs = S.devoluciones.filter((d) => d.viaje_id === viajeId && d.cliente_id === clienteId).map((d) => ({ id: d.id, numero_devolucion: d.numero_devolucion, monto_total: d.monto_total, valor_cobro: d.monto_total, estado: d.estado, devoluciones_detalle: d.items.map((i, n) => ({ id: `${d.id}:${n}`, articulo_id: i.articulo_id, cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, motivo: i.motivo, condicion: i.condicion, articulos: { sku: artDe(i.articulo_id)?.sku, descripcion: artDe(i.articulo_id)?.descripcion } })) }))
+  const devs = S.devoluciones.filter((d) => d.viaje_id === viajeId && d.cliente_id === clienteId).map((d) => ({ id: d.id, numero_devolucion: d.numero_devolucion, monto_total: d.monto_total, valor_cobro: d.monto_total, aplica_10: false, estado: d.estado, devoluciones_detalle: d.items.map((i, n) => ({ id: `${d.id}:${n}`, comprobante_venta_id: i.origen_comp?.comprobante_venta_id || null, estado_renglon: null, articulo_id: i.articulo_id, cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, motivo: i.motivo, condicion: i.condicion, articulos: { sku: artDe(i.articulo_id)?.sku, descripcion: artDe(i.articulo_id)?.descripcion } })) }))
   const totalDev = r2(devs.reduce((s, d) => s + d.monto_total, 0)), totalCob = r2(pagos.reduce((s, p) => s + p.monto, 0))
+  const devolvible = []
+  for (const p of S.pedidos.filter((x) => x.cliente_id === clienteId && x.viaje_id === viajeId)) {
+    const comp = S.comprobantes.find((k) => k.pedido_id === p.id && !k.anulado_en)
+    if (!comp) continue
+    for (const dd of p.detalle) {
+      const devuelto = S.devoluciones.filter((d) => d.cliente_id === clienteId).flatMap((d) => d.items).filter((i) => i.articulo_id === dd.articulo_id && i.origen_comp?.comprobante_venta_id === comp.id).reduce((s, i) => s + Number(i.cantidad), 0)
+      devolvible.push({ comprobante_venta_id: comp.id, articulo_id: dd.articulo_id, vendido: dd.cantidad, devuelto })
+    }
+  }
   const pedidosCli = S.pedidos.filter((p) => p.cliente_id === clienteId && p.estado !== "eliminado")
   return {
     id: `${viajeId}:${clienteId}`, viaje_id: viajeId, cliente_id: clienteId,
@@ -163,6 +176,7 @@ function filaCliente(viajeId, clienteId) {
     comprobantes_pendientes: pend, devoluciones: devs, pagos_registrados: pagos, cobros_sin_confirmar: clienteId === S.f.clientes[1].id ? [{ id: uid(8777), monto: 5000, created_at: ahora(), origen: "oficina" }] : [], otras_devoluciones: [],
     resumen: { saldo_anterior: c.saldo_actual, saldo_real: c.saldo_actual, saldo_proyectado: r2(c.saldo_actual - totalCob), pendiente_verificacion: totalCob, total_pedido: ped?.total || 0, total_devuelto: totalDev, total_cobrado: totalCob, total_a_cobrar: r2(c.saldo_actual + (ped?.total || 0) - totalDev), ya_cobrado: totalCob > 0 },
     viaje_estado: v.estado,
+    devolvible,
     cobro: {
       comprobantes: compsDe(clienteId).filter((k) => ["pendiente", "parcial"].includes(k.estado_pago)).map(({ id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_factura, saldo_pendiente, estado_pago, pedido_id }) => ({ id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_factura, saldo_pendiente, estado_pago, pedido_id, en_cobro: 0, nc_contado: ["FA", "FB", "FC", "PRES"].includes(tipo_comprobante) ? r2(total_factura * 0.1) : 0 })),
       pedidos: pedidosCli.map((p) => ({ id: p.id, numero_pedido: p.numero_pedido, fecha: p.fecha, total: p.total, estado: p.estado, pago_contado_10: p.pago_contado_10, anticipo_pago_id: p.anticipo_pago_id })),
@@ -224,6 +238,7 @@ const HANDLERS = {
     if (!pa) throw new Rechazo("Parada no encontrada")
     if (p.estado === "pendiente") { Object.assign(pa, { estado: "pendiente", bultos_entregados: null, motivo_no_entrega: null, motivo_no_cobro: null, resuelto_at: null }); return { replica: [parcheViaje(v.id)] } }
     const calc = parada(pa)
+    if (calc.entrega_bloqueada && p.estado !== "no_entregado") throw new Rechazo("Si no salda lo solicitado, retirar el pedido")
     const mE = String(p.motivo_no_entrega || "").trim(), mC = String(p.motivo_no_cobro || "").trim()
     if (["no_entregado", "entregado_parcial"].includes(p.estado) && !mE) throw new Rechazo("Contá por qué no se entregó todo")
     if (p.estado === "solo_cobro" && calc.pedidos.length) throw new Rechazo("Esta parada tiene mercadería para entregar")
@@ -283,7 +298,15 @@ const HANDLERS = {
     for (const i of imps) { const x = Math.min(i.monto_imputado, resta); if (x > 0.005) { recortadas.push({ ...i, monto_imputado: r2(x) }); resta = r2(resta - x) } }
     for (const i of recortadas) { const k = S.comprobantes.find((c) => c.id === i.comprobante_id); if (!k) throw new Rechazo("cobranza_crear: comprobante inexistente"); if (k.anulado_en) throw new Rechazo(`cobranza_crear: el comprobante ${k.numero_comprobante} está anulado — no se puede cobrar`) }
     const pago = { id: randomUUID(), idempotency_key: m.idempotency_key || null, viaje_id: v.id, cliente_id: p.cliente_id, monto, estado: "pendiente_rendicion", created_at: ahora(), creado_por: u.id, detalles: (p.metodos || []).map((x) => ({ tipo_pago: x.tipo, monto: r2(Number(x.monto)), banco: x.banco_emisor || null, numero_cheque: x.numero_cheque || null, numero_comprobante_pago: x.numero_comprobante || null })), imputaciones: recortadas, contado: !!p.contado_general, ajuste, fotos: [...(p.comprobante_urls || []).map((c) => c.url), ...(p.fotos_pendientes || []).map(() => "https://placehold.co/640x300/e2e8f0/475569.png?text=Foto+pendiente+(mock)")], declarado: false }
-    S.pagos.push(pago)
+    const digitales = pago.detalles.filter((x) => ["transferencia", "deposito"].includes(x.tipo_pago))
+    if (digitales.length) {
+      pago.detalles = pago.detalles.filter((x) => !digitales.includes(x))
+      const md = r2(digitales.reduce((s, x) => s + x.monto, 0))
+      S.pagos.push({ id: randomUUID(), viaje_id: v.id, cliente_id: p.cliente_id, monto: md, estado: "pendiente", created_at: ahora(), creado_por: u.id, detalles: digitales, imputaciones: [], declarado: false })
+      pago.monto = r2(pago.monto - md)
+    }
+    pago.descuento = r2(Number(p.descuento_estimado) || 0)
+    if (pago.detalles.length) S.pagos.push(pago)
     for (const i of recortadas) { const k = S.comprobantes.find((c) => c.id === i.comprobante_id); k.saldo_pendiente = r2(k.saldo_pendiente - i.monto_imputado); k.estado_pago = k.saldo_pendiente <= 0.009 ? "pagado" : "parcial" }
     for (const pid of (p.pedidos_contado || []).filter((id) => !anticipos || anticipos.some((a) => a.pedido_id === id))) { const ped = S.pedidos.find((x) => x.id === pid); if (ped) { ped.pago_contado_10 = true; ped.anticipo_pago_id = pago.id } }
     for (const did of p.devolucion_ids || []) { const d = S.devoluciones.find((x) => x.id === did); if (d) d.descontada = true }
@@ -291,7 +314,7 @@ const HANDLERS = {
     const paCobro = S.paradas.find((x) => x.viaje_id === v.id && x.cliente_id === p.cliente_id)
     if (!p._agregado && paCobro && paCobro.estado === "pendiente" && ["despachado", "en_curso"].includes(v.estado)) {
       const calc = parada(paCobro)
-      Object.assign(paCobro, { estado: calc.pedidos.length ? "entregado" : "solo_cobro", bultos_entregados: calc.pedidos.length ? calc.bultos : null, motivo_no_entrega: null, motivo_no_cobro: calc.cobro_cumplido ? null : `Cobró $${calc.cobrado} de $${calc.minimo_exigido} exigidos (parada cerrada al registrar el cobro)`, resuelto_at: ahora() })
+      if (!calc.entrega_bloqueada) Object.assign(paCobro, { estado: calc.pedidos.length ? "entregado" : "solo_cobro", bultos_entregados: calc.pedidos.length ? calc.bultos : null, motivo_no_entrega: null, motivo_no_cobro: calc.cobro_cumplido ? null : `Cobró $${calc.cobrado} de $${calc.minimo_exigido} exigidos (parada cerrada al registrar el cobro)`, resuelto_at: ahora() })
     }
     const extras = []
     for (const ex of p.cobros_extra || []) {
@@ -320,6 +343,14 @@ const HANDLERS = {
     let d = S.devoluciones.find((x) => x.id === p.id)
     if (!d) {
       if (!["despachado", "en_curso"].includes(v.estado)) throw new Rechazo("El viaje no está activo")
+      for (const it of p.items) {
+        const comp = it.origen_comp?.comprobante_venta_id
+        const ped = comp && S.pedidos.find((x) => x.id === S.comprobantes.find((k) => k.id === comp)?.pedido_id)
+        const vendido = ped?.detalle.filter((x) => x.articulo_id === it.articulo_id).reduce((s, x) => s + x.cantidad, 0)
+        if (!vendido) continue
+        const ya = S.devoluciones.flatMap((x) => x.items).filter((i) => i.articulo_id === it.articulo_id && i.origen_comp?.comprobante_venta_id === comp).reduce((s, i) => s + Number(i.cantidad), 0)
+        if (ya + Number(it.cantidad) > vendido) throw new Rechazo(`No se puede devolver más de lo vendido: se vendieron ${vendido}, ya se devolvieron ${ya}.`)
+      }
       const total = r2(p.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_venta_original), 0))
       d = { id: p.id, numero_devolucion: `DEV-${String(++S.numeroDev).padStart(5, "0")}`, viaje_id: v.id, cliente_id: p.cliente_id, pedido_id: p.pedido_id || null, items: p.items, monto_total: total, estado: "pendiente", altas: 0 }
       S.devoluciones.push(d)
@@ -464,7 +495,14 @@ createServer(async (req, res) => {
     await new Promise((r) => setTimeout(r, 1200))
     return json(200, { success: true, categoria: "nafta", monto: 32500, fecha: hoy(), comercio: "YPF Necochea", detalle: "YPF Necochea · Nafta súper 32 L", confianza: 0.9, foto_url: "https://placehold.co/400x600/e2e8f0/475569.png?text=Ticket+(mock)" })
   }
-  if (url.pathname === "/api/chofer/articulo/precio-historico") return json(200, { precio: 999.99, fecha: null, comprobante: null, fuente: "vigente" })
+  if (url.pathname === "/api/chofer/articulo/precio-historico") {
+    // = lib/cobranzas/origen-devolucion.ts: lo del pedido del viaje sale del comprobante de ESE pedido (exacto)
+    const ped = S.pedidos.find((p) => p.id === url.searchParams.get("pedidoId"))
+    const d = ped?.detalle.find((x) => x.articulo_id === url.searchParams.get("articuloId"))
+    const comp = ped && S.comprobantes.find((k) => k.pedido_id === ped.id && !k.anulado_en)
+    if (d && comp) return json(200, { precio: d.precio_final, fecha: comp.fecha, comprobante: comp.numero_comprobante, fuente: "factura", origen: { comprobante_venta_id: comp.id, tipo_comprobante: comp.tipo_comprobante, numero_comprobante: comp.numero_comprobante, fiscal: comp.tipo_comprobante !== "PRES", percepcion_iva: false, bonificado_contado: false, exacto: true, precio: d.precio_final, iva_unitario: null } })
+    return json(200, { precio: 999.99, fecha: null, comprobante: null, fuente: "vigente" })
+  }
   if (/^\/api\/remitos\/.+\/pdf$/.test(url.pathname)) { res.writeHead(302, { Location: "https://placehold.co/600x800.png?text=Remito+(mock)", ...cors }); return res.end() }
   if (url.pathname.startsWith("/api/bcra/deudor/")) return json(200, { cuit: url.pathname.split("/").pop(), denominacion: "DEMO SA", situacion_max: 1, sin_antecedentes: true, apto: true, entidades: [] })
   json(404, { error: "No existe en el mock" })

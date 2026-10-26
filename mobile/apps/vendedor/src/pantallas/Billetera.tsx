@@ -125,7 +125,8 @@ export function Billetera() {
                 ? `${data.pagos_sin_rendir} ${data.pagos_sin_rendir === 1 ? "cobro" : "cobros"} sin rendir a oficina`
                 : "No tenés cobros sin rendir"}
             </p>
-            {data.desglose?.transferencias > 0 && (
+            {/* Servidor viejo (sin la lista de transferencias): el total suelto, como antes */}
+            {!data.transferencias && data.desglose?.transferencias > 0 && (
               <p className="mt-1 text-xs text-emerald-300/80">🏦 {formatCurrency(data.desglose.transferencias)} transferido directo al banco</p>
             )}
             {data.en_viaje?.total > 0 && (
@@ -177,6 +178,30 @@ export function Billetera() {
             )}
           </section>
 
+          {/* ── Transferencias (#35, 26/10): no son plata en mano ni van a la rendición; las confirma la oficina ── */}
+          {!!data.transferencias?.length && (
+            <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <p className="text-sm font-bold text-gray-700">🏦 Transferencias que cobraste</p>
+              <p className="text-xs text-gray-400">No van en la rendición: la oficina las confirma cuando entran al banco. Últimos 30 días.</p>
+              <div className="mt-2 space-y-1.5">
+                {data.transferencias.map((t) => (
+                  <div key={t.pago_id} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-gray-900">{t.cliente || "Cliente"}</p>
+                      <p className="text-xs text-gray-400">{formatDateAR(t.fecha)} · {t.medio}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-bold text-gray-900">{formatCurrency(t.monto)}</p>
+                      <p className={`text-[11px] font-bold ${t.estado === "confirmado" ? "text-green-700" : t.estado === "pendiente" ? "text-amber-700" : "text-gray-500"}`}>
+                        {t.estado === "confirmado" ? "✓ confirmada" : t.estado === "pendiente" ? "a confirmar en oficina" : "guardada en el equipo"}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Tabs */}
           <div className="flex gap-2">
             <button
@@ -197,7 +222,11 @@ export function Billetera() {
             data.historial?.length ? (
               <div className="space-y-2">
                 {data.historial.map((m) => {
-                  const t = TIPO_LABEL[m.tipo] || { label: m.tipo, icon: "•", color: "text-gray-600" }
+                  // Crédito "rendicion_retiros" (26/10): compensa que la rendición descuenta los cobros
+                  // enteros; lo retirado ya está en tu cuenta personal. No es plata nueva.
+                  const t = m.referencia_tipo === "rendicion_retiros"
+                    ? { label: "Retiros ya descontados", icon: "↩️", color: "text-gray-600" }
+                    : TIPO_LABEL[m.tipo] || { label: m.tipo, icon: "•", color: "text-gray-600" }
                   return (
                     <div key={m.id} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-3">
                       <div className="flex min-w-0 items-center gap-3">

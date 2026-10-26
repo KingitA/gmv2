@@ -125,7 +125,7 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
     .select(`
       id, numero_devolucion, monto_total, estado,
       devoluciones_detalle(
-        id, articulo_id, cantidad, precio_venta_original, motivo, es_vendible, condicion,
+        id, articulo_id, cantidad, precio_venta_original, motivo, es_vendible, condicion, comprobante_venta_id, estado_renglon,
         articulos(sku, descripcion)
       )
     `)

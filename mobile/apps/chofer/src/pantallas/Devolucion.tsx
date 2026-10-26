@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
-import { indiceHistorial, useOnline, useRuntime } from "@gm/core"
+import { indiceHistorial, useNoEnviados, useOnline, useRuntime } from "@gm/core"
 import { DS, esEnCurso, MOTIVOS_DEVOLUCION, type Articulo, type DetallePedido, type ItemDevolucion, type OpDevolucion } from "../datasets"
 import { guardarBorrador, useBorradorDevolucion } from "../datos/borrador-devolucion"
 import { buscarArticulos, useArticulos, useClienteViaje, useEncolar, useViaje, uuidv4 } from "../datos/hooks"
 import { parseMonto } from "@gm/formato"
 import { valorEstimadoDevolucion } from "../datos/cuenta-cobro"
+import { primerExceso, textoTope, topeDevolucion, type RenglonParaTope } from "../datos/devolucion-tope"
 import { elegirOrigenDevolucion, origenDesdeComprado, type OrigenDevolucion } from "@gm/vendedor"
 import { dejarAviso, formatCurrency, GRACIA_TECLADO_MS, MontoInput, Pantalla, useBloqueoSalida, useBusqueda, useToast } from "../ui"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
@@ -34,6 +35,13 @@ export function Devolucion() {
   const [listo, setListo] = useState(false)
   const enviandoRef = useRef(false)
   const items = borrador.items
+  // #25: lo devuelto desde este equipo que todavía no salió también cuenta para el tope
+  const ops = useNoEnviados()
+  const sinEnviar = useMemo<RenglonParaTope[]>(
+    () => ops.filter((o) => o.tipo === "viaje.devolucion" && o.estado !== "rechazado" && (o.payload as OpDevolucion).cliente_id === clienteId).flatMap((o) => (o.payload as OpDevolucion).items),
+    [ops, clienteId],
+  )
+  const tope = (r: RenglonParaTope) => topeDevolucion(data?.devolvible, r, sinEnviar)
 
   // Un "atrás" justo después de elegir un artículo (el teclado se acaba de cerrar solo) no cuenta
   const graciaTeclado = useRef(0)
@@ -61,6 +69,9 @@ export function Devolucion() {
     if (items.some((x) => x.articulo_id === a.id)) return
     const enPedido = data?.pedido?.detalle.find((d) => d.articulo_id === a.id)
     const { precio, origenComp, aviso } = await resolverItem(a.id, enPedido)
+    const t = tope({ articulo_id: a.id, cantidad: 0, origen_comp: origenComp })
+    if (t && t.maximo <= 0) return mostrar(textoTope(t, a.descripcion), "err")
+    const cantidad = Math.min(enPedido ? enPedido.cantidad : 1, t ? t.maximo : Infinity)
     setBorrador((prev) => ({
       items: [
         ...prev.items,
@@ -68,7 +79,7 @@ export function Devolucion() {
           articulo_id: a.id,
           sku: a.sku,
           descripcion: a.descripcion,
-          cantidad: enPedido ? enPedido.cantidad : 1,
+          cantidad,
           precio_venta_original: precio,
           motivo: "otro",
           condicion: "vendible",
@@ -118,8 +129,10 @@ export function Devolucion() {
   const agregarDelPedido = async (it: DetallePedido) => {
     if (items.some((x) => x.articulo_id === it.articulo_id)) return
     const { precio, origenComp, aviso } = await resolverItem(it.articulo_id, it)
+    const t = tope({ articulo_id: it.articulo_id, cantidad: 0, origen_comp: origenComp })
+    if (t && t.maximo <= 0) return mostrar(textoTope(t, it.articulos?.descripcion || undefined), "err")
     setBorrador((prev) => ({
-      items: [...prev.items, { articulo_id: it.articulo_id, sku: it.articulos?.sku ?? null, descripcion: it.articulos?.descripcion || "Artículo", cantidad: it.cantidad, precio_venta_original: precio, motivo: "otro", condicion: "vendible", origen: "pedido", comprobante_venta_id: origenComp.comprobante_venta_id, origen_comp: origenComp }],
+      items: [...prev.items, { articulo_id: it.articulo_id, sku: it.articulos?.sku ?? null, descripcion: it.articulos?.descripcion || "Artículo", cantidad: Math.min(it.cantidad, t ? t.maximo : Infinity), precio_venta_original: precio, motivo: "otro", condicion: "vendible", origen: "pedido", comprobante_venta_id: origenComp.comprobante_venta_id, origen_comp: origenComp }],
     }))
     if (aviso) mostrar(aviso, "err")
   }
@@ -135,6 +148,8 @@ export function Devolucion() {
     for (const i of items) {
       if (i.cantidad <= 0) return mostrar("Todos los artículos necesitan cantidad mayor a cero.", "err")
     }
+    const exceso = primerExceso(data?.devolvible, items, sinEnviar)
+    if (exceso) return mostrar(exceso, "err")
     enviandoRef.current = true
     setEnviando(true)
     try {
@@ -241,7 +256,16 @@ export function Devolucion() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-xs text-gray-500">Cantidad</label>
-                <input type="text" inputMode="numeric" value={item.cantidad || ""} onChange={(e) => updateItem(idx, { cantidad: Math.max(0, Math.trunc(parseMonto(e.target.value.replace(/\D/g, "")) ?? 0)) })} className="min-h-11 w-full rounded-xl border-2 border-gray-200 px-3 py-2 text-center text-lg font-bold" />
+                <input
+                  type="text" inputMode="numeric" value={item.cantidad || ""}
+                  onChange={(e) => {
+                    const n = Math.max(0, Math.trunc(parseMonto(e.target.value.replace(/\D/g, "")) ?? 0))
+                    const t = tope(item)
+                    if (t && n > t.maximo) { mostrar(textoTope(t, item.descripcion), "err"); return updateItem(idx, { cantidad: t.maximo }) }
+                    updateItem(idx, { cantidad: n })
+                  }}
+                  className="min-h-11 w-full rounded-xl border-2 border-gray-200 px-3 py-2 text-center text-lg font-bold"
+                />
               </div>
               <div>
                 <label className="mb-1 block text-xs text-gray-500">Precio unit. {item.origen_comp?.fiscal === false ? "final" : "neto"}{item.precio_venta_original <= 0 ? <span className="font-bold text-amber-700"> · cargalo</span> : null}</label>
@@ -274,6 +298,7 @@ export function Devolucion() {
                 ))}
               </div>
             </div>
+            {(() => { const t = tope(item); return t ? <p className={`text-xs ${item.cantidad >= t.maximo ? "font-medium text-amber-700" : "text-gray-500"}`}>{textoTope(t)}</p> : null })()}
             <div className="rounded-xl bg-gray-50 px-3 py-2 text-right">
               <span className="text-sm text-gray-500">Subtotal: </span>
               <span className="font-bold text-green-600">{formatCurrency(item.cantidad * item.precio_venta_original)}</span>

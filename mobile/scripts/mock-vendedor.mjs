@@ -90,7 +90,8 @@ function filaCC(id) {
   const pedidosCobro = S.pedidos.filter((p) => p.cliente_id === id && p.estado !== "en_venta").map((p) => ({ id: p.id, numero_pedido: p.numero_pedido, fecha: p.fecha, estado: p.estado, total: p.total, pago_contado_10: !!p.pago_contado_10, anticipo_pago_id: p.anticipo_pago_id || null, facturado: !!p.facturado, cobrable: !p.facturado && !p.anticipo_pago_id && p.total > 0 }))
   return {
     id, cliente: { ...c, pendiente_verificacion: 0, devoluciones_en_proceso: 0, actualizado_at: c.actualizado_at || null, actualizado_por_nombre: c.actualizado_por_nombre || null },
-    comprobantes: k.comprobantes.filter((x) => x.saldo_pendiente > 0), creditos: [], a_cuenta: [], total_a_favor: 0, pedidos_cobrables: [], pedidos_cobro: pedidosCobro,
+    comprobantes: k.comprobantes.filter((x) => x.saldo_pendiente > 0), creditos: [], a_cuenta: [], total_a_favor: 0,
+    ajustes_apertura: id === "0eb72473-7d21-40db-bbe6-70059dd3d813" ? [{ id: "aj-1", fecha: "2026-10-01", concepto: "CHEQUE RECH (YASH)", numero: "0002-00000001", monto: 58000 }] : [], pedidos_cobrables: [], pedidos_cobro: pedidosCobro,
     devoluciones_pendientes: k.devoluciones.map((d) => ({ ...d, descontado: r2(d.monto_total - d.restante) })),
     pagos_recientes: k.pagos.slice(0, 10), comprados: k.comprados, habituales: k.habituales,
     movimientos: [
@@ -109,6 +110,13 @@ function filaPedido(p) {
       clientes: c ? { id: c.id, nombre: c.nombre, localidad: c.localidad, metodo_facturacion: c.metodo_facturacion, lista_precio_id: c.lista_precio_id, lista: c.lista || null } : null,
       pedidos_detalle: p.detalle.map((d) => ({ ...d, articulos: artDe(d.articulo_id) })) },
     comprobantes: [], remitos: [],
+    cuenta_pedido: (() => {
+      const comp = S.cc.get(p.cliente_id)?.comprobantes.find((x) => x.pedido_id === p.id)
+      if (!comp) return null
+      const resto = r2(comp.total_factura - comp.saldo_pendiente)
+      const rev = r2(resto * 0.3), pagado = r2(resto - rev)
+      return { total: comp.total_factura, reversas: rev > 0 ? [{ id: "rev-1", tipo_comprobante: "REV", numero_comprobante: "0001-00000021", motivo: "Devolución DEV-00003", monto: rev, estado_pdf: "generado" }] : [], total_reversas: rev, pagado, ajuste: 0, debe: comp.saldo_pendiente }
+    })(),
     descuentos: { segmentos: ["limpieza_bazar", "perf0", "perf_plus"].map(seg), condiciones: [], solo_este_pedido: !!p.bonif_pedido },
   }
 }
@@ -126,8 +134,12 @@ const billetera = () => {
   const retirado = r2(S.retiros.reduce((s, x) => s + x.monto, 0))
   const efectivo = r2(pagos.reduce((s, p) => s + (p.efectivo || 0), 0))
   const cuenta = { cliente_id: "cuenta-personal", saldo_real: r2(-30000 + retirado), saldo_proyectado: r2(-30000 + retirado), a_favor: r2(30000 - retirado), comisiones_ganadas: 30000, retiros: retirado }
+  // = /api/vendedor/billetera desde el 26/10 (#35): la parte digital del cobro es otro pago
+  // 'pendiente' que confirma la oficina; no suma a la mano ni a la rendición
+  const transferencias = [...S.cc.values()].flatMap((k) => k.pagos).filter((p) => (p.transf || 0) > 0)
+    .map((p) => ({ pago_id: `${p.id}-dig`, fecha: p.fecha_pago, cliente: p.cliente_nombre, monto: p.transf, medio: "transferencia", estado: p.transf_estado || "pendiente" }))
   return [
-    { id: "billetera", balance: r2(efectivo - retirado), saldo: r2(efectivo - retirado + cuenta.saldo_real), retiros_sin_rendir: retirado, cuenta_personal: cuenta, desglose: { efectivo, cheques: 0, transferencias: r2(pagos.reduce((s, p) => s + p.monto - (p.efectivo || 0), 0)) }, cheques_cantidad: 0, pagos_sin_rendir: pagos.length, en_viaje: { total: 0, cantidad: 0 }, deuda_rendiciones: 0, comisiones_pendientes: [], total_pendiente_comisiones: 0, historial: pagos.map((p) => ({ id: p.id, tipo: "cobro_cliente", medio: p.forma_pago, monto: p.monto, concepto: `Cobro ${p.cliente_nombre}`, fecha: p.fecha_pago, referencia_id: p.id, referencia_tipo: "pago_cliente" })), total: pagos.length, page: 1, per_page: 50 },
+    { id: "billetera", balance: r2(efectivo - retirado), saldo: r2(efectivo - retirado + cuenta.saldo_real), retiros_sin_rendir: retirado, cuenta_personal: cuenta, transferencias, desglose: { efectivo, cheques: 0, transferencias: 0 }, cheques_cantidad: 0, pagos_sin_rendir: pagos.length, en_viaje: { total: 0, cantidad: 0 }, deuda_rendiciones: 0, comisiones_pendientes: [], total_pendiente_comisiones: 0, historial: pagos.map((p) => ({ id: p.id, tipo: "cobro_cliente", medio: p.forma_pago, monto: p.monto, concepto: `Cobro ${p.cliente_nombre}`, fecha: p.fecha_pago, referencia_id: p.id, referencia_tipo: "pago_cliente" })), total: pagos.length, page: 1, per_page: 50 },
     { id: "comisiones:cobrada", tipo: "cobrada", totales: { disponible: 0, sin_cobrar: 0, retirado: 0 }, pedidos: [] },
     { id: "comisiones:vendida", tipo: "vendida", totales: { disponible: 0, sin_cobrar: r2(S.pedidos.reduce((s, p) => s + p.total * 0.05, 0)), retirado: 0 }, pedidos: S.pedidos.filter((p) => p.estado !== "eliminado").map((p) => ({ pedido_id: p.id, numero_pedido: p.numero_pedido, cliente_id: p.cliente_id, cliente_nombre: clienteDe(p.cliente_id)?.nombre || "—", fecha: p.fecha, fecha_cobro: "", total_monto: p.total, total_comision: r2(p.total * 0.05), total_debito_contado: 0, cantidad_skus: p.detalle.length })) },
     ...S.pedidos.map((p) => ({ id: `detalle:vendida:${p.id}`, tipo: "vendida", articulos: p.detalle.map((d) => ({ kardex_id: d.id, articulo_id: d.articulo_id, sku: "—", descripcion: S.f.articulos.find((a) => a.id === d.articulo_id)?.descripcion || "—", categoria: "—", cantidad: d.cantidad, precio_unitario: d.precio_base, subtotal: r2(d.precio_base * d.cantidad), comision_pct: 5, comision_monto: r2(d.precio_base * d.cantidad * 0.05), comision_pactada: r2(d.precio_base * d.cantidad * 0.05), descuento_financiero_pct: 0 })) })),
@@ -272,7 +284,8 @@ const HANDLERS = {
       for (const x of c.pedidos || []) { const ped = S.pedidos.find((q) => q.id === x.pedido_id); if (ped) { ped.anticipo_pago_id = m.idempotency_key; ped.pago_contado_10 = !!x.contado } }
       for (const d of c.devoluciones || []) { const dev = k.devoluciones.find((x) => x.id === d.devolucion_id); if (dev) dev.restante = Math.max(0, r2(dev.restante - Number(d.monto))) }
       const efectivo = r2(p.metodos.filter((x) => x.tipo === "efectivo").reduce((s, x) => s + Number(x.monto), 0))
-      const pago = { id: randomUUID(), fecha_pago: hoy(), monto: totalMetodos, efectivo, estado: "pendiente_rendicion", forma_pago: [...new Set(p.metodos.map((x) => x.tipo))].join(" + "), verificado: false, eliminable: true, cliente_nombre: cli.nombre, imputaciones: c.imputaciones || [] }
+      const transf = r2(p.metodos.filter((x) => x.tipo === "transferencia" || x.tipo === "deposito" || (x.tipo === "cheque" && x.es_echeq)).reduce((s, x) => s + Number(x.monto), 0))
+      const pago = { id: randomUUID(), fecha_pago: hoy(), monto: totalMetodos, efectivo, transf, estado: "pendiente_rendicion", forma_pago: [...new Set(p.metodos.map((x) => x.tipo))].join(" + "), verificado: false, eliminable: true, cliente_nombre: cli.nombre, imputaciones: c.imputaciones || [] }
       k.pagos.unshift(pago)
       cli.pagos_sin_rendir++
       cli.saldo_proyectado = r2(cli.saldo_proyectado - (suma(c.imputaciones) + suma(c.pedidos) + Number(c.pago_a_cuenta || 0) - suma(c.creditos) - suma(c.devoluciones)))

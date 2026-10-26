@@ -4,7 +4,7 @@
 **De:** sesión "prueba integral de salida de mercadería", con Juan.
 **Estado:** abierto. Cada agente tacha lo suyo (`~~…~~` + fecha + versión/commit) en este mismo archivo.
 
-> **App Chofer (26/10):** C1–C6 en curso por la sesión App Chofer, en `main`. Archivos que toca: `mobile/apps/chofer/**`, `mobile/packages/core/test/chofer-*.test.ts`, `mobile/scripts/mock-chofer.mjs` y la sección §19 de `MOBILE.md`. **No los edites desde otra sesión**; si necesitás algo ahí, pedíselo a Juan.
+> **App Chofer (26/10):** C1–C6 **hechos** en `main` (v0.3.3, ver §3 y MOBILE.md §19 "v0.3.3"). Cualquier cambio a las reglas de la app chofer pasa por esa sesión. Archivos que toca: `mobile/apps/chofer/**`, `mobile/packages/core/test/chofer-*.test.ts`, `mobile/scripts/mock-chofer.mjs` y la sección §19 de `MOBILE.md`. **No los edites desde otra sesión**; si necesitás algo ahí, pedíselo a Juan.
 
 > **App Vendedor (26/10):** V1–V5, T1 y los avisos que tocan a vendedor (ajustes de apertura, "Retiros ya descontados") en curso por la sesión APK Vendedor, en `main` (worktree `gmv2-vendedor`). Archivos que toca: `mobile/apps/vendedor/**`, `mobile/packages/core/test/vendedor-*.test.ts`, `mobile/scripts/mock-vendedor.mjs`, `mobile/scripts/fixture-vendedor.mjs`, la sección §18 de `MOBILE.md` y, **por T1**, el login compartido: `mobile/packages/core/src/auth/**`, la pantalla de login de `mobile/packages/core/src/ui/pantallas.tsx` y `app/api/mobile/auth/login/**`. **No los edites desde otra sesión**; si necesitás algo ahí, pedíselo a Juan.
 
@@ -94,20 +94,20 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 
 | Tarea | Área | Depende del servidor | Estado |
 |---|---|---|---|
-| C1 — Bloqueo de entrega real (#23) | App Chofer | Sí: hojas de ruta/viajes y cobranzas — **servidor listo 26/10 (daab2b3)**, ver "Avisos del servidor (hojas de ruta)" | **En curso 26/10 (sesión App Chofer)** |
-| C2 — No devolver más de lo vendido; mostrar qué se devuelve (#25) | App Chofer | Sí: cuentas corrientes pone el tope en el servidor — **servidor listo 26/10 (fd6aa9c)** | **En curso 26/10 (sesión App Chofer)** |
-| C3 — Cobro con devoluciones + 10 % contado: valuar la devolución como el servidor (#26) | App Chofer | No | **En curso 26/10 (sesión App Chofer)** |
-| C4 — "No entregado" con un solo texto si fue por falta de pago (#24) | App Chofer | No | **En curso 26/10 (sesión App Chofer)** |
-| C5 — "−$0,00" en la billetera (#3) | App Chofer | No | **En curso 26/10 (sesión App Chofer)** |
-| C6 — Transferencias fuera de la rendición (#35) | App Chofer | Sí: cuentas corrientes — **servidor listo 26/10 (f1b5db2)** | **En curso 26/10 (sesión App Chofer)** |
-| V1 — Checkbox 10 % contado al finalizar el pedido y total en vivo (#13) | App Vendedor | No: el servidor ya está (listas de precios, 8f907c8, campo `bonif_pedido.contado_todo`) | **En curso 26/10 (sesión APK Vendedor)** |
-| V2 — Cobrar con 10 % contado: la base no incluye lo ya devuelto (#33) | App Vendedor | Sí: cuentas corrientes (la REV del 10 %) — servidor listo 26/10 (`nc_contado`) | **En curso 26/10 (sesión APK Vendedor)** |
-| V3 — Pedido facturado: mostrar también las reversas (#31) | App Vendedor | No | **En curso 26/10 (sesión APK Vendedor)** |
-| V4 — "Plata de la empresa en tu mano" descuenta los retiros (#32) | App Vendedor | No | **En curso 26/10 (sesión APK Vendedor)** |
-| V5 — Transferencias fuera de la rendición (#35) | App Vendedor | Sí: cuentas corrientes — servidor listo 26/10 (f1b5db2) | **En curso 26/10 (sesión APK Vendedor)** |
+| ~~C1 — Bloqueo de entrega real (#23)~~ | App Chofer | Sí: hojas de ruta/viajes y cobranzas — **servidor listo 26/10 (daab2b3)**, ver "Avisos del servidor (hojas de ruta)" | **Hecho 26/10 — App Chofer v0.3.3** |
+| ~~C2 — No devolver más de lo vendido; mostrar qué se devuelve (#25)~~ | App Chofer | Sí: cuentas corrientes pone el tope en el servidor — **servidor listo 26/10 (fd6aa9c)** | **Hecho 26/10 — App Chofer v0.3.3** |
+| ~~C3 — Cobro con devoluciones + 10 % contado: valuar la devolución como el servidor (#26)~~ | App Chofer | No | **Hecho 26/10 — App Chofer v0.3.3** |
+| ~~C4 — "No entregado" con un solo texto si fue por falta de pago (#24)~~ | App Chofer | No | **Hecho 26/10 — App Chofer v0.3.3** |
+| ~~C5 — "−$0,00" en la billetera (#3)~~ | App Chofer | No | **Hecho 26/10 — App Chofer v0.3.3** |
+| ~~C6 — Transferencias fuera de la rendición (#35)~~ | App Chofer | Sí: cuentas corrientes — **servidor listo 26/10 (f1b5db2)** | **Hecho 26/10 — App Chofer v0.3.3** |
+| ~~V1 — Checkbox 10 % contado al finalizar el pedido y total en vivo (#13)~~ | App Vendedor | — | **Hecho 26/10** (APK pendiente de compilar con lo que falte) |
+| ~~V2 — Cobrar con 10 % contado: la base no incluye lo ya devuelto (#33)~~ | App Vendedor | — | **Hecho 26/10: sin cambios en la app** (ya usa `nc_contado` tal cual desde v0.4.0) |
+| ~~V3 — Pedido facturado: mostrar también las reversas (#31)~~ | App Vendedor | — | **Hecho 26/10** |
+| ~~V4 — "Plata de la empresa en tu mano" descuenta los retiros (#32)~~ | App Vendedor | — | **Hecho 26/10** |
+| ~~V5 — Transferencias fuera de la rendición (#35)~~ | App Vendedor | — | **Hecho 26/10** |
 | ~~V6 — "Mercadería cobrada" = "Comisiones ganadas" (#41)~~ | App Vendedor | — | **Hecho 26/10** (ea55e14, APK v0.4.4 compilada). Validado: 001939 = $51.175,19 |
-| T1 — Iniciar sesión con **nombre de usuario** (#2) — **toca `@gm/core` (las 3 apps)** | **App Vendedor** hace el cambio en core y en el servidor del login; chofer y depósito solo recompilan | Sí (endpoint del login, ver T1) | **En curso 26/10 (sesión APK Vendedor)** |
-| D1 — Recompilar con el login nuevo (T1) | App Depósito | — | Esperando T1 (sesión App Depósito atenta; la v0.3.1 ya está en `main`, sin instalar) |
+| T1 — Iniciar sesión con **nombre de usuario** (#2) — **toca `@gm/core` (las 3 apps)** | **App Vendedor** hace el cambio en core y en el servidor del login; chofer y depósito solo recompilan | Sí (endpoint del login, ver T1) | **Hecho 26/10, en `main`**: chofer y depósito solo recompilan |
+| D1 — Recompilar con el login nuevo (T1) | App Depósito | — | **T1 ya en `main` (26/10): recompilar** — Esperando T1 (sesión App Depósito atenta; la v0.3.1 ya está en `main`, sin instalar) |
 | D2 — Nada que hacer con bultos ni con pedidos todo faltante (solo para que lo sepas) | App Depósito | — | Informativo |
 | ~~D3 — `reiniciarPicking` para el "volver a pendiente" del #17 (lo usa Frontend)~~ | App Depósito | — | **Hecho 26/10** (ver §6 D3 y el aviso en PENDIENTES-ERP-SALIDA #17) |
 
@@ -115,7 +115,9 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 
 ## 3. App Chofer
 
-### C1 — El bloqueo de entrega no bloquea (#23) · GRAVE
+### ~~C1 — El bloqueo de entrega no bloquea (#23) · GRAVE~~ — hecho 26/10 (v0.3.3)
+
+> **Hecho:** la parada trae `entrega_bloqueada`; el overlay la recalcula sin señal con `cobroCumple` (cobrado + 10 %/ajuste del cobro local ≥ lo exigido, neto de lo devuelto). Bloqueada: cartel con el texto, botón "✕ Cerrar parada (no entregado)", la hoja solo ofrece "✕ No entregué (retiro el pedido)" con un solo texto. Un cobro sin señal que no cubre lo exigido **no** cierra la parada. El rechazo del servidor (`ENTREGA_BLOQUEADA`) llega por la cola como cualquier rechazo, con su texto. Tests: `mobile/packages/core/test/chofer-salida.test.ts`.
 
 **Qué pasó:** en el viaje PRUEBA, la parada de FITTERER tenía "🔒 NO ENTREGAR SIN COBRAR — DEBE MUCHO DE LO ANTERIOR" y "COBRAR SÍ O SÍ $3.784.286,00". Juan la marcó **"entregado" sin cobrar nada** y la app lo dejó. El servidor también lo aceptó.
 
@@ -131,7 +133,9 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 
 **Cómo verificar:** con el mock, parada con `bloquear_entrega: true` y cobro exigido. Probá: sin cobro (no deja entregar), con cobro parcial que no llega (no deja), con cobro que cumple (deja), y lo mismo en modo avión.
 
-### C2 — Se puede devolver dos veces lo mismo (#25) · GRAVE
+### ~~C2 — Se puede devolver dos veces lo mismo (#25) · GRAVE~~ — hecho 26/10 (v0.3.3)
+
+> **Hecho:** la ficha del cliente trae `devolvible` (por comprobante y artículo: vendido y ya devuelto en el servidor, de cualquier app, sin los renglones rechazados — `devolvibleDe` en `lib/mobile/sync/chofer.ts`). La app le suma lo cargado en el equipo sin enviar (`datos/devolucion-tope.ts`): no deja agregar ni pasar el máximo ("ya se devolvieron 6 de 6. No se puede devolver más.") y muestra "podés devolver hasta N" debajo de cada renglón. Ficha, selector del cobro y lista muestran "6 × ARTÍCULO". El tope del servidor (409) sigue de respaldo.
 
 **Qué pasó:** CHEN compró **6** naftalinas (PRES 0001-00000022). Juan cargó una devolución de las 6 (DEV-00001) y la app le dejó cargar **otra** de las mismas 6 (DEV-00002). Terminaron 12 devueltas de 6 vendidas. El cobro se calculó con las dos, y el cliente pagó de menos: después de que depósito rechazó la duplicada, quedó debiendo $17.743,69.
 Además, la pantalla de devoluciones del chofer muestra **solo "devolución" y el monto**: no se ve qué artículos ni cuántos.
@@ -144,7 +148,9 @@ Además, la pantalla de devoluciones del chofer muestra **solo "devolución" y e
 - [ ] En la lista de devoluciones (ficha del cliente, cobro, resumen): mostrar **artículo y cantidad**, no solo el monto.
 - [ ] El servidor también pone el tope (cuentas corrientes; ver el doc del ERP). Si rechaza, la app lo muestra.
 
-### C3 — Cobro con devoluciones y 10 % contado: la app pide de menos (#26)
+### ~~C3 — Cobro con devoluciones y 10 % contado: la app pide de menos (#26)~~ — hecho 26/10 (v0.3.3)
+
+> **Hecho:** en un cobro contado, una devolución **sin NC** (`aplica_10: false`) contra un comprobante bonificado en ese cobro baja el 10 % de ese comprobante en el 10 % de su valor (`devueltoSinNcPorComprobante` en `datos/cuenta-cobro.ts`). PRES $100.000 + dev $10.000 → **$81.000**; CHEN → **$96.591,25**. Las que ya vienen netas del 10 % no se vuelven a descontar.
 
 **Qué pasó:** CHEN, PRES de $154.329,05, con 10 % contado y devoluciones por $47.005,44 (las dos de naftalina, a precio lleno). La app pidió **$91.890,70** ($154.329,05 × 0,9 − $47.005,44). El servidor, en cambio, revierte la devolución **al 90 %** cuando el comprobante se cobró contado ("tal cual se facturó"). Con esas dos devoluciones, lo correcto era **($154.329,05 − $47.005,44) × 0,9 = $96.591,25**: la app pidió $4.700,54 de menos.
 Es el hallazgo 14 de la auditoría de cuentas corrientes ("el chofer ve las devoluciones a valor bruto"), que seguía abierto.
@@ -153,7 +159,9 @@ Es el hallazgo 14 de la auditoría de cuentas corrientes ("el chofer ve las devo
 - [ ] En un cobro con 10 % contado, la devolución se resta **al mismo valor con el que la va a revertir el servidor**. Usá el `valor_cobro` o valor neto que ya manda el servidor; si no viene, pedíselo a cuentas corrientes. No lo inventes en la app.
 - [ ] Caso de prueba con números redondos: PRES $100.000, devolución $10.000, contado. Hay que cobrar **$81.000** = ($100.000 − $10.000) × 0,9, no $80.000.
 
-### C4 — "No entregado" pide dos textos (#24)
+### ~~C4 — "No entregado" pide dos textos (#24)~~ — hecho 26/10 (v0.3.3)
+
+> **Hecho:** "No entregué" sin el cobro cumplido pide **un solo texto** (opciones rápidas "No pagó", "Cerrado", "Rechazó la mercadería") que vale para los dos campos.
 
 **Qué pasó:** Juan marcó FITTERER "no entregado" porque no pagó. La app le pidió "por qué no se entregó" **y** "por qué no se cobró" (`Viaje.tsx:120` y `:132`).
 
@@ -161,11 +169,15 @@ Es el hallazgo 14 de la auditoría de cuentas corrientes ("el chofer ve las devo
 - [ ] Si la parada estaba bloqueada por cobro, o el motivo de no entrega es "no pagó", **un solo texto** (o una opción rápida "No pagó") que sirva para los dos campos.
 - [ ] En los demás casos, como hoy.
 
-### C5 — "−$0,00" en la billetera (#3)
+### ~~C5 — "−$0,00" en la billetera (#3)~~ — hecho 26/10 (v0.3.3)
+
+> **Hecho:** `formatResta` en `ui.tsx`. De paso (#43): gastos "✓ aprobado" / "✕ rechazado: motivo" (tachado) y el concepto `camion` se lee "Camión".
 
 - [ ] Con gastos en cero, mostrar "$0,00" sin el signo menos. Es la misma regla que ya pidió Juan: nada de guiones ni signos sobre cero.
 
-### C6 — Transferencias fuera de la rendición (#35) · esperar al servidor
+### ~~C6 — Transferencias fuera de la rendición (#35)~~ — hecho 26/10 (v0.3.3)
+
+> **Hecho:** la rendición ya no tiene la línea "Transferencias" (nota: "no se rinden, las confirma oficina"). La billetera lista "🏦 Transferencias de este viaje" con cliente, monto y estado (a confirmar / confirmada / sin enviar) desde la réplica del viaje; la ficha marca el pago "🏦 Transferencia · a confirmar en oficina". Sin señal la transferencia no suma a la plata en mano.
 
 **Regla de Juan:** la transferencia se anota en la app, la confirma la oficina en /caja cuando entró al banco, y **la rendición no la lleva**.
 
@@ -226,6 +238,16 @@ Igual que C6:
 - [ ] La transferencia queda "a confirmar en oficina" hasta que /caja la confirma.
 
 **Ojo:** hoy, al confirmar la rendición del vendedor, la transferencia de $784.600 de URQUIZA **entró directo al banco**. Eso lo cambia el servidor.
+
+### Hecho por la App Vendedor (26/10) — para que nadie lo pise
+
+- **V1** — `bonif_pedido.contado_todo` desde el carrito (`pantallas/pedido-nuevo/Pantallas.tsx`, `contexto.tsx`, `datos/condiciones.ts`: `contadoInicial` / `descuentoContado` con `contadoPorDefectoCliente` y `resolverContadoItem` de `@gm/pricing`). Arranca tildado si la ficha tiene contado en todo; "parcial" se ve indeterminado. El total en vivo (carrito y barra del catálogo) es total − 10 % de lo que va contado; el precio de cada renglón no cambia.
+- **V2** — sin cambios: `Cobrar.tsx` usa `nc_contado` del servidor tal cual.
+- **V3** — `lib/vendedor/detalle-pedido.ts` devuelve **`cuenta_pedido`** `{ total, reversas[], total_reversas, pagado, ajuste, debe }` (reversas = imputaciones con `credito_comprobante_id` a los comprobantes del pedido: REV de devolución y del 10 %). La app lo muestra en el detalle del pedido ("Cuenta del pedido") y refresca ese pedido al abrirlo con señal; en Cobrar, el pedido desplegado tiene "Ver la cuenta del pedido". Validado con el 001939: $2.309.215,56 − $524.518,90 − $1.784.600 − ajuste $96,66 = $0.
+- **V4** — el outbox de `cobro.registrar` y `retiro.registrar` devuelve como réplica las filas `billetera` y `pagos_pendientes` (`filasBilleteraCaja` en `lib/mobile/sync/vendedor.ts`): el inicio ya no queda con la plata de antes del retiro si la re-lectura del dataset entero falla.
+- **V5** — `/api/vendedor/billetera` devuelve **`transferencias`** (últimos 30 días: `{ pago_id, fecha, cliente, monto, medio, estado: pendiente | confirmado }`); la billetera de la app las lista aparte ("a confirmar en oficina" / "confirmada" / "guardada en el equipo" si el cobro no salió). No suman a la mano.
+- **Avisos del servidor** — `ajustes_apertura` en Cobrar → Facturados ("Saldo del sistema anterior", no se tildan); movimiento `rendicion_retiros` = "Retiros ya descontados".
+- **T1** — login con usuario o mail: `lib/usuario-por-nombre.ts` (lo usan `loginUser` del ERP y `/api/mobile/auth/login`; sin "@" resuelve el mail igual que el ERP, mismos errores) y la pantalla de login de `@gm/core` ("Usuario o mail", campo de texto). El contrato no cambió (`{ email, password, app }`): las sesiones guardadas siguen.
 
 ### Lo que NO tiene que tocar la App Vendedor
 - **"Sin cobrar hasta $2.271.578,99"** (#10) incluye comisiones de pedidos en "Sistema viejo" y de pedidos eliminados. Lo arregla el servidor (cuentas corrientes). Cuando esté, la app lo muestra bien sin cambios.

@@ -6,6 +6,7 @@ import { DS, esEnCurso, ESTADOS_COBRABLES, type OpFinalizar, type OpIniciar, typ
 import { paradasSinResolver, type ParadaVista } from "../datos/overlay"
 import { rechazosDe, useDescargaViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
 import { parseMonto } from "@gm/formato"
+import { TEXTO_ENTREGA_BLOQUEADA } from "@gm/cobro"
 import { AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, HojaConfirmar, Linea, MontoInput, Pantalla, Rechazos, SinDescargar, SinEnviar, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
 import { GastoHoja } from "./GastoHoja"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
@@ -55,7 +56,7 @@ export function Viaje() {
   const claveHoja = hojaParada.valor
   useEffect(() => {
     if (!claveHoja || !paradaSel) return
-    setEstadoSel(paradaSel.pedidos.length ? "entregado" : "solo_cobro")
+    setEstadoSel(paradaSel.entrega_bloqueada ? "no_entregado" : paradaSel.pedidos.length ? "entregado" : "solo_cobro")
     setBultosEntregados("")
     setMotivoEntrega("")
     setMotivoCobro("")
@@ -116,8 +117,12 @@ export function Viaje() {
   const guardarResultado = async (p: ParadaVista) => {
     // Mismas reglas que PATCH parada (el servidor las vuelve a controlar)
     const mEntrega = motivoEntrega.trim()
-    const mCobro = motivoCobro.trim()
-    if (["no_entregado", "entregado_parcial"].includes(estadoSel) && !mEntrega) return setAviso("Contá por qué no se entregó todo")
+    // #24: "no entregado" sin cubrir lo exigido pide UN solo texto, que vale para los dos motivos
+    const unSoloTexto = estadoSel === "no_entregado" && !p.cobro_cumplido
+    const mCobro = unSoloTexto ? mEntrega : motivoCobro.trim()
+    // #23: bloqueada sin cubrir lo exigido ⇒ solo "no entregado" (el servidor lo vuelve a controlar)
+    if (p.entrega_bloqueada && estadoSel !== "no_entregado") return setAviso(TEXTO_ENTREGA_BLOQUEADA)
+    if (["no_entregado", "entregado_parcial"].includes(estadoSel) && !mEntrega) return setAviso(unSoloTexto ? "Contá por qué no se entregó (por ejemplo: No pagó)" : "Contá por qué no se entregó todo")
     if (estadoSel === "solo_cobro" && p.pedidos.length) return setAviso("Esta parada tiene mercadería para entregar")
     if (!p.cobro_cumplido && !mCobro) return setAviso(`Oficina pidió cobrar sí o sí ${formatCurrency(p.minimo_exigido)} y hay cobrado ${formatCurrency(p.cobrado)}: contá por qué no se cobró`)
     setOcupado(true)
@@ -193,6 +198,7 @@ export function Viaje() {
         {p.bloquear_entrega && (
           <div className="mt-3 rounded-xl bg-red-600 px-3 py-2 text-center text-sm font-bold text-white">
             🔒 NO ENTREGAR SIN COBRAR{p.motivo_bloqueo ? ` — ${p.motivo_bloqueo}` : ""}
+            {p.entrega_bloqueada && p.estado === "pendiente" && <span className="mt-1 block text-xs font-medium text-red-100">{TEXTO_ENTREGA_BLOQUEADA}</span>}
           </div>
         )}
         {p.minimo_exigido > 0 && (
@@ -206,7 +212,7 @@ export function Viaje() {
         {p.nota_oficina && <p className="mt-2 rounded-xl bg-yellow-50 px-3 py-2 text-sm text-yellow-900">📝 {p.nota_oficina}</p>}
 
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-lg bg-gray-50 py-2"><p className="text-xs text-gray-400">Bultos</p><p className="font-bold text-gray-800">{p.bultos}</p></div>
+          <div className="rounded-lg bg-gray-50 py-2"><p className="text-xs text-gray-400">Bultos</p><p className="font-bold text-gray-800">{p.bultos}{(p.pallets ?? 0) > 0 && <span className="text-xs font-medium text-gray-500"> · {p.pallets} {p.pallets === 1 ? "pallet" : "pallets"}</span>}</p></div>
           <div className="rounded-lg bg-gray-50 py-2"><p className="text-xs text-gray-400">Este viaje</p><p className="text-sm font-bold text-gray-800">{formatCurrency(p.total_viaje)}</p></div>
           {/* Sin guiones (dueño, 21/10): $0, o "A favor" si el cliente tiene crédito */}
           <div className={`rounded-lg py-2 ${p.saldo_anterior > 0.005 ? "bg-red-50" : p.saldo_anterior < -0.005 ? "bg-green-50" : "bg-gray-50"}`}>
@@ -271,7 +277,7 @@ export function Viaje() {
         {enCurso &&
           (p.estado === "pendiente" ? (
             <button onClick={() => hojaParada.abrir(p.id)} className="mt-2 min-h-12 w-full rounded-xl bg-green-600 py-3 text-sm font-bold text-white active:scale-95">
-              ✔ Cerrar parada (entregado / no entregado)
+              {p.entrega_bloqueada ? "✕ Cerrar parada (no entregado)" : "✔ Cerrar parada (entregado / no entregado)"}
             </button>
           ) : (
             <button onClick={() => hojaReabrir.abrir(p.id)} className="mt-2 min-h-11 w-full rounded-xl border border-gray-300 py-2 text-sm font-medium text-gray-600 active:scale-95">
@@ -392,9 +398,17 @@ export function Viaje() {
         {paradaSel && (
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-2">
-              {(paradaSel.pedidos.length
-                ? [["entregado", `✔ Entregué todo (${paradaSel.bultos} bultos)`], ["entregado_parcial", "◐ Entregué una parte"], ["no_entregado", "✕ No entregué"]]
-                : [["solo_cobro", "✔ Pasé a cobrar"], ["no_entregado", "✕ No pude pasar / no estaba"]]
+              {paradaSel.entrega_bloqueada && (
+                <div className="rounded-xl bg-red-600 px-4 py-3 text-white">
+                  <p className="font-bold">🔒 {TEXTO_ENTREGA_BLOQUEADA}</p>
+                  <p className="mt-1 text-sm text-red-100">Oficina pidió cobrar {formatCurrency(paradaSel.minimo_exigido)} y hay cubierto {formatCurrency(paradaSel.cobrado + (paradaSel.descuentos_cobro ?? 0))}. Si cobrás lo que falta, se habilita la entrega.</p>
+                </div>
+              )}
+              {(paradaSel.entrega_bloqueada
+                ? [["no_entregado", paradaSel.pedidos.length ? "✕ No entregué (retiro el pedido)" : "✕ No pude cobrar"]]
+                : paradaSel.pedidos.length
+                  ? [["entregado", `✔ Entregué todo (${paradaSel.bultos} bultos)`], ["entregado_parcial", "◐ Entregué una parte"], ["no_entregado", "✕ No entregué"]]
+                  : [["solo_cobro", "✔ Pasé a cobrar"], ["no_entregado", "✕ No pude pasar / no estaba"]]
               ).map(([valor, texto]) => (
                 <button
                   key={valor}
@@ -413,13 +427,23 @@ export function Viaje() {
               />
             )}
             {["entregado_parcial", "no_entregado"].includes(estadoSel) && (
-              <textarea
-                value={motivoEntrega} onChange={(e) => setMotivoEntrega(e.target.value)} rows={2}
-                placeholder="¿Por qué no se entregó todo? (cerrado, rechazó mercadería, faltante…)"
-                className="w-full rounded-xl border-2 border-gray-200 px-4 py-3"
-              />
+              <div className="space-y-2">
+                {estadoSel === "no_entregado" && !paradaSel.cobro_cumplido && (
+                  <div className="flex flex-wrap gap-2">
+                    {["No pagó", "Cerrado", "Rechazó la mercadería"].map((t) => (
+                      <button key={t} onClick={() => setMotivoEntrega(t)} className={`min-h-11 rounded-xl border-2 px-3 py-2 text-sm font-bold ${motivoEntrega === t ? "border-blue-600 bg-blue-50 text-blue-800" : "border-gray-200 text-gray-600"}`}>{t}</button>
+                    ))}
+                  </div>
+                )}
+                <textarea
+                  value={motivoEntrega} onChange={(e) => setMotivoEntrega(e.target.value)} rows={2}
+                  placeholder="¿Por qué no se entregó todo? (cerrado, rechazó mercadería, faltante…)"
+                  className="w-full rounded-xl border-2 border-gray-200 px-4 py-3"
+                />
+                {estadoSel === "no_entregado" && !paradaSel.cobro_cumplido && <p className="text-xs text-gray-500">Este motivo vale también para lo que no se cobró.</p>}
+              </div>
             )}
-            {!paradaSel.cobro_cumplido && (
+            {!paradaSel.cobro_cumplido && estadoSel !== "no_entregado" && (
               <div className="space-y-2 rounded-xl bg-red-50 p-3">
                 <p className="text-sm font-bold text-red-700">
                   Oficina pidió cobrar sí o sí {formatCurrency(paradaSel.minimo_exigido)} y hay cobrado {formatCurrency(paradaSel.cobrado)}.
@@ -451,12 +475,15 @@ export function Viaje() {
               <Linea etiqueta="− Gastos" valor={formatCurrency(dinero.gastos_total)} rojo />
               <div className="border-t pt-2"><Linea etiqueta="Efectivo en mano" valor={formatCurrency(dinero.efectivo_en_mano)} fuerte /></div>
               {dinero.cheques_cantidad > 0 && <Linea etiqueta="Cheques que entregás" valor={`${dinero.cheques_cantidad} ${dinero.cheques_cantidad === 1 ? "cheque" : "cheques"}`} />}
-              {dinero.cobrado_transferencias > 0 && <Linea etiqueta="Transferencias" valor={formatCurrency(dinero.cobrado_transferencias)} />}
+
             </div>
             {v.paradas.some((p) => p.devuelto > 0.005) && (
               <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 ↩ Las devoluciones de este viaje ({formatCurrency(v.paradas.reduce((s, p) => s + p.devuelto, 0))}) quedan esperando que depósito las revise; la nota de crédito la emite oficina. Mientras tanto ya descuentan de lo que debe cada cliente.
               </p>
+            )}
+            {dinero.cobrado_transferencias > 0 && (
+              <p className="rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-800">🏦 Las transferencias ({formatCurrency(dinero.cobrado_transferencias)}) no se rinden: las confirma oficina cuando entran al banco.</p>
             )}
             {!online && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">📡 Sin señal: el cierre queda guardado en el equipo y sale a oficina al reconectar.</p>}
             <div>

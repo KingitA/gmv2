@@ -6,7 +6,7 @@ import { fechaHora, numero, parseMonto } from "@gm/formato"
 import { DS, SEG_LABEL, type DetallePedido, type ItemOpPedido, type OpPedido } from "../../datasets"
 import { condDesdePayload } from "../pedido-nuevo/Marco"
 import { almacenBorradores, nuevoBorrador } from "../../datos/borradores"
-import { rechazosDe, useEncolar, usePedido } from "../../datos/hooks"
+import { rechazosDe, useEncolar, usePedido, useRefrescarFilas } from "../../datos/hooks"
 import { preciosAl } from "../../datos/precios"
 import { useVer } from "../pedido-nuevo/contexto"
 import { BadgeEstado, fechaAR, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinDescargar, SinEnviar, useFotoZoom, useToast, useVolver, Vacio, ZoomFoto } from "../../ui"
@@ -22,6 +22,8 @@ import { usePdfComprobantes } from "../../datos/comprobantes-pdf"
 export function PedidoDetalle() {
   const { id } = useParams()
   const { pedido, cargando } = usePedido(id)
+  // Con señal, re-lee este pedido: la cuenta (cobros, REV, NC) cambia sin que cambie el pedido
+  useRefrescarFilas(DS.pedidos, [id])
   if (!pedido) return <Pantalla titulo="Pedido">{cargando ? null : id?.startsWith("local:") ? <Vacio icono="✅">Este pedido ya se envió. Buscalo en Mis pedidos.</Vacio> : <SinDescargar que="este pedido" />}</Pantalla>
   return pedido.local ? <PedidoLocal vista={pedido} /> : <PedidoServidor vista={pedido} />
 }
@@ -281,6 +283,28 @@ function PedidoServidor({ vista }: { vista: Vista }) {
 
         {esPedidoEditable(pedido.estado) && cliente && (
           <button onClick={() => navigate(`/pedido/nuevo/${cliente.id}?pedido=${pedido.id}`)} className="min-h-12 w-full rounded-xl border-2 border-emerald-600 bg-white font-bold text-emerald-700">＋ Agregar artículos</button>
+        )}
+
+        {/* Cuenta del pedido (V3, #31): que cierre a la vista por qué debe lo que debe */}
+        {fila.cuenta_pedido && (
+          <div className="space-y-1.5 rounded-2xl border border-gray-200 bg-white p-4 text-sm">
+            <p className="font-bold text-gray-700">Cuenta del pedido</p>
+            <div className="flex justify-between"><span className="text-gray-600">Facturado</span><span className="font-bold text-gray-900">{formatCurrency(fila.cuenta_pedido.total)}</span></div>
+            {fila.cuenta_pedido.reversas.map((r) => (
+              <button key={r.id} disabled={!online || r.estado_pdf !== "generado"} onClick={() => void pdf.abrir({ id: r.id, tipo_comprobante: r.tipo_comprobante, numero_comprobante: r.numero_comprobante })} className="flex min-h-9 w-full justify-between gap-2 text-left disabled:opacity-100">
+                <span className="min-w-0 text-gray-600">− {r.tipo_comprobante} {r.numero_comprobante} <span className="text-gray-400">· {r.motivo}</span></span>
+                <span className="shrink-0 text-red-600">−{formatCurrency(r.monto)}</span>
+              </button>
+            ))}
+            {fila.cuenta_pedido.pagado > 0.005 && <div className="flex justify-between"><span className="text-gray-600">− Pagado</span><span className="text-red-600">−{formatCurrency(fila.cuenta_pedido.pagado)}</span></div>}
+            {Math.abs(fila.cuenta_pedido.ajuste) > 0.005 && (
+              <div className="flex justify-between">
+                <span className="text-gray-600">{fila.cuenta_pedido.ajuste > 0 ? "− Ajuste" : "+ Ajuste"}</span>
+                <span className={fila.cuenta_pedido.ajuste > 0 ? "text-red-600" : "text-gray-900"}>{fila.cuenta_pedido.ajuste > 0 ? "−" : "+"}{formatCurrency(Math.abs(fila.cuenta_pedido.ajuste))}</span>
+              </div>
+            )}
+            <div className="flex justify-between border-t border-gray-100 pt-1.5"><span className="font-bold text-gray-800">Debe</span><span className="font-bold text-gray-900">{formatCurrency(fila.cuenta_pedido.debe)}</span></div>
+          </div>
         )}
 
         {(fila.comprobantes.length > 0 || fila.remitos.length > 0) && (

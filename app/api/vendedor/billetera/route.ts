@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { billeteraConCuentaPersonal } from "@/lib/cuenta-corriente/cuenta-personal"
+import { hoyISO, sumarDiasISO } from "@/lib/formato"
 
 // GET /api/vendedor/billetera?page=
 // Billetera del vendedor autenticado. "Plata en la calle" = suma de los pagos
@@ -72,8 +73,34 @@ export async function GET(request: Request) {
       return { ...m, concepto, medio: m.medio || info.metodos || null }
     })
 
+    // Transferencias / depósitos / echeqs que cobró en la calle (#35, 26/10): NO van a la
+    // rendición ni a la mano; la oficina las confirma en /caja. La app las lista aparte con su
+    // estado ("pendiente" = a confirmar en oficina, "confirmado" = confirmada). Últimos 30 días.
+    const { data: pagosDig } = await supabase
+      .from("pagos_clientes")
+      .select("id, monto, estado, fecha_pago, clientes(nombre), pagos_detalle(tipo_pago, monto, color_cheque)")
+      .in("vendedor_id", session.vendedorIds)
+      .in("estado", ["pendiente", "confirmado"])
+      .gte("fecha_pago", sumarDiasISO(hoyISO(), -30))
+      .order("fecha_pago", { ascending: false })
+      .limit(100)
+    const esDigital = (d: any) => d.tipo_pago === "transferencia" || d.tipo_pago === "deposito" || (d.tipo_pago === "cheque" && d.color_cheque === "ECHEQ")
+    const transferencias = (pagosDig ?? []).flatMap((p: any) => {
+      const dig = (p.pagos_detalle || []).filter(esDigital)
+      if (!dig.length) return []
+      return [{
+        pago_id: p.id,
+        fecha: p.fecha_pago,
+        cliente: p.clientes?.nombre || "",
+        monto: Math.round(dig.reduce((s: number, d: any) => s + Number(d.monto || 0), 0) * 100) / 100,
+        medio: [...new Set(dig.map((d: any) => (d.tipo_pago === "cheque" ? "echeq" : d.tipo_pago)))].join(" + "),
+        estado: p.estado as "pendiente" | "confirmado",
+      }]
+    })
+
     return NextResponse.json({
       ...resumen,
+      transferencias,
       comisiones_pendientes: comisionesPendientes,
       total_pendiente_comisiones: totalPendiente,
       historial: historialEnriquecido,

@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.3 (versionCode 9) — 2026-10-26
+
+- v0.3.3: entrega bloqueada real, tope de devolución, contado con devoluciones, un solo texto al no entregar, sin -$0,00, transferencias aparte
+
 ## v0.3.2 (versionCode 8) — 2026-10-23
 
 - Devoluciones tal cual fue facturado: lo del pedido entra con el precio neto de SU factura (bloqueado), con IVA, percepciones e IIBB vigente, menos el 10% si fue contado; el mismo valor en la ficha, el cobro y la nota de crédito. La rendición propone solo el efectivo que todavía tenés.

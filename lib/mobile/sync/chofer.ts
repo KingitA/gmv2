@@ -115,7 +115,55 @@ export async function filaClienteViaje(ctx: CtxSync, viajeId: string, clienteId:
     cobro,
     comprados: [...comprados].sort((a: any, b: any) => (b.ultima_fecha || "").localeCompare(a.ultima_fecha || "")).slice(0, 150),
     contexto_devolucion: contextoDev,
+    // #25: cuánto se puede devolver de cada artículo, por comprobante de origen (sin señal también)
+    devolvible: await devolvibleDe(ctx.supabase, clienteId, ficha, comprados).catch((e) => {
+      console.error("[sync/chofer_viaje_clientes] devolvible:", e?.message || e)
+      return null
+    }),
   }
+}
+
+/**
+ * Tope de devolución para la app (#25): por (comprobante de origen, artículo), lo vendido y lo ya
+ * devuelto. MISMA regla que el servidor (`excedeTopeDevolucion`, lib/cobranzas/tope-devolucion.ts):
+ * devoluciones pendientes, aceptadas o con NC; los renglones rechazados no cuentan. Solo los
+ * comprobantes que la app puede elegir como origen sin señal: los de los pedidos del viaje y los
+ * de los comprados replicados. Un origen que no está acá no se topea en el equipo (sí en el servidor).
+ */
+export async function devolvibleDe(
+  supabase: CtxSync["supabase"],
+  clienteId: string,
+  ficha: { pedido?: { id: string; detalle?: Array<{ pedido_id?: string | null }> } | null },
+  comprados: Array<{ comprobante_venta_id?: string | null }>,
+): Promise<Array<{ comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number }>> {
+  const pedidoIds = [...new Set([ficha.pedido?.id, ...(ficha.pedido?.detalle ?? []).map((d) => d.pedido_id)].filter((x): x is string => !!x))]
+  const { data: delViaje } = pedidoIds.length
+    ? await supabase.from("comprobantes_venta").select("id").eq("cliente_id", clienteId).in("pedido_id", pedidoIds).is("anulado_en", null)
+    : { data: [] as any[] }
+  const compIds = [...new Set([...(delViaje || []).map((c: any) => c.id as string), ...comprados.map((c) => c.comprobante_venta_id).filter((x): x is string => !!x)])]
+  if (!compIds.length) return []
+  const [{ data: vendidos }, { data: devueltos }] = await Promise.all([
+    supabase.from("comprobantes_venta_detalle").select("comprobante_id, articulo_id, cantidad").in("comprobante_id", compIds),
+    supabase
+      .from("devoluciones_detalle")
+      .select("comprobante_venta_id, articulo_id, cantidad, estado_renglon, devolucion:devoluciones!inner(estado)")
+      .in("comprobante_venta_id", compIds)
+      .in("devolucion.estado", ["pendiente", "confirmado", "facturado"]),
+  ])
+  const filas = new Map<string, { comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number }>()
+  for (const v of vendidos || []) {
+    if (!v.articulo_id) continue
+    const k = `${v.comprobante_id}|${v.articulo_id}`
+    const f = filas.get(k) ?? { comprobante_venta_id: v.comprobante_id, articulo_id: v.articulo_id, vendido: 0, devuelto: 0 }
+    f.vendido += Number(v.cantidad) || 0
+    filas.set(k, f)
+  }
+  for (const d of (devueltos || []) as any[]) {
+    if (d.estado_renglon === "rechazado") continue
+    const f = filas.get(`${d.comprobante_venta_id}|${d.articulo_id}`)
+    if (f) f.devuelto += Number(d.cantidad) || 0
+  }
+  return [...filas.values()]
 }
 
 const viajeClientes: DatasetDef = {

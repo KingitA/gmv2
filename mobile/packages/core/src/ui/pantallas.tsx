@@ -24,7 +24,8 @@ function recordarEmail(email: string) {
 
 /**
  * Login de dispositivo: se ve UNA vez (la sesión queda guardada en el Keystore).
- * En equipos compartidos (depósito) recuerda los emails usados en ESTE equipo:
+ * Entra con el nombre de usuario del ERP o con el mail.
+ * En equipos compartidos (depósito) recuerda los usuarios/mails usados en ESTE equipo:
  * el cambio de turno es tocar el nombre y tipear solo la contraseña.
  */
 export function PantallaLogin({ nombreApp }: { nombreApp: string }) {
@@ -75,10 +76,11 @@ export function PantallaLogin({ nombreApp }: { nombreApp: string }) {
           </div>
         )}
         <label className="block">
-          <span className="text-sm font-medium">Email</span>
+          <span className="text-sm font-medium">Usuario o mail</span>
+          {/* Acepta el nombre de usuario del ERP o el mail (#2, 26/10/2026): lo resuelve el servidor */}
           <input
             className="mt-1 h-12 w-full rounded-lg border border-slate-300 px-3 text-base"
-            type="email" inputMode="email" autoComplete="username" autoCapitalize="none"
+            type="text" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false}
             value={email} onChange={(e) => setEmail(e.target.value)} required
           />
         </label>
