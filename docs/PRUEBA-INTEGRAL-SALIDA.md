@@ -360,7 +360,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Resumen para repartir (25/10)
 
-**43 problemas anotados: 3 cerrados (1, 15 y 38) y 40 abiertos.**
+**43 problemas anotados: 4 cerrados (1, 4, 15 y 38) y 39 abiertos. Todas las decisiones pendientes de Juan se tomaron el 26/10.**
 
 ### Antes de pasar a producción (tocan plata o frenan el pase)
 
@@ -382,13 +382,13 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | # | Qué | Quién |
 |---|---|---|
 | 16 / 19 / 20 | Cambiar condiciones después de preparar, y botón "Anular comprobantes" para refacturar | ERP + servidor |
-| 13 | Marcar un pedido como contado al venderlo | App vendedor + ERP |
+| 13 | Marcar un pedido como contado al venderlo | App vendedor + ERP | **Decisión de Juan (26/10):** al **finalizar el pedido** en la app aparece un cartel con un **checkbox de 10 % contado**. Si el cliente ya tiene el contado por defecto, aparece tildado; si no, se puede tildar ahí. Afecta el **total del pedido en vivo**: mientras se levanta el pedido en la calle, el total ya se ve con el 10 % incluido si corresponde | Decidido 26/10, falta hacerlo |
 | 2 | Iniciar sesión en las apps con el nombre de usuario | Las 3 apps |
-| 43 | El gasto del chofer queda "a revisar" para siempre | ERP + servidor |
+| 43 | El gasto del chofer queda "a revisar" para siempre | ERP + servidor | **Decisión de Juan (26/10):** los gastos se aprueban **en la rendición**: al aceptarla, la oficina carga el gasto (nafta, camión, peón, hotel u otro) asociado al **vehículo** o al concepto que corresponda | Decidido 26/10, falta hacerlo |
 | 27 | La parada dice "cobró de menos" cuando sobró plata | App chofer / servidor |
 | 31 / 32 | App vendedor: el pedido no muestra las reversas; la plata en mano no descuenta el retiro | App vendedor |
 | 14 | No se ve "preparado 30 de 36" ni el total que se va a facturar | ERP |
-| 22 | Nadie carga los bultos | Juan define + app depósito |
+| 22 | Nadie carga los bultos | Juan define + app depósito | **Decisión de Juan (26/10):** por ahora los bultos se cargan **en el ERP**, en cualquier momento antes de finalizar el viaje; al despachar ya deberían estar. Pueden ser **bultos o pallets**. **No bloquea**: un pedido sin bultos se despacha igual, sin alerta | Decidido 26/10, falta hacerlo |
 
 ### Detalles visuales y datos
 
@@ -402,18 +402,18 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 40 | El chofer figura como "d6ac25bb" en el tablero | ERP |
 | 12 | Artículo con proveedor "INEXISTENTE" y otro sin rubro | Oficina |
 
-### Decisiones pendientes de Juan
+### Decisiones de Juan (26/10)
 
-| # | Qué hay que decidir |
+| # | Decisión |
 |---|---|
-| 4 | Las 2 recepciones de mercadería pendientes de la app depósito, ¿son reales? |
-| 18 | Numeración de los PRES nuevos y de los del sistema viejo |
-| 28 | Qué pasa con la devolución de un artículo que no está en ningún comprobante de gmv2 |
-| 34 | Color de un cheque que paga factura y presupuesto a la vez (hoy: más del 50 % presupuesto = negro) |
-| 35 | ¿Confirmar la rendición alcanza como control de la transferencia, o va a "por confirmar"? |
-| 43 | Dónde y cuándo aprueba la oficina los gastos del chofer |
-| 22 | Quién carga los bultos y cuándo |
-| 13 | Cómo se marca el contado al vender |
+| 4 | Las 2 recepciones de la app depósito son de prueba: se borran antes del pase |
+| 13 | Checkbox "10 % contado" al finalizar el pedido; viene tildado si el cliente lo tiene por defecto, y el total en vivo ya lo incluye |
+| 18 | Los PRES del sistema viejo entran como PV 2 ("0002-…"); gmv2 sigue en PV 1 |
+| 22 | Los bultos (o pallets) se cargan en el ERP antes de finalizar el viaje; no bloquean el despacho |
+| 28 | La devolución va contra un comprobante anterior con ese artículo (negro → REV, blanco → NC, salvo cliente todo negro o todo blanco); si no hay ninguno, contra el 0002-00000001 |
+| 34 | El color del cheque queda con la regla actual, pero se puede cambiar en /caja y en la cartera |
+| 35 | Las transferencias se confirman en /caja apenas se controla el banco; las rendiciones solo llevan efectivo y cheques |
+| 43 | Los gastos del viaje se aprueban al aceptar la rendición, asociados al vehículo o al concepto |
 
 ### Por responsable (para pasarle a cada agente)
 
@@ -421,6 +421,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 - **Agente app vendedor:** 2, 13, 31, 32, 33 (cálculo del 10 %) y 41.
 - **Agente app depósito:** 2 y 22.
 - **Agente cuentas corrientes:** 28, 29, 33, 35 y 36.
+- **Servidor / ERP, nuevo por las decisiones del 26/10:** 18 (PV 2 en la apertura), 22 (bultos en el ERP), 34 (cambiar el color en /caja y en la cartera), 35 (transferencias a /caja, fuera de la rendición) y 43 (gastos al aceptar la rendición).
 - **Servidor / ERP:** 5 a 8, 10, 11, 14, 16, 17, 19, 20, 21, 30, 37, 39, 40, 42 y 43, más la parte de servidor de 23 y 25.
 - **Oficina:** 9 y 12, el borrador de la app vendedor y la lista de 556.
 
