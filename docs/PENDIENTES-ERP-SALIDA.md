@@ -1,4 +1,4 @@
-# Pendientes del ERP y del servidor para salir a producción — 26/10/2026
+# Pendientes del ERP y del servidor para salir a producción — 26/10/2026 En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) | En curso 26/10 (hojas de ruta/viajes y cobranzas, en este orden: 23, 27, 21, 22, 43) |
 
 **Para:** agentes de **Cuentas corrientes**, **Frontend**, **Listas de precios y descuentos** y **Hojas de ruta / viajes y cobranzas**.
 **De:** sesión "prueba integral de salida de mercadería", con Juan.
