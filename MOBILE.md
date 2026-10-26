@@ -1159,9 +1159,16 @@ pantalla contra el mock (parcial 2 de 3 + rechazado + validación de "más de lo
    operario la ve, reiniciar el NuStar.
 4. Gestos con el dedo (swipe, objetivos táctiles): los prueba el depósito; acá se hicieron por adb.
    Incluye el TOQUE que abre la ficha del artículo y que el swipe siga saliendo natural.
-5. Detalles vistos en el equipo: en Buscar, con el teclado abierto, la lista de resultados queda
-   chica (los botones del pie ocupan lugar); en la cola, "⇪ N sin enviar" se parte en dos líneas.
-   Resuelto el 22/09: la descripción del artículo se cortaba a los ~14 caracteres (ver arriba).
+5. ~~Detalles vistos en el equipo~~ **Resueltos el 26/10 (v0.3.1)**:
+   - En Buscar (pedido, recepción, devoluciones), con el teclado abierto la lista quedaba chica:
+     ahora `useTecladoAbierto()` (`ui.tsx`) esconde el pie y los contadores mientras el teclado
+     está abierto y vuelven al cerrarlo. Detecta el teclado porque el WebView se achica (evento
+     `resize` / `visualViewport`) y además vuelve a medir al enfocar o soltar un campo. Medido
+     con la ventana a la mitad: de 1,2 a 2,8 artículos a la vista.
+   - En la cola, "⇪ N sin enviar" iba al lado del número y la fecha y se partía en dos líneas:
+     ahora es una etiqueta `SinEnviar n={N}` en la fila de la barra de progreso (que se achica),
+     siempre en una línea.
+   - Resuelto el 22/09: la descripción del artículo se cortaba a los ~14 caracteres (ver arriba).
 6. Tarea aparte ya anotada: depuración de los `impreso` viejos (arriba).
 
 ### Devoluciones: FUERA del checklist contra producción (decisión del dueño, 18/09/2026)

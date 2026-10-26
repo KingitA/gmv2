@@ -3,7 +3,7 @@ import { fecha } from "@gm/formato"
 import { useNoEnviados, useParamEstado } from "@gm/core"
 import { usePedidos, useRefrescarAlEntrar } from "../../datos/hooks"
 import type { PedidoVista } from "../../datos/overlay"
-import { C, Marco, Rechazos, useAvisoEntrante, useToast } from "../../ui"
+import { C, Marco, Rechazos, SinEnviar, useAvisoEntrante, useToast } from "../../ui"
 import { DATASET } from "./comun"
 
 const PRIORIDADES = [
@@ -29,7 +29,6 @@ function FilaPedido({ pedido, ultimo, color }: { pedido: PedidoVista; ultimo: bo
           </div>
           <div style={{ fontSize: 12, color: C.light, fontFamily: "monospace", marginTop: 2 }}>
             {pedido.numero_pedido} · {fechaAR(pedido.fecha)}
-            {pedido.sinEnviar.size > 0 && <span style={{ color: C.yellow, fontFamily: "inherit", fontWeight: 700 }}> · ⇪ {pedido.sinEnviar.size} sin enviar</span>}
           </div>
         </div>
         <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 999, whiteSpace: "nowrap", flexShrink: 0, background: listo ? C.greenL : enProgreso ? C.orangeL : C.bg, color: listo ? C.green : enProgreso ? C.orange : C.sub, border: `1px solid ${listo ? C.greenB : enProgreso ? C.orangeB : C.border}` }}>
@@ -40,6 +39,8 @@ function FilaPedido({ pedido, ultimo, color }: { pedido: PedidoVista; ultimo: bo
         <div style={{ flex: 1, background: C.border, borderRadius: 999, height: 5, overflow: "hidden" }}>
           <div style={{ height: "100%", background: listo ? C.green : C.orange, borderRadius: 999, width: `${pct}%` }} />
         </div>
+        {/* En la fila de la barra (que se achica) y no al lado del número: ahí se partía en dos líneas */}
+        {pedido.sinEnviar.size > 0 && <SinEnviar n={pedido.sinEnviar.size} />}
         <span style={{ fontSize: 12, color: listo ? C.green : enProgreso ? C.orange : C.sub, fontWeight: 700, minWidth: 40, textAlign: "right" }}>{total} art.</span>
         <span style={{ fontSize: 13, color, fontWeight: 700 }}>›</span>
       </div>

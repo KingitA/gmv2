@@ -6,7 +6,7 @@ import { DS } from "../../datasets"
 import { buscarPorCodigo, eansDe, padEan13 } from "../../datos/busqueda"
 import { useArticulos, useCatalogos, useEncolar, useRecepcion, useRecepciones, useRefrescarAlEntrar } from "../../datos/hooks"
 import type { LineaRecepcion, RecepcionVista } from "../../datos/overlay"
-import { BarraProgreso, C, Contadores, dejarAviso, DESCRIPCION, Marco, META, Rechazos, SinEnviar, TarjetaSwipe, TITULO_GRUPO, useAvisoEntrante, useToast, useVolver, Vacio } from "../../ui"
+import { BarraProgreso, C, Contadores, dejarAviso, DESCRIPCION, Marco, META, Rechazos, SinEnviar, TarjetaSwipe, TITULO_GRUPO, useAvisoEntrante, useTecladoAbierto, useToast, useVolver, Vacio } from "../../ui"
 import { FichaArticulo, useAbrirFicha, useFichaAbierta, type DatosFicha } from "../comunes/FichaArticulo"
 import { PanelBuscar } from "../comunes/Buscar"
 import { useDadoDeBaja } from "../comunes/DadoDeBaja"
@@ -380,16 +380,19 @@ export function RecepcionBuscar() {
   const { resolverCodigo, abrirItem, baja } = useAccionesRecepcion(r, mostrar)
   const finalizar = useFinalizarRecepcion(r, mostrar)
   const volver = useVolver()
+  const teclado = useTecladoAbierto() // con el teclado abierto, encabezado y pie le dejan lugar a los resultados
   if (!r || r.cierrePendiente) return <Marco titulo="Buscar artículo">{toast}<OrdenNoDisponible cargando={cargando} finalizada={r?.cierrePendiente} /></Marco>
   const s = resumen(r)
   return (
     <Marco titulo="Buscar artículo">
       {toast}
-      <div style={{ background: C.white, borderBottom: `1px solid ${C.border}`, padding: "14px 16px" }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{r.orden.numero_orden}</div>
-        <div style={{ color: C.green, fontWeight: 600, fontSize: 14, marginTop: 2 }}>🏭 {r.orden.proveedores?.nombre}</div>
-        <Contadores pendientes={s.pendientes} ok={s.ok} faltantes={s.faltantes} estilo={{ marginTop: 6 }} />
-      </div>
+      {!teclado && (
+        <div style={{ background: C.white, borderBottom: `1px solid ${C.border}`, padding: "14px 16px" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{r.orden.numero_orden}</div>
+          <div style={{ color: C.green, fontWeight: 600, fontSize: 14, marginTop: 2 }}>🏭 {r.orden.proveedores?.nombre}</div>
+          <Contadores pendientes={s.pendientes} ok={s.ok} faltantes={s.faltantes} estilo={{ marginTop: 6 }} />
+        </div>
+      )}
       <PanelBuscar
         placeholder="Escanear EAN o buscar artículo..."
         vacio={{ icono: "📱", texto: <>Escaneá el código de barras<br />o escribí para buscar</> }}
@@ -406,10 +409,12 @@ export function RecepcionBuscar() {
         dadoDeBaja={baja}
       />
       {baja.hoja}
-      <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 10 }}>
-        <button onClick={() => volver()} style={{ flex: 1, background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}` }}>📋 Lista</button>
-        <button onClick={() => finalizar(2)} style={{ flex: 1, background: s.pendientes === 0 ? C.green : "#e5e7eb", color: s.pendientes === 0 ? "#fff" : C.light, fontWeight: 800, fontSize: 16, padding: "19px 0", borderRadius: 18, border: "none" }}>✅ Finalizar</button>
-      </div>
+      {!teclado && (
+        <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 10 }}>
+          <button onClick={() => volver()} style={{ flex: 1, background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}` }}>📋 Lista</button>
+          <button onClick={() => finalizar(2)} style={{ flex: 1, background: s.pendientes === 0 ? C.green : "#e5e7eb", color: s.pendientes === 0 ? "#fff" : C.light, fontWeight: 800, fontSize: 16, padding: "19px 0", borderRadius: 18, border: "none" }}>✅ Finalizar</button>
+        </div>
+      )}
     </Marco>
   )
 }
