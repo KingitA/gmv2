@@ -67,7 +67,7 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | ~~21~~ | ~~Hoja del viaje: "PRES 0001-0001-…"~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
 | ~~13~~ | ~~Pedido con 10 % contado desde la venta (lado servidor de V1)~~ | Listas de precios y descuentos | **Hecho 26/10** (8f907c8, ver §5): campo `bonif_pedido.contado_todo`. Falta la app (V1) |
 | ~~16~~ | ~~Condiciones editables hasta facturar, y repreciar al guardar~~ | Listas de precios y descuentos | **Hecho 26/10** (8f907c8, ver §5) |
-| 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | **Plan listo 26/10 (ver §5), esperando 3 respuestas de Juan.** Lo de listas de precios (#16) ya está |
+| 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | **Listas de precios: hecho 26/10** (reglas en `lib/pedidos/anulacion-pedido.ts`, ver §5). **Falta:** cuentas corrientes (anular todo junto + ruta) y frontend (botón y modal) |
 | 17, 39 | Pedido con todo faltante: volver a pendiente o eliminar; que no aparezca como cobrable | Frontend | Pendiente |
 | 14 | Mostrar "preparado 30 de 36" y el total a facturar | Frontend | Pendiente |
 | 34 | Cambiar el color del cheque en /caja y en la cartera | Frontend | Pendiente |
@@ -307,25 +307,34 @@ Todo lo que eso implica:
 - [ ] Un pedido puede tener varios comprobantes (URQUIZA tuvo 2, por la condición de ARNANUK).
 - [ ] Si el cliente ya había pagado una parte, esa plata queda a favor y la oficina la aplica al comprobante nuevo (regla 39 de la auditoría).
 
-#### Plan (listas de precios, 26/10) — para acordar con cuentas corrientes y frontend
+#### Plan acordado (listas de precios, 26/10) — respuestas de Juan incluidas
 
-Idea: **anular = volver el pedido a "Pendiente Facturación"**. Desde ahí rige lo que ya está hecho en #16 (condiciones editables, reprecio solo) y se vuelve a generar con el botón de siempre. No hace falta un estado nuevo.
+**Respuestas de Juan (26/10):**
+1. Se puede refacturar **hasta que se cobra**: si alguien cobró el 100 % del pedido se bloquea; cobrado en parte, se puede. El estado del pedido (facturado, listo, en viaje, entregado) no importa.
+2. **Se anula todo**: los comprobantes del pedido **y** el 10 % contado. Las NC/REV de **devoluciones no** (es mercadería que volvió, con su stock).
+3. Lo que el cliente ya pagó **queda a cuenta**: no se reimputa solo.
 
-1. **Servidor — cuentas corrientes:** `anularComprobantesPedido(supabase, pedidoId, usuarioId)` en `lib/` (sacando el cuerpo de `/api/comprobantes-venta/[id]/anular` a una función reutilizable, sin cambiar lo que hace por comprobante) y la ruta `POST /api/pedidos/[id]/anular-comprobantes`.
-   - Anula **todos** los comprobantes vivos del pedido: los propios (`pedido_id`) y las NC/REV del **10 % contado** que les quedaron imputadas (`lib/comprobantes/comprobantes-de-pedido.ts` ya los junta). Orden: primero las del 10 % contado, después los originales; los fiscales antes que las REV.
-   - **Reintentable:** si se corta a la mitad, al volver a llamar anula solo lo que sigue vivo.
-   - La plata que ya estaba imputada queda **a favor** del cliente (no se reimputa sola).
-   - Al terminar, sin comprobantes vivos: `pedidos.estado = "pendiente_facturacion"` y `sincronizarKardexPedido`.
-2. **Listas de precios (yo):**
-   - en `lib/pedidos/estados.ts`, la regla de qué estados permiten anular y el paso a `pendiente_facturacion`, que solo puede hacer esta acción;
-   - revisar que `generar` vuelva a emitir con las cantidades preparadas (`cantidad-a-facturar.ts`) y las condiciones nuevas.
-3. **Frontend:** botón **"Anular comprobantes"** en el modal del pedido (`/clientes-pedidos`), visible con comprobantes vivos. Antes de anular, un modal que liste qué se va a anular (número, tipo, importe) y avise si hay **fiscales** (la NC con CAE no se puede deshacer). Al terminar, el modal muestra "Pendiente Facturación: cambiá las condiciones (o Repreciar) y volvé a generar".
-4. **Apps:** nada. Ven los comprobantes nuevos por las réplicas de siempre.
+Idea: **anular = volver el pedido a "Pendiente Facturación"**. Desde ahí rige #16 (condiciones editables, reprecio solo; "Repreciar" lleva a precios de hoy) y se vuelve a generar con el botón de siempre: `generar` ya acepta un pedido cuyos comprobantes están todos anulados y factura las cantidades preparadas (`cantidad-a-facturar.ts`). No hace falta un estado nuevo.
 
-**Preguntas para Juan antes de programar:**
-- (a) ¿Hasta qué estado se puede anular? Propuesta: facturado, listo para retirar/enviar y **también en viaje y entregado** (el cliente puede pedir refacturar después de recibir). El estado del viaje no cambia: solo los comprobantes.
-- (b) ¿El 10 % contado se anula junto? Propuesta: **sí**. Si el pedido nuevo sigue siendo contado, `generar` emite el nuevo 10 % sobre los comprobantes nuevos.
-- (c) Lo que el cliente ya pagó queda a favor. ¿Lo imputa la oficina a mano (regla 39), o se imputa solo al comprobante nuevo al volver a generar? Propuesta: **solo**, si el pago estaba imputado a comprobantes de ese mismo pedido.
+**Hecho por listas de precios (26/10) — NO reescribir, usarlo:** `lib/pedidos/anulacion-pedido.ts`
+- `evaluarAnulacionPedido(supabase, pedidoId)` → `{ puede, motivo, aAnular, estado }`. `aAnular` = lo que hay que anular, **en orden**: primero las NC/REV del 10 % contado imputadas a sus comprobantes, después los comprobantes del pedido (fiscales antes que PRES). Si `puede` es false, `motivo` es el texto para la pantalla ("ya está cobrado al 100 %…").
+- `reglaAnulacionPedido(estado, comprobantes)`: la parte pura (tests en `mobile/packages/core/test/anulacion-pedido.test.ts`).
+- `ESTADO_TRAS_ANULAR = "pendiente_facturacion"`.
+- "Cobrado al 100 %" = todos los comprobantes del pedido con `saldo_pendiente` en 0 (pagos, 10 % contado o devoluciones).
+
+**Falta — cuentas corrientes:** `anularComprobantesPedido(supabase, pedidoId, usuarioId)` + `POST /api/pedidos/[id]/anular-comprobantes`:
+1. `evaluarAnulacionPedido`; si `!puede` → 422 con `motivo`.
+2. Anular cada uno de `aAnular` **en ese orden**, con la misma lógica de `/api/comprobantes-venta/[id]/anular` (sacarla a una función de `lib/` sin cambiar lo que hace: inverso PRES→REV / FA→NC con CAE, libro mayor, cruce con el original, comisión, stock, remito).
+3. **Reintentable:** si se corta a la mitad, al volver a llamar `aAnular` ya trae solo lo que sigue vivo.
+4. Lo pagado queda **a cuenta** del cliente (respuesta 3): no reimputar.
+5. Sin comprobantes vivos: `pedidos.estado = ESTADO_TRAS_ANULAR`, `pago_contado_10 = false` si lo tenía, y `sincronizarKardexPedido`.
+6. Respuesta: lista de lo anulado (tipo, número, importe) + lo que quedó a cuenta.
+
+**Falta — frontend:** en el modal del pedido (`/clientes-pedidos`), botón **"Anular comprobantes"** cuando `tieneComprobantes` (ya existe en la página).
+- Al abrir, pedir `evaluarAnulacionPedido` (vía la ruta o una server action) y mostrar `aAnular` con número y monto. Si hay FA/FB: "la nota de crédito se emite en ARCA y no se puede deshacer". Si `!puede`: mostrar `motivo` y deshabilitar.
+- Al terminar: refrescar y mostrar "Pendiente Facturación: cambiá las condiciones (Editar pedido) o Repreciar, y volvé a Generar". El resto de los botones ya funciona: Repreciar y Generar se habilitan solos cuando no quedan comprobantes vivos.
+
+**Apps:** nada. Ven los comprobantes nuevos por las réplicas de siempre.
 
 ---
 
