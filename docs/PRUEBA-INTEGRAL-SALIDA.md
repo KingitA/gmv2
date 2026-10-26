@@ -1,4 +1,4 @@
-# Prueba integral — salida de mercadería (ensayo general antes de producción)
+Hecho 26/10 (cuentas corrientes; falta aplicar 20261026_billeteras_sin_fantasma.sql) |Hecho 26/10 (cuentas corrientes; falta aplicar 20261026_billeteras_sin_fantasma.sql) |Hecho 26/10 (cuentas corrientes; falta aplicar 20261026_billeteras_sin_fantasma.sql) |# Prueba integral — salida de mercadería (ensayo general antes de producción)
 
 Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casilla se tilda recién cuando lo vimos funcionar con nuestros ojos (pantalla del ERP, app o consulta a la base).
 

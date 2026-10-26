@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { plataEnManoDeMovimientos } from "@/lib/cobranzas/billetera-cc"
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireAuth()
@@ -19,12 +20,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const balanceData = await fetchAllRows(() =>
       supabase
         .from("billetera_movimientos")
-        .select("tipo, monto")
+        .select("tipo, monto, referencia_tipo")
         .eq("viajante_id", id)
     )
 
     const movimientos = balanceData
-    const balance = movimientos.reduce((sum, m) => sum + Number(m.monto), 0)
+    // Sin los movimientos de cuenta personal (diferencias de rendición): misma regla
+    // que saldos_financieros BILLETERA (#29)
+    const balance = plataEnManoDeMovimientos(movimientos as any)
 
     // "En camino a oficina": declarado en rendiciones abiertas — sigue en el
     // saldo contable (se debita al confirmar) pero el cobrador ya no lo tiene.

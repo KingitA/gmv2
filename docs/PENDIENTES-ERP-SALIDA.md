@@ -53,10 +53,10 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 |---|---|---|---|
 | ~~5, 6, 7, 8, 18~~ | ~~Apertura: importar el reporte real (no frenar todo, texto libre como ajuste, cuentas del personal, segunda columna de saldo, PRES viejos como PV 2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | 28 | Devolución de un artículo que no está en el comprobante: comprobante anterior o el 0002-00000001 | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
-| 29, 36 | Billeteras con plata "fantasma" después de rendir | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| ~~29, 36~~ | ~~Billeteras con plata "fantasma" después de rendir~~ | Cuentas corrientes | **Hecho 26/10, falta que Juan aplique** `supabase/migrations/20261026_billeteras_sin_fantasma.sql` |
 | 33 | El 10 % contado sobre mercadería ya devuelta (lado servidor de V2) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | 10, 11, 42 | Comisiones: "sin cobrar" inflado, pedidos sin número, Playroom en $0 | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
-| 30 | Números sin formato en los textos de la rendición | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| ~~30~~ | ~~Números sin formato en los textos de la rendición~~ | Cuentas corrientes | **Hecho 26/10** en la misma migración (`fmt_moneda`) |
 | 37 | /caja: el total no descuenta lo que el cliente tiene a cuenta | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | 35 | Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | 25 | Tope de devolución en el servidor (lado servidor de C2) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
@@ -120,7 +120,9 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 
 **Dónde:** `rendicion_confirmar` / `rendicion_crear` y el trigger que copia la diferencia a la cuenta personal (migraciones `20260826_rendicion_confirmar_v2_faltante_billetera`, `20260915_rendicion_cc_dos_diferencias`, `20260929_rendicion_fondos_gastos`, `20261019_cc_personal`).
 
-**Además:** hay que dejar en $0 la billetera del chofer ($1.000) y la del vendedor (−$10.000). La puesta a cero del pase lo hace sola, pero para las próximas pruebas conviene el arreglo antes.
+**HECHO 26/10 (cuentas corrientes) — migración `20261026_billeteras_sin_fantasma.sql` (la aplica Juan):** `billetera_saldo_sync` ya no suma a la billetera los movimientos que son de la cuenta personal (`rendicion_saldo_declarado`, `rendicion_diferencia`, `rendicion_devuelta`, `viaje_gasto_rechazado`: `TIPOS_SOLO_CUENTA_PERSONAL` en `lib/cobranzas/billetera-cc.ts`); `rendicion_confirmar` v3 devuelve a la billetera los retiros de la rendición (movimiento `rendicion_retiros`, idempotente); reparación de lo ya rendido y recálculo de `saldos_financieros` BILLETERA. Simulado con los datos de la prueba: chofer $1.000 → $0, vendedor −$10.000 → $0. `/viajantes` y `/api/viajantes/[id]/billetera` usan la misma regla. No toca el libro ni las cuentas personales.
+
+**Además (original):** hay que dejar en $0 la billetera del chofer ($1.000) y la del vendedor (−$10.000). La puesta a cero del pase lo hace sola, pero para las próximas pruebas conviene el arreglo antes.
 
 ### #33 — El 10 % contado sobre mercadería ya devuelta (lado servidor de V2)
 
@@ -164,7 +166,7 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 
 ### #30 — Números sin formato en los textos de la rendición
 
-- [ ] Los movimientos de la diferencia de rendición dicen "faltan $1000.0000000000000000" y "declaró enviar $45000.00". Tienen que decir **$1.000,00** y **$45.000,00**. Esos textos los arman las funciones SQL de rendición.
+- [x] **HECHO 26/10** (`fmt_moneda` en `rendicion_crear` v5 y `rendicion_confirmar` v3, misma migración que #29/#36). Antes: los movimientos de la diferencia de rendición decían "faltan $1000.0000000000000000" y "declaró enviar $45000.00". Tienen que decir **$1.000,00** y **$45.000,00**. Esos textos los arman las funciones SQL de rendición.
 
 ---
 
