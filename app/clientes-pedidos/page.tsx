@@ -46,6 +46,7 @@ import {
   AlertCircle,
   RefreshCw,
   DollarSign,
+  Undo2,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -58,6 +59,9 @@ import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido, marcarPe
 import { transicionesManuales, puedeEliminarPedido, puedeAsignarViaje, ESTADO_LABEL } from "@/lib/pedidos/estados"
 import { calcularDescuentosPedido, type DescuentosPedido } from "@/lib/pedidos/descuentos-cabecera"
 import { comprobantesDePedidos } from "@/lib/comprobantes/comprobantes-de-pedido"
+import { pedidoPreparado, totalAFacturar, totalFacturado, textoCantidadPreparada } from "@/lib/pedidos/totales-pedido"
+import { volverPedidoSinMercaderiaAPendiente, eliminarPedidoSinMercaderia } from "@/lib/actions/pedido-sin-mercaderia"
+import { AnularComprobantesDialog } from "@/components/pedidos/AnularComprobantesDialog"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -165,6 +169,7 @@ type Comprobante = {
   numero_comprobante: string
   total_factura: number
   anulado_en: string | null
+  pedido_id?: string | null
 }
 
 type Remito = {
@@ -260,6 +265,7 @@ export default function ClientesPedidosPage() {
   const [generandoRemitos, setGenerandoRemitos] = useState(false)
   const [modalDetalleAbierto, setModalDetalleAbierto] = useState(false)
   const [pedidoAEliminar, setPedidoAEliminar] = useState<Pedido | null>(null)
+  const [anularAbierto, setAnularAbierto] = useState(false)
   const [eliminando, setEliminando] = useState(false)
   const [pickingStatus, setPickingStatus] = useState<Record<string, any>>({})
   const [expandedPriorities, setExpandedPriorities] = useState<Record<string, boolean>>({ "1": true, "2": true, "3": true })
@@ -618,7 +624,39 @@ export default function ClientesPedidosPage() {
     }
   }
 
+  const SIN_NADA_PARA_FACTURAR = "No hay nada para facturar: todos los renglones están en faltante."
+
+  // #17/#39: preparado con todo faltante → no se factura; vuelve a la cola o se elimina
+  const sinMercaderia = (pedido: Pedido) =>
+    pedidoSeleccionado?.id === pedido.id && pedido.estado === "pendiente_facturacion" &&
+    detallesPedido.length > 0 && pedidoPreparado(detallesPedido) && totalAFacturar(detallesPedido) === 0 &&
+    !tieneComprobantes(pedido.id)
+
+  const [resolviendoSinMercaderia, setResolviendoSinMercaderia] = useState(false)
+  const resolverSinMercaderia = async (pedido: Pedido, accion: "pendiente" | "eliminar") => {
+    const pregunta = accion === "pendiente"
+      ? `¿Volver el pedido ${pedido.numero_pedido} a Pendiente? Entra de nuevo a la cola del depósito.`
+      : `¿Eliminar el pedido ${pedido.numero_pedido}?`
+    if (!confirm(pregunta)) return
+    setResolviendoSinMercaderia(true)
+    try {
+      if (accion === "pendiente") await volverPedidoSinMercaderiaAPendiente(pedido.id)
+      else await eliminarPedidoSinMercaderia(pedido.id)
+      if (accion === "eliminar") cerrarPedido()
+      else await cargarDetallesPedido(pedido.id)
+      await cargarPedidos()
+    } catch (e: any) {
+      alert(e?.message || "No se pudo cambiar el pedido")
+    } finally {
+      setResolviendoSinMercaderia(false)
+    }
+  }
+
   const generarComprobantes = async (pedidoId: string) => {
+    if (pedidoSeleccionado?.id === pedidoId && sinMercaderia(pedidoSeleccionado)) {
+      alert(SIN_NADA_PARA_FACTURAR)
+      return
+    }
     setGenerandoComprobante(pedidoId)
     try {
       const response = await fetch("/api/comprobantes-venta/generar", {
@@ -633,6 +671,10 @@ export default function ClientesPedidosPage() {
         throw new Error(result.error || "Error generando comprobantes")
       }
 
+      if (!result.comprobantes?.length) {
+        alert(SIN_NADA_PARA_FACTURAR)
+        return
+      }
       alert(
         `Comprobantes generados exitosamente:\n${result.comprobantes.map((c: any) => `${c.tipo_comprobante} ${c.numero}`).join("\n")}`,
       )
@@ -1332,7 +1374,17 @@ export default function ClientesPedidosPage() {
   const tieneComprobantes = (pedidoId: string) => {
     // Solo los emitidos AL facturar el pedido (llevan pedido_id); sus NC/REV no
     // impiden volver a facturar si se anularon los comprobantes.
-    return comprobantesGenerados[pedidoId]?.some((c: any) => !c.anulado_en && c.pedido_id === pedidoId) ?? false
+    // La NC/REV espejo de una anulación lleva pedido_id y queda viva: no cuenta (#19/#20).
+    return totalFacturado(comprobantesGenerados[pedidoId], pedidoId) != null
+  }
+
+  // #14: ya facturado → total de los comprobantes; preparado → lo que sale; si no, el del pedido
+  const totalMostrado = (pedido: Pedido): { etiqueta: string; monto: number } => {
+    const facturado = totalFacturado(comprobantesGenerados[pedido.id], pedido.id)
+    if (facturado != null) return { etiqueta: "Facturado", monto: facturado }
+    if (pedidoSeleccionado?.id === pedido.id && pedidoPreparado(detallesPedido))
+      return { etiqueta: "A facturar", monto: totalAFacturar(detallesPedido) }
+    return { etiqueta: "Total", monto: Number(pedido.total) || 0 }
   }
 
   const listaName = (id: string | null | undefined) =>
@@ -1686,8 +1738,8 @@ export default function ClientesPedidosPage() {
               {/* Stats */}
               <div className="flex gap-2 mt-5">
                 <div className="bg-white/10 rounded-xl px-3 py-2.5 backdrop-blur-sm flex-1 min-w-0">
-                  <p className="text-white/50 text-[10px] uppercase tracking-wide font-semibold">Total</p>
-                  <p className="text-lg font-bold text-white mt-0.5 truncate">{moneda(pedidoSeleccionado.total, 0)}</p>
+                  <p className="text-white/50 text-[10px] uppercase tracking-wide font-semibold">{totalMostrado(pedidoSeleccionado).etiqueta}</p>
+                  <p className="text-lg font-bold text-white mt-0.5 truncate">{moneda(totalMostrado(pedidoSeleccionado).monto, 0)}</p>
                 </div>
                 <div className="bg-white/10 rounded-xl px-3 py-2.5 backdrop-blur-sm min-w-[70px] text-center">
                   <p className="text-white/50 text-[10px] uppercase tracking-wide font-semibold">Arts.</p>
@@ -1728,6 +1780,13 @@ export default function ClientesPedidosPage() {
                   className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
                   <Printer className="h-3.5 w-3.5 mr-1.5" />Imprimir
                 </Button>
+                {tieneComprobantes(pedidoSeleccionado.id) && (
+                  <Button size="sm" onClick={() => setAnularAbierto(true)}
+                    title="Anula todos los comprobantes del pedido para volver a facturarlo"
+                    className="bg-transparent border border-red-300/60 text-red-100 hover:bg-red-500/20 font-medium">
+                    <Undo2 className="h-3.5 w-3.5 mr-1.5" />Anular comprobantes
+                  </Button>
+                )}
                 {!tieneComprobantes(pedidoSeleccionado.id) && pedidoSeleccionado.estado !== "eliminado" && (
                   <Button size="sm" onClick={() => repreciarPedidoActual(pedidoSeleccionado)}
                     disabled={repreciando === pedidoSeleccionado.id}
@@ -1880,6 +1939,25 @@ export default function ClientesPedidosPage() {
                 </div>
               )}
 
+              {/* #17/#39: todo faltante */}
+              {sinMercaderia(pedidoSeleccionado) && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3.5">
+                  <p className="text-sm font-semibold text-red-700">{SIN_NADA_PARA_FACTURAR}</p>
+                  <div className="mt-2.5 flex gap-2">
+                    <Button size="sm" variant="outline" disabled={resolviendoSinMercaderia}
+                      onClick={() => resolverSinMercaderia(pedidoSeleccionado, "pendiente")}
+                      className="h-8 text-xs border-slate-300">
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />Volver a Pendiente
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={resolviendoSinMercaderia}
+                      onClick={() => resolverSinMercaderia(pedidoSeleccionado, "eliminar")}
+                      className="h-8 text-xs border-red-300 text-red-700 hover:bg-red-100">
+                      <Trash2 className="h-3.5 w-3.5 mr-1.5" />Eliminar
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* Comprobantes */}
               {comprobantesGenerados[pedidoSeleccionado.id]?.length > 0 && (
                 <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
@@ -1950,7 +2028,7 @@ export default function ClientesPedidosPage() {
                             <p className="text-[10px] text-slate-400 font-mono">{d.articulos?.sku} · {d.articulos?.proveedores?.nombre || "—"}</p>
                           </div>
                           <div className="text-right shrink-0">
-                            <span className="text-sm font-bold text-slate-700">{d.cantidad} u.</span>
+                            <span className={`text-sm font-bold ${d.estado_item === "FALTANTE" ? "text-red-600" : d.estado_item === "PARCIAL" ? "text-orange-600" : "text-slate-700"}`}>{textoCantidadPreparada(d)} u.</span>
                             <span className="text-[10px] text-slate-400 block">{moneda(d.precio_final, 0)}</span>
                           </div>
                         </div>
@@ -1996,9 +2074,15 @@ export default function ClientesPedidosPage() {
                       <span>{moneda(pedidoSeleccionado.total_impuestos)}</span>
                     </div>
                   )}
+                  {totalMostrado(pedidoSeleccionado).etiqueta !== "Total" && (
+                    <div className="flex justify-between text-white/60 pt-2 border-t border-white/20">
+                      <span>Total del pedido</span>
+                      <span>{moneda(pedidoSeleccionado.total)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-bold text-lg pt-2 border-t border-white/20">
-                    <span>TOTAL</span>
-                    <span>{moneda(pedidoSeleccionado.total)}</span>
+                    <span>{totalMostrado(pedidoSeleccionado).etiqueta === "Total" ? "TOTAL" : totalMostrado(pedidoSeleccionado).etiqueta.toUpperCase()}</span>
+                    <span>{moneda(totalMostrado(pedidoSeleccionado).monto)}</span>
                   </div>
                 </div>
               </div>
@@ -2034,6 +2118,19 @@ export default function ClientesPedidosPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      {pedidoSeleccionado && (
+        <AnularComprobantesDialog
+          pedidoId={pedidoSeleccionado.id}
+          numeroPedido={pedidoSeleccionado.numero_pedido}
+          open={anularAbierto}
+          onOpenChange={setAnularAbierto}
+          onAnulado={async (completo) => {
+            if (completo) setPedidoSeleccionado((prev: any) => (prev && prev.id === pedidoSeleccionado.id ? { ...prev, estado: "pendiente_facturacion" } : prev))
+            await Promise.all([cargarPedidos(true), cargarComprobantesExistentes()])
+          }}
+        />
+      )}
 
       <AlertDialog open={!!pedidoAEliminar} onOpenChange={(open) => !open && setPedidoAEliminar(null)}>
         <AlertDialogContent>

@@ -3,6 +3,7 @@ import { ESTADOS_DEVOLUCION_EN_PROCESO, getSaldosCliente, saldoDeParada } from "
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { enCobroPorComprobante } from "@/lib/cobranzas/en-cobro"
 import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
+import { sinPedidosVacios } from "@/lib/pedidos/sin-mercaderia"
 
 // Ficha de UN cliente dentro de un viaje de reparto: lo que ve el chofer al bajar
 // del camión (pedido con renglones, comprobantes pendientes, devoluciones y cobros
@@ -311,9 +312,11 @@ export async function cargarCuentaCobro(supabase: SupabaseClient, clienteId: str
   const lista = (comps || []).map((c: any) => ({ ...c, total_neto: Number(c.total_neto) || 0, total_factura: Number(c.total_factura) || 0, saldo_pendiente: Number(c.saldo_pendiente) || 0, en_cobro: enCobro.get(c.id) || 0, nc_contado: ncPendiente[c.id] ?? 0 }))
   const ncsObs = (ncs || []).map((n: any) => String(n.observaciones || ""))
   const dtos = lista.filter((c) => ncsObs.some((o) => o.includes(c.numero_comprobante))).map((c) => c.id)
+  // #17/#39: un pedido con todo faltante no se cobra (ni como anticipo)
+  const pedsVivos = await sinPedidosVacios(supabase, (peds || []) as any[])
   return {
     comprobantes: lista,
-    pedidos: (peds || []).map((p: any) => ({ ...p, total: Number(p.total) || 0 })),
+    pedidos: pedsVivos.map((p: any) => ({ ...p, total: Number(p.total) || 0 })),
     pedidos_facturados: [...new Set((facturados || []).map((f: any) => f.pedido_id as string).filter(Boolean))],
     dtos_hechos: dtos,
   }

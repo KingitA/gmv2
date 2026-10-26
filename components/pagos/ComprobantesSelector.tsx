@@ -11,6 +11,7 @@ import { CargaProgreso } from "@/components/ui/carga-progreso"
 import { InputMonto } from "@/components/ui/input-monto"
 import { fecha, moneda, redondear } from "@/lib/formato"
 import { traerSaldosCliente } from "@/lib/cuenta-corriente/saldos-cliente-fetch"
+import { sinPedidosVacios } from "@/lib/pedidos/sin-mercaderia"
 
 /**
  * "Facturas pendientes $X · a favor −$Y · Saldo de la cuenta $Z" — lo mismo en
@@ -151,7 +152,10 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
         .select("pedido_id")
         .eq("cliente_id", clienteId)
         .not("pedido_id", "is", null),
-    ]).then(([{ data: comps }, { data: ncs }, { data: peds }, { data: facturados }]) => {
+    ]).then(async ([{ data: comps }, { data: ncs }, { data: pedsDb }, { data: facturados }]) => {
+      // #17/#39: un pedido con todo faltante no se cobra (ni como anticipo)
+      const peds = await sinPedidosVacios(supabase, (pedsDb || []) as Pedido[])
+      if (clienteActual.current !== clienteId) return
       const lista = (comps || []) as Comprobante[]
       setComprobantes(lista)
       onComprobantesLoaded?.(lista)

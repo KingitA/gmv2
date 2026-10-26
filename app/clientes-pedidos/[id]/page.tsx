@@ -18,6 +18,7 @@ import { ArrowLeft, Loader2, Plus, Trash2, Search, Package, Save, ChevronDown, C
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { moneda, numero, porcentaje, parseMonto } from "@/lib/formato"
 import { InputMonto } from "@/components/ui/input-monto"
+import { pedidoPreparado, totalAFacturar, totalFacturado, textoCantidadPreparada } from "@/lib/pedidos/totales-pedido"
 
 type ItemEdit = { precio_final: number; cantidad: number; estado_item: string }
 
@@ -61,6 +62,7 @@ export default function PedidoEditPage() {
   const [showAddPanel, setShowAddPanel] = useState(false)
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
   const [vendedores, setVendedores] = useState<any[]>([])
+  const [comprobantes, setComprobantes] = useState<any[]>([])
   const [itemEdits, setItemEdits] = useState<Record<string, ItemEdit>>({})
   // Condiciones por proveedor / marca "solo este pedido" (editor)
   const [segPedido, setSegPedido] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
@@ -85,7 +87,7 @@ export default function PedidoEditPage() {
 
   async function loadAll() {
     setLoading(true)
-    const [pedRes, itemsRes, listasRes, vendRes] = await Promise.all([
+    const [pedRes, itemsRes, listasRes, vendRes, compRes] = await Promise.all([
       supabase.from("pedidos").select(`
         id, numero_pedido, fecha, estado, total, subtotal, cliente_id, bonif_mercaderia_pct, bonif_pedido, condiciones_cliente,
         metodo_facturacion_pedido, condicion_entrega, observaciones,
@@ -102,6 +104,7 @@ export default function PedidoEditPage() {
       `).eq("pedido_id", id).order("created_at" as any),
       supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).order("nombre"),
       supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
+      supabase.from("comprobantes_venta").select("tipo_comprobante, total_factura, anulado_en, pedido_id").eq("pedido_id", id),
     ])
     const p = pedRes.data as any
     setPedido(p)
@@ -109,6 +112,7 @@ export default function PedidoEditPage() {
     setItemEdits({})
     setListasPrecio(listasRes.data || [])
     setVendedores(vendRes.data || [])
+    setComprobantes(compRes.data || [])
     if (p?.cliente_id) {
       const [{ data: bonifTodas }, { data: cmPed }, { data: cpPed }, { data: cmCli }, { data: cpCli }] = await Promise.all([
         supabase.from("bonificaciones").select("id, tipo, porcentaje, segmento, proveedor_id").eq("cliente_id", p.cliente_id).eq("activo", true).in("tipo", ["general", "viajante", "mercaderia", "contado"]),
@@ -373,6 +377,11 @@ export default function PedidoEditPage() {
   const opcionesEstado = [pedido?.estado, ...transicionesManuales(pedido?.estado)].filter(Boolean) as string[]
   const puedeGuardar = editable || condEditable || entregaEditable || opcionesEstado.length > 1
   const liveTotal = items.map(i => getDisplayItem(i)).reduce((sum, i) => sum + (i.precio_final ?? 0) * (i.cantidad ?? 0), 0)
+  // #14: ya facturado → total de los comprobantes; preparado → lo que sale del depósito
+  const facturado = totalFacturado(comprobantes, id)
+  const preparado = pedidoPreparado(items.map(i => getDisplayItem(i)))
+  const totalMostrado = facturado ?? (preparado ? totalAFacturar(items.map(i => getDisplayItem(i))) : liveTotal)
+  const etiquetaTotal = facturado != null ? "Facturado" : preparado ? "A facturar" : "Total del pedido"
   const hasUnsaved = Object.keys(itemEdits).length > 0
 
   const c = pedido?.clientes as any
@@ -413,8 +422,8 @@ export default function PedidoEditPage() {
             <span className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${estadoColor}`}>
               {ESTADO_LABEL[pedido?.estado] || pedido?.estado}
             </span>
-            <span className="text-xl font-bold text-slate-800">
-              {moneda(liveTotal)}
+            <span className="text-xl font-bold text-slate-800" title={etiquetaTotal}>
+              {moneda(totalMostrado)}
             </span>
             <Button onClick={savePedido} disabled={saving || !puedeGuardar} className="gap-2">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -878,7 +887,7 @@ export default function PedidoEditPage() {
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
                           displayItem.cantidad_preparada >= displayItem.cantidad ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
                         }`}>
-                          {displayItem.cantidad_preparada} prep.
+                          {textoCantidadPreparada(displayItem)} prep.
                         </span>
                       )}
                     </div>
@@ -931,9 +940,12 @@ export default function PedidoEditPage() {
                   {hasUnsaved && <span className="ml-2 text-amber-400 text-xs font-semibold">· cambios sin guardar</span>}
                 </div>
                 <div className="text-right">
-                  <p className="text-white/50 text-xs">Total del pedido</p>
+                  {etiquetaTotal !== "Total del pedido" && (
+                    <p className="text-white/50 text-xs">Total del pedido {moneda(liveTotal)}</p>
+                  )}
+                  <p className="text-white/50 text-xs">{etiquetaTotal}</p>
                   <p className="text-2xl font-bold">
-                    {moneda(liveTotal)}
+                    {moneda(totalMostrado)}
                   </p>
                 </div>
               </div>

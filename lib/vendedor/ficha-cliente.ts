@@ -11,6 +11,7 @@ import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { hoyISO, sumarDiasISO } from "@/lib/formato"
+import { sinPedidosVacios } from "@/lib/pedidos/sin-mercaderia"
 
 export interface SesionFicha {
   vendedorIds: string[]
@@ -92,13 +93,15 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
 
   // Pedidos cobrables sin facturar (anticipo, mismo criterio que el ERP):
   // sin comprobantes emitidos, sin anticipo previo, y ya confirmados (no en_venta)
-  const { data: pedidosCliente } = await supabase
+  const { data: pedidosClienteDb } = await supabase
     .from("pedidos")
     .select("id, numero_pedido, fecha, estado, total, pago_contado_10, anticipo_pago_id")
     .eq("cliente_id", id)
     .is("eliminado_at", null)
     .not("estado", "in", "(eliminado,en_venta,sistema_viejo)")
     .order("fecha", { ascending: true })
+  // #17/#39: un pedido con todo faltante no se cobra (ni como anticipo)
+  const pedidosCliente = await sinPedidosVacios(supabase, (pedidosClienteDb || []) as any[])
 
   const { data: compsDePedidos } = await supabase
     .from("comprobantes_venta")
