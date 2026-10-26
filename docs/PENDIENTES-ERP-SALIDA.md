@@ -59,7 +59,7 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | ~~30~~ | ~~Números sin formato en los textos de la rendición~~ | Cuentas corrientes | **Hecho 26/10** en la misma migración (`fmt_moneda`) |
 | 37 | /caja: el total no descuenta lo que el cliente tiene a cuenta | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | 35 | Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
-| 25 | Tope de devolución en el servidor (lado servidor de C2) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| ~~25~~ | ~~Tope de devolución en el servidor (lado servidor de C2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | 23 | El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1) | Hojas de ruta/viajes y cobranzas | Pendiente |
 | 27 | La parada dice "cobró de menos" cuando sobró | Hojas de ruta/viajes y cobranzas | Pendiente |
 | 22 | Cargar bultos o pallets en el ERP antes de finalizar el viaje | Hojas de ruta/viajes y cobranzas | Pendiente |
@@ -148,6 +148,8 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 
 - [ ] Al crear una devolución (outbox chofer `viaje.devolucion`, vendedor y web), la cantidad por artículo no puede superar **lo vendido menos lo ya devuelto**, contando confirmadas y pendientes.
 - [ ] Hoy entraron DEV-00001 y DEV-00002 por las mismas 6 naftalinas de 6 vendidas.
+
+**HECHO 26/10 (cuentas corrientes):** `lib/cobranzas/tope-devolucion.ts` (`excedeTopeDevolucion`) en las 4 entradas: `/api/chofer/viaje/[id]/devolucion` (outbox `viaje.devolucion`), `/api/viajante/devolucion` (outbox `devolucion.registrar`), `/api/devoluciones` (web) y `/api/mostrador/devolucion`. Por renglón y contra su comprobante de origen: cantidad ≤ vendido en ese comprobante − ya devuelto contra él (pendiente, aceptado o con NC; rechazados no cuentan). Responde **409** `{ error, codigo: "TOPE_DEVOLUCION" }` con el detalle ("NAFTALINA PURA x150g: en PRES 0001-00000022 se vendieron 6, ya se devolvieron 6 y querés devolver 1 (máximo 0)"). Sin detalle del artículo en el comprobante (apertura o origen de respaldo de #28) no topea. Verificado contra la prueba: DEV-00002 habría sido rechazada.
 
 ### #35 — Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5)
 
