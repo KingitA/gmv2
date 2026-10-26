@@ -6,6 +6,8 @@
 
 > **App Chofer (26/10):** C1–C6 en curso por la sesión App Chofer, en `main`. Archivos que toca: `mobile/apps/chofer/**`, `mobile/packages/core/test/chofer-*.test.ts`, `mobile/scripts/mock-chofer.mjs` y la sección §19 de `MOBILE.md`. **No los edites desde otra sesión**; si necesitás algo ahí, pedíselo a Juan.
 
+> **App Vendedor (26/10):** V1–V5, T1 y los avisos que tocan a vendedor (ajustes de apertura, "Retiros ya descontados") en curso por la sesión APK Vendedor, en `main` (worktree `gmv2-vendedor`). Archivos que toca: `mobile/apps/vendedor/**`, `mobile/packages/core/test/vendedor-*.test.ts`, `mobile/scripts/mock-vendedor.mjs`, `mobile/scripts/fixture-vendedor.mjs`, la sección §18 de `MOBILE.md` y, **por T1**, el login compartido: `mobile/packages/core/src/auth/**`, la pantalla de login de `mobile/packages/core/src/ui/pantallas.tsx` y `app/api/mobile/auth/login/**`. **No los edites desde otra sesión**; si necesitás algo ahí, pedíselo a Juan.
+
 ---
 
 ## 1. De dónde salen estos pedidos
@@ -91,13 +93,13 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 | C4 — "No entregado" con un solo texto si fue por falta de pago (#24) | App Chofer | No | **En curso 26/10 (sesión App Chofer)** |
 | C5 — "−$0,00" en la billetera (#3) | App Chofer | No | **En curso 26/10 (sesión App Chofer)** |
 | C6 — Transferencias fuera de la rendición (#35) | App Chofer | Sí: cuentas corrientes — **servidor listo 26/10 (f1b5db2)** | **En curso 26/10 (sesión App Chofer)** |
-| V1 — Checkbox 10 % contado al finalizar el pedido y total en vivo (#13) | App Vendedor | No: el servidor ya está (listas de precios, 8f907c8, campo `bonif_pedido.contado_todo`) | Pendiente |
-| V2 — Cobrar con 10 % contado: la base no incluye lo ya devuelto (#33) | App Vendedor | Sí: cuentas corrientes (la REV del 10 %) | Pendiente |
-| V3 — Pedido facturado: mostrar también las reversas (#31) | App Vendedor | No | Pendiente |
-| V4 — "Plata de la empresa en tu mano" descuenta los retiros (#32) | App Vendedor | No | Pendiente |
-| V5 — Transferencias fuera de la rendición (#35) | App Vendedor | Sí: cuentas corrientes | Pendiente (esperar servidor) |
+| V1 — Checkbox 10 % contado al finalizar el pedido y total en vivo (#13) | App Vendedor | No: el servidor ya está (listas de precios, 8f907c8, campo `bonif_pedido.contado_todo`) | **En curso 26/10 (sesión APK Vendedor)** |
+| V2 — Cobrar con 10 % contado: la base no incluye lo ya devuelto (#33) | App Vendedor | Sí: cuentas corrientes (la REV del 10 %) — servidor listo 26/10 (`nc_contado`) | **En curso 26/10 (sesión APK Vendedor)** |
+| V3 — Pedido facturado: mostrar también las reversas (#31) | App Vendedor | No | **En curso 26/10 (sesión APK Vendedor)** |
+| V4 — "Plata de la empresa en tu mano" descuenta los retiros (#32) | App Vendedor | No | **En curso 26/10 (sesión APK Vendedor)** |
+| V5 — Transferencias fuera de la rendición (#35) | App Vendedor | Sí: cuentas corrientes — servidor listo 26/10 (f1b5db2) | **En curso 26/10 (sesión APK Vendedor)** |
 | ~~V6 — "Mercadería cobrada" = "Comisiones ganadas" (#41)~~ | App Vendedor | — | **Hecho 26/10** (ea55e14, APK v0.4.4 compilada). Validado: 001939 = $51.175,19 |
-| T1 — Iniciar sesión con **nombre de usuario** (#2) — **toca `@gm/core` (las 3 apps)** | **App Vendedor** hace el cambio en core y en el servidor del login; chofer y depósito solo recompilan | Sí (endpoint del login, ver T1) | Pendiente |
+| T1 — Iniciar sesión con **nombre de usuario** (#2) — **toca `@gm/core` (las 3 apps)** | **App Vendedor** hace el cambio en core y en el servidor del login; chofer y depósito solo recompilan | Sí (endpoint del login, ver T1) | **En curso 26/10 (sesión APK Vendedor)** |
 | D1 — Recompilar con el login nuevo (T1) | App Depósito | — | Esperando T1 |
 | D2 — Nada que hacer con bultos ni con pedidos todo faltante (solo para que lo sepas) | App Depósito | — | Informativo |
 
