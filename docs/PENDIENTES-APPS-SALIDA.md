@@ -89,7 +89,7 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 | C4 — "No entregado" con un solo texto si fue por falta de pago (#24) | App Chofer | No | Pendiente |
 | C5 — "−$0,00" en la billetera (#3) | App Chofer | No | Pendiente |
 | C6 — Transferencias fuera de la rendición (#35) | App Chofer | Sí: cuentas corrientes | Pendiente (esperar servidor) |
-| V1 — Checkbox 10 % contado al finalizar el pedido y total en vivo (#13) | App Vendedor | Sí: listas de precios y descuentos guarda el contado en el pedido | Pendiente |
+| V1 — Checkbox 10 % contado al finalizar el pedido y total en vivo (#13) | App Vendedor | No: el servidor ya está (listas de precios, 8f907c8, campo `bonif_pedido.contado_todo`) | Pendiente |
 | V2 — Cobrar con 10 % contado: la base no incluye lo ya devuelto (#33) | App Vendedor | Sí: cuentas corrientes (la REV del 10 %) | Pendiente |
 | V3 — Pedido facturado: mostrar también las reversas (#31) | App Vendedor | No | Pendiente |
 | V4 — "Plata de la empresa en tu mano" descuenta los retiros (#32) | App Vendedor | No | Pendiente |
@@ -184,7 +184,7 @@ Es el hallazgo 14 de la auditoría de cuentas corrientes ("el chofer ve las devo
 - [ ] **El total del pedido se ve en vivo con el 10 % incluido** si está tildado. Juan quiere ir viendo el total real mientras levanta el pedido en la calle.
 - [ ] Funciona **sin señal** (el pedido sale con la marca por el outbox).
 
-**Depende de:** listas de precios y descuentos tiene que hacer que el pedido guarde la marca (`pedidos.pago_contado_10` u otra) y que el servidor la respete al facturar. Ya hay base: el ERP tiene "Contado 10 %" por segmento en el pedido y existen `pedido_marca_condicion` / `pedido_proveedor_condicion`. **Coordiná el nombre del campo con ese agente antes de programar.**
+**Depende de (ya resuelto 26/10, ver el recuadro de arriba):** listas de precios y descuentos tiene que hacer que el pedido guarde la marca (`pedidos.pago_contado_10` u otra) y que el servidor la respete al facturar. Ya hay base: el ERP tiene "Contado 10 %" por segmento en el pedido y existen `pedido_marca_condicion` / `pedido_proveedor_condicion`. **Coordiná el nombre del campo con ese agente antes de programar.**
 
 ### V2 — Cobrar con 10 % contado: la base no incluye lo ya devuelto (#33)
 
