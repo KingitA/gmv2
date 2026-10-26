@@ -32,6 +32,7 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { FechaInput } from "@/components/finanzas/fecha-input";
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible";
+import { PREFIJO_AJUSTE_APERTURA } from "@/lib/apertura/parsear-chr";
 import { armarExtracto, etiquetaMovimiento, type MovimientoCC } from "@/lib/cuenta-corriente/extracto";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
@@ -207,6 +208,28 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                     comp.tipo_comprobante.toLowerCase().includes("reversa"),
             });
         });
+
+        // Ajustes de APERTURA (texto libre del sistema viejo: "CHEQUE RECH",
+        // "10%", "SEGURO AUDI"…, #6/#7): están en el libro sin comprobante. Se
+        // listan para que "Solo saldos" sume el Saldo Real (prueba de salida 26/10).
+        (data.movimientos ?? [])
+            .filter((m) => m.referencia_tipo === "ajuste_manual" && String(m.observaciones || "").startsWith(PREFIJO_AJUSTE_APERTURA))
+            .forEach((m, i) => {
+                const neto = Math.round((Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
+                const texto = String(m.observaciones || "").replace(`${PREFIJO_AJUSTE_APERTURA} — `, "").replace(/\s*\(importe.*$/, "");
+                documentos.push({
+                    id: `ajuste-${m.id ?? i}`,
+                    tipo: "AJUSTE",
+                    numero: texto || m.numero_comprobante || "Ajuste",
+                    fecha: m.fecha,
+                    pedido: "-",
+                    total: neto,
+                    saldo: neto,
+                    estado: neto > 0 ? "pendiente" : "a_favor",
+                    es_devolucion: false,
+                    es_credito: neto < 0,
+                });
+            });
 
         // Devoluciones EN PROCESO: estimativo informativo para facilitar la
         // cobranza — NO son crédito real (el crédito nace con la NC/REV, que ya
@@ -438,11 +461,11 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
             return doc.tipo !== "PAGO" && doc.estado !== "anulado" && Math.abs(doc.saldo) > 0.009;
         }
         // En detallada los pagos completos ya se ven — las filas "A CUENTA" duplicarían
-        return doc.tipo !== "A CUENTA" && enRango(doc.fecha);
+        return doc.tipo !== "A CUENTA" && doc.tipo !== "AJUSTE" && enRango(doc.fecha);
     });
 
     // Seleccionar todo: los mismos documentos que tienen checkbox en la fila
-    const idsSeleccionables = documentosVisibles.filter((d) => d.tipo !== "A CUENTA").map((d) => d.id);
+    const idsSeleccionables = documentosVisibles.filter((d) => d.tipo !== "A CUENTA" && d.tipo !== "AJUSTE").map((d) => d.id);
     const todosSeleccionados = idsSeleccionables.length > 0 && idsSeleccionables.every((id) => selectedDocumentos.includes(id));
     const toggleTodos = () => {
         setSelectedDocumentos((prev) =>
@@ -772,7 +795,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                         documentosVisibles.map((doc) => (
                                             <TableRow key={doc.id} className={`hover:bg-gray-50 ${doc.estado === "anulado" && doc.tipo !== "PAGO" ? "opacity-50 line-through" : ""}`}>
                                                 <TableCell>
-                                                    {doc.tipo !== "A CUENTA" && (
+                                                    {doc.tipo !== "A CUENTA" && doc.tipo !== "AJUSTE" && (
                                                         <Checkbox
                                                             checked={selectedDocumentos.includes(doc.id)}
                                                             onCheckedChange={() => handleToggleDocumento(doc.id)}
@@ -781,7 +804,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                 </TableCell>
                                                 <TableCell className="font-medium">{doc.tipo}</TableCell>
                                                 <TableCell>
-                                                    {!doc.es_devolucion && doc.tipo !== "PAGO" && doc.tipo !== "A CUENTA" ? (
+                                                    {!doc.es_devolucion && doc.tipo !== "PAGO" && doc.tipo !== "A CUENTA" && doc.tipo !== "AJUSTE" ? (
                                                         <button
                                                             onClick={() => window.open(`/api/comprobantes-venta/${doc.id}/pdf`, '_blank')}
                                                             className="text-blue-600 hover:underline"
@@ -831,7 +854,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                                 : getEstadoBadge(doc.saldo, doc.es_devolucion)}
                                                 </TableCell>
                                                 <TableCell>
-                                                    {!doc.es_devolucion && doc.tipo !== "PAGO" && doc.tipo !== "A CUENTA" && (
+                                                    {!doc.es_devolucion && doc.tipo !== "PAGO" && doc.tipo !== "A CUENTA" && doc.tipo !== "AJUSTE" && (
                                                         <Button
                                                             variant="ghost"
                                                             size="sm"

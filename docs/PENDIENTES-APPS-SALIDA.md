@@ -55,6 +55,11 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 
 ---
 
+### Avisos del servidor (cuentas corrientes)
+
+- **26/10 — Apertura (#6/#7):** la deuda del sistema viejo que no es comprobante (texto libre: "CHEQUE RECH", "10%", "SEGURO AUDI", diferencias de rendición del personal…) entra como **ajuste del libro mayor**, sin comprobante. El saldo del cliente lo incluye, pero la lista de comprobantes pendientes no. La ficha del cliente (`/api/vendedor/cliente/[id]` y el dataset `vendedor_cc`) trae ahora **`ajustes_apertura`**: `[{ id, fecha, concepto, numero, monto }]` (monto + = debe, − = a favor). **App Vendedor (y Chofer si muestra pendientes):** listarlos junto a los comprobantes pendientes ("Ajuste: CHEQUE RECH (YASH) $X"), solo para mostrar, no se pueden tildar al cobrar. Sin esto, en GRONDONA CHRISTIAN (1000) faltarían $58 M en la lista.
+- **26/10 — PRES del sistema viejo con punto de venta 2 (#18):** los PRES de la apertura se graban "0002-…"; los de gmv2 siguen en "0001-…". Si la app arma o compara números de PRES, no asumir PV 1.
+
 ## 2. Quién hace qué (anotá "en curso" antes de empezar)
 
 | Tarea | Área | Depende del servidor | Estado |

@@ -6,6 +6,7 @@
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
 import { enCobroPorComprobante } from "@/lib/cobranzas/en-cobro"
 import { reservasDeCreditos } from "@/lib/cobranzas/creditos"
+import { PREFIJO_AJUSTE_APERTURA } from "@/lib/apertura/parsear-chr"
 import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
@@ -185,6 +186,22 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
         ? (p.fecha || "") >= cutoffRechazadas
         : p.disponible > 0.005
     )
+  // Ajustes de APERTURA (texto libre del sistema viejo, #6/#7): parte del saldo
+  // sin comprobante. La app los puede listar para que lo pendiente sume el saldo.
+  const { data: ajustesApDb } = await supabase
+    .from("cuenta_corriente_clientes")
+    .select("id, fecha, debe, haber, numero_comprobante, observaciones")
+    .eq("cliente_id", id)
+    .ilike("observaciones", `${PREFIJO_AJUSTE_APERTURA}%`)
+    .order("fecha", { ascending: true })
+  const ajustesApertura = (ajustesApDb || []).map((a: any) => ({
+    id: a.id,
+    fecha: a.fecha,
+    concepto: String(a.observaciones || "").replace(`${PREFIJO_AJUSTE_APERTURA} — `, "").replace(/\s*\(importe.*$/, ""),
+    numero: a.numero_comprobante,
+    monto: Math.round((Number(a.debe || 0) - Number(a.haber || 0)) * 100) / 100,
+  }))
+
   const totalAFavor = Math.round((
     (creditosVivos || []).reduce((s: number, c: any) => s + Math.abs(Number(c.saldo_pendiente)), 0)
     + aCuenta.filter((p: any) => p.estado !== "rechazado").reduce((s: number, p: any) => s + p.disponible, 0)
@@ -266,6 +283,7 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
     comprobantes: comprobantesConReserva,
     creditos: creditosVivos || [],
     a_cuenta: aCuenta,
+    ajustes_apertura: ajustesApertura,
     total_a_favor: totalAFavor,
     pedidos_cobrables: pedidosCobrables,
     pedidos_cobro: pedidosCobro,

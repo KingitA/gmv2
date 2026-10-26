@@ -6,8 +6,18 @@
  *
  *   20 cliente · 21 nombre · 22 CUIT · 23 teléfono · 24 número · 25 descripción
  *   (tipo + días) · 26 fecha · 27 vencimiento · 28 importe · 29 pendiente ·
- *   30 saldo del cliente · 31 saldo del cliente · 32 total general · 33 pie
+ *   30 saldo del cliente (otra cuenta) · 31 SALDO DEL CLIENTE (= Σ pendiente) ·
+ *   32 total general · 33 pie
  *   11 "Viajante: 00022 - FREIJE DANIEL (lista NECO)"
+ *
+ * Reglas del dueño (26/10, prueba integral de salida #6, #7, #8, #18):
+ *  - El saldo bueno es la columna 31 (la 30 no siempre coincide con la suma de
+ *    lo pendiente: DELLI GUSTAVO 169 debe 2.804.921,57, no 2.923.875,09).
+ *  - Un renglón con texto libre en vez de tipo ("CHEQUE RECH (YASH)", "10%",
+ *    "DIFERENCIA RENDICION", "SEGURO AUDI"…) entra como AJUSTE, con el texto
+ *    como concepto y el signo del pendiente (igual que "Ajustar saldo").
+ *  - Los PRES del sistema viejo pasan al punto de venta 2 ("0001-00117929" →
+ *    "0002-00117929") para no mezclarse con los PRES de gmv2 (PV 1).
  *
  * Módulo PURO (sin base de datos): lo usan la pantalla de apertura y los tests.
  */
@@ -16,6 +26,19 @@ export type TipoApertura =
   | "PRES" | "FA" | "FB" | "FC" | "NDA" | "NDB" | "NDC"   // débitos
   | "NCA" | "NCB" | "NCC" | "REV"                           // créditos (comprobantes)
   | "A_CUENTA"                                              // entrega a cuenta (pago)
+  | "AJUSTE"                                                // texto libre: ajuste de cuenta corriente
+
+/** Prefijo de los ajustes de apertura en el libro mayor (texto libre, #6): lo usan la importación, la cuenta corriente y los controles de descuadre */
+export const PREFIJO_AJUSTE_APERTURA = "APERTURA GM AJUSTE"
+
+/** Punto de venta con el que entran los PRES del sistema viejo */
+export const PV_PRES_SISTEMA_VIEJO = "0002"
+
+/** "0001-00117929" → "0002-00117929" (solo PRES) */
+export function numeroPresSistemaViejo(numero: string): string {
+  const m = numero.trim().match(/^(\d{4})-(\d+)$/)
+  return m ? `${PV_PRES_SISTEMA_VIEJO}-${m[2]}` : numero
+}
 
 export interface RenglonApertura {
   linea: number
@@ -23,14 +46,15 @@ export interface RenglonApertura {
   codigo_cliente: string          // sin ceros a la izquierda ("00207" → "207")
   nombre: string
   cuit: string
-  numero: string                  // "0001-00119733"
-  descripcion: string             // "Presupuesto", "Fact.A Electronica", …
-  tipo: TipoApertura | null       // null = tipo que no se reconoce
+  numero: string                  // como se graba ("0002-00119733" para un PRES viejo)
+  numero_original: string         // como viene en el reporte ("0001-00119733")
+  descripcion: string             // "Presupuesto", "Fact.A Electronica", … o el texto libre
+  tipo: TipoApertura | null       // AJUSTE = texto libre; null solo en datos viejos
   fecha: string                   // ISO aaaa-mm-dd
   vencimiento: string             // ISO
   importe: number
   pendiente: number
-  saldo_cliente: number           // saldo del cliente según el sistema viejo
+  saldo_cliente: number           // saldo del cliente según el sistema viejo (columna 31)
 }
 
 export interface ResultadoLectura {
@@ -93,25 +117,29 @@ export function leerReporteImpagos(texto: string): ResultadoLectura {
     }
     if (!fechaReporte) fechaReporte = fechaIso(c[6]) || null
     const descripcion = c[25].replace(/\s+\d+$/, "").trim()
+    // Texto libre (sin tipo reconocible) = ajuste de cuenta corriente (#6)
+    const tipo: TipoApertura = tipoDeDescripcion(descripcion) ?? "AJUSTE"
+    // Saldo bueno = columna 31; la 30 queda solo si el archivo es más corto (#8)
+    const saldo31 = c.length > 31 ? numero(c[31]) : NaN
     const r: RenglonApertura = {
       linea: i + 1,
       viajante: c[11].replace(/^Viajante:\s*/i, "").trim(),
       codigo_cliente: codigo(c[20]),
       nombre: c[21],
       cuit: c[22],
-      numero: c[24],
+      numero: tipo === "PRES" ? numeroPresSistemaViejo(c[24]) : c[24],
+      numero_original: c[24],
       descripcion,
-      tipo: tipoDeDescripcion(descripcion),
+      tipo,
       fecha: fechaIso(c[26]),
       vencimiento: fechaIso(c[27]) || fechaIso(c[26]),
       importe: numero(c[28]),
       pendiente: numero(c[29]),
-      saldo_cliente: numero(c[30]),
+      saldo_cliente: Number.isFinite(saldo31) ? saldo31 : numero(c[30]),
     }
     if (!r.codigo_cliente) errores.push(`Renglón ${i + 1}: sin número de cliente`)
     if (!r.fecha) errores.push(`Renglón ${i + 1}: fecha inválida "${c[26]}"`)
     if (!Number.isFinite(r.pendiente) || !Number.isFinite(r.importe)) errores.push(`Renglón ${i + 1}: importe inválido`)
-    if (!r.tipo) errores.push(`Renglón ${i + 1} (${r.nombre} ${r.numero}): tipo de comprobante desconocido "${descripcion}"`)
     renglones.push(r)
   })
   return { fecha_reporte: fechaReporte, renglones, errores }
