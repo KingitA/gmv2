@@ -62,7 +62,7 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | ~~25~~ | ~~Tope de devolución en el servidor (lado servidor de C2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | ~~23~~ | ~~El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1)~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
 | ~~27~~ | ~~La parada dice "cobró de menos" cuando sobró~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
-| 22 | Cargar bultos o pallets en el ERP antes de finalizar el viaje | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas) |
+| ~~22~~ | ~~Cargar bultos o pallets en el ERP antes de finalizar el viaje~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (e0b8b3f, falta que Juan aplique `supabase/migrations/20261026_pedidos_pallets.sql`) |
 | 43 | Aprobar los gastos del viaje al aceptar la rendición | Hojas de ruta/viajes y cobranzas | En curso 26/10 (hojas de ruta/viajes y cobranzas) |
 | ~~21~~ | ~~Hoja del viaje: "PRES 0001-0001-…"~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
 | 13 | Pedido con 10 % contado desde la venta (lado servidor de V1) | Listas de precios y descuentos | Pendiente |
@@ -206,6 +206,8 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 - [ ] Pueden ser **bultos o pallets**.
 - [ ] **No bloquea:** un pedido sin bultos se despacha igual, sin alerta.
 - [ ] Hoy los 3 pedidos del viaje y la hoja de ruta mostraron 0 bultos. Falta el lugar donde cargarlos, por pedido, en el armado del viaje o en la ficha del pedido.
+
+**HECHO 26/10 (e0b8b3f):** en el detalle del viaje → "Pedidos del viaje", cada pedido tiene **Bultos** y **Pallets** editables mientras el viaje está programado, despachado o en curso (se guardan al salir del campo). `PATCH /api/viajes/[id]/pedidos { pedido_id, bultos?, pallets? }`. No bloquea el despacho ni avisa. La hoja (pantalla, PDF) muestra los pallets junto a los bultos. **Migración `20261026_pedidos_pallets.sql`** (columna `pedidos.pallets`); hasta aplicarla, los pallets se leen en 0 y no se pueden guardar (los bultos sí). La ficha del pedido no tiene el campo: si se quiere también ahí, es de Frontend.
 
 ### #43 — Aprobar los gastos del viaje al aceptar la rendición
 

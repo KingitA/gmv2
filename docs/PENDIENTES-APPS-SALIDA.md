@@ -72,6 +72,7 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
   - Si igual llega un "entregado"/"entregado_parcial" de una parada bloqueada, el outbox `viaje.parada` lo **rechaza** (definitivo, no reintenta) con `codigo: "ENTREGA_BLOQUEADA"` y un `error` legible. Mostralo tal cual.
   - **Cobrar ya no cierra una parada bloqueada que no cumplió**: el cobro entra, pero la parada queda pendiente. En el overlay, `cierreDeParadaPorCobro` acepta dos campos nuevos opcionales: `bloqueada` (= `bloquear_entrega`) y `descuentos`. Pasalos para que el equipo sin señal haga lo mismo que el servidor. Sin ellos se comporta como antes.
 - **26/10 — Lo exigido neto (#27), ya en main (daab2b3):** `minimo_exigido` ahora viene **neto de lo devuelto en el viaje**, y la parada trae **`descuentos_cobro`** (10 % contado y ajuste de los cobros del viaje). `cobro_cumplido` = cobrado + descuentos_cobro ≥ minimo_exigido. Si la app muestra "COBRAR SÍ O SÍ" / "cobró X de Y", usá esos campos tal cual.
+- **26/10 — Bultos y pallets (#22), ya en main (e0b8b3f):** la oficina carga bultos **y pallets** por pedido en el ERP. En la hoja del viaje, `pedidos[].pallets` y `paradas[].pallets` (número, 0 si no hay). Si la app muestra "bultos a bajar", puede sumar "· N pallets" cuando haya. El depósito no hace nada (D2).
 - **26/10 — Número de comprobante (#21):** en la hoja, `pedidos[].comprobantes[].numero` ahora es "0001-00000021" (antes "0001-0001-00000021").
 
 ## 2. Quién hace qué (anotá "en curso" antes de empezar)
