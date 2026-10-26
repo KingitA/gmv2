@@ -4,6 +4,7 @@ import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
 import { getPrecioNeto } from "@/lib/comisiones/calcular"
 import { fechaISO } from "@/lib/formato"
+import { sinPedidosExcluidos } from "@/lib/comisiones/pedidos-sin-comision"
 import { comisionGanadaPorComprobante, cuentaPersonalDe, resumenCuentaPersonal } from "@/lib/cuenta-corriente/cuenta-personal"
 
 // GET /api/vendedor/comisiones?tipo=cobrada|vendida
@@ -32,8 +33,10 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const tipo = searchParams.get("tipo") === "vendida" ? "vendida" : "cobrada"
 
-    // Todas las filas de venta con comisión del vendedor (paginado)
-    const rows = await fetchAllRows(() =>
+    // Todas las filas de venta con comisión del vendedor (paginado), sin los
+    // pedidos eliminados ni los pasados al sistema viejo (#10: "sin cobrar"
+    // daba $2,4 M por esos; el flag del kardex no alcanza)
+    const rows = await sinPedidosExcluidos(supabase, await fetchAllRows(() =>
       supabase
         .from("kardex")
         .select(
@@ -44,7 +47,7 @@ export async function GET(req: NextRequest) {
         .neq("comision_viajante_monto", 0)
         .eq("pedido_eliminado", false)
         .in("vendedor_id", session.vendedorIds)
-    )
+    ))
 
     // Comisión neta de una línea: pactada menos el débito por pago contado
     const netoLinea = (k: any) => {

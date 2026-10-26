@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getPreviousPeriod, getSameLastYear, fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
 import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
 import { fechaISO, hoyISO } from '@/lib/formato'
+import { comisionesGanadas, repartirPorLinea } from '@/lib/comisiones/ganadas'
+import { sinPedidosExcluidos } from '@/lib/comisiones/pedidos-sin-comision'
 
 function firstDayOfMonthArgentina(): string {
   return `${hoyISO().slice(0, 7)}-01`
@@ -35,6 +37,74 @@ export async function GET(req: NextRequest) {
 
     const vendedores = await fetchAllRows(() => supabase.from('vendedores').select('id, nombre'))
     const vendedoresMap = new Map(vendedores.map(v => [v.id, v.nombre]))
+
+    // ── COBRADA = comisión GANADA, acreditada en la cuenta personal (#42) ────
+    // Fuente única desde la etapa 3 (lib/comisiones/ganadas.ts): la tabla vieja
+    // `comisiones` tipo 'cobrada' ya no se escribe y el tablero daba $0. El
+    // renglón ya viene neto (10% contado, devoluciones) y se revierte solo si el
+    // cobro se anula. "Pagado" = acreditado en su cuenta (de ahí la retira).
+    if (tipoFiltro === 'cobrada') {
+      const [actual, anterior] = await Promise.all([
+        comisionesGanadas(supabase, { desde: dateFrom, hasta: dateTo, vendedorId: viajanteId }),
+        comisionesGanadas(supabase, { desde: prev.from, hasta: prev.to, vendedorId: viajanteId }),
+      ])
+      type AggC = { devengado: number; devengadoPrev: number; pedidos: Set<string>; clientes: Set<string>; por_segmento: Record<string, number> }
+      const aggC = new Map<string, AggC>()
+      const ensureC = (vid: string) => {
+        if (!aggC.has(vid)) aggC.set(vid, { devengado: 0, devengadoPrev: 0, pedidos: new Set(), clientes: new Set(), por_segmento: {} })
+        return aggC.get(vid)!
+      }
+      const pasaFiltros = (g: (typeof actual)[number]) =>
+        (!clienteId || g.cliente_id === clienteId) &&
+        (!pedidoId || g.pedido_id === pedidoId) &&
+        (!comprobanteId || g.comprobante_id === comprobanteId)
+      for (const [lista, esActual] of [[actual, true], [anterior, false]] as const) {
+        for (const g of lista) {
+          if (!pasaFiltros(g)) continue
+          const partes = repartirPorLinea(g).filter((p) => !articuloId || p.articulo_id === articuloId)
+          if (!partes.length) continue
+          const monto = partes.reduce((s, p) => s + p.monto, 0)
+          const agg = ensureC(g.vendedor_id)
+          if (!esActual) { agg.devengadoPrev += monto; continue }
+          agg.devengado += monto
+          if (g.pedido_id) agg.pedidos.add(g.pedido_id)
+          if (g.cliente_id) agg.clientes.add(g.cliente_id)
+          for (const p of partes) {
+            const seg = p.articulo_categoria ?? 'sin_segmento'
+            agg.por_segmento[seg] = (agg.por_segmento[seg] ?? 0) + p.monto
+          }
+        }
+      }
+      const rowsC = [...aggC.entries()]
+        .map(([vId, agg]) => ({
+          viajante_id: vId,
+          nombre: vendedoresMap.get(vId) ?? vId,
+          devengado: agg.devengado,
+          devengado_anterior: agg.devengadoPrev,
+          variacion_pct: agg.devengadoPrev > 0
+            ? ((agg.devengado - agg.devengadoPrev) / Math.abs(agg.devengadoPrev)) * 100
+            : agg.devengado > 0 ? 100 : 0,
+          cobrable: agg.devengado,
+          pagado: agg.devengado,
+          pendiente_cobro: 0,
+          cantidad_pedidos: agg.pedidos.size,
+          cantidad_clientes: agg.clientes.size,
+          por_segmento: agg.por_segmento,
+        }))
+        .filter(r => Math.abs(r.devengado) >= 0.005 || Math.abs(r.devengado_anterior) >= 0.005)
+        .sort((a, b) => b.devengado - a.devengado)
+      if (!rowsC.length) return NextResponse.json(empty)
+      return NextResponse.json({
+        rows: rowsC,
+        summary: {
+          total_devengado: rowsC.reduce((s, r) => s + r.devengado, 0),
+          total_cobrable: rowsC.reduce((s, r) => s + r.cobrable, 0),
+          total_pagado: rowsC.reduce((s, r) => s + r.pagado, 0),
+          total_pendiente: 0,
+        },
+        meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, tipo: tipoFiltro, fuente: 'cuenta_personal' },
+      })
+    }
 
     // ── Camino rápido (RPC): sin filtros granulares, agrega en Postgres ────────
     if (!clienteId && !pedidoId && !articuloId && !comprobanteId) {
@@ -130,86 +200,15 @@ export async function GET(req: NextRequest) {
       return q.order('id', { ascending: true })
     }
 
-    // ── COBRADA: lo efectivamente cobrado vive en `comisiones` tipo 'cobrada'
-    //    (por línea + débito −10% de contado). El kardex tiene la comisión
-    //    VENDIDA, antes del descuento. Mismo criterio que el RPC (v2). ────────
-    if (tipoFiltro === 'cobrada') {
-      let cq = supabase
-        .from('comisiones')
-        .select('id, viajante_id, pedido_id, articulo_id, comprobante_venta_id, monto, pagado, fecha_comprobante_cobrado, created_at, kardex:kardex_id(cliente_id, articulo_categoria), pedidos:pedido_id(cliente_id)')
-        .eq('tipo', 'cobrada')
-        .neq('monto', 0)
-        .order('id', { ascending: true })
-      if (viajanteId) cq = cq.eq('viajante_id', viajanteId)
-      if (articuloId) cq = cq.eq('articulo_id', articuloId)
-      if (pedidoId) cq = cq.eq('pedido_id', pedidoId)
-      if (comprobanteId) cq = cq.eq('comprobante_venta_id', comprobanteId)
-      const cobradasRows = await fetchAllRows(() => cq)
-
-      for (const c of cobradasRows as any[]) {
-        const cliente = c.kardex?.cliente_id ?? c.pedidos?.cliente_id ?? null
-        if (clienteId && cliente !== clienteId) continue
-        const monto = Number(c.monto ?? 0)
-        const vid = c.viajante_id ?? 'sin_vendedor'
-        const fechaFiltro = fechaISO(c.fecha_comprobante_cobrado ?? c.created_at) // timestamptz → día argentino
-        const inCurrent = fechaFiltro >= dateFrom && fechaFiltro <= dateTo
-        const inPrev = fechaFiltro >= prev.from && fechaFiltro <= prev.to
-        if (!inCurrent && !inPrev) continue
-        const agg = ensureAgg(vid)
-        if (inCurrent) {
-          agg.devengado += monto
-          agg.cobrable += monto
-          if (c.pagado) agg.pagado += monto
-          else agg.pendiente += monto
-          if (c.pedido_id) agg.pedidos.add(c.pedido_id)
-          if (cliente) agg.clientes.add(cliente)
-          const seg = c.kardex?.articulo_categoria ?? (monto < 0 ? 'dto. 10% contado' : 'sin_segmento')
-          agg.por_segmento[seg] = (agg.por_segmento[seg] ?? 0) + monto
-        }
-        if (inPrev) agg.devengadoPrev += monto
-      }
-
-      const rowsC = [...aggMap.entries()]
-        .map(([vId, agg]) => ({
-          viajante_id: vId,
-          nombre: agg.nombre,
-          devengado: agg.devengado,
-          devengado_anterior: agg.devengadoPrev,
-          variacion_pct: agg.devengadoPrev > 0
-            ? ((agg.devengado - agg.devengadoPrev) / Math.abs(agg.devengadoPrev)) * 100
-            : agg.devengado > 0 ? 100 : 0,
-          cobrable: agg.cobrable,
-          pagado: agg.pagado,
-          pendiente_cobro: agg.pendiente,
-          cantidad_pedidos: agg.pedidos.size,
-          cantidad_clientes: agg.clientes.size,
-          por_segmento: agg.por_segmento,
-        }))
-        .filter(r => r.devengado !== 0 || r.devengado_anterior !== 0)
-        .sort((a, b) => b.devengado - a.devengado)
-      if (!rowsC.length) return NextResponse.json(empty)
-      return NextResponse.json({
-        rows: rowsC,
-        summary: {
-          total_devengado: rowsC.reduce((s, r) => s + r.devengado, 0),
-          total_cobrable: rowsC.reduce((s, r) => s + r.cobrable, 0),
-          total_pagado: rowsC.reduce((s, r) => s + r.pagado, 0),
-          total_pendiente: rowsC.reduce((s, r) => s + r.pendiente_cobro, 0),
-        },
-        meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, tipo: tipoFiltro },
-      })
-    }
-
     // ── VENDIDA: comisiones por fecha de creación del movimiento (kardex) ────
     const dateField = 'fecha'
 
     // Paginate to bypass Supabase PostgREST max_rows server-side cap (default 1000)
     const PAGE_SIZE = 1000
-    const kardexRows: any[] = []
+    let kardexRows: any[] = []
     let offset = 0
     while (true) {
       let q = buildKardexQuery(dateField, prev.from, dateTo)
-      if (tipoFiltro === 'cobrada') q = q.eq('comprobante_cobrado', true)
       const { data: page, error: pageError } = await q.range(offset, offset + PAGE_SIZE - 1)
       if (pageError) throw pageError
       if (!page?.length) break
@@ -218,6 +217,8 @@ export async function GET(req: NextRequest) {
       offset += PAGE_SIZE
     }
 
+    // Sin pedidos eliminados ni del sistema viejo (#10)
+    kardexRows = await sinPedidosExcluidos(supabase, kardexRows)
     if (!kardexRows.length) return NextResponse.json(empty)
 
     // Obtener flag pagado desde tabla comisiones (join por kardex_id, por tandas:
@@ -235,7 +236,7 @@ export async function GET(req: NextRequest) {
     for (const k of kardexRows) {
       const monto = Number(k.comision_viajante_monto ?? 0)
       const vid = k.vendedor_id ?? 'sin_vendedor'
-      const fechaFiltro = fechaISO(tipoFiltro === 'cobrada' ? k.fecha_comprobante_cobrado : k.fecha) // timestamptz → día argentino
+      const fechaFiltro = fechaISO(k.fecha) // timestamptz → día argentino
       const pagado = pagadoMap.get(k.id) ?? false
 
       const inCurrent = fechaFiltro >= dateFrom && fechaFiltro <= dateTo

@@ -25,7 +25,6 @@ export async function GET(req: NextRequest) {
       .eq('pedido_eliminado', false)
 
     if (viajanteId) q = q.eq('vendedor_id', viajanteId)
-    if (tipo === 'cobrada') q = q.eq('comprobante_cobrado', true)
 
     const { data: rows, error } = await q
     if (error) throw error
@@ -62,6 +61,31 @@ export async function GET(req: NextRequest) {
       : { data: [] }
     const compMap = new Map((comprobantes ?? []).map(c => [c.id, c]))
 
+    // COBRADA = lo GANADO en la cuenta personal por comprobante (#42): neto de
+    // 10% contado y devoluciones; se reparte entre los artículos en proporción
+    // a la comisión pactada. Comprobante sin comisión ganada → no se lista.
+    const { data: movsCom } = compIds.length > 0
+      ? await supabase
+          .from('cuenta_corriente_clientes')
+          .select('referencia_id, debe, haber, fecha')
+          .eq('tipo_movimiento', 'comision')
+          .eq('referencia_tipo', 'comision')
+          .in('referencia_id', compIds)
+      : { data: [] }
+    const ganadaDe = new Map<string, { monto: number; fecha: string }>()
+    for (const m of movsCom ?? []) {
+      const g = ganadaDe.get(m.referencia_id) || { monto: 0, fecha: '' }
+      g.monto += Number(m.haber || 0) - Number(m.debe || 0)
+      const dia = fechaISO(m.fecha)
+      if (dia > g.fecha) g.fecha = dia
+      ganadaDe.set(m.referencia_id, g)
+    }
+    const pactadaDe = new Map<string, number>()
+    for (const r of rows) {
+      const cid = r.comprobante_venta_id ?? 'sin_comprobante'
+      pactadaDe.set(cid, (pactadaDe.get(cid) ?? 0) + Number(r.comision_viajante_monto ?? 0))
+    }
+
     type CompAgg = {
       comprobante_id: string
       numero: string
@@ -90,13 +114,15 @@ export async function GET(req: NextRequest) {
     for (const r of rows) {
       const cid = r.comprobante_venta_id ?? 'sin_comprobante'
       const comp = compMap.get(cid)
+      const ganada = ganadaDe.get(cid)
+      if (!ganada || Math.abs(ganada.monto) < 0.005) continue
 
       if (!compAggMap.has(cid)) {
         compAggMap.set(cid, {
           comprobante_id: cid,
           numero: comp ? `${comp.tipo_comprobante} ${comp.numero}` : '—',
           tipo_comprobante: comp?.tipo_comprobante ?? '—',
-          fecha_cobro: fechaISO(r.fecha_comprobante_cobrado), // timestamptz → día argentino
+          fecha_cobro: ganada.fecha,
           total_neto: comp?.total_neto ?? 0,
           total_iva: comp?.total_iva ?? 0,
           total: comp?.total ?? 0,
@@ -106,7 +132,10 @@ export async function GET(req: NextRequest) {
       }
 
       const agg = compAggMap.get(cid)!
-      const comMonto = Number(r.comision_viajante_monto ?? 0)
+      const pactada = pactadaDe.get(cid) ?? 0
+      const comMonto = Math.abs(pactada) >= 0.005
+        ? (ganada.monto * Number(r.comision_viajante_monto ?? 0)) / pactada
+        : 0
       agg.total_comision += comMonto
       agg.articulos.push({
         kardex_id: r.id,

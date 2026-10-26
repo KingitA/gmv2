@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { agruparPorComprobante, mapArticuloComision } from "@/lib/vendedor/comisiones-detalle"
+import { sinPedidosExcluidos } from "@/lib/comisiones/pedidos-sin-comision"
 import { comisionGanadaPorComprobante, cuentaPersonalDe } from "@/lib/cuenta-corriente/cuenta-personal"
 
 // GET /api/vendedor/comisiones/detalle?pedido_id=&tipo=cobrada|vendida
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "pedido_id requerido" }, { status: 400 })
     }
 
-    const rows = await fetchAllRows(() => {
+    const rows = await sinPedidosExcluidos(supabase, await fetchAllRows(() => {
       let q = supabase
         .from("kardex")
         .select(
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
         .in("vendedor_id", session.vendedorIds)
       if (tipo === "cobrada") q = q.eq("comprobante_cobrado", true)
       return q
-    })
+    }))
 
     if (tipo === "vendida") {
       return NextResponse.json({ tipo, articulos: (rows || []).map(mapArticuloComision) })
