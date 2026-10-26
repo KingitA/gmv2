@@ -51,15 +51,15 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 
 | # | Tarea | Dueño | Estado |
 |---|---|---|---|
-| 5, 6, 7, 8, 18 | Apertura: importar el reporte real (no frenar todo, texto libre como ajuste, cuentas del personal, segunda columna de saldo, PRES viejos como PV 2) | Cuentas corrientes | Pendiente |
-| 28 | Devolución de un artículo que no está en el comprobante: comprobante anterior o el 0002-00000001 | Cuentas corrientes | Pendiente |
-| 29, 36 | Billeteras con plata "fantasma" después de rendir | Cuentas corrientes | Pendiente |
-| 33 | El 10 % contado sobre mercadería ya devuelta (lado servidor de V2) | Cuentas corrientes | Pendiente |
-| 10, 11, 42 | Comisiones: "sin cobrar" inflado, pedidos sin número, Playroom en $0 | Cuentas corrientes | Pendiente |
-| 30 | Números sin formato en los textos de la rendición | Cuentas corrientes | Pendiente |
-| 37 | /caja: el total no descuenta lo que el cliente tiene a cuenta | Cuentas corrientes | Pendiente |
-| 35 | Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5) | Cuentas corrientes | Pendiente |
-| 25 | Tope de devolución en el servidor (lado servidor de C2) | Cuentas corrientes | Pendiente |
+| 5, 6, 7, 8, 18 | Apertura: importar el reporte real (no frenar todo, texto libre como ajuste, cuentas del personal, segunda columna de saldo, PRES viejos como PV 2) | Cuentas corrientes | **En curso** 26/10 (sesión cuentas corrientes, carpeta gmv2-cc) |
+| 28 | Devolución de un artículo que no está en el comprobante: comprobante anterior o el 0002-00000001 | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| 29, 36 | Billeteras con plata "fantasma" después de rendir | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| 33 | El 10 % contado sobre mercadería ya devuelta (lado servidor de V2) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| 10, 11, 42 | Comisiones: "sin cobrar" inflado, pedidos sin número, Playroom en $0 | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| 30 | Números sin formato en los textos de la rendición | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| 37 | /caja: el total no descuenta lo que el cliente tiene a cuenta | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| 35 | Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| 25 | Tope de devolución en el servidor (lado servidor de C2) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | 23 | El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1) | Hojas de ruta/viajes y cobranzas | Pendiente |
 | 27 | La parada dice "cobró de menos" cuando sobró | Hojas de ruta/viajes y cobranzas | Pendiente |
 | 22 | Cargar bultos o pallets en el ERP antes de finalizar el viaje | Hojas de ruta/viajes y cobranzas | Pendiente |
