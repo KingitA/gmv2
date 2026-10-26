@@ -57,7 +57,7 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | ~~33~~ | ~~El 10 % contado sobre mercadería ya devuelta (lado servidor de V2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | 10, 11, 42 | Comisiones: "sin cobrar" inflado, pedidos sin número, Playroom en $0 | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | ~~30~~ | ~~Números sin formato en los textos de la rendición~~ | Cuentas corrientes | **Hecho 26/10** en la misma migración (`fmt_moneda`) |
-| 37 | /caja: el total no descuenta lo que el cliente tiene a cuenta | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| ~~37~~ | ~~/caja: el total no descuenta lo que el cliente tiene a cuenta~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | ~~35~~ | ~~Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | ~~25~~ | ~~Tope de devolución en el servidor (lado servidor de C2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | ~~23~~ | ~~El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1)~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
@@ -168,7 +168,9 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 
 **Qué pasó:** FITTERER tenía $20.000 a cuenta, que le había dado al chofer. En /caja, el resumen chico decía "a favor / a cuenta −$20.000 · Saldo de la cuenta $4.403.099,76", pero el **"Total a pagar"** grande y el cálculo del 10 % usaron **$4.423.099,76**. Pagó todo y quedó con $20.000 a favor.
 
-- [ ] /caja ofrece **usar lo que está a cuenta** (lo aplica la oficina, regla 39) y muestra el total neto. El 10 % contado se calcula sobre lo que realmente se paga.
+- [x] /caja ofrece **usar lo que está a cuenta** (lo aplica la oficina, regla 39) y muestra el total neto. El 10 % contado se calcula sobre lo que realmente se paga.
+
+**HECHO 26/10 (cuentas corrientes), sin migración:** al elegir el cliente, /caja (`components/caja/registrar-cobro.tsx`) pide `GET /api/pagos-clientes/creditos?cliente_id=` y muestra el recuadro **"Tiene a favor"**: NC/REV vivas y entregas a cuenta (confirmadas, en oficina o sin rendir) con su disponible, sin lo que ya tomaron otros cobros sin confirmar. La oficina tilda lo que usa (se puede bajar el monto) y viaja como `creditos_aplicar` (el servidor ya lo validaba y lo ejecuta al confirmar). Cuenta: **seleccionado − a favor − NC 10 % = a cobrar**; "Total a pagar" del selector también sale neto. El 10 % sigue siendo el de cada comprobante (regla 07/10): la plata a cuenta no lleva 10 % en contra; una NC de mercadería tildada con contado sí (check "10 % en contra", igual que la app vendedor). La lista sale de `lib/cobranzas/creditos-a-favor.ts`, que ahora usa también la ficha del vendedor (`lib/vendedor/ficha-cliente.ts`, misma respuesta). FITTERER hoy: entrega a cuenta del 25/10 con $20.000 disponibles.
 
 ### #30 — Números sin formato en los textos de la rendición
 

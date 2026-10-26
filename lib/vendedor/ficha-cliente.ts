@@ -3,9 +3,8 @@
 // que también lo use la réplica de la app Vendedor (lib/mobile/sync/vendedor.ts)
 // sin re-autenticar por cliente. Ver MOBILE.md → "Vendedor".
 
-import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
 import { enCobroPorComprobante } from "@/lib/cobranzas/en-cobro"
-import { reservasDeCreditos } from "@/lib/cobranzas/creditos"
+import { creditosAFavor } from "@/lib/cobranzas/creditos-a-favor"
 import { PREFIJO_AJUSTE_APERTURA } from "@/lib/apertura/parsear-chr"
 import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
@@ -120,72 +119,16 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
     .limit(10)
 
   // ── PLATA A FAVOR del cliente (el vendedor debe verla al cobrar: sin esto
-  // podría cobrar la deuda bruta cuando el cliente tiene crédito) ──
-  // a) Créditos documento vivos: NC/REV con saldo disponible
-  const { data: creditosVivosDb } = await supabase
-    .from("comprobantes_venta")
-    .select("id, tipo_comprobante, numero_comprobante, fecha, saldo_pendiente")
-    .eq("cliente_id", id)
-    .lt("saldo_pendiente", -0.005)
-    .is("anulado_en", null)
-    .neq("estado_pago", "anulado")
-    .order("fecha", { ascending: true })
-  // Lo que ya tomaron cobros sin confirmar no está disponible: se descuenta
-  // de cada crédito (auditoría 21/10, créditos usados dos veces). La app
-  // muestra este número tal cual.
-  const reservas = await reservasDeCreditos(supabase, id)
-  const creditosVivos = (creditosVivosDb || [])
-    .map((c: any) => ({
-      ...c,
-      saldo_pendiente: -Math.round(Math.max(0, -Number(c.saldo_pendiente) - (reservas.get(c.id) ?? 0)) * 100) / 100,
-    }))
-    .filter((c: any) => Number(c.saldo_pendiente) < -0.005)
-
-  // b) Entregas a cuenta con disponible sin imputar. No solo confirmadas:
-  // también las que están EN VIAJE (sin rendir) o EN OFICINA (sin confirmar)
-  // — el movimiento existe y el vendedor debe poder tildarlo para no cobrar
-  // dos veces. Las rechazadas de los últimos 30 días se listan informativas
-  // (NO descuentan).
-  const { data: pagosConfirmados } = await supabase
-    .from("pagos_clientes")
-    .select("id, monto, fecha_pago, estado, vendedor_id, creado_por")
-    .eq("cliente_id", id)
-    .in("estado", ["confirmado", "pendiente", "pendiente_rendicion", "rechazado"])
-  const confIds = (pagosConfirmados || []).map((p: any) => p.id)
-  const impsPorPagoConf = new Map<string, any[]>()
-  if (confIds.length) {
-    const { data: impsConf } = await supabase
-      .from("imputaciones")
-      .select("pago_id, monto_imputado, estado, comprobante:comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante)")
-      .in("pago_id", confIds)
-    for (const i of impsConf || []) {
-      if (!impsPorPagoConf.has(i.pago_id)) impsPorPagoConf.set(i.pago_id, [])
-      impsPorPagoConf.get(i.pago_id)!.push(i)
-    }
-  }
-  const cutoffRechazadas = sumarDiasISO(hoyISO(), -30)
-  const aCuenta = (pagosConfirmados || [])
-    .map((p: any) => ({
-      pago_id: p.id,
-      fecha: p.fecha_pago,
-      estado: p.estado as string,
-      monto: Number(p.monto) || 0,
-      // ¿La tiene este usuario? (para el rótulo "en tu poder")
-      mia: session.vendedorIds.includes(p.vendedor_id) || p.creado_por === session.user.id,
-      disponible: Math.round(Math.max(0, disponibleDePago(
-        p.monto,
-        (impsPorPagoConf.get(p.id) || []).map((i: any) => ({
-          monto_imputado: i.monto_imputado,
-          estado: i.estado,
-          tipo_comprobante_destino: (i.comprobante as any)?.tipo_comprobante ?? null,
-        })),
-      ) - (reservas.get(p.id) ?? 0)) * 100) / 100,
-    }))
-    .filter((p: any) =>
-      p.estado === "rechazado"
-        ? (p.fecha || "") >= cutoffRechazadas
-        : p.disponible > 0.005
-    )
+  // podría cobrar la deuda bruta cuando el cliente tiene crédito). NC/REV vivas
+  // y entregas a cuenta, sin lo que ya tomaron cobros sin confirmar (misma
+  // fuente que /caja). Las rechazadas de los últimos 30 días van informativas.
+  const aFavor = await creditosAFavor(supabase, id, { incluirRechazadasDesde: sumarDiasISO(hoyISO(), -30) })
+  const creditosVivos = aFavor.creditos
+  const aCuenta = aFavor.aCuenta.map(({ vendedor_id, creado_por, ...p }) => ({
+    ...p,
+    // ¿La tiene este usuario? (para el rótulo "en tu poder")
+    mia: session.vendedorIds.includes(vendedor_id as string) || creado_por === session.user.id,
+  }))
   // Ajustes de APERTURA (texto libre del sistema viejo, #6/#7): parte del saldo
   // sin comprobante. La app los puede listar para que lo pendiente sume el saldo.
   const { data: ajustesApDb } = await supabase
@@ -202,10 +145,7 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
     monto: Math.round((Number(a.debe || 0) - Number(a.haber || 0)) * 100) / 100,
   }))
 
-  const totalAFavor = Math.round((
-    (creditosVivos || []).reduce((s: number, c: any) => s + Math.abs(Number(c.saldo_pendiente)), 0)
-    + aCuenta.filter((p: any) => p.estado !== "rechazado").reduce((s: number, p: any) => s + p.disponible, 0)
-  ) * 100) / 100
+  const totalAFavor = aFavor.totalAFavor
 
   // Devoluciones sin confirmar (todavía no tienen NC/reversa emitida), con
   // cuánto ya se descontó en cobros anteriores (se puede descontar parcial).
