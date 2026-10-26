@@ -361,6 +361,8 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 
 ## Resumen para repartir (25/10)
 
+**Traspasos para los agentes (26/10):** [`docs/PENDIENTES-APPS-SALIDA.md`](PENDIENTES-APPS-SALIDA.md) (apps chofer, vendedor y depósito) y [`docs/PENDIENTES-ERP-SALIDA.md`](PENDIENTES-ERP-SALIDA.md) (cuentas corrientes, frontend, listas de precios y descuentos, hojas de ruta/viajes y cobranzas). Cada agente tacha su parte ahí y acá.
+
 **43 problemas anotados: 4 cerrados (1, 4, 15 y 38) y 39 abiertos. Todas las decisiones pendientes de Juan se tomaron el 26/10.**
 
 ### Antes de pasar a producción (tocan plata o frenan el pase)
@@ -478,7 +480,7 @@ Armado el 23/10/2026. Es la lista que vamos tildando juntos con Juan. Cada casil
 | 38 | 8b | **¿El 10 % contado corresponde sobre la deuda vieja?** El 10 % de FITTERER ($442.309,98) incluyó los 2 PRES de junio que vinieron del sistema viejo ($3.784.286,00 → $378.428,60 de descuento). **Juan (25/10): sí, el 10 % contado también aplica a la deuda vieja.** Está bien como funciona | — | **Cerrado: no es error** |
 | 39 | 8b | **Imputar ofrece como anticipo un pedido que no se va a facturar.** El modal de imputación propuso el pedido 001942 (todo faltante, "Sin facturar (anticipo)") por $115.545,25. Un pedido con todos sus renglones faltantes no tendría que aparecer como cobrable. Es la misma raíz que el problema 17 | ERP + servidor | Anotado 25/10 |
 | 40 | 9.1 | La billetera y las rendiciones del chofer figuran como **"d6ac25bb"** (un pedazo del código del usuario) en el tablero de Finanzas, en vez de "Juan Cruz" | ERP (tablero) | Anotado 25/10 |
-| 41 | 9.4 | **App vendedor, "Mercadería cobrada": la comisión del pedido no descuenta las devoluciones.** El 001939 muestra $65.822,31 (comisión pactada × 90 %), pero se acreditaron $51.175,19 porque se devolvieron 240 bolsas. Es el pendiente V3 de la app vendedor ("Mercadería cobrada" y "Comisiones ganadas" tienen que coincidir) | App vendedor + servidor (/api/vendedor/comisiones) | Anotado 25/10 |
+| 41 | 9.4 | **App vendedor, "Mercadería cobrada": la comisión del pedido no descuenta las devoluciones.** El 001939 muestra $65.822,31 (comisión pactada × 90 %), pero se acreditaron $51.175,19 porque se devolvieron 240 bolsas. Es el pendiente V3 de la app vendedor ("Mercadería cobrada" y "Comisiones ganadas" tienen que coincidir) | App vendedor + servidor (/api/vendedor/comisiones) | **Hecho 26/10 por el agente vendedor (ea55e14)**: la lista sale de la cuenta personal; 001939 = $51.175,19 |
 | 42 | 9.4 | **Playroom, comisiones: $0 en octubre.** El tablero lee las comisiones "cobradas" de la tabla vieja, que desde la etapa 3 de cuentas corrientes ya no se escribe. Tiene que leer la comisión acreditada en la cuenta personal | Servidor (Playroom) | Anotado 25/10 |
 | 43 | 9.1 | **El gasto de nafta ($25.000) quedó "a revisar en oficina" después de rendir.** La rendición se confirmó, pero el gasto sigue "declarado": nadie lo aprobó ni lo rechazó. Hay que definir dónde lo revisa la oficina, si tiene que hacerlo antes de confirmar la rendición, o si confirmar la rendición ya lo aprueba | ERP + servidor (Juan define) | Anotado 25/10 |
 
