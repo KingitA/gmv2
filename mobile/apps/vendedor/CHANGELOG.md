@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.4 (versionCode 13) — 2026-10-26
+
+- Comisiones: Mercadería cobrada coincide con Comisiones ganadas (sin devoluciones ni contado)
+
 ## v0.4.3 (versionCode 12) — 2026-10-23
 
 - Devoluciones tal cual fueron facturadas (mismo valor que la NC, precio facturado bloqueado); en Cobrar el pedido muestra lo que debe y no su total; tope de reintentos del envío
