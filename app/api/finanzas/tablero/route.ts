@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { conNombreCobrador } from "@/lib/finanzas/nombres-cobradores"
 
 /**
  * GET /api/finanzas/tablero — todos los KPIs de tesorería en una llamada.
@@ -44,8 +45,9 @@ export async function GET() {
       posicion: posicion.data || [],
       cheques: cheques.data || [],
       verificacion: verificacion.data || null,
-      rendiciones: rendiciones.data || [],
-      dias_calle: calle.data || [],
+      // #40: los choferes son usuarios, no vendedores: la vista mostraba un pedazo del id
+      rendiciones: await conNombreCobrador(supabase, (rendiciones.data || []) as any[]),
+      dias_calle: await conNombreCobrador(supabase, (calle.data || []) as any[]),
       cierres: cierres.data || [],
       costo_cheques: costos.data || [],
       proyeccion: proyeccion.data || [],

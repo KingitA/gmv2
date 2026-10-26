@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuth } from "@/lib/auth"
+import { conNombreCobrador } from "@/lib/finanzas/nombres-cobradores"
 
 /**
  * GET /api/finanzas/panel — datos chicos que suma el Panel de Finanzas (solo lectura):
@@ -45,13 +46,14 @@ export async function GET() {
       }
     }
 
-    const enCalle = ((calle.data || []) as any[]).reduce((t, d) => t + (Number(d.en_calle) || 0), 0)
+    const filasCalle = await conNombreCobrador(sb, (calle.data || []) as any[])
+    const enCalle = filasCalle.reduce((t, d) => t + (Number(d.en_calle) || 0), 0)
     const porVerificar = (pendientes.data || []) as any[]
 
     return NextResponse.json({
       ultimos_ajustes: ultimos,
       en_calle: enCalle,
-      en_calle_detalle: ((calle.data || []) as any[])
+      en_calle_detalle: filasCalle
         .filter((d) => Number(d.en_calle) > 0)
         .map((d) => ({ nombre: d.cobrador_nombre ?? "—", monto: Number(d.en_calle), dias: d.dias_calle ?? null })),
       cobros_por_verificar: { cantidad: porVerificar.length, monto: porVerificar.reduce((t, p) => t + (Number(p.monto) || 0), 0) },

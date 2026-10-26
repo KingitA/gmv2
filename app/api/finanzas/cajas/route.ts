@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { nombresCobradores } from "@/lib/finanzas/nombres-cobradores"
 
 /**
  * GET /api/finanzas/cajas — todas las cuentas de fondos con sus saldos
@@ -68,17 +69,16 @@ export async function GET() {
       ...new Set(saldos.filter((s) => s.cuenta_tipo === "BILLETERA").map((s) => s.cuenta_id)),
     ]
     if (billeteraIds.length) {
-      const { data: vendedores } = await supabase
-        .from("vendedores")
-        .select("id, nombre")
-        .in("id", billeteraIds)
+      // Vendedores y choferes (usuarios): #40
+      const nombres = await nombresCobradores(supabase, billeteraIds)
       for (const id of billeteraIds) {
         cuentas.push({
           cuenta_tipo: "BILLETERA",
           cuenta_id: id,
-          nombre: `Billetera ${vendedores?.find((v) => v.id === id)?.nombre ?? id.slice(0, 8)}`,
+          nombre: `Billetera ${nombres.get(id) ?? id.slice(0, 8)}`,
           grupo: "BILLETERAS",
           saldos: saldoDe("BILLETERA", id),
+          updated_at: updatedDe("BILLETERA", id),
         })
       }
     }
