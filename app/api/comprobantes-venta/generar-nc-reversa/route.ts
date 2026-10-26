@@ -226,6 +226,8 @@ export async function POST(request: Request) {
       let clienteCuit = ""
       let condIvaReceptor: number | null = null
       const cbteAsoc: { tipo: number; ptoVta: number; nro: number }[] = []
+      // Sin comprobante asociado: período del mes de emisión (PeriodoAsoc, RG 4540)
+      let periodoAsoc: { desde: string; hasta: string } | undefined
       const origenIds: string[] = [...new Set(parte.items.map((it: any) => it.comprobante_venta_id).filter(Boolean) as string[])]
       if (esFiscal) {
         if (!devolucion.cliente?.cuit || devolucion.cliente.cuit.trim() === '') {
@@ -289,12 +291,15 @@ export async function POST(request: Request) {
           cbteAsoc.push({ tipo: tipoArca, ptoVta, nro })
         }
 
-        // RG 4540: una NC/ND fiscal no puede emitirse sin comprobante asociado
+        // RG 4540: la NC informa el comprobante asociado O el período asociado.
+        // Lo devuelto sin comprobante con ese artículo (#28: venta del sistema
+        // viejo o nunca facturada) sale con PERÍODO, sin inventar un asociado ni
+        // para ARCA ni para el sistema (Juan 26/10). Período = del 1° del mes a la
+        // fecha de emisión: con percepciones ARCA exige el mismo mes/año (10217)
+        // y la fecha "hasta" no puede pasar la de emisión.
         if (cbteAsoc.length === 0) {
-          throw corte({
-            error: 'No se detectó ningún comprobante original asociado a esta devolución (RG 4540). Ingresá manualmente el/los comprobantes que esta NC ajusta antes de emitir.',
-            error_code: 'NC_SIN_ASOCIADO',
-          }, 422)
+          const hoyNc = todayArgentina()
+          periodoAsoc = { desde: `${hoyNc.slice(0, 7).replace("-", "")}01`, hasta: hoyNc.replace(/-/g, "") }
         }
       }
 
@@ -375,6 +380,7 @@ export async function POST(request: Request) {
             ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
             : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
           cbteAsoc,
+          periodoAsoc,
           tributos: tributos.length > 0 ? tributos : undefined,
           condicionIVAReceptorId: condIvaReceptor!,
         })
@@ -397,7 +403,7 @@ export async function POST(request: Request) {
         saldo_pendiente:    -Math.abs(totalComprobante),
         estado_pago:        "pendiente",
         motivo_ajuste:      motivo_ajuste,
-        observaciones:      `${prefijoObs}${aplica10 ? " (renglones bonificados 10% contado — la factura original fue cobrada con el descuento)" : ""}`,
+        observaciones:      `${prefijoObs}${aplica10 ? " (renglones bonificados 10% contado — la factura original fue cobrada con el descuento)" : ""}${periodoAsoc ? ` (sin comprobante asociado: período ${periodoAsoc.desde.slice(6, 8)}/${periodoAsoc.desde.slice(4, 6)}/${periodoAsoc.desde.slice(0, 4)} al ${periodoAsoc.hasta.slice(6, 8)}/${periodoAsoc.hasta.slice(4, 6)}/${periodoAsoc.hasta.slice(0, 4)} informado a ARCA)` : ""}`,
         ...(cae            ? { cae }                             : {}),
         ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
       }
@@ -531,9 +537,11 @@ export async function POST(request: Request) {
             p_usuario_id: auth.user.id,
           })
           if (impErr) {
-            // "sin saldo disponible/pendiente" es esperable cuando el crédito se agotó
+            // "sin saldo disponible/pendiente" es esperable cuando el crédito se
+            // agotó o el origen ya no debe nada (el PRES de respaldo 0002-00000001
+            // está en $0, #28): se sigue con el próximo origen, no se corta.
             console.warn("[cc_imputar_credito] NC", comprobante.id, "→", origenId, impErr.message)
-            break
+            continue
           }
           if (Number(impRes?.credito_saldo_restante) >= 0) break // crédito agotado
         }

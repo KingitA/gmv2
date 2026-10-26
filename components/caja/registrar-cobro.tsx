@@ -101,6 +101,16 @@ export function RegistrarCobro({
   const [dtosHechos, setDtosHechos] = useState<Set<string>>(new Set())
   const [contadoPedidos, setContadoPedidos] = useState<Set<string>>(new Set())
   const [aplicarContado, setAplicarContado] = useState(false)
+  // Plata a favor del cliente (#37, regla 39: la oficina decide si la usa).
+  // NC/REV vivas y entregas a cuenta; credSel: "nc:<id>" | "ac:<pago_id>" →
+  // monto a usar. cred10: crédito de MERCADERÍA sin el 10% hecho → con contado
+  // se le aplica el 10% en contra (como la app vendedor). Nunca a la plata a cuenta.
+  const [aFavor, setAFavor] = useState<{
+    creditos: { id: string; tipo_comprobante: string; numero_comprobante: string; fecha: string; saldo_pendiente: number }[]
+    a_cuenta: { pago_id: string; fecha: string; estado: string; monto: number; disponible: number }[]
+  }>({ creditos: [], a_cuenta: [] })
+  const [credSel, setCredSel] = useState<Record<string, number>>({})
+  const [cred10, setCred10] = useState<Record<string, boolean>>({})
   // Fotos de comprobantes
   const [archivos, setArchivos] = useState<{ url: string; nombre: string }[]>([])
   const [subiendo, setSubiendo] = useState(false)
@@ -130,12 +140,42 @@ export function RegistrarCobro({
     setAplicarContado(false)
     setModoPedidos("facturados")
     setResumen(null)
+    setCredSel({})
+    setCred10({})
+    setAFavor({ creditos: [], a_cuenta: [] })
+    if (!cliente?.id) return
+    let vivo = true
+    fetch(`/api/pagos-clientes/creditos?cliente_id=${cliente.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (vivo && d) setAFavor({ creditos: d.creditos || [], a_cuenta: d.a_cuenta || [] })
+      })
+      .catch(() => {})
+    return () => {
+      vivo = false
+    }
   }, [cliente?.id])
 
   const totalSeleccionado = useMemo(
     () => Object.values(seleccionados).reduce((s, v) => s + (Number(v) || 0), 0),
     [seleccionados]
   )
+
+  // Lo que se puede descontar con plata a favor: solo contra COMPROBANTES
+  // tildados (el servidor asigna los créditos FIFO a las imputaciones; a un
+  // anticipo de pedido sin facturar no se le aplica crédito).
+  const totalComprobantesSel = useMemo(
+    () =>
+      Object.entries(seleccionados)
+        .filter(([k]) => !k.startsWith(PEDIDO_PREFIX))
+        .reduce((s, [, v]) => s + (Number(v) || 0), 0),
+    [seleccionados]
+  )
+  const totalCreditos = useMemo(
+    () => round2(Math.min(Object.values(credSel).reduce((s, v) => s + (Number(v) || 0), 0), totalComprobantesSel)),
+    [credSel, totalComprobantesSel]
+  )
+  const hayAFavor = aFavor.creditos.length > 0 || aFavor.a_cuenta.length > 0
 
   // Preview del 10% contado — REGLA 07/10 (dueño): la NC es el 10% del TOTAL
   // de cada comprobante, una sola vez, aunque este cobro pague una parte.
@@ -147,8 +187,13 @@ export function RegistrarCobro({
       const comp = comprobantes.find((c) => c.id === key)
       if (comp) total += Math.min(Math.max(0, Number(v) || 0), Math.abs(Number(comp.total_factura) || 0) * 0.1)
     }
-    return round2(total)
-  }, [aplicarContado, seleccionados, dtosHechos, comprobantes])
+    // Crédito de mercadería sin el 10% hecho: el 10% de lo usado va en contra
+    // (regla 25/08 — el servidor asienta ese débito al ejecutar el crédito)
+    for (const [key, m] of Object.entries(credSel)) {
+      if (key.startsWith("nc:") && cred10[key] && m > 0) total -= m * 0.1
+    }
+    return round2(Math.max(0, total))
+  }, [aplicarContado, seleccionados, dtosHechos, comprobantes, credSel, cred10])
 
   // ── Fotos: subir / cámara / pegar captura ──
   const subirArchivos = useCallback(
@@ -261,6 +306,8 @@ export function RegistrarCobro({
     setSeleccionados({})
     setAplicarContado(false)
     setArchivos([])
+    setCredSel({})
+    setCred10({})
   }
 
   // Arma el payload del método que se está editando en la barra (null si incompleto)
@@ -315,11 +362,13 @@ export function RegistrarCobro({
     metodosAgregados.reduce((s, m) => s + m.monto, 0) + (monto ?? 0)
 
   // ── Resumen del cobro (se actualiza al confirmar el monto, no por tecla) ──
-  // Neto a cobrar = lo seleccionado − la NC del 10% (si está tildado).
+  // Neto a cobrar = lo seleccionado − lo que tiene a favor (tildado) − la NC
+  // del 10% (si está tildado). FITTERER (#37): sin restar lo a cuenta, pagaba
+  // todo y le quedaban $20.000 a favor.
   const totalCobroConfirmado = metodosAgregados.reduce((s, m) => s + m.monto, 0) + montoConfirmado
-  const netoACobrar = round2(totalSeleccionado - (aplicarContado ? bonificacionEstimada : 0))
+  const netoACobrar = round2(totalSeleccionado - totalCreditos - (aplicarContado ? bonificacionEstimada : 0))
   const restaSaldar = round2(netoACobrar - totalCobroConfirmado)
-  const mostrarResumen = totalSeleccionado > 0 && (totalCobroConfirmado > 0 || aplicarContado)
+  const mostrarResumen = totalSeleccionado > 0 && (totalCobroConfirmado > 0 || aplicarContado || totalCreditos > 0)
 
   const registrar = async (modoDiferencia?: "saldo" | "ajuste" | "sobra_ajuste" | "sobra_cuenta") => {
     setDialogoFalta(null)
@@ -357,7 +406,7 @@ export function RegistrarCobro({
     //    redondeo (crédito en cuenta corriente) → nadie cobra centavos.
     //  - "saldo": se recorta la última imputación (pago parcial, queda saldo).
     const totalMetodos = metodosCobro.reduce((s, m) => s + m.monto, 0)
-    const cubierto = round2(totalMetodos + (aplicarContado ? bonificacionEstimada : 0))
+    const cubierto = round2(totalMetodos + totalCreditos + (aplicarContado ? bonificacionEstimada : 0))
     const falta = round2(totalSeleccionado - cubierto)
     const totalImputable = imputaciones.reduce((s, i) => s + i.monto_imputado, 0)
     let recorte = 0
@@ -369,7 +418,7 @@ export function RegistrarCobro({
         toast({
           variant: "destructive",
           title: "Falta plata para lo seleccionado",
-          description: `Entre métodos${aplicarContado ? " + NC 10%" : ""} cubrís ${moneda(cubierto)} y seleccionaste ${moneda(totalSeleccionado)}. Bajá la selección o agregá un método.`,
+          description: `Entre métodos${totalCreditos > 0 ? " + lo que tiene a favor" : ""}${aplicarContado ? " + NC 10%" : ""} cubrís ${moneda(cubierto)} y seleccionaste ${moneda(totalSeleccionado)}. Bajá la selección o agregá un método.`,
         })
         return
       }
@@ -425,6 +474,14 @@ export function RegistrarCobro({
             .filter(([k, v]) => k.startsWith(PEDIDO_PREFIX) && Number(v) > 0)
             .map(([k, v]) => ({ pedido_id: k.replace(PEDIDO_PREFIX, ""), monto: Number(v) })),
           pedidos_contado: [...contadoPedidos],
+          // Plata a favor tildada (#37): se aplica a los comprobantes al
+          // confirmarse el cobro; el servidor valida el disponible.
+          creditos_aplicar: Object.entries(credSel)
+            .filter(([, m]) => m > 0)
+            .map(([key, m]) => {
+              const [tipo, id] = key.split(":")
+              return { tipo, id, monto: m, aplicar_10: tipo === "nc" && aplicarContado && !!cred10[key] }
+            }),
           comprobante_urls: archivos,
           // El servidor decide (efectivo/cheque físico al acto; transferencia/echeq pendiente)
           confirmar: true,
@@ -752,8 +809,96 @@ export function RegistrarCobro({
               onContadoPedidosChange={setContadoPedidos}
               modo={modoPedidos}
               onResumenLoaded={setResumen}
+              aFavorAplicado={totalCreditos}
             />
           </div>
+
+          {/* ── Lo que el cliente tiene a favor (#37): la oficina decide si lo usa ── */}
+          {hayAFavor && (
+            <div className="mt-2 rounded-lg border border-green-200 bg-green-50/50 px-3 py-2">
+              <p className="text-xs font-semibold text-green-800">
+                Tiene a favor — tildá lo que querés usar en este cobro
+                {totalComprobantesSel <= 0.005 && (
+                  <span className="font-normal text-slate-500"> (primero tildá los comprobantes a pagar)</span>
+                )}
+              </p>
+              <div className="mt-1.5 flex flex-col gap-1">
+                {[
+                  ...aFavor.creditos.map((c) => ({
+                    key: `nc:${c.id}`,
+                    titulo: `${c.tipo_comprobante === "REV" ? "Reversa" : "Nota de crédito"} ${c.numero_comprobante}`,
+                    detalle: fmtFecha(c.fecha),
+                    disp: round2(Math.abs(Number(c.saldo_pendiente))),
+                    esNC: true,
+                  })),
+                  ...aFavor.a_cuenta.map((p) => ({
+                    key: `ac:${p.pago_id}`,
+                    titulo: `Entrega a cuenta ${fmtFecha(p.fecha)}`,
+                    detalle:
+                      p.estado === "pendiente_rendicion"
+                        ? "en poder del vendedor/chofer, sin rendir"
+                        : p.estado === "pendiente"
+                          ? "en oficina, sin confirmar"
+                          : "confirmada",
+                    disp: round2(p.disponible),
+                    esNC: false,
+                  })),
+                ].map((c) => {
+                  const activo = credSel[c.key] !== undefined
+                  return (
+                    <div key={c.key} className="flex flex-wrap items-center gap-2 text-xs">
+                      <label className="inline-flex min-w-[260px] flex-1 cursor-pointer items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={activo}
+                          disabled={totalComprobantesSel <= 0.005}
+                          onChange={() => {
+                            setCredSel((prev) => {
+                              const next = { ...prev }
+                              if (next[c.key] !== undefined) delete next[c.key]
+                              else next[c.key] = c.disp
+                              return next
+                            })
+                            if (c.esNC) setCred10((prev) => (prev[c.key] === undefined ? { ...prev, [c.key]: true } : prev))
+                          }}
+                          className="h-3.5 w-3.5"
+                        />
+                        <span className="font-semibold text-slate-800">{c.titulo}</span>
+                        <span className="text-slate-500">· {c.detalle} · disponible</span>
+                        <b className="text-green-700" style={NUM}>{moneda(c.disp)}</b>
+                      </label>
+                      {activo && c.esNC && aplicarContado && (
+                        <label
+                          className="inline-flex cursor-pointer items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 font-semibold text-amber-800"
+                          title="Crédito de mercadería SIN el 10% hecho: se le aplica el 10% en contra. Destildá si la NC ya tiene el descuento."
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!cred10[c.key]}
+                            onChange={() => setCred10((prev) => ({ ...prev, [c.key]: !prev[c.key] }))}
+                            className="h-3 w-3"
+                          />
+                          10% en contra
+                        </label>
+                      )}
+                      {activo && (
+                        <InputMonto
+                          value={credSel[c.key]}
+                          onChange={(n) => setCredSel((prev) => ({ ...prev, [c.key]: Math.min(Math.max(0, n ?? 0), c.disp) }))}
+                          soloPositivos
+                          className={`${inputCls} w-28 py-0.5 text-right text-xs`}
+                          style={NUM}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Se aplica a los comprobantes tildados al confirmarse el cobro. La plata a cuenta nunca lleva 10% en contra.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -765,12 +910,24 @@ export function RegistrarCobro({
               <span className="text-slate-500">
                 Seleccionado <b className="text-slate-800" style={NUM}>{moneda(totalSeleccionado)}</b>
               </span>
+              {totalCreditos > 0 && (
+                <>
+                  <span className="text-slate-400">−</span>
+                  <span className="text-green-700">
+                    a favor <b style={NUM}>{moneda(totalCreditos)}</b>
+                  </span>
+                </>
+              )}
               {aplicarContado && bonificacionEstimada > 0 && (
                 <>
                   <span className="text-slate-400">−</span>
                   <span className="text-amber-700">
                     NC 10% <b style={NUM}>{moneda(bonificacionEstimada)}</b>
                   </span>
+                </>
+              )}
+              {(totalCreditos > 0 || (aplicarContado && bonificacionEstimada > 0)) && (
+                <>
                   <span className="text-slate-400">=</span>
                   <span className="text-slate-500">
                     a cobrar <b className="text-slate-800" style={NUM}>{moneda(netoACobrar)}</b>

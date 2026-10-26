@@ -9,6 +9,7 @@ import type { ParadaHoja, HojaRuta } from "@/lib/viajes/hoja-ruta"
 import { GastoSheet } from "@/components/chofer/gasto-sheet"
 import { fecha } from "@/lib/formato"
 import { InputMonto } from "@/components/ui/input-monto"
+import { TEXTO_ENTREGA_BLOQUEADA } from "@/lib/cobranzas/reglas-cobro"
 
 // Hoja de ruta del chofer (titular o acompañante): paradas en el orden que
 // armó oficina, con su instrucción (cobrar sí o sí / NO ENTREGAR SIN COBRAR /
@@ -97,7 +98,7 @@ export default function ViajeDashboardPage() {
   }
 
   const abrirResultado = (p: ParadaHoja) => {
-    setEstadoSel(p.pedidos.length ? "entregado" : "solo_cobro")
+    setEstadoSel(p.entrega_bloqueada ? "no_entregado" : p.pedidos.length ? "entregado" : "solo_cobro")
     setBultosEntregados("")
     setMotivoEntrega("")
     setMotivoCobro("")
@@ -174,6 +175,7 @@ export default function ViajeDashboardPage() {
         {p.bloquear_entrega && (
           <div className="mt-3 rounded-xl bg-red-600 px-3 py-2 text-center text-sm font-bold text-white">
             🔒 NO ENTREGAR SIN COBRAR{p.motivo_bloqueo ? ` — ${p.motivo_bloqueo}` : ""}
+            {p.entrega_bloqueada && <span className="mt-0.5 block text-xs font-semibold">{TEXTO_ENTREGA_BLOQUEADA}</span>}
           </div>
         )}
         {p.minimo_exigido > 0 && (
@@ -387,9 +389,14 @@ export default function ViajeDashboardPage() {
             {paradaSel && (
               <>
                 <h3 className="text-center text-xl font-bold">{paradaSel.cliente_nombre}</h3>
+                {paradaSel.entrega_bloqueada && (
+                  <p className="rounded-xl bg-red-600 px-3 py-2 text-center text-sm font-bold text-white">🔒 {TEXTO_ENTREGA_BLOQUEADA}</p>
+                )}
                 <div className="grid grid-cols-1 gap-2">
                   {(paradaSel.pedidos.length
-                    ? [["entregado", `✔ Entregué todo (${paradaSel.bultos} bultos)`], ["entregado_parcial", "◐ Entregué una parte"], ["no_entregado", "✕ No entregué"]]
+                    ? paradaSel.entrega_bloqueada
+                      ? [["no_entregado", "✕ No entregué"]]
+                      : [["entregado", `✔ Entregué todo (${paradaSel.bultos} bultos)`], ["entregado_parcial", "◐ Entregué una parte"], ["no_entregado", "✕ No entregué"]]
                     : [["solo_cobro", "✔ Pasé a cobrar"], ["no_entregado", "✕ No pude pasar / no estaba"]]
                   ).map(([valor, texto]) => (
                     <button

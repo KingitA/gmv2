@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { agruparPorCliente, ES_DEBITO, type ClienteApertura, type RenglonApertura, type TipoApertura } from "./parsear-chr"
+import { agruparPorCliente, ES_DEBITO, PREFIJO_AJUSTE_APERTURA, type ClienteApertura, type RenglonApertura, type TipoApertura } from "./parsear-chr"
 
 /**
  * APERTURA de cuentas corrientes desde el sistema viejo (regla del dueño
@@ -15,9 +15,22 @@ import { agruparPorCliente, ES_DEBITO, type ClienteApertura, type RenglonApertur
  *    en el sistema viejo), libro mayor haber. Queda "a cuenta" decidido.
  *  - No generan comisión en gmv2 (no tienen renglones de kardex).
  *
- * Controles que BLOQUEAN: cliente inexistente, tipo desconocido, fecha o
- * importe inválido, suma de lo pendiente distinta del saldo del reporte.
- * Idempotente: un comprobante/a cuenta ya cargado se saltea.
+ * Reglas del dueño del 26/10 (prueba integral de salida):
+ *  - #5: los clientes con error NO frenan el archivo: se cargan los que están
+ *    bien y los otros quedan listados aparte para corregir.
+ *  - #6/#7: el texto libre ("10%", "CHEQUE RECH", "SEGURO AUDI"…) entra como
+ *    AJUSTE del libro mayor (como "Ajustar saldo"), con el texto como concepto,
+ *    la fecha original y el signo del pendiente. Las cuentas del personal son
+ *    cuentas de cliente marcadas: lo suyo va a su cuenta personal igual.
+ *  - #8: el saldo del reporte es la columna 31 (parsear-chr).
+ *  - #18: los PRES viejos entran como PV 2; un PRES ya cargado con su número
+ *    original (PV 1) también cuenta como cargado.
+ *  - #9: un cliente cuyo CUIT y nombre no coinciden con gmv2 cambió de dueño:
+ *    es error (no se le carga la deuda de otro).
+ *
+ * Controles que BLOQUEAN AL CLIENTE (no al archivo): cliente inexistente, otro
+ * dueño, fecha o importe inválido, signo imposible, suma distinta del saldo.
+ * Idempotente: un comprobante/a cuenta/ajuste ya cargado se saltea.
  */
 
 const MOV: Record<string, string> = {
@@ -29,6 +42,11 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 /** Mediodía en Argentina: la fecha no se corre de día al guardarla como timestamptz */
 const fechaLibro = (iso: string) => `${iso}T12:00:00-03:00`
 const marcaACuenta = (numero: string) => `a cuenta ${numero}`
+export { PREFIJO_AJUSTE_APERTURA }
+/** Clave de idempotencia de un ajuste: el mismo número de renglón trae varios textos */
+const claveAjuste = (r: RenglonApertura) => `[ap:${r.numero_original}|${r.descripcion}|${r2(r.pendiente)}]`
+const soloDigitos = (s: unknown) => String(s || "").replace(/\D/g, "")
+const primeraPalabra = (s: string) => s.toUpperCase().replace(/[^A-ZÑ0-9 ]/g, " ").trim().split(/\s+/)[0] || ""
 
 export interface ClientePrevia extends ClienteApertura {
   cliente_id: string | null
@@ -36,6 +54,8 @@ export interface ClientePrevia extends ClienteApertura {
   es_empleado: boolean
   saldo_actual_gmv2: number
   ya_cargados: number
+  /** Renglones de texto libre que entran como ajuste */
+  ajustes: number
   errores: string[]
   avisos: string[]
 }
@@ -44,7 +64,12 @@ export interface Previa {
   clientes: ClientePrevia[]
   total: number
   renglones: number
+  /** Clientes con error: NO se cargan (el resto sí) */
   bloqueantes: number
+  /** Clientes que se van a cargar */
+  importables: number
+  total_importable: number
+  total_con_error: number
   puede_confirmar: boolean
 }
 
@@ -58,7 +83,7 @@ export async function previsualizarApertura(supabase: SupabaseClient, renglones:
   for (let i = 0; i < variantes.length; i += 200) {
     const { data, error } = await supabase
       .from("clientes")
-      .select("id, codigo_cliente, nombre, nombre_razon_social, es_empleado")
+      .select("id, codigo_cliente, nombre, nombre_razon_social, cuit, es_empleado")
       .in("codigo_cliente", variantes.slice(i, i + 200))
     if (error) throw error
     clientes.push(...(data || []))
@@ -70,47 +95,65 @@ export async function previsualizarApertura(supabase: SupabaseClient, renglones:
   const saldoDe = new Map<string, number>()
   const yaComp = new Set<string>()
   const yaACuenta = new Set<string>()
+  const yaAjuste = new Set<string>()
   for (let i = 0; i < ids.length; i += 150) {
     const parte = ids.slice(i, i + 150)
-    const [{ data: saldos }, { data: comps }, { data: pagos }] = await Promise.all([
+    const [{ data: saldos }, { data: comps }, { data: pagos }, { data: ajustes }] = await Promise.all([
       supabase.from("v_saldo_clientes").select("cliente_id, saldo_actual").in("cliente_id", parte),
       supabase.from("comprobantes_venta").select("cliente_id, tipo_comprobante, numero_comprobante").in("cliente_id", parte),
       supabase.from("pagos_clientes").select("cliente_id, observaciones").in("cliente_id", parte).ilike("observaciones", "APERTURA GM%"),
+      supabase.from("cuenta_corriente_clientes").select("cliente_id, observaciones").in("cliente_id", parte).ilike("observaciones", `${PREFIJO_AJUSTE_APERTURA}%`),
     ])
     for (const s of saldos || []) saldoDe.set(s.cliente_id, Number(s.saldo_actual) || 0)
     for (const c of comps || []) yaComp.add(`${c.cliente_id}|${c.tipo_comprobante}|${c.numero_comprobante}`)
     for (const p of pagos || []) yaACuenta.add(`${p.cliente_id}|${String(p.observaciones || "").toLowerCase()}`)
+    for (const a of ajustes || []) yaAjuste.add(`${a.cliente_id}|${a.observaciones}`)
   }
+  const ajusteCargado = (clienteId: string, r: RenglonApertura) =>
+    [...yaAjuste].some((k) => k.startsWith(`${clienteId}|`) && k.includes(claveAjuste(r)))
+  const compCargado = (clienteId: string, r: RenglonApertura) =>
+    yaComp.has(`${clienteId}|${r.tipo}|${r.numero}`) || yaComp.has(`${clienteId}|${r.tipo}|${r.numero_original}`)
 
   let bloqueantes = 0
   const out: ClientePrevia[] = grupos.map((g) => {
     const cl = porCodigo.get(g.codigo_cliente)
     const errores: string[] = []
     const avisos: string[] = []
-    if (!cl) errores.push(`El cliente ${g.codigo_cliente} (${g.nombre}) no existe en gmv2`)
+    if (!cl) errores.push(`El cliente ${g.codigo_cliente} (${g.nombre}) no existe en gmv2: hay que darlo de alta`)
     for (const r of g.renglones) {
       if (!r.tipo) errores.push(`${r.numero}: tipo desconocido "${r.descripcion}"`)
       if (!r.fecha) errores.push(`${r.numero}: fecha inválida`)
       if (!Number.isFinite(r.pendiente) || !Number.isFinite(r.importe)) errores.push(`${r.numero}: importe inválido`)
-      if (r.tipo && ES_DEBITO.has(r.tipo) && r.pendiente < 0) errores.push(`${r.numero}: ${r.descripcion} con pendiente negativo`)
-      if (r.tipo && !ES_DEBITO.has(r.tipo) && r.pendiente > 0) errores.push(`${r.numero}: ${r.descripcion} con pendiente positivo`)
+      if (r.tipo && r.tipo !== "AJUSTE" && ES_DEBITO.has(r.tipo) && r.pendiente < 0) errores.push(`${r.numero}: ${r.descripcion} con pendiente negativo`)
+      if (r.tipo && r.tipo !== "AJUSTE" && !ES_DEBITO.has(r.tipo) && r.pendiente > 0) errores.push(`${r.numero}: ${r.descripcion} con pendiente positivo`)
     }
     if (!g.cuadra) errores.push(`La suma de lo pendiente (${g.suma}) no da el saldo del reporte (${g.saldo_reporte})`)
 
     let ya = 0
     if (cl) {
+      const nombreG = String(cl.nombre || cl.nombre_razon_social || "").toUpperCase()
+      const nombreCoincide = !nombreG || nombreG.includes(primeraPalabra(g.nombre))
+      const cuitR = soloDigitos(g.renglones[0]?.cuit)
+      const cuitG = soloDigitos(cl.cuit)
+      if (cuitR && cuitG && cuitR !== cuitG) {
+        if (!nombreCoincide) {
+          errores.push(`Cambió de dueño: en el reporte es "${g.nombre}" (CUIT ${g.renglones[0].cuit}), en gmv2 el ${g.codigo_cliente} es "${cl.nombre || cl.nombre_razon_social}" (CUIT ${cl.cuit}). Corregí la ficha antes de cargarlo.`)
+        } else {
+          avisos.push(`El CUIT no coincide: reporte ${g.renglones[0].cuit}, gmv2 ${cl.cuit}`)
+        }
+      } else if (!nombreCoincide) {
+        avisos.push(`El nombre no coincide: en el reporte "${g.nombre}", en gmv2 "${cl.nombre || cl.nombre_razon_social}"`)
+      }
       for (const r of g.renglones) {
         if (r.tipo === "A_CUENTA") {
           if ([...yaACuenta].some((k) => k.startsWith(`${cl.id}|`) && k.includes(marcaACuenta(r.numero).toLowerCase()))) ya++
-        } else if (r.tipo && yaComp.has(`${cl.id}|${r.tipo}|${r.numero}`)) ya++
+        } else if (r.tipo === "AJUSTE") {
+          if (ajusteCargado(cl.id, r)) ya++
+        } else if (r.tipo && compCargado(cl.id, r)) ya++
       }
       const saldoActual = saldoDe.get(cl.id) || 0
       if (Math.abs(saldoActual) > 0.009 && ya < g.renglones.length) {
         avisos.push(`Ya tiene saldo en gmv2 (${saldoActual}): la apertura se SUMA a eso. Después de la puesta a cero tendría que estar en 0.`)
-      }
-      const nombreG = String(cl.nombre || cl.nombre_razon_social || "").toUpperCase()
-      if (nombreG && !nombreG.includes(g.nombre.toUpperCase().split(" ")[0])) {
-        avisos.push(`El nombre no coincide: en el reporte "${g.nombre}", en gmv2 "${cl.nombre || cl.nombre_razon_social}"`)
       }
     }
     if (errores.length) bloqueantes++
@@ -121,17 +164,23 @@ export async function previsualizarApertura(supabase: SupabaseClient, renglones:
       es_empleado: !!cl?.es_empleado,
       saldo_actual_gmv2: cl ? saldoDe.get(cl.id) || 0 : 0,
       ya_cargados: ya,
+      ajustes: g.renglones.filter((r) => r.tipo === "AJUSTE").length,
       errores,
       avisos,
     }
   })
 
+  const conError = out.filter((c) => c.errores.length)
+  const importables = out.length - conError.length
   return {
     clientes: out,
     total: r2(out.reduce((s, c) => s + c.suma, 0)),
     renglones: renglones.length,
     bloqueantes,
-    puede_confirmar: bloqueantes === 0,
+    importables,
+    total_importable: r2(out.filter((c) => !c.errores.length).reduce((s, c) => s + c.suma, 0)),
+    total_con_error: r2(conError.reduce((s, c) => s + c.suma, 0)),
+    puede_confirmar: importables > 0,
   }
 }
 
@@ -139,42 +188,53 @@ export interface ResultadoConfirmacion {
   clientes: number
   comprobantes: number
   a_cuenta: number
+  ajustes: number
   salteados: number
+  /** Clientes del lote que NO se cargaron por tener error (se corrigen y se vuelve a subir) */
+  no_importados: Array<{ codigo_cliente: string; nombre: string; errores: string[] }>
   errores: string[]
   /** Por cliente: saldo del libro después de cargar vs. saldo del reporte */
   control: Array<{ codigo_cliente: string; nombre: string; saldo_libro: number; saldo_reporte: number; cuadra: boolean }>
 }
 
-/** Graba la apertura de un LOTE de clientes (la pantalla manda de a tandas). */
+/** Graba la apertura de un LOTE de clientes (la pantalla manda de a tandas). Los clientes con error se saltean. */
 export async function confirmarApertura(
   supabase: SupabaseClient,
   renglones: RenglonApertura[],
   usuarioId: string,
 ): Promise<ResultadoConfirmacion> {
   const previa = await previsualizarApertura(supabase, renglones)
-  if (!previa.puede_confirmar) {
-    throw new Error(`Hay ${previa.bloqueantes} clientes con errores: corregilos antes de confirmar`)
-  }
-  const res: ResultadoConfirmacion = { clientes: 0, comprobantes: 0, a_cuenta: 0, salteados: 0, errores: [], control: [] }
+  const res: ResultadoConfirmacion = { clientes: 0, comprobantes: 0, a_cuenta: 0, ajustes: 0, salteados: 0, no_importados: [], errores: [], control: [] }
   const ahora = new Date().toISOString()
 
   for (const c of previa.clientes) {
-    const clienteId = c.cliente_id!
+    if (c.errores.length || !c.cliente_id) {
+      res.no_importados.push({ codigo_cliente: c.codigo_cliente, nombre: c.nombre, errores: c.errores })
+      continue
+    }
+    const clienteId = c.cliente_id
     try {
       const { data: compsYa } = await supabase.from("comprobantes_venta").select("tipo_comprobante, numero_comprobante").eq("cliente_id", clienteId)
       const yaComp = new Set((compsYa || []).map((x: any) => `${x.tipo_comprobante}|${x.numero_comprobante}`))
       const { data: pagosYa } = await supabase.from("pagos_clientes").select("observaciones").eq("cliente_id", clienteId).ilike("observaciones", "APERTURA GM%")
       const obsPagos = (pagosYa || []).map((p: any) => String(p.observaciones || "").toLowerCase())
+      const { data: ajustesYa } = await supabase.from("cuenta_corriente_clientes").select("observaciones").eq("cliente_id", clienteId).ilike("observaciones", `${PREFIJO_AJUSTE_APERTURA}%`)
+      const obsAjustes = (ajustesYa || []).map((a: any) => String(a.observaciones || ""))
 
       const nuevosComp: any[] = []
       const nuevosPagos: any[] = []
+      const nuevosAjustes: RenglonApertura[] = []
       for (const r of c.renglones) {
         const tipo = r.tipo as TipoApertura
         if (tipo === "A_CUENTA") {
           if (obsPagos.some((o) => o.includes(marcaACuenta(r.numero).toLowerCase()))) { res.salteados++; continue }
           nuevosPagos.push({ r })
+        } else if (tipo === "AJUSTE") {
+          if (obsAjustes.some((o) => o.includes(claveAjuste(r)))) { res.salteados++; continue }
+          if (Math.abs(r.pendiente) < 0.005) { res.salteados++; continue } // nada pendiente: no mueve el saldo
+          nuevosAjustes.push(r)
         } else {
-          if (yaComp.has(`${tipo}|${r.numero}`)) { res.salteados++; continue }
+          if (yaComp.has(`${tipo}|${r.numero}`) || yaComp.has(`${tipo}|${r.numero_original}`)) { res.salteados++; continue }
           nuevosComp.push({ r, tipo })
         }
       }
@@ -195,7 +255,7 @@ export async function confirmarApertura(
           total_factura: r.importe,
           saldo_pendiente: r.pendiente,
           estado_pago: Math.abs(r.pendiente) + 0.009 < Math.abs(r.importe) ? "parcial" : "pendiente",
-          observaciones: `APERTURA GM — ${r.descripcion} ${r.numero} migrado del sistema anterior (importe ${r.importe}, pendiente ${r.pendiente}; viajante ${r.viajante})`,
+          observaciones: `APERTURA GM — ${r.descripcion} ${r.numero}${r.numero !== r.numero_original ? ` (en el sistema viejo ${r.numero_original})` : ""} migrado del sistema anterior (importe ${r.importe}, pendiente ${r.pendiente}; viajante ${r.viajante})`,
           creado_por: usuarioId,
         }))
         const { data: creados, error } = await supabase.from("comprobantes_venta").insert(filas).select("id, tipo_comprobante, numero_comprobante")
@@ -250,6 +310,26 @@ export async function confirmarApertura(
         const { error: e2 } = await supabase.from("cuenta_corriente_clientes").insert(libro)
         if (e2) throw new Error(`libro (a cuenta): ${e2.message}`)
         res.a_cuenta += nuevosPagos.length
+      }
+
+      // Ajustes (texto libre): como "Ajustar saldo", solo libro mayor, con su fecha
+      if (nuevosAjustes.length) {
+        const libro = nuevosAjustes.map((r) => ({
+          cliente_id: clienteId,
+          fecha: fechaLibro(r.fecha),
+          tipo_movimiento: "ajuste",
+          debe: r.pendiente > 0 ? r2(r.pendiente) : 0,
+          haber: r.pendiente < 0 ? r2(-r.pendiente) : 0,
+          saldo: 0,
+          referencia_tipo: "ajuste_manual",
+          referencia_id: null,
+          numero_comprobante: r.numero,
+          observaciones: `${PREFIJO_AJUSTE_APERTURA} — ${r.descripcion} (importe ${r.importe}, pendiente ${r.pendiente}; viajante ${r.viajante}) ${claveAjuste(r)}`,
+          usuario_id: usuarioId,
+        }))
+        const { error: e3 } = await supabase.from("cuenta_corriente_clientes").insert(libro)
+        if (e3) throw new Error(`libro (ajustes): ${e3.message}`)
+        res.ajustes += nuevosAjustes.length
       }
 
       // Control: el libro tiene que dar el saldo del reporte (+ lo que ya tenía)

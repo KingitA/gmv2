@@ -61,7 +61,7 @@ export async function GET(
       .from("pagos_clientes")
       .select("id, cliente_id, monto, estado, forma_pago")
       .eq("viaje_id", id)
-      .in("estado", ["pendiente_rendicion", "confirmado"])
+      .in("estado", ["pendiente_rendicion", "pendiente", "confirmado"]) // "pendiente" = transferencia de la calle a confirmar en /caja (#35)
 
     // Devoluciones pendientes de este viaje
     const { data: devolucionesViaje } = await supabase

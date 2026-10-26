@@ -41,6 +41,7 @@ import type { MovimientoCC } from "@/lib/cuenta-corriente/extracto"
 import { cargarComprados } from "@/lib/vendedor/comprados"
 import { contextoDevolucion } from "@/lib/cobranzas/origen-devolucion"
 import { agruparPorComprobante, KARDEX_COMISION_COLS, mapArticuloComision } from "@/lib/vendedor/comisiones-detalle"
+import { comisionGanadaPorComprobante, cuentaPersonalDe } from "@/lib/cuenta-corriente/cuenta-personal"
 import { cargarDetallePedido } from "@/lib/vendedor/detalle-pedido"
 import { cargarFichaCliente } from "@/lib/vendedor/ficha-cliente"
 import { frecuenciaHabituales, TOPE_HABITUALES } from "@/lib/vendedor/habituales"
@@ -318,6 +319,9 @@ async function detallesComision(ctx: CtxSync, vendedorIds: string[], pedidoIds: 
     compIds,
   )
   const compMap = new Map(comps.map((c: any) => [c.id, c]))
+  // V3: con la cuenta personal, lo GANADO por comprobante (= "Comisiones ganadas")
+  const cuentaId = await cuentaPersonalDe(ctx.supabase, { usuarioId: ctx.sesion.user.id, vendedorIds })
+  const ganada = cuentaId ? await comisionGanadaPorComprobante(ctx.supabase, cuentaId) : undefined
   const porPedido = new Map<string, any[]>()
   for (const r of rows) {
     const l = porPedido.get(r.pedido_id) || []
@@ -328,7 +332,7 @@ async function detallesComision(ctx: CtxSync, vendedorIds: string[], pedidoIds: 
   for (const [pid, filas] of porPedido) {
     out.push({ id: `detalle:vendida:${pid}`, tipo: "vendida", articulos: filas.map(mapArticuloComision) })
     const cobradas = filas.filter((r) => r.comprobante_cobrado)
-    if (cobradas.length) out.push({ id: `detalle:cobrada:${pid}`, tipo: "cobrada", comprobantes: agruparPorComprobante(cobradas, compMap) })
+    if (cobradas.length) out.push({ id: `detalle:cobrada:${pid}`, tipo: "cobrada", comprobantes: agruparPorComprobante(cobradas, compMap, ganada) })
   }
   return out
 }

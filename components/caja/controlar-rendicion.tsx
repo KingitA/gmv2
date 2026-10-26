@@ -14,6 +14,8 @@ import { CargaProgreso } from "@/components/ui/carga-progreso"
 import type { CuentaFondos } from "./registrar-cobro"
 import { InputMonto } from "@/components/ui/input-monto"
 import { fecha, moneda, redondear } from "@/lib/formato"
+import { GastosRendicion } from "./gastos-rendicion"
+import type { DecisionGasto } from "@/lib/viajes/gastos-rendicion"
 
 const NUM = { fontVariantNumeric: "tabular-nums" } as const
 
@@ -59,6 +61,8 @@ export function ControlarRendicion({
   // el historial de Cobros (rendiciones-resumen) — informativo, no bloquea.
   const [detalle, setDetalle] = useState<any | null>(null)
   const [recarga, setRecarga] = useState(0)
+  // #43: decisiones sobre los gastos del viaje (se aplican al confirmar)
+  const [decisionesGastos, setDecisionesGastos] = useState<Record<string, DecisionGasto>>({})
 
   const cajas = useMemo(() => cuentas.filter((c) => c.grupo === "EFECTIVO"), [cuentas])
   const bancos = useMemo(() => cuentas.filter((c) => c.grupo === "BANCOS"), [cuentas])
@@ -237,6 +241,11 @@ export function ControlarRendicion({
       })
       return
     }
+    const rechazoSinMotivo = Object.values(decisionesGastos).some((d) => !d.aprobar && !d.motivo?.trim())
+    if (rechazoSinMotivo) {
+      toast({ variant: "destructive", title: "Falta el motivo", description: "Escribí por qué se rechaza el gasto" })
+      return
+    }
     setGuardando(true)
     try {
       // Verificados: TODOS los cobros declarados, salvo los que traen cheques
@@ -273,6 +282,7 @@ export function ControlarRendicion({
           pagos_verificados: pagosVerificados,
           forzar_diferencia: forzar,
           colores_cheque: Object.keys(colores).length ? colores : undefined,
+          gastos: Object.values(decisionesGastos),
         }),
       })
       const data = await res.json()
@@ -286,6 +296,9 @@ export function ControlarRendicion({
         return
       }
       if (!res.ok) throw new Error(data.error || "Error confirmando la rendición")
+      if (data.gastos_errores?.length) {
+        toast({ variant: "destructive", title: "Rendición confirmada, pero algún gasto no se pudo resolver", description: `${data.gastos_errores[0]}. Resolvelo desde el viaje (arqueo).` })
+      }
       toast({
         title: "Rendición confirmada",
         description:
@@ -581,6 +594,11 @@ export function ControlarRendicion({
                   <p className="text-[11px] text-slate-500 md:col-span-3">💬 {detalle.observaciones}</p>
                 )}
               </div>
+            )}
+
+            {/* #43: gastos del viaje — aprobar o rechazar al aceptar la rendición */}
+            {rendicion?.viaje_id && (
+              <GastosRendicion viajeId={rendicion.viaje_id} decisiones={decisionesGastos} onChange={setDecisionesGastos} />
             )}
 
             {/* Caja destino + acciones */}

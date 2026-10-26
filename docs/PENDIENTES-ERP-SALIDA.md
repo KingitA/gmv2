@@ -1,0 +1,388 @@
+# Pendientes del ERP y del servidor para salir a producción — 26/10/2026
+
+**Para:** agentes de **Cuentas corrientes**, **Frontend**, **Listas de precios y descuentos** y **Hojas de ruta / viajes y cobranzas**.
+**De:** sesión "prueba integral de salida de mercadería", con Juan.
+**Estado:** abierto. Cada agente tacha lo suyo (`~~…~~` + fecha + commit) en este mismo archivo.
+
+> Todas las tareas tienen dueño (Juan las asignó el 26/10). Si algo de otra área te bloquea, **pedíselo a Juan**; no lo cambies vos.
+
+---
+
+## 1. De dónde salen estos pedidos
+
+Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de salida de mercadería en producción**, con datos de prueba, como ensayo general del día del pase. El orden fue:
+1. puesta a cero (`cc_puesta_a_cero`), limpieza complementaria y pase de los 1.640 pedidos reales viejos al estado nuevo **"sistema_viejo"**;
+2. apertura de la deuda del sistema viejo (`/apertura`);
+3. pedidos desde la app vendedor, preparación en la app depósito y presupuestos desde el ERP;
+4. viaje con bloqueo de entrega y fondo al chofer;
+5. entregas, cobros, devoluciones y gasto desde la app chofer;
+6. rendición del chofer y del vendedor;
+7. cobro en /caja;
+8. control de billeteras, comisiones, caja y bancos (cuadraron al peso).
+
+- El paso a paso con los números verificados en la base está en **[`docs/PRUEBA-INTEGRAL-SALIDA.md`](PRUEBA-INTEGRAL-SALIDA.md)**. Cada problema tiene un **#**, el mismo de este documento. Buscalo ahí antes de empezar: tiene el detalle, los importes y la decisión de Juan.
+- Lo de las **apps** está en [`docs/PENDIENTES-APPS-SALIDA.md`](PENDIENTES-APPS-SALIDA.md). Varias tareas de acá son **el lado del servidor de una tarea de app**: está marcado, coordiná con ese agente.
+- **Ya hecho por esta sesión (no repetir):**
+  - estado `sistema_viejo` (pedidos viejos fuera de la cola, del armado de viajes y de los cobrables), en la migración `20261023_prueba_integral.sql`, aplicada;
+  - **#15**, facturar lo preparado y no lo pedido en renglones parciales: `lib/pedidos/cantidad-a-facturar.ts`, usada por `generar` y `sincronizarKardexPedido`, verificado.
+- **Ya hecho por el agente vendedor el 26/10:** #41, "Mercadería cobrada" = "Comisiones ganadas" (ea55e14).
+
+### Reglas para todos
+- Rama propia desde `origin/main`.
+- `npm run typecheck:movil` en verde (es obligatorio y también corre el control de formatos).
+- Nada a `main` sin el OK de Juan.
+- Anotá "en curso" en la tabla del punto 2 **antes** de programar.
+- **Formatos** (`docs/FORMATOS.md`): fechas dd/mm/aaaa, $1.000,32, helpers de `lib/formato`.
+- **Nunca emitir un comprobante fiscal en pruebas.** Solo PRES y REV, con clientes sin CUIT o en "Presupuesto".
+- Datos reales que **no se tocan**: artículos, clientes, proveedores, pedidos, comprobantes con CAE. Todo lo demás es de prueba (regla de Juan).
+- Migraciones: las aplica Juan. Dejalas en `supabase/migrations/` y avisale la ruta completa en `gmv2-nuevo`.
+
+### Datos de la prueba (de referencia; NO los uses para probar)
+- Clientes 1190 CHEN, 199 URQUIZA y 556 FITTERER (reales: no cambies sus fichas).
+- Pedidos 001939 a 001942.
+- Viaje "PRUEBA".
+- PRES 0001-00000019 a 22, REV 0001-00000018 a 23, DEV-00001 a 04.
+- Cuenta personal de Juan: cód. 194.
+- Todo se borra el día del pase.
+
+---
+
+## 2. Quién hace qué
+
+| # | Tarea | Dueño | Estado |
+|---|---|---|---|
+| ~~5, 6, 7, 8, 18~~ | ~~Apertura: importar el reporte real (no frenar todo, texto libre como ajuste, cuentas del personal, segunda columna de saldo, PRES viejos como PV 2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
+| ~~28~~ | ~~Devolución de un artículo que no está en el comprobante: comprobante anterior o el 0002-00000001~~ | Cuentas corrientes | **Hecho 26/10** (negro → PRES 0002-00000001; blanco → NC con período a ARCA, sin asociado), ver §3 |
+| ~~29, 36~~ | ~~Billeteras con plata "fantasma" después de rendir~~ | Cuentas corrientes | **Hecho 26/10**, migración aplicada y verificada (BILLETERA en $0, compensación de retiros $10.000) |
+| ~~33~~ | ~~El 10 % contado sobre mercadería ya devuelta (lado servidor de V2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
+| ~~10, 11, 42~~ | ~~Comisiones: "sin cobrar" inflado, pedidos sin número, Playroom en $0~~ | Cuentas corrientes | **Hecho 26/10, falta que Juan aplique** `supabase/migrations/20261026c_comisiones_salida.sql` (ver §3) |
+| ~~30~~ | ~~Números sin formato en los textos de la rendición~~ | Cuentas corrientes | **Hecho 26/10** en la misma migración (`fmt_moneda`) |
+| ~~37~~ | ~~/caja: el total no descuenta lo que el cliente tiene a cuenta~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
+| ~~35~~ | ~~Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
+| ~~25~~ | ~~Tope de devolución en el servidor (lado servidor de C2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
+| ~~23~~ | ~~El servidor rechaza "entregado" en una parada bloqueada sin cobro (lado servidor de C1)~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
+| ~~27~~ | ~~La parada dice "cobró de menos" cuando sobró~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
+| ~~22~~ | ~~Cargar bultos o pallets en el ERP antes de finalizar el viaje~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (e0b8b3f, falta que Juan aplique `supabase/migrations/20261026_pedidos_pallets.sql`) |
+| ~~43~~ | ~~Aprobar los gastos del viaje al aceptar la rendición~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (839f9db, falta que Juan aplique `supabase/migrations/20261026b_viajes_gastos_aprobacion.sql`) |
+| ~~21~~ | ~~Hoja del viaje: "PRES 0001-0001-…"~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
+| ~~13~~ | ~~Pedido con 10 % contado desde la venta (lado servidor de V1)~~ | Listas de precios y descuentos | **Hecho 26/10** (8f907c8, ver §5): campo `bonif_pedido.contado_todo`. Falta la app (V1) |
+| ~~16~~ | ~~Condiciones editables hasta facturar, y repreciar al guardar~~ | Listas de precios y descuentos | **Hecho 26/10** (8f907c8, ver §5) |
+| 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | **Listas de precios: hecho 26/10** (reglas en `lib/pedidos/anulacion-pedido.ts`, ver §5). **Falta:** cuentas corrientes (anular todo junto + ruta: **en curso 26/10**) y frontend (botón y modal) |
+| 17, 39 | Pedido con todo faltante: volver a pendiente o eliminar; que no aparezca como cobrable | Frontend | Pendiente |
+| 14 | Mostrar "preparado 30 de 36" y el total a facturar | Frontend | Pendiente |
+| 34 | Cambiar el color del cheque en /caja y en la cartera | Frontend | Pendiente |
+| 40 | Chofer "d6ac25bb" sin nombre en el tablero de Finanzas | Frontend | Pendiente |
+| 9, 12, 4 | Datos: clientes 56, 1381, 765 y 766; artículos mal cargados; recepciones de prueba | Oficina (Juan) | Pendiente |
+
+---
+
+## 3. Cuentas corrientes
+
+### #5, #6, #7, #8, #18 — Apertura: que el reporte real se pueda importar · BLOQUEA EL PASE
+
+**Qué pasó:** el reporte real "Comprobantes Impagos de Clientes" del 23/10 (`C:\Users\INTEL PC1\Desktop\pruebafacimpagasclientesxcodigo.chr`) tiene 1.859 renglones, 249 clientes y $675.632.433,83 de total. Lo leí con `lib/apertura/parsear-chr.ts` en solo lectura: **hoy `/apertura` no deja confirmar nada**, porque unos 34 clientes tienen error y uno solo alcanza para frenar todo. Para la prueba se importó a mano solo el 556.
+
+**Decisiones de Juan:**
+- [ ] **#5:** importar los clientes que están bien y mostrar aparte los que hay que corregir. No frenar el archivo entero por un error.
+- [ ] **#6:** los **72 renglones de texto libre** de 15 clientes comunes ($65,4 M, casi todos en GRONDONA CHRISTIAN cód. 1000; "CHEQUE RECH (YASH)", "ECHEQ", "10%", "COMISION JULIO", nombres de personas) entran como **ajuste**, igual que "Ajustar saldo" de la cuenta corriente, con el texto original como concepto y el signo del importe.
+- [ ] **#7:** las **15 cuentas de empleados, socios y viajantes** (805 renglones, $12,7 M) van a la **cuenta personal** de cada uno. Lo que no es comprobante entra como ajuste, igual que en #6.
+- [ ] **#8:** el reporte trae **dos columnas de saldo** (`c[30]` y `c[31]` en `leerReporteImpagos`). La buena es la **segunda (`c[31]`)**, que siempre coincide con la suma de lo pendiente. Ejemplo: DELLI GUSTAVO (169) debe $2.804.921,57, no $2.923.875,09. Hoy el lector compara con la primera, y por eso 17 clientes "no cuadran".
+- [ ] **#18:** los PRES del sistema viejo entran como **punto de venta 2**. Juan pasa el archivo con "0001-00117929" y la importación lo graba como **"0002-00117929"**, para que no se mezclen con los PRES nuevos de gmv2, que siguen en el PV 1. La idempotencia (no cargar dos veces) tiene que reconocer el número ya convertido.
+
+**HECHO 26/10 (cuentas corrientes).** Vista previa REAL contra la base (solo lectura) con el archivo del 23/10: 1.859 renglones, 249 clientes, $675.632.433,83; **se cargan 245 clientes por $663.608.194,55** y quedan afuera 4 por $12.024.239,28 (suman el total): **56 y 1381** ("cambió de dueño": CUIT y nombre distintos de la ficha), **765 y 766** (no existen). 507 renglones de texto libre en 22 clientes → AJUSTE (libro mayor, `referencia_tipo ajuste_manual`, observaciones `APERTURA GM AJUSTE — <texto> … [ap:…]`, idempotente). 738 PRES → `0002-…` (guarda el número viejo; reconoce también los ya cargados con PV 1). Avisos que no frenan: CUIT distinto con el mismo nombre (830, 1249, 1501). Los ajustes se ven en "Solo saldos" de la cuenta del cliente (tipo AJUSTE) y no cuentan como descuadre (`lib/cuenta-corriente/descuadres.ts`). La ficha del vendedor trae `ajustes_apertura` (ver PENDIENTES-APPS-SALIDA). Tests: `mobile/packages/core/test/apertura-chr.test.ts`. Archivos: `lib/apertura/parsear-chr.ts`, `lib/apertura/importar.ts`, `app/apertura/page.tsx`.
+
+**Cómo verificar (original):** la vista previa local con el lector real da hoy 1.859 renglones, 249 clientes y $675.632.433,83. Después del cambio, el total importable más el total de los clientes con error tiene que dar ese mismo número. Los 4 clientes del #9 tienen que salir como error o aviso hasta que la oficina los corrija. Ojo: el 56 y el 1381 tienen **otro dueño**, así que **no** los cargues al cliente que hoy tiene ese código (ver #9).
+
+### #28 — Devolución de un artículo que no está en el comprobante
+
+**Qué pasó:** URQUIZA devolvió 3 bolsas residuo 45x60 "de otro pedido". La devolución quedó atada al PRES 0001-00000020, que **no tiene ese artículo**, a $500,98 (REV 0001-00000019). Eso además bajó un poco la comisión de ese PRES.
+
+**Regla de Juan (26/10):**
+- [x] Se asocia a un **comprobante anterior** del cliente que tenga ese artículo: el de gmv2 o el de la apertura.
+- [x] Si el artículo va en **negro**, sale **reversa**; si va en **blanco**, sale **nota de crédito**. Salvo que el cliente esté configurado todo negro o todo blanco: ahí manda el cliente.
+- [x] Si **no existe ningún comprobante** con ese artículo (tampoco del sistema viejo), todas esas devoluciones se asocian a un único comprobante **0002-00000001**.
+
+**Dónde:** `app/api/comprobantes-venta/generar-nc-reversa`, `valor-devolucion.ts`, `origen-devolucion.ts`.
+
+**Ojo con lo fiscal:** si el cliente tiene CUIT y el artículo va en blanco, esto **emite una NC con CAE**. En pruebas, solo clientes sin CUIT.
+
+**HECHO 26/10 (cuentas corrientes), sin migración** (`lib/cobranzas/origen-devolucion.ts`):
+- Con el artículo en un comprobante de gmv2 → el último que lo tiene, al precio facturado (ya era así). Los de la **apertura no traen artículos** (solo número, tipo y fecha), así que nunca se pueden elegir por artículo.
+- Sin comprobante con el artículo y va en **negro** (motor de precios: manda la configuración del cliente) → **REV asociada al PRES 0002-00000001 del cliente**, uno por cliente, en $0, sin renglones y sin libro mayor (no mueve saldo). Se crea solo al guardar la primera devolución que lo necesita (`asegurarComprobanteRespaldo`). La REV queda a favor del cliente y **no baja la comisión de ningún comprobante**. Antes iba al PRES más reciente (URQUIZA: PRES 0001-00000020).
+- Sin comprobante con el artículo y va en **blanco** → **NC sin comprobante asociado**, ni en ARCA ni en el sistema (decisión de Juan 26/10: "si no hace falta mentirle a ARCA, menos a nosotros"). A ARCA se le informa el **período asociado** (RG 4540, manual WSFEv1 v4.0: NC/ND informan comprobante asociado *o* período): del 1° del mes a la fecha de emisión (con percepciones tiene que ser el mismo mes, error 10217). La NC dice en observaciones "sin comprobante asociado: período … informado a ARCA". Sin origen no lleva percepción IVA espejo ni 10 % contado. **El camino de período nunca se probó contra ARCA real** (Juan decidió no probarlo): si ARCA lo rechaza, /revision-devoluciones muestra "ARCA rechazó el comprobante: …", no se graba nada y la devolución queda pendiente para reintentar. Antes de esto iba a la factura más reciente, que no tenía el artículo.
+- `generar-nc-reversa`: si un origen no tiene saldo (el respaldo en $0) sigue con el próximo en vez de cortar la imputación.
+
+### #29 y #36 — Billeteras con plata "fantasma" después de rendir
+
+**Qué pasó:**
+- **Chofer (#29):** rindió $44.000 de $45.000. Los $1.000 que faltan quedaron como **deuda en la cuenta personal** (`diferencia_rendicion`, debe $1.000) **y además** como **$1.000 "en mano"** en `saldos_financieros` (BILLETERA del usuario `d6ac25bb…`): "queda en billetera del cobrador". Se cuentan dos veces.
+- **Vendedor (#36):** cobró $1.000.000 en efectivo + $784.600 por transferencia, retiró $10.000 (debitado en la cuenta personal) y rindió $990.000. Al confirmar, la rendición descontó **$1.784.600** de la billetera, así que la BILLETERA del vendedor `8146a51a…` quedó en **−$10.000**.
+- En las dos apps se ve $0,00 en mano, porque calculan por su cuenta. El error está en la base y en el tablero de Finanzas, y puede pegar en la próxima rendición.
+
+**Qué tiene que pasar:**
+- [ ] Después de una rendición confirmada, la billetera (plata de la empresa en mano) queda en **$0**.
+- [ ] La diferencia va **solo** a la cuenta personal (regla 29 de la auditoría).
+- [ ] El retiro, que ya se debitó en la cuenta personal, no se vuelve a restar.
+
+**Dónde:** `rendicion_confirmar` / `rendicion_crear` y el trigger que copia la diferencia a la cuenta personal (migraciones `20260826_rendicion_confirmar_v2_faltante_billetera`, `20260915_rendicion_cc_dos_diferencias`, `20260929_rendicion_fondos_gastos`, `20261019_cc_personal`).
+
+**HECHO 26/10 (cuentas corrientes) — migración `20261026_billeteras_sin_fantasma.sql` (la aplica Juan):** `billetera_saldo_sync` ya no suma a la billetera los movimientos que son de la cuenta personal (`rendicion_saldo_declarado`, `rendicion_diferencia`, `rendicion_devuelta`, `viaje_gasto_rechazado`: `TIPOS_SOLO_CUENTA_PERSONAL` en `lib/cobranzas/billetera-cc.ts`); `rendicion_confirmar` v3 devuelve a la billetera los retiros de la rendición (movimiento `rendicion_retiros`, idempotente); reparación de lo ya rendido y recálculo de `saldos_financieros` BILLETERA. Simulado con los datos de la prueba: chofer $1.000 → $0, vendedor −$10.000 → $0. `/viajantes` y `/api/viajantes/[id]/billetera` usan la misma regla. No toca el libro ni las cuentas personales.
+
+**Además (original):** hay que dejar en $0 la billetera del chofer ($1.000) y la del vendedor (−$10.000). La puesta a cero del pase lo hace sola, pero para las próximas pruebas conviene el arreglo antes.
+
+### #33 — El 10 % contado sobre mercadería ya devuelta (lado servidor de V2)
+
+**Qué pasó:**
+- **URQUIZA:** primero se emitieron las REV de devoluciones a precio lleno ($293.597,34); después se cobró contado y `generarBonificacionContado` emitió la **REV 0001-00000022 por $230.921,56**, que es el 10 % de los totales **originales** de los PRES. Lo correcto era **$201.561,82**, el 10 % de lo que el cliente se quedó: **$29.359,74 de más**.
+- **CHEN:** el orden fue el inverso (primero el 10 % sobre el total, después la devolución revertida al 90 %) y el saldo final quedó **bien**. El sistema depende del orden.
+
+**Qué tiene que pasar:**
+- [ ] La REV del 10 % contado se calcula sobre el comprobante **menos sus reversas o NC de devolución ya emitidas**. El resultado no puede depender del orden.
+- [ ] Misma base que la app vendedor (V2) y la app chofer (C3): acordala con esos agentes.
+
+**Dónde:** `lib/comprobantes/generar-bonificacion.ts`.
+
+**HECHO 26/10 (cuentas corrientes):** base del 10% = total − lo imputado por NC/REV de devolución (`lib/cobranzas/devuelto.ts`, `devueltoPorComprobante`). La usan la emisión (`generar-bonificacion`), el `nc_contado` que reciben las apps (`bonif-pendiente`: ficha del vendedor, cuenta de cobro del chofer, cobro del chofer) y el saldo proyectado (`saldo.ts`). Verificado con URQUIZA en la base: daría $201.561,82 (antes $230.921,56). La devolución posterior al cobro ya salía neta del 10%: los dos órdenes terminan iguales. Sin migración.
+
+### #10, #11, #42 — Comisiones mostradas mal
+
+- [x] **#10:** "sin cobrar" en `/api/vendedor/comisiones` dio **$2.368.414,82**, cuando lo de la prueba era $104.058,65. Suma $1.917.710,02 de 21 pedidos en **sistema_viejo** (esas comisiones se liquidan en el sistema viejo, regla 36) y $346.646,15 de **10 pedidos eliminados**, porque `kardex.pedido_eliminado` sigue en `false` aunque el pedido esté "eliminado". Hay que excluir los dos y arreglar el flag (o filtrar por el estado del pedido). Revisar también el Playroom y las estadísticas.
+- [x] **#11:** `kardex.numero_pedido` queda **null** en los pedidos que entran por la app: 9.143 de 11.279 renglones del último mes. Las listas muestran "—". Tomar el número del pedido, o completarlo al insertar en el kardex (`lib/kardex/insertar-kardex.ts`, desde `createPedido`), y rellenar los existentes.
+- [x] **#42:** Playroom → comisiones cobradas de octubre: **$0**, cuando Juan ganó $65.429,71. El tablero lee la tabla vieja de comisiones "cobradas", que ya no se escribe desde la etapa 3. Tiene que leer la comisión acreditada en la cuenta personal, como hizo el agente vendedor en V3 (`comisionGanadaPorComprobante`, `lib/cuenta-corriente/cuenta-personal.ts`).
+
+**HECHO 26/10 (cuentas corrientes), con migración `supabase/migrations/20261026c_comisiones_salida.sql` (falta aplicarla):**
+- **#10:** las comisiones se filtran por el **estado del pedido** (`lib/comisiones/pedidos-sin-comision.ts`: `eliminado` y `sistema_viejo` no cuentan), no solo por el flag del kardex: `/api/vendedor/comisiones` (+ detalle) y Playroom vendidas (resumen y pedidos). La migración marca `pedido_eliminado = true` en el kardex de los 41 pedidos eliminados de agosto (borra sus comisiones "vendida" no pagadas, igual que la baja de hoy) y saca eliminados y sistema viejo de `playroom_comisiones_viajantes`. "Sin cobrar" de Juan hoy: $2.271.578,99 → **$7.222,82** (lo de la prueba ya se cobró y pasó a ganadas).
+- **#11:** `createPedido` pasa `numero_pedido` al kardex; la migración rellena los 50.076 renglones sin número y agrega el trigger `trg_kardex_numero_pedido` (lo completa al insertar, venga de donde venga).
+- **#42:** "cobradas" del Playroom sale de la **cuenta personal** (`lib/comisiones/ganadas.ts`: renglones `comision` referidos al comprobante, netos y revertidos si se anula el cobro), en el resumen, la lista por pedido y el detalle por comprobante (repartido entre artículos según la comisión pactada). "Pagado" = acreditado en su cuenta (de ahí la retira); "Pendiente" = 0. Octubre: **$65.429,71** (Juan, 3 comprobantes del 25/10). Sin migración.
+
+### #25 — Tope de devolución en el servidor (lado servidor de C2) · GRAVE
+
+- [ ] Al crear una devolución (outbox chofer `viaje.devolucion`, vendedor y web), la cantidad por artículo no puede superar **lo vendido menos lo ya devuelto**, contando confirmadas y pendientes.
+- [ ] Hoy entraron DEV-00001 y DEV-00002 por las mismas 6 naftalinas de 6 vendidas.
+
+**HECHO 26/10 (cuentas corrientes):** `lib/cobranzas/tope-devolucion.ts` (`excedeTopeDevolucion`) en las 4 entradas: `/api/chofer/viaje/[id]/devolucion` (outbox `viaje.devolucion`), `/api/viajante/devolucion` (outbox `devolucion.registrar`), `/api/devoluciones` (web) y `/api/mostrador/devolucion`. Por renglón y contra su comprobante de origen: cantidad ≤ vendido en ese comprobante − ya devuelto contra él (pendiente, aceptado o con NC; rechazados no cuentan). Responde **409** `{ error, codigo: "TOPE_DEVOLUCION" }` con el detalle ("NAFTALINA PURA x150g: en PRES 0001-00000022 se vendieron 6, ya se devolvieron 6 y querés devolver 1 (máximo 0)"). Sin detalle del artículo en el comprobante (apertura o origen de respaldo de #28) no topea. Verificado contra la prueba: DEV-00002 habría sido rechazada.
+
+### #35 — Transferencias fuera de la rendición, confirmadas en /caja (lado servidor de C6/V5)
+
+**Qué pasó:** al confirmar la rendición del vendedor, la transferencia de $784.600 de URQUIZA **entró directo al Credicoop** (de $13.443.379,93 a $14.227.979,93), sin control de banco.
+
+**Decisión de Juan (26/10):**
+- [ ] Las transferencias **no pasan por las rendiciones**: la rendición lleva solo efectivo y cheques.
+- [ ] El vendedor o el chofer la anota en la app → aparece en **/caja → "Transf. por confirmar"** → la oficina controla el banco y **la confirma ahí**. Recién entonces entra al banco y a la cuenta del cliente.
+- [ ] Ejemplo de Juan: el 26/10 se anota la transferencia y se confirma; el 27/10 el chofer rinde y esa transferencia ya está aceptada y no forma parte de la rendición.
+- [ ] Coordinar con las apps (C6 y V5): la rendición propuesta deja de incluirlas.
+- [ ] Revisar también la rendición del chofer y `rendicion_crear` / `rendicion_confirmar`: hoy mueven transferencias junto con el efectivo.
+
+**HECHO 26/10 (cuentas corrientes), sin migración:** `crearCobranza` (`lib/cobranzas/crear.ts`, la usan `/api/viajante/cobro` y `/api/chofer/viaje/[id]/cobro`) parte el cobro de la calle: parte física (efectivo, cheque papel) → `pendiente_rendicion` (billetera + rendición); parte digital (transferencia, depósito, echeq) → otro pago **`pendiente`** (`/caja` → "Transf. por confirmar", confirmable ahí; recién al confirmar entra al banco y a la cuenta del cliente). Imputaciones repartidas en orden (primero la digital); `[CREDITOS]`/`[AJUSTE]`/anticipo con la física, `[10% CONTADO]` con las dos (la NC sale una vez por comprobante). Clave de idempotencia derivada para la parte digital. La billetera solo anota la plata física. La rendición ya no incluye transferencias de cobros nuevos (sigue tomando solo `pendiente_rendicion`). La hoja de ruta, la parada del chofer y la ficha del cliente en el viaje cuentan también los pagos `pendiente` como cobrados (si no, el bloqueo de entrega #23 los ignoraba). Test: `mobile/packages/core/test/cobro-transferencia-aparte.test.ts`.
+
+### #37 — /caja no descuenta lo que el cliente tiene a cuenta
+
+**Qué pasó:** FITTERER tenía $20.000 a cuenta, que le había dado al chofer. En /caja, el resumen chico decía "a favor / a cuenta −$20.000 · Saldo de la cuenta $4.403.099,76", pero el **"Total a pagar"** grande y el cálculo del 10 % usaron **$4.423.099,76**. Pagó todo y quedó con $20.000 a favor.
+
+- [x] /caja ofrece **usar lo que está a cuenta** (lo aplica la oficina, regla 39) y muestra el total neto. El 10 % contado se calcula sobre lo que realmente se paga.
+
+**HECHO 26/10 (cuentas corrientes), sin migración:** al elegir el cliente, /caja (`components/caja/registrar-cobro.tsx`) pide `GET /api/pagos-clientes/creditos?cliente_id=` y muestra el recuadro **"Tiene a favor"**: NC/REV vivas y entregas a cuenta (confirmadas, en oficina o sin rendir) con su disponible, sin lo que ya tomaron otros cobros sin confirmar. La oficina tilda lo que usa (se puede bajar el monto) y viaja como `creditos_aplicar` (el servidor ya lo validaba y lo ejecuta al confirmar). Cuenta: **seleccionado − a favor − NC 10 % = a cobrar**; "Total a pagar" del selector también sale neto. El 10 % sigue siendo el de cada comprobante (regla 07/10): la plata a cuenta no lleva 10 % en contra; una NC de mercadería tildada con contado sí (check "10 % en contra", igual que la app vendedor). La lista sale de `lib/cobranzas/creditos-a-favor.ts`, que ahora usa también la ficha del vendedor (`lib/vendedor/ficha-cliente.ts`, misma respuesta). FITTERER hoy: entrega a cuenta del 25/10 con $20.000 disponibles.
+
+### #30 — Números sin formato en los textos de la rendición
+
+- [x] **HECHO 26/10** (`fmt_moneda` en `rendicion_crear` v5 y `rendicion_confirmar` v3, misma migración que #29/#36). Antes: los movimientos de la diferencia de rendición decían "faltan $1000.0000000000000000" y "declaró enviar $45000.00". Tienen que decir **$1.000,00** y **$45.000,00**. Esos textos los arman las funciones SQL de rendición.
+
+---
+
+## 4. Hojas de ruta / viajes y cobranzas
+
+### #23 — El servidor tiene que rechazar "entregado" en una parada bloqueada sin cobro · GRAVE
+
+**Qué pasó:** FITTERER tenía `bloquear_entrega = true` y "cobrar sí o sí $3.784.286,00". La app chofer mandó "entregado" sin cobro y `PATCH /api/chofer/viaje/[id]/parada` lo aceptó.
+
+- [ ] `PATCH .../parada` rechaza `entregado` y `entregado_parcial` si la parada está bloqueada y no se cumplió el cobro exigido. Contá los cobros de la parada, también los pendientes de rendición. Error claro, con código, para que la app lo muestre.
+- [ ] Solo deja `no_entregado`.
+- [ ] El texto que muestra la app es **"Si no salda lo solicitado, retirar el pedido"**. La app hace su parte (C1).
+
+**HECHO 26/10 (daab2b3, hojas de ruta/viajes y cobranzas):**
+- `PATCH /api/chofer/viaje/[id]/parada` responde **409** `{ error, codigo: "ENTREGA_BLOQUEADA", minimo_exigido, cobrado }` si la parada tiene `bloquear_entrega` y lo cubierto no llega a lo exigido. Solo acepta `no_entregado` (y `pendiente` para reabrir). "Lo cubierto" = cobros del viaje (también pendientes de rendición) + 10 % contado y ajuste (`descuentos_cobro`). El `error` empieza con "Si no salda lo solicitado, retirar el pedido". Por el outbox (`viaje.parada`) llega como rechazo definitivo con ese texto y código.
+- **Segunda puerta que también estaba abierta:** registrar un cobro cerraba la parada como "entregado" aunque no llegara a lo exigido (`cierreDeParadaPorCobro`). Ahora, si la parada está bloqueada y no cumple, el cobro se registra pero **la parada queda pendiente**.
+- La hoja de ruta (`lib/viajes/hoja-ruta.ts`, también `GET /api/chofer/viaje/[id]` y el dataset de la app) trae **`entrega_bloqueada`** (bloqueada y sin cumplir). La web del chofer (`/chofer/[viajeId]`) solo ofrece "No entregué" y muestra el texto.
+- Constantes compartidas en `lib/cobranzas/reglas-cobro.ts` (`@gm/cobro`): `TEXTO_ENTREGA_BLOQUEADA`, `CODIGO_ENTREGA_BLOQUEADA`, `cobroCumple`. Tests: `mobile/packages/core/test/entrega-bloqueada.test.ts`.
+
+### #27 — La parada dice "cobró de menos" cuando sobró
+
+- [ ] La parada de CHEN quedó con "Cobró $100.000,00 de $154.329,05 exigidos (parada cerrada al registrar el cobro)". Lo exigido no descontó las devoluciones ni el 10 % contado, y en realidad sobró plata. El texto sale de `lib/cobranzas/reglas-cobro.ts`.
+- [ ] Lo exigido tiene que ser **neto** de devoluciones y del 10 % si corresponde, con la misma base que `saldoDeParada`.
+
+**HECHO 26/10 (daab2b3):** `minimo_exigido` es ahora **neto de lo devuelto en el viaje** (misma base que `saldoDeParada` / `total_a_cobrar`) y la parada trae **`descuentos_cobro`**: el 10 % contado y el ajuste de los cobros del viaje (pendientes: lo que bajan del saldo además de la plata; ya rendido: los créditos NC/REV aplicados a los comprobantes del viaje). `cobro_cumplido` = cobrado + descuentos ≥ exigido. El texto del cierre lo muestra aparte: "Cobró $70.000,00 (+ $9.000,00 de 10 % contado / ajuste) de $90.000,00 exigidos". Verificado con el viaje PRUEBA en solo lectura: CHEN cubrió $100.000 + $36.585,36 de REV sobre $154.329,05 → le faltan $17.743,69, lo mismo que quedó debiendo cuando se rechazó DEV-00002 (en la calle, con esa devolución pendiente, daba cumplido). Los textos ya grabados en paradas viejas no se reescriben.
+
+### #22 — Bultos en el ERP
+
+**Decisión de Juan:**
+- [ ] Los bultos se cargan **en el ERP**, en cualquier momento antes de **finalizar** el viaje. Al despachar ya deberían estar.
+- [ ] Pueden ser **bultos o pallets**.
+- [ ] **No bloquea:** un pedido sin bultos se despacha igual, sin alerta.
+- [ ] Hoy los 3 pedidos del viaje y la hoja de ruta mostraron 0 bultos. Falta el lugar donde cargarlos, por pedido, en el armado del viaje o en la ficha del pedido.
+
+**HECHO 26/10 (e0b8b3f):** en el detalle del viaje → "Pedidos del viaje", cada pedido tiene **Bultos** y **Pallets** editables mientras el viaje está programado, despachado o en curso (se guardan al salir del campo). `PATCH /api/viajes/[id]/pedidos { pedido_id, bultos?, pallets? }`. No bloquea el despacho ni avisa. La hoja (pantalla, PDF) muestra los pallets junto a los bultos. **Migración `20261026_pedidos_pallets.sql`** (columna `pedidos.pallets`); hasta aplicarla, los pallets se leen en 0 y no se pueden guardar (los bultos sí). La ficha del pedido no tiene el campo: si se quiere también ahí, es de Frontend.
+
+### #43 — Aprobar los gastos del viaje al aceptar la rendición
+
+**Qué pasó:** la nafta ($25.000) quedó "declarado" ("a revisar en oficina") aunque la rendición se confirmó.
+
+**Decisión de Juan:**
+- [ ] Al **aceptar la rendición**, la oficina aprueba o carga cada gasto (nafta, camión, peón, hotel u otro), asociado al **vehículo** o al concepto.
+- [ ] Queda aprobado con quién y cuándo.
+- [ ] La app chofer deja de mostrarlo "a revisar".
+
+**HECHO 26/10 (839f9db):** en **/caja → Controlar rendición**, si la rendición es de un viaje aparece "Gastos del viaje": cada gasto declarado viene **aprobado por defecto**, con su **concepto** (nafta, camión, peón, hotel, peaje, comida, cubierta u otro) y el **vehículo** (por defecto el del viaje); se puede rechazar con motivo. `POST /api/finanzas/rendiciones/[id]/confirmar` recibe `gastos: [{ id, aprobar, categoria?, vehiculo_id?, motivo? }]`: si quedan gastos sin decidir o un rechazo sin motivo, no confirma (400). Se aplican **después** de confirmar con `viaje_gasto_resolver` (queda `revisado_por` / `revisado_at`); si alguno falla, la rendición queda confirmada y se avisa (se resuelve desde el arqueo del viaje). No toca la cuenta de la rendición (gastos congelados al declarar, 20260929). **Migración `20261026b_viajes_gastos_aprobacion.sql`**: `viajes_gastos.vehiculo_id` y el concepto 'camion' (sin aplicar: el vehículo no se guarda y camión pasa a "otro"). Lógica en `lib/viajes/gastos-rendicion.ts`. **Lo de la prueba:** la nafta de $25.000 del viaje PRUEBA sigue "declarado" (la rendición ya estaba confirmada); se aprueba desde el arqueo del viaje o la borra la puesta a cero.
+
+### #21 — "PRES 0001-0001-00000021" en la hoja del viaje
+
+- [ ] El punto de venta se repite. Tiene que decir **"PRES 0001-00000021"**.
+
+**HECHO 26/10 (daab2b3):** la hoja (pantalla, PDF y app chofer) usa `numeroVisible()` de `lib/viajes/hoja-ruta.ts`: el `numero_comprobante` ya trae el punto de venta. Dice "PRES 0001-00000021" (verificado con el viaje PRUEBA).
+
+---
+
+## 5. Listas de precios y descuentos
+
+### #13 — Pedido con 10 % contado desde la venta (lado servidor de V1)
+
+> **Hecho 26/10 (8f907c8) — lado servidor y ERP.** No tocar sin hablar con listas de precios.
+> - **Campo:** `pedidos.bonif_pedido.contado_todo` (jsonb existente, **sin migración**): `true` = checkbox tildado (todo el pedido contado), `false` = destildado (nada contado), ausente/`null` = cada artículo según su segmento, ficha y condición por proveedor/marca. Tildado o destildado **le gana a todo** (`resolverContadoItem` en `lib/pricing/resolver.ts`); la lista Especial nunca va contado.
+> - **Cómo arranca el checkbox:** `contadoPorDefectoCliente(fichaFilas, condiciones)` (en `@gm/pricing`) → `"todo"` (tildado), `"parcial"` (algún segmento o condición: mostrarlo sin definir y dejar tildar/destildar) o `"nada"`.
+> - **Outbox de la app:** va dentro del `bonif_pedido` que ya manda la app al crear/confirmar el pedido (`{ ..., contado_todo: true }`). `createPedido` y `aplicarCondicionesPedidoVendedor` lo guardan; `normalizarBonifPedido` lo conserva.
+> - **Al facturar:** cada renglón queda con `pedidos_detalle.contado` y `generar` emite la NC/REV del 10 % de esos comprobantes (lo de siempre, no cambió). Al repreciar se respeta.
+> - **ERP:** en la ficha del pedido, "10 % por pago contado en TODO el pedido": Según cada segmento / Sí / No.
+> - **Pendiente:** la pantalla de la app (V1, agente vendedor). La REV del 10 % la emite `generar` como siempre: no hace falta nada de cuentas corrientes.
+
+**Decisión de Juan:**
+- [ ] Al finalizar el pedido en la app, un checkbox "10 % por pago contado": tildado por defecto si el cliente lo tiene, y tildable si no.
+- [ ] El **total del pedido en vivo** lo incluye.
+- [ ] El servidor tiene que **guardar la marca en el pedido** y respetarla en el total, al repreciar y al facturar. Hoy existen `pedidos.pago_contado_10`, "Contado 10 %" por segmento en el encabezado del pedido del ERP y las condiciones por proveedor y marca.
+- [ ] Definí con el agente vendedor el campo y el formato del outbox, y con cuentas corrientes cómo se emite la REV.
+
+### #16 — Condiciones editables hasta facturar, y repreciar al guardar
+
+> **Hecho 26/10 (8f907c8).** No tocar sin hablar con listas de precios.
+> - `lib/pedidos/estados.ts` → `puedeEditarCondiciones(estado)`: estados editables **y `pendiente_facturacion`**. `motivoBloqueo` lo explica.
+> - Servidor (`lib/actions/pedidos.ts`): `actualizarEncabezadoPedido` acepta en `pendiente_facturacion` las condiciones (`CAMPOS_CONDICIONES`: listas y métodos general y por segmento, `bonif_pedido`, `bonif_mercaderia_pct`) + la entrega; **si cambia alguna, reprecia solo** (precios de cuando se tomó el pedido, "precio cerrado") y `recalcularTotalPedido` resincroniza el kardex. `guardarCondicionesPedido` y `repreciarPedido` usan `assertCondicionesEditables` (estado + **sin comprobantes vivos**).
+> - Artículos, cantidades, precios a mano y cupos de mercadería siguen con `esPedidoEditable` (bloqueados después de preparar).
+> - ERP `/clientes-pedidos/[id]`: los controles de condiciones usan `condEditable`; un solo "Guardar" (reprecia una vez).
+> - "Condición de pago" a nivel pedido = el contado 10 % (#13). La forma de pago de la ficha del cliente no es del pedido.
+
+**Qué pasó:** después de que el depósito termina el último artículo, el pedido pasa a "Pendiente Facturación" y en el ERP **se bloquea todo** salvo la condición de entrega (`lib/pedidos/estados.ts`: `ESTADOS_EDITABLES`, `puedeEditarEntrega`).
+
+**Regla de Juan:**
+- [ ] Los **artículos y cantidades** quedan bloqueados después de preparar, porque son lo que armó el depósito.
+- [ ] **Lista, método de facturación, condición de pago, descuentos por segmento y contado 10 %** se pueden cambiar **hasta que el pedido esté facturado**.
+- [ ] Al guardar, el pedido se **reprecia solo** y el kardex se resincroniza (`sincronizarKardexPedido`).
+
+### #19 y #20 — Anular comprobantes y volver a emitir · lo dirige Listas de precios y descuentos
+
+**Reparto (Juan, 26/10):**
+- **Listas de precios y descuentos** dirige el flujo: que el pedido vuelva a tener las condiciones editables, el repreciado y la nueva emisión.
+- **Frontend** hace el botón "Anular comprobantes" en el modal del pedido.
+- **Cuentas corrientes** hace la anulación de todos los comprobantes del pedido juntos, con su cuenta corriente, comisión, stock y remito.
+
+Empieza Listas de precios con un plan corto que acuerden los tres.
+
+**Caso real de Juan:** "le pedí al vendedor todo factura", o mitad y mitad, o todo presupuesto; o se cambió la lista en el medio.
+
+**Flujo pedido:**
+1. Emitir comprobantes.
+2. El cliente quiere refacturar.
+3. En el **modal del pedido** aparece el botón **"Anular comprobantes"**, que anula **todos** los comprobantes del pedido juntos (PRES → REV; FA → NC, fiscal en producción).
+4. El pedido vuelve a tener las **condiciones** editables, como en #16.
+5. Se reprecia.
+6. Se vuelve a emitir **sin tocar cantidades**.
+
+Todo lo que eso implica:
+- la cuenta corriente se ajusta a lo nuevo;
+- la comisión también;
+- el stock;
+- el remito;
+- las apps ven el comprobante nuevo.
+
+**Lo que ya existe:** `app/api/comprobantes-venta/[id]/anular` anula **de a uno**. Por cada uno: asienta la reversa en la cuenta corriente y la cruza con el original, reliquida la comisión, devuelve el stock y anula el remito. **Pero el pedido queda en "Facturado"** y no se puede editar ni volver a generar.
+
+**Detalles a tener en cuenta:**
+- [ ] Un pedido puede tener varios comprobantes (URQUIZA tuvo 2, por la condición de ARNANUK).
+- [ ] Si el cliente ya había pagado una parte, esa plata queda a favor y la oficina la aplica al comprobante nuevo (regla 39 de la auditoría).
+
+#### Plan acordado (listas de precios, 26/10) — respuestas de Juan incluidas
+
+**Respuestas de Juan (26/10):**
+1. Se puede refacturar **hasta que se cobra**: si alguien cobró el 100 % del pedido se bloquea; cobrado en parte, se puede. El estado del pedido (facturado, listo, en viaje, entregado) no importa.
+2. **Se anula todo**: los comprobantes del pedido **y** el 10 % contado. Las NC/REV de **devoluciones no** (es mercadería que volvió, con su stock).
+3. Lo que el cliente ya pagó **queda a cuenta**: no se reimputa solo.
+
+Idea: **anular = volver el pedido a "Pendiente Facturación"**. Desde ahí rige #16 (condiciones editables, reprecio solo; "Repreciar" lleva a precios de hoy) y se vuelve a generar con el botón de siempre: `generar` ya acepta un pedido cuyos comprobantes están todos anulados y factura las cantidades preparadas (`cantidad-a-facturar.ts`). No hace falta un estado nuevo.
+
+**Hecho por listas de precios (26/10) — NO reescribir, usarlo:** `lib/pedidos/anulacion-pedido.ts`
+- `evaluarAnulacionPedido(supabase, pedidoId)` → `{ puede, motivo, aAnular, estado }`. `aAnular` = lo que hay que anular, **en orden**: primero las NC/REV del 10 % contado imputadas a sus comprobantes, después los comprobantes del pedido (fiscales antes que PRES). Si `puede` es false, `motivo` es el texto para la pantalla ("ya está cobrado al 100 %…").
+- `reglaAnulacionPedido(estado, comprobantes)`: la parte pura (tests en `mobile/packages/core/test/anulacion-pedido.test.ts`).
+- `ESTADO_TRAS_ANULAR = "pendiente_facturacion"`.
+- "Cobrado al 100 %" = todos los comprobantes del pedido con `saldo_pendiente` en 0 (pagos, 10 % contado o devoluciones).
+
+**Falta — cuentas corrientes:** `anularComprobantesPedido(supabase, pedidoId, usuarioId)` + `POST /api/pedidos/[id]/anular-comprobantes`:
+1. `evaluarAnulacionPedido`; si `!puede` → 422 con `motivo`.
+2. Anular cada uno de `aAnular` **en ese orden**, con la misma lógica de `/api/comprobantes-venta/[id]/anular` (sacarla a una función de `lib/` sin cambiar lo que hace: inverso PRES→REV / FA→NC con CAE, libro mayor, cruce con el original, comisión, stock, remito).
+3. **Reintentable:** si se corta a la mitad, al volver a llamar `aAnular` ya trae solo lo que sigue vivo.
+4. Lo pagado queda **a cuenta** del cliente (respuesta 3): no reimputar.
+5. Sin comprobantes vivos: `pedidos.estado = ESTADO_TRAS_ANULAR`, `pago_contado_10 = false` si lo tenía, y `sincronizarKardexPedido`.
+6. Respuesta: lista de lo anulado (tipo, número, importe) + lo que quedó a cuenta.
+
+**Falta — frontend:** en el modal del pedido (`/clientes-pedidos`), botón **"Anular comprobantes"** cuando `tieneComprobantes` (ya existe en la página).
+- Al abrir, pedir `evaluarAnulacionPedido` (vía la ruta o una server action) y mostrar `aAnular` con número y monto. Si hay FA/FB: "la nota de crédito se emite en ARCA y no se puede deshacer". Si `!puede`: mostrar `motivo` y deshabilitar.
+- Al terminar: refrescar y mostrar "Pendiente Facturación: cambiá las condiciones (Editar pedido) o Repreciar, y volvé a Generar". El resto de los botones ya funciona: Repreciar y Generar se habilitan solos cuando no quedan comprobantes vivos.
+
+**Apps:** nada. Ven los comprobantes nuevos por las réplicas de siempre.
+
+---
+
+## 6. Frontend
+
+### #14 — Preparado y total a facturar en la ficha del pedido
+
+**Qué pasó:** el 001941 se preparó con 30 de 36 PACKx2 y el BATMAN faltante, y se facturó por $638.813,76. La ficha y el modal del pedido siguieron mostrando **36 u.** y **"TOTAL $722.881"**, también ya facturado.
+
+- [ ] Por renglón, después de preparar: **"30 de 36"** (además del color).
+- [ ] El total que se va a facturar: la suma de lo preparado, que es lo mismo que `cantidadAFacturar` de `lib/pedidos/cantidad-a-facturar.ts`.
+- [ ] Ya facturado: el **total de los comprobantes**, no el del pedido.
+
+### #34 — Color del cheque editable
+
+**Decisión de Juan:**
+- [ ] La regla automática queda como está (`lib/actions/color-cheque.ts`: más del 50 % presupuesto = NEGRO; si no, BLANCO).
+- [ ] Se tiene que poder **cambiar a mano** al recibirlo en **/caja** y desde la **cartera de cheques**.
+
+### #40 — Chofer sin nombre en el tablero
+
+- [ ] En el tablero de Finanzas, la billetera y las rendiciones del chofer figuran como **"d6ac25bb"**, un pedazo del id del usuario. Tiene que decir el nombre ("Juan Cruz"). Sale de `/api/finanzas/tablero`.
+
+### #17 y #39 — Pedido con todo faltante
+
+**Qué pasó:** el 001942 (FITTERER) se preparó con los 3 renglones faltantes.
+- "Generar" mostró **"Comprobantes generados exitosamente:"** con la lista **vacía**, no generó nada, y el pedido quedó en "Pendiente Facturación" para siempre.
+- Después, al imputar un cobro en /caja, el modal ofreció ese pedido como **anticipo** ("Sin facturar (anticipo)", $115.545,25).
+
+**Qué tiene que pasar:**
+- [ ] "Generar" sobre un pedido sin nada para facturar avisa: **"No hay nada para facturar: todos los renglones están en faltante."**
+- [ ] El pedido se puede **volver a "pendiente"** (para prepararlo cuando haya mercadería; vuelve a la cola del depósito) **o pasar a "eliminado"**.
+- [ ] Un pedido con todo faltante **no aparece como cobrable** en ningún lado: `components/pagos/ComprobantesSelector.tsx`, `lib/vendedor/ficha-cliente.ts`, `lib/viajes/cliente-viaje.ts`. Son los mismos lugares donde se excluyó `sistema_viejo`.
+
+---
+
+## 7. Oficina (Juan) — no es código
+
+- [ ] **#9:** actualizar el cliente **56** (en el sistema viejo es SANJUMATO S.A., CUIT 30-71698039-8) y el **1381** (DING DAFU, CUIT 20-96309098-7), que cambiaron de dueño. Dar de alta el **765** LA PAMPEANA DISTRIBUIDORA S.A. (30-71835473-7) y el **766** YOU JUNJUN (20-95333922-7). Exportar del sistema viejo **todos** los clientes (código, nombre, CUIT) para armar el listado completo de faltantes.
+- [ ] **#12:** el artículo "Cepillo Dent BATMAN/M.MARAVILLA" tiene proveedor "INEXISTENTE", y el "PACKx2 ULTRA BLANCO x90g" no tiene rubro.
+- [ ] **#4:** las 2 recepciones de mercadería de prueba se borran antes del pase (van en el script del pase, Fase 10.4 del roadmap).
+- [ ] FITTERER (556) quedó con lista **Bahía** desde la prueba: decidir si vuelve a Neco.
+
+---
+
+## 8. Al terminar cada tarea
+
+1. Tachala en la tabla del punto 2, con fecha y commit.
+2. En [`docs/PRUEBA-INTEGRAL-SALIDA.md`](PRUEBA-INTEGRAL-SALIDA.md), columna "Estado" de ese #: "Hecho dd/mm (commit)".
+3. Si cambia algo que ven las apps, anotalo en [`docs/PENDIENTES-APPS-SALIDA.md`](PENDIENTES-APPS-SALIDA.md) para el agente de la app.
+4. Si dejaste una migración, avisale a Juan la ruta completa en `gmv2-nuevo` para que la aplique.

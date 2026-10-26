@@ -23,6 +23,25 @@ export interface MovimientoCC {
   referencia_tipo: string | null
 }
 
+/**
+ * Movimientos que son SOLO de la cuenta personal del cobrador (se copian ahí por
+ * billetera_a_cuenta_empleado): no son plata de la empresa en su mano, así que la
+ * billetera no los suma (migración 20261026_billeteras_sin_fantasma, #29).
+ */
+export const TIPOS_SOLO_CUENTA_PERSONAL = [
+  "rendicion_saldo_declarado",
+  "rendicion_diferencia",
+  "rendicion_devuelta",
+  "viaje_gasto_rechazado",
+] as const
+
+/** Plata en mano según los movimientos (misma regla que saldos_financieros BILLETERA). */
+export function plataEnManoDeMovimientos(movimientos: MovimientoCC[]): number {
+  const fuera = new Set<string>(TIPOS_SOLO_CUENTA_PERSONAL)
+  const total = movimientos.filter((m) => !(m.referencia_tipo && fuera.has(m.referencia_tipo))).reduce((s, m) => s + Number(m.monto || 0), 0)
+  return Math.round(total * 100) / 100
+}
+
 /** Tipos que componen la cuenta corriente de la billetera (deuda/favor). */
 export const TIPOS_CC_BILLETERA = [
   "rendicion_diferencia",

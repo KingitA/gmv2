@@ -82,6 +82,9 @@ interface Props {
   // false: el toggle "10% contado a todo" lo pinta el padre (junto a "Incluir devoluciones");
   // el selector solo sigue el valor de `contadoGeneral` (marca los anticipos al 90%).
   contadoEnBarra?: boolean
+  // Plata a favor que el padre tildó para este cobro (#37, /caja): el "Total a
+  // pagar" la descuenta (lo seleccionado − lo que ya tiene a favor).
+  aFavorAplicado?: number
 }
 
 // Prefijo de clave para anticipos a pedidos sin facturar (quedan como pago a cuenta).
@@ -97,7 +100,7 @@ export interface ResumenCuenta {
   otrosComprobantes: number   // comprobantes cobrables sin pedido vivo
 }
 
-export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded, onContadoPedidosChange, modo = "todos", onResumenLoaded, seleccionTotal, contadoGeneral, onContadoGeneralChange, contadoEnBarra = true }: Props) {
+export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded, onContadoPedidosChange, modo = "todos", onResumenLoaded, seleccionTotal, contadoGeneral, onContadoGeneralChange, contadoEnBarra = true, aFavorAplicado = 0 }: Props) {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [pedidosFacturados, setPedidosFacturados] = useState<Set<string>>(new Set())
@@ -457,7 +460,17 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
 
       {Object.keys(seleccionados).length > 0 && (
         <div className="flex justify-end text-sm font-semibold pt-1">
-          Total a pagar: <span className="ml-2 text-blue-700">{moneda(totalSeleccionado)}</span>
+          {aFavorAplicado > 0.005 ? (
+            <>
+              <span className="font-normal text-slate-500">
+                Seleccionado {moneda(totalSeleccionado)} − a favor <span className="text-green-700">{moneda(aFavorAplicado)}</span> ·
+              </span>
+              <span className="ml-2">Total a pagar:</span>
+              <span className="ml-2 text-blue-700">{moneda(redondear(totalSeleccionado - aFavorAplicado))}</span>
+            </>
+          ) : (
+            <>Total a pagar: <span className="ml-2 text-blue-700">{moneda(totalSeleccionado)}</span></>
+          )}
         </div>
       )}
     </div>

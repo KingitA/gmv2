@@ -21,10 +21,17 @@ import {
  *  2. si el artículo está en un comprobante del sistema → el último, exacto
  *     (precio neto e IVA del renglón; el precio no se puede tocar);
  *  3. si no (comprobante importado del sistema viejo, que solo tiene número,
- *     tipo y fecha, o artículo nunca facturado) → el comprobante MÁS RECIENTE
- *     del cliente del tipo que corresponde según cómo va hoy ese artículo para
- *     ese cliente (motor de precios: cliente todo facturado ⇒ NC A/B aunque el
- *     artículo sea de presupuesto). Precio sugerido: el neto actual del cliente.
+ *     tipo y fecha, o artículo nunca facturado), según cómo va hoy ese artículo
+ *     para ese cliente (motor de precios: cliente todo facturado ⇒ NC A/B aunque
+ *     el artículo sea de presupuesto). Precio sugerido: el neto actual del cliente.
+ *     - va en NEGRO → la REV se asocia al PRES de respaldo 0002-00000001 del
+ *       cliente (regla de Juan 26/10, #28). Antes iba al PRES más reciente, que
+ *       no tenía el artículo, y le bajaba la comisión (URQUIZA, PRES 0001-00000020).
+ *       El respaldo se crea al guardar la devolución, en $0 y sin renglones.
+ *     - va en BLANCO → la NC sale SIN comprobante asociado, ni en ARCA ni en el
+ *       sistema (Juan 26/10: no se le miente a nadie). A ARCA se le informa el
+ *       período (PeriodoAsoc, RG 4540; generar-nc-reversa). Antes se asociaba a
+ *       la factura más reciente, que no tenía el artículo.
  *
  * Percepción IVA: la lleva la NC si el comprobante de origen la llevaba (neto
  * de ese comprobante por encima del mínimo y cliente RI no excluido).
@@ -32,6 +39,10 @@ import {
  */
 
 const FISCALES = ["FA", "FB", "FC"]
+
+/** #28: PRES de respaldo, uno por cliente, para lo devuelto sin comprobante con ese artículo (negro). */
+export const NUMERO_RESPALDO_DEVOLUCION = "0002-00000001"
+const OBS_RESPALDO = "RESPALDO DEVOLUCIONES — comprobante en $0 para asociar devoluciones de artículos sin comprobante de origen (#28)"
 const VENTAS = [...FISCALES, "PRES"]
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -192,30 +203,68 @@ export async function origenesComprados(supabase: SupabaseClient, clienteId: str
 /** Contexto para valuar sin señal: alícuota IIBB vigente y comprobantes más recientes (fiscal / presupuesto). */
 export async function contextoDevolucion(supabase: SupabaseClient, clienteId: string, clienteIn?: ClienteDev | null): Promise<ContextoDevolucion> {
   const cliente = await leerCliente(supabase, clienteId, clienteIn)
-  const hoy = hoyISO()
-  const ultimoDe = async (tipos: string[]) => {
-    const { data } = await supabase
-      .from("comprobantes_venta")
-      .select("id, tipo_comprobante, numero_comprobante, fecha, total_neto, percepcion_iva, pedido_id, created_at")
-      .eq("cliente_id", clienteId)
-      .in("tipo_comprobante", tipos)
-      .is("anulado_en", null)
-      .neq("estado_pago", "anulado")
-      .lte("fecha", hoy)
-      .order("fecha", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    return (data as CompRow | null) ?? null
-  }
-  const [alicuota, fiscal, pres] = await Promise.all([alicuotaIIBBVigente(supabase, cliente), ultimoDe(FISCALES), ultimoDe(["PRES"])])
-  const bonificados = await bonificadosDe(supabase, clienteId, [fiscal, pres].filter(Boolean) as CompRow[])
+  const [alicuota, respaldo] = await Promise.all([alicuotaIIBBVigente(supabase, cliente), comprobanteRespaldo(supabase, clienteId)])
   const sinPrecio = { exacto: false, precio: null, iva_unitario: null }
   return {
     alicuota_iibb: alicuota,
-    ultimo_fiscal: fiscal ? origenDe(fiscal, cliente, bonificados, sinPrecio) : null,
-    ultimo_presupuesto: pres ? origenDe(pres, cliente, bonificados, sinPrecio) : null,
+    // Blanco sin comprobante con el artículo → sin asociado (NC con período a ARCA, #28)
+    ultimo_fiscal: null,
+    // Negro sin comprobante con el artículo → respaldo 0002-00000001 (#28). Si
+    // todavía no existe va sin id: prepararRenglonesDevolucion lo crea al guardar.
+    ultimo_presupuesto: respaldo
+      ? origenDe(respaldo, cliente, new Set(), sinPrecio)
+      : {
+          comprobante_venta_id: null,
+          tipo_comprobante: "PRES",
+          numero_comprobante: NUMERO_RESPALDO_DEVOLUCION,
+          fiscal: false,
+          percepcion_iva: false,
+          bonificado_contado: false,
+          ...sinPrecio,
+        },
   }
+}
+
+const RESPALDO_COLS = "id, tipo_comprobante, numero_comprobante, fecha, total_neto, percepcion_iva, pedido_id, created_at"
+
+async function comprobanteRespaldo(supabase: SupabaseClient, clienteId: string): Promise<CompRow | null> {
+  const { data } = await supabase
+    .from("comprobantes_venta")
+    .select(RESPALDO_COLS)
+    .eq("cliente_id", clienteId)
+    .eq("tipo_comprobante", "PRES")
+    .eq("numero_comprobante", NUMERO_RESPALDO_DEVOLUCION)
+    .is("anulado_en", null)
+    .limit(1)
+    .maybeSingle()
+  return (data as CompRow | null) ?? null
+}
+
+/** El PRES de respaldo del cliente (#28): lo busca y, si no está, lo crea en $0 (sin libro mayor: no mueve saldo). */
+export async function asegurarComprobanteRespaldo(supabase: SupabaseClient, clienteId: string): Promise<string> {
+  const existente = await comprobanteRespaldo(supabase, clienteId)
+  if (existente) return existente.id
+  const { data, error } = await supabase
+    .from("comprobantes_venta")
+    .insert({
+      cliente_id: clienteId,
+      tipo_comprobante: "PRES",
+      numero_comprobante: NUMERO_RESPALDO_DEVOLUCION,
+      punto_venta: NUMERO_RESPALDO_DEVOLUCION.split("-")[0],
+      fecha: hoyISO(),
+      total_neto: 0,
+      total_iva: 0,
+      percepcion_iva: 0,
+      percepcion_iibb: 0,
+      total_factura: 0,
+      saldo_pendiente: 0,
+      estado_pago: "pagado",
+      observaciones: OBS_RESPALDO,
+    })
+    .select("id")
+    .single()
+  if (error || !data) throw new Error(`No se pudo crear el comprobante de respaldo ${NUMERO_RESPALDO_DEVOLUCION}: ${error?.message ?? "sin respuesta"}`)
+  return data.id
 }
 
 /** Cómo va hoy cada artículo para el cliente (motor de precios) + precio sugerido (neto si factura). */
@@ -318,6 +367,13 @@ export async function prepararRenglonesDevolucion<T extends { articulo_id: strin
 ): Promise<Array<T & { precio_venta_original: number; comprobante_venta_id: string | null }>> {
   if (!items.length) return []
   const { origenes } = await resolverOrigenesDevolucion(supabase, clienteId, items.map((i) => i.articulo_id), opts)
+  // #28: negro sin comprobante con el artículo y el respaldo todavía no existe → crearlo
+  let respaldoId: string | null = null
+  for (const o of origenes.values()) {
+    if (o.comprobante_venta_id || o.fiscal || o.numero_comprobante !== NUMERO_RESPALDO_DEVOLUCION) continue
+    respaldoId ??= await asegurarComprobanteRespaldo(supabase, clienteId)
+    o.comprobante_venta_id = respaldoId
+  }
   const out: Array<T & { precio_venta_original: number; comprobante_venta_id: string | null }> = []
   for (const it of items) {
     const o = origenes.get(it.articulo_id)

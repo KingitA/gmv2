@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from '@/lib/auth'
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { prepararRenglonesDevolucion } from "@/lib/cobranzas/origen-devolucion"
+import { CODIGO_TOPE_DEVOLUCION, excedeTopeDevolucion } from "@/lib/cobranzas/tope-devolucion"
 import { redondear } from "@/lib/formato"
 
 export async function GET(request: NextRequest) {
@@ -130,7 +131,14 @@ export async function POST(request: NextRequest) {
 
     // Cada renglón contra su comprobante de origen y, si está facturado en el
     // sistema, al precio facturado (regla del dueño 21/10/2026)
-    items = await prepararRenglonesDevolucion(supabase, cliente_id, items, { pedidoId: pedido_id })
+    items = await prepararRenglonesDevolucion(supabase, cliente_id, items, { pedidoId: pedido_id })
+
+
+    // Tope en el servidor: no devolver más de lo vendido en el comprobante de origen (#25)
+
+    const tope = await excedeTopeDevolucion(supabase, items)
+
+    if (tope) return NextResponse.json({ error: tope, codigo: CODIGO_TOPE_DEVOLUCION }, { status: 409 })
 
     // Calcular monto total
     const montoTotal = items.reduce((sum: number, item: any) => sum + item.cantidad * item.precio_venta_original, 0)

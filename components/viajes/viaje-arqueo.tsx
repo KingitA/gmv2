@@ -10,6 +10,7 @@ import { toast } from "sonner"
 import { formatCurrency, formatDateTimeAR } from "@/lib/utils"
 import type { HojaRuta } from "@/lib/viajes/hoja-ruta"
 import { InputMonto } from "@/components/ui/input-monto"
+import { ETIQUETA_CATEGORIA } from "@/lib/viajes/gastos-rendicion"
 
 // Arqueo del viaje (al pie de la hoja de ruta): plata entregada, gastos
 // detallados con aprobar/rechazar, y el efectivo que debería traer el chofer.
@@ -95,7 +96,7 @@ export function ViajeArqueo({ hoja, onCambio }: { hoja: HojaRuta; onCambio: () =
             {dinero.gastos.map((g) => (
               <tr key={g.id} className={`border-b ${g.estado === "rechazado" ? "opacity-50" : ""}`}>
                 <td className="px-3 py-1.5">
-                  <span className="capitalize">{g.categoria}</span>
+                  <span>{ETIQUETA_CATEGORIA[g.categoria] || g.categoria}</span>
                   {g.observaciones && <span className="text-muted-foreground"> — {g.observaciones}</span>}
                   <span className="ml-2 text-xs text-muted-foreground">{g.cargado_por} · {formatDateTimeAR(g.fecha)}</span>
                   {g.foto_url && <a className="ml-2 text-xs text-blue-600 underline" href={g.foto_url} target="_blank" rel="noreferrer">ticket</a>}

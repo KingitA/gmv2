@@ -24,6 +24,7 @@ import {
 } from "@/lib/pricing/segmento"
 import {
   esPedidoEditable,
+  puedeEditarCondiciones,
   puedeEliminarPedido,
   puedeEditarEntrega,
   puedeCambiarEstado,
@@ -986,6 +987,7 @@ export async function createPedido(data: {
         vendedor_id: clienteInfo.vendedor_id ?? null,
         provincia_destino: clienteInfo.provincia ?? null,
         pedido_id: pedido.id,
+        numero_pedido: pedido.numero_pedido ?? null, // #11: las listas mostraban "—"
         lista_precio_id: item.listaUsadaId,
         metodo_facturacion: metodoColor,
         color_dinero: colorDinero,
@@ -1258,9 +1260,15 @@ export async function cambiarEstadoPedidoManual(pedidoId: string, nuevoEstado: s
 // ─── Encabezado del pedido (ficha /clientes-pedidos/[id]) ────────────────────
 // Aplica la traba por estado del lado del servidor:
 // - editable: se guarda todo el encabezado (estado solo si es transición válida).
-// - facturado / listo / pendiente_facturacion: SOLO condicion_entrega (+ estado
-//   listo_para_retirar ↔ listo_para_enviar). El resto se descarta.
+// - pendiente_facturacion sin comprobantes vivos (#16, regla del dueño 23/10):
+//   las CONDICIONES (CAMPOS_CONDICIONES) + condicion_entrega; artículos y
+//   cantidades ya son los del depósito.
+// - facturado / listo: SOLO condicion_entrega (+ estado listo_para_retirar ↔
+//   listo_para_enviar). El resto se descarta.
 // - en_viaje: solo estado (entregado / rechazado). Finales: nada.
+// Si cambia una condición, el pedido se reprecia solo (precios de cuando se tomó)
+// y el kardex se resincroniza — salvo `opts.repreciar === false` (el que llama
+// reprecia después, p. ej. porque también guarda condiciones por proveedor/marca).
 const CAMPOS_ENCABEZADO = [
   "metodo_facturacion_pedido", "condicion_entrega", "vendedor_id",
   "lista_precio_pedido_id", "lista_limpieza_pedido_id", "metodo_limpieza_pedido",
@@ -1271,24 +1279,41 @@ const CAMPOS_ENCABEZADO = [
   "bonif_pedido",
 ] as const
 
+/** Condiciones del pedido: se pueden cambiar hasta facturar (#16) y reprecian. */
+const CAMPOS_CONDICIONES = [
+  "metodo_facturacion_pedido",
+  "lista_precio_pedido_id", "lista_limpieza_pedido_id", "metodo_limpieza_pedido",
+  "lista_perf0_pedido_id", "metodo_perf0_pedido", "lista_perf_plus_pedido_id",
+  "metodo_perf_plus_pedido", "bonif_mercaderia_pct", "bonif_pedido",
+] as const
+
 export async function actualizarEncabezadoPedido(
   pedidoId: string,
   patch: Partial<Record<(typeof CAMPOS_ENCABEZADO)[number] | "estado", any>>,
+  opts: { repreciar?: boolean } = {},
 ) {
   const supabase = await createClient()
   const { data: pedido, error } = await supabase
-    .from("pedidos").select("id, estado").eq("id", pedidoId).single()
+    .from("pedidos").select("id, estado, " + CAMPOS_CONDICIONES.join(", ")).eq("id", pedidoId).single<Record<string, any>>()
   if (error || !pedido) throw new Error("Pedido no encontrado")
 
   const editable = esPedidoEditable(pedido.estado)
+  const condEditables = !editable && puedeEditarCondiciones(pedido.estado) && !(await comprobanteVivoDePedido(supabase, pedidoId))
   const update: Record<string, any> = {}
 
   if (editable) {
     for (const k of CAMPOS_ENCABEZADO) if (k in patch) update[k] = patch[k]
-    if ("bonif_pedido" in update) update.bonif_pedido = normalizarBonifPedido(update.bonif_pedido)
+  } else if (condEditables) {
+    for (const k of CAMPOS_CONDICIONES) if (k in patch) update[k] = patch[k]
+    if ("condicion_entrega" in patch) update.condicion_entrega = patch.condicion_entrega
   } else if (puedeEditarEntrega(pedido.estado)) {
     if ("condicion_entrega" in patch) update.condicion_entrega = patch.condicion_entrega
   }
+  if ("bonif_pedido" in update) update.bonif_pedido = normalizarBonifPedido(update.bonif_pedido)
+  // ¿Cambió alguna condición? (solo lo que de verdad cambia dispara el reprecio)
+  const cambioCondicion = CAMPOS_CONDICIONES.some((k) =>
+    k in update && JSON.stringify(update[k] ?? null) !== JSON.stringify(k === "bonif_pedido" ? normalizarBonifPedido((pedido as any)[k]) : (pedido as any)[k] ?? null),
+  )
 
   if (patch.estado && patch.estado !== pedido.estado) {
     if (!puedeCambiarEstado(pedido.estado, patch.estado)) {
@@ -1308,8 +1333,45 @@ export async function actualizarEncabezadoPedido(
 
   const { error: upErr } = await supabase.from("pedidos").update(update).eq("id", pedidoId)
   if (upErr) throw new Error(upErr.message)
+  let total: number | undefined
+  if (cambioCondicion && opts.repreciar !== false) total = (await repreciarConCondiciones(supabase, pedidoId)).total
   revalidatePath("/clientes-pedidos")
-  return { success: true, aplicado: Object.keys(update), editable }
+  return { success: true, aplicado: Object.keys(update), editable, repreciado: cambioCondicion && opts.repreciar !== false, total }
+}
+
+/** Comprobante vivo (no anulado) del pedido, o null. Con comprobante vivo el precio quedó cerrado. */
+async function comprobanteVivoDePedido(supabase: any, pedidoId: string): Promise<{ tipo_comprobante: string; numero_comprobante: string } | null> {
+  const { data } = await supabase
+    .from("comprobantes_venta")
+    .select("tipo_comprobante, numero_comprobante")
+    .eq("pedido_id", pedidoId)
+    .is("anulado_en", null)
+    .limit(1)
+    .maybeSingle()
+  return data ?? null
+}
+
+/** Condiciones editables (#16): estado editable o pendiente de facturación, y sin comprobantes vivos. */
+async function assertCondicionesEditables(supabase: any, pedidoId: string) {
+  const { data, error } = await supabase.from("pedidos").select("id, estado").eq("id", pedidoId).single()
+  if (error || !data) throw new Error("Pedido no encontrado")
+  if (!puedeEditarCondiciones(data.estado)) throw new Error(motivoBloqueo(data.estado) || "El pedido no puede modificarse")
+  const vivo = await comprobanteVivoDePedido(supabase, pedidoId)
+  if (vivo) throw new Error(`El pedido ya está facturado (${vivo.tipo_comprobante} ${vivo.numero_comprobante}): para cambiar las condiciones hay que anular los comprobantes.`)
+  return data
+}
+
+/** Reprecia con las condiciones guardadas y los precios de cuando se tomó; total + kardex. */
+async function repreciarConCondiciones(supabase: any, pedidoId: string) {
+  const { data: pedido, error } = await supabase
+    .from("pedidos")
+    .select(`id,estado,cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
+    .eq("id", pedidoId)
+    .single()
+  if (error || !pedido) throw new Error("Pedido no encontrado")
+  await repreciarItemsPedido(supabase, pedido, pedidoId)
+  const total = await recalcularTotalPedido(supabase, pedidoId)
+  return { total }
 }
 
 // ─── Edición de pedidos pendientes ─────────────────────────────────────────
@@ -1798,15 +1860,8 @@ async function repreciarItemsPedido(supabase: any, pedido: any, pedidoId: string
 // (método/lista/segmentación/descuentos del pedido) desde /clientes-pedidos/[id].
 export async function repreciarPedido(pedidoId: string) {
   const supabase = await createClient()
-  await assertPedidoEditable(supabase, pedidoId)
-  const { data: pedido, error } = await supabase
-    .from("pedidos")
-    .select(`id,estado,cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
-    .eq("id", pedidoId)
-    .single()
-  if (error || !pedido) throw new Error("Pedido no encontrado")
-  await repreciarItemsPedido(supabase, pedido, pedidoId)
-  const total = await recalcularTotalPedido(supabase, pedidoId)
+  await assertCondicionesEditables(supabase, pedidoId)
+  const { total } = await repreciarConCondiciones(supabase, pedidoId)
   revalidatePath("/clientes-pedidos")
   return { success: true, total }
 }
@@ -1902,6 +1957,8 @@ export async function aplicarCondicionesPedidoVendedor(
       if (tipo in entrante) fusion[tipo] = entrante[tipo]
       else if (cond.bonif_pedido === null && (tipo === "viajante" || tipo === "mercaderia")) delete fusion[tipo]
     }
+    // Checkbox "10 % contado" de todo el pedido (#13): si viene, se respeta (null = según cada condición)
+    if ("contado_todo" in entrante) fusion.contado_todo = entrante.contado_todo
     const v = normalizarBonifPedido(fusion)
     if (JSON.stringify(v) !== JSON.stringify(actual)) patch.bonif_pedido = v
   }
@@ -1933,7 +1990,8 @@ export async function guardarCondicionesPedido(
   cond: { proveedor: CondicionProveedor[]; marca: CondicionMarca[] },
 ) {
   const supabase = await createClient()
-  await assertPedidoEditable(supabase, pedidoId)
+  // Condición, no artículo: se puede cambiar hasta facturar (#16)
+  await assertCondicionesEditables(supabase, pedidoId)
 
   const { data: pedido } = await supabase
     .from("pedidos")

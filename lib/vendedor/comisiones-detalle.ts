@@ -41,8 +41,13 @@ export const mapArticuloComision = (r: any) => {
 }
 
 
-/** Filas de kardex de UN pedido ya cobradas → agrupadas por comprobante. */
-export function agruparPorComprobante(rows: any[], compMap: Map<string, any>) {
+/**
+ * Filas de kardex de UN pedido ya cobradas → agrupadas por comprobante.
+ * `ganada` (V3, 21/10): comisión GANADA por comprobante en la cuenta personal; si viene,
+ * el total del comprobante es ese (ya sin devoluciones ni contado) y `debito_contado`
+ * pasa a ser pactada − ganada.
+ */
+export function agruparPorComprobante(rows: any[], compMap: Map<string, any>, ganada?: Map<string, { monto: number }>) {
   const grupos = new Map<string, any>()
   for (const r of rows || []) {
     const cid = r.comprobante_venta_id ?? "sin_comprobante"
@@ -68,6 +73,13 @@ export function agruparPorComprobante(rows: any[], compMap: Map<string, any>) {
   }
 
   for (const g of grupos.values()) {
+    const gan = ganada?.get(g.comprobante_id)
+    if (ganada) {
+      const pactada = g.total_comision + g.debito_contado
+      g.total_comision = gan?.monto ?? 0
+      g.debito_contado = Math.max(0, pactada - g.total_comision)
+      g.ganada_en_cuenta = true
+    }
     g.total_comision = Math.round(g.total_comision * 100) / 100
     g.debito_contado = Math.round(g.debito_contado * 100) / 100
   }

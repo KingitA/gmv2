@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { ncContadoComprobante } from "@/lib/cobranzas/reglas-cobro"
+import { devueltoPorComprobante } from "@/lib/cobranzas/devuelto"
 
 /**
  * ¿Cuánta NC del 10% contado va a generar ESTE cobro por cada comprobante?
@@ -10,6 +11,8 @@ import { ncContadoComprobante } from "@/lib/cobranzas/reglas-cobro"
  *
  * REGLA 07/10 (dueño): la NC es el 10% del TOTAL del comprobante, una sola
  * vez, aunque este cobro pague solo una parte. Solo bonifican FA/FB/FC/PRES.
+ * #33 (26/10): sobre lo que el cliente se quedó (total − NC/REV de devolución
+ * ya emitidas), igual que generar-bonificacion: las apps muestran este número.
  */
 const BONIFICABLES = new Set(["FA", "FB", "FC", "PRES"])
 
@@ -27,7 +30,7 @@ export async function bonificacionPendientePorComprobante(
   const ids = [...porComp.keys()]
   if (!ids.length) return out
 
-  const [{ data: comps }, { data: ncs }] = await Promise.all([
+  const [{ data: comps }, { data: ncs }, devuelto] = await Promise.all([
     supabase
       .from("comprobantes_venta")
       .select("id, tipo_comprobante, numero_comprobante, total_factura")
@@ -40,13 +43,14 @@ export async function bonificacionPendientePorComprobante(
       .is("anulado_en", null)
       .neq("estado_pago", "anulado")
       .ilike("observaciones", "%Bonificación contado%"),
+    devueltoPorComprobante(supabase, ids),
   ])
   const obsBonif = (ncs || []).map((n: any) => String(n.observaciones || ""))
   for (const c of comps || []) {
     if (!BONIFICABLES.has(c.tipo_comprobante)) continue
     const yaBonificado = obsBonif.some((o) => o.includes(c.numero_comprobante))
     if (yaBonificado) continue
-    out[c.id] = ncContadoComprobante(Number(c.total_factura) || 0)
+    out[c.id] = ncContadoComprobante(Math.max(0, (Number(c.total_factura) || 0) - (devuelto.get(c.id) ?? 0)))
   }
   return out
 }

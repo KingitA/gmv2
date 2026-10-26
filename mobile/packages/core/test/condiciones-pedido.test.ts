@@ -3,6 +3,7 @@
 // comisión con descuento de viajante, y la compatibilidad con la APK instalada.
 import { describe, expect, it } from "vitest"
 import {
+  contadoPorDefectoCliente,
   normalizarBonifPedido,
   precioArticuloParaCliente,
   resolverContadoItem,
@@ -188,5 +189,34 @@ describe("comisión con descuento de viajante (regla del dueño)", () => {
   it("mercadería regalada: su neto no tiene el viajante aplicado", () => {
     const r = calcularComisionMonto({ precioNetoUnitario: 100, cantidad: 1, metodoFacturacion: "Factura", ivaVentas: "factura", comisionPct: 6, viajantePct: 3, netoIncluyeViajante: false })
     expect(r.monto).toBe(3)
+  })
+})
+
+describe("contado de TODO el pedido — checkbox al finalizar (#13, 26/10/2026)", () => {
+  const ficha = [{ tipo: "contado", segmento: null, porcentaje: 10 }]
+  const condSi = { lista_precio_id: null, metodo_facturacion: null, dto_general_pct: null, dto_viajante_pct: null, dto_mercaderia_pct: null, contado: true }
+  it("tildado: todo contado, aunque la ficha o una condición digan que no", () => {
+    expect(resolverContadoItem(null, { contado_todo: true }, [], "perf0")).toBe(true)
+    expect(resolverContadoItem({ ...condSi, contado: false }, { contado_todo: true }, [], "limpieza")).toBe(true)
+  })
+  it("destildado: nada contado, aunque la ficha o una condición lo tengan", () => {
+    expect(resolverContadoItem(null, { contado_todo: false }, ficha, "limpieza")).toBe(false)
+    expect(resolverContadoItem(condSi, { contado_todo: false }, ficha, "perf_plus")).toBe(false)
+  })
+  it("la lista Especial nunca va de contado; sin checkbox, la jerarquía de siempre", () => {
+    expect(resolverContadoItem(null, { contado_todo: true }, ficha, "limpieza", true)).toBe(false)
+    expect(resolverContadoItem(null, { contado: { limpieza_bazar: 0 } }, ficha, "limpieza")).toBe(false)
+  })
+  it("se guarda en bonif_pedido y sobrevive a normalizar", () => {
+    expect(normalizarBonifPedido({ contado_todo: false })).toEqual({ contado_todo: false })
+    expect(normalizarBonifPedido({ general: { perf0: 5 }, contado_todo: true })).toEqual({ general: { perf0: 5 }, contado_todo: true })
+    expect(normalizarBonifPedido({ contado_todo: "si" })).toBeNull()
+  })
+  it("cómo arranca el checkbox según la ficha y las condiciones del cliente", () => {
+    expect(contadoPorDefectoCliente(ficha)).toBe("todo")
+    expect(contadoPorDefectoCliente([{ tipo: "contado", segmento: "perf0", porcentaje: 10 }])).toBe("parcial")
+    expect(contadoPorDefectoCliente([], [{ contado: true }])).toBe("parcial")
+    expect(contadoPorDefectoCliente(ficha, [{ contado: false }])).toBe("parcial")
+    expect(contadoPorDefectoCliente([{ tipo: "general", segmento: null, porcentaje: 5 }])).toBe("nada")
   })
 })

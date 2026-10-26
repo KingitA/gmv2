@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { getSaldosClientes, saldoDeParada, valorDevolucionesDeViaje } from "@/lib/cuenta-corriente/saldo"
+import { palletsDePedidos } from "./bultos"
 import { fechaCorta, sumarDiasISO } from "@/lib/formato"
 
 /**
@@ -16,6 +17,8 @@ export interface PedidoHoja {
   estado: string
   total: number
   bultos: number
+  /** #22: pallets (además de los bultos) */
+  pallets: number
   vendedor: string
   comprobantes: Array<{ id: string; tipo: string; numero: string; total: number; saldo: number }>
   remitos: Array<{ id: string; tipo_remito: string; numero_remito: string; estado_pdf: string }>
@@ -61,15 +64,25 @@ export interface ParadaHoja {
   // calculado
   pedidos: PedidoHoja[]
   bultos: number
+  pallets: number
   total_viaje: number      // Σ pedidos de este viaje
   saldo_anterior: number   // saldo PROYECTADO del cliente SIN lo de este viaje (saldoDeParada)
   total_a_cobrar: number   // saldo_anterior + total_viaje − devuelto
-  minimo_exigido: number   // lo que oficina marcó como "cobrar sí o sí"
+  /**
+   * Lo que oficina marcó como "cobrar sí o sí", NETO de lo devuelto en este viaje
+   * (misma base que saldoDeParada / total_a_cobrar). #27: antes era bruto y una parada
+   * con devoluciones y 10 % contado decía "cobró de menos" cuando había sobrado plata.
+   */
+  minimo_exigido: number
+  /** 10 % contado y ajuste por redondeo de los cobros del viaje: también cubren lo exigido */
+  descuentos_cobro: number
   cobrado: number
   cobrado_anterior: number // parte del cobro aplicada a comprobantes anteriores
   cobrado_viaje: number    // parte aplicada a comprobantes de este viaje
   devuelto: number         // valor de las devoluciones en proceso cargadas en este viaje
-  cobro_cumplido: boolean  // cobrado >= minimo_exigido
+  cobro_cumplido: boolean  // cobrado + descuentos_cobro >= minimo_exigido
+  /** #23: bloqueada y sin cumplir lo exigido → solo se puede marcar "no entregado" */
+  entrega_bloqueada: boolean
   pagos: PagoHoja[]
 }
 
@@ -100,6 +113,7 @@ export interface HojaRuta {
     paradas: number
     pedidos: number
     bultos: number
+    pallets: number
     total_viaje: number
     saldo_anterior: number
     total_a_cobrar: number
@@ -125,6 +139,16 @@ export interface HojaRuta {
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100
+
+/**
+ * "0001-00000021". El numero_comprobante ya trae el punto de venta: antes se le
+ * volvía a anteponer y la hoja decía "PRES 0001-0001-00000021" (#21).
+ */
+export function numeroVisible(puntoVenta: string | null | undefined, numero: string | null | undefined): string {
+  const n = String(numero || "")
+  if (n.includes("-") || !puntoVenta) return n
+  return `${puntoVenta}-${n}`
+}
 /** Último día del viaje: fecha de salida + (dias − 1). */
 export function fechaFin(fecha: string, dias: number | null | undefined): string {
   return sumarDiasISO(String(fecha).slice(0, 10), Math.max(1, Number(dias) || 1) - 1)
@@ -162,7 +186,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
           pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, numero_comprobante_pago, cheque_id),
           imputaciones(comprobante_id, monto_imputado, comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante, punto_venta, numero_comprobante, pedido_id))`)
         .eq("viaje_id", viajeId)
-        .in("estado", ["pendiente_rendicion", "confirmado"])
+        .in("estado", ["pendiente_rendicion", "pendiente", "confirmado"]) // "pendiente" = transferencia de la calle a confirmar en /caja (#35)
         .order("created_at", { ascending: true }),
       supabase.from("viajes_fondos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),
       supabase.from("viajes_gastos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),
@@ -189,7 +213,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     ]),
   ].filter(Boolean) as string[]
 
-  const [{ data: clientes }, { data: comprobantes }, { data: remitos }, { data: usuarios }, saldos, { data: cajas }, { data: bancos }, { data: saldoBill }, devueltoPorCliente] =
+  const [{ data: clientes }, { data: comprobantes }, { data: remitos }, { data: usuarios }, saldos, saldosConViaje, { data: cajas }, { data: bancos }, { data: saldoBill }, devueltoPorCliente, palletsPorPedido] =
     await Promise.all([
       clienteIds.length
         ? supabase
@@ -218,6 +242,9 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
         : Promise.resolve({ data: [] as any[] }),
       // Fuente única: proyectado SIN los cobros/devoluciones de este viaje (se muestran aparte)
       getSaldosClientes(supabase, clienteIds, { excluirViajeId: viajeId }),
+      // Mismo saldo CON lo de este viaje: la diferencia es lo que el viaje ya bajó (cobros +
+      // su 10 % contado y ajuste + devoluciones). De ahí salen los descuentos del cobro (#27).
+      getSaldosClientes(supabase, clienteIds),
       supabase.from("cajas_financieras").select("id, nombre"),
       supabase.from("cuentas_bancarias").select("id, nombre"),
       viaje.chofer_id
@@ -228,6 +255,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
             .eq("cuenta_id", viaje.chofer_id)
         : Promise.resolve({ data: [] as any[] }),
       valorDevolucionesDeViaje(supabase, viajeId),
+      palletsDePedidos(supabase, pedidoIds),
     ])
 
   const nombreUsuario = new Map((usuarios || []).map((u: any) => [u.id, u.nombre as string]))
@@ -256,7 +284,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     const imps = (p.imputaciones || []).map((i: any) => {
       const c = i.comprobantes_venta
       return {
-        comprobante: c ? `${c.tipo_comprobante} ${c.punto_venta || ""}${c.punto_venta ? "-" : ""}${c.numero_comprobante || ""}` : "comprobante",
+        comprobante: c ? `${c.tipo_comprobante} ${numeroVisible(c.punto_venta, c.numero_comprobante)}` : "comprobante",
         monto: Number(i.monto_imputado) || 0,
         de_este_viaje: !!c?.pedido_id && pedidoIdSet.has(c.pedido_id),
       }
@@ -298,11 +326,12 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       estado: p.estado,
       total: Number(p.total) || 0,
       bultos: p.bultos || 0,
+      pallets: palletsPorPedido.get(p.id) || 0,
       vendedor: p.vendedores?.nombre || "",
       comprobantes: (compsPorPedido.get(p.id) || []).map((x) => ({
         id: x.id,
         tipo: x.tipo_comprobante,
-        numero: `${x.punto_venta || ""}${x.punto_venta ? "-" : ""}${x.numero_comprobante || ""}`,
+        numero: numeroVisible(x.punto_venta, x.numero_comprobante),
         total: Number(x.total_factura) || 0,
         saldo: Number(x.saldo_pendiente) || 0,
       })),
@@ -330,9 +359,26 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     const pagosCli = pagosPorCliente.get(pa.cliente_id) || []
     const cobradoViaje = r2(pagosCli.flatMap((x) => x.imputaciones).filter((i) => i.de_este_viaje).reduce((s, i) => s + i.monto, 0))
     const cobradoAnterior = r2(pagosCli.flatMap((x) => x.imputaciones).filter((i) => !i.de_este_viaje).reduce((s, i) => s + i.monto, 0))
-    const minimo = r2(
-      (pa.exigir_cobro_anterior ? Math.max(saldoAnterior, 0) : 0) + (pa.exigir_cobro_actual ? totalViaje : 0),
-    )
+    // Lo exigido NETO de lo devuelto en el viaje (#27). Lo cubierto suma el 10 % contado y
+    // el ajuste de los cobros pendientes del viaje: lo que esos cobros bajan del saldo además
+    // de la plata (diferencia de saldos con y sin el viaje, menos plata y devoluciones).
+    const exigidoBruto = (pa.exigir_cobro_anterior ? Math.max(saldoAnterior, 0) : 0) + (pa.exigir_cobro_actual ? totalViaje : 0)
+    const minimo = exigidoBruto > 0 ? r2(Math.max(0, exigidoBruto - devuelto)) : 0
+    const cobradoPendiente = r2(pagosCli.filter((x) => x.estado !== "confirmado").reduce((s, x) => s + x.monto, 0))
+    const bajaDelViaje =
+      (saldos.get(pa.cliente_id)?.saldo_proyectado ?? 0) - (saldosConViaje.get(pa.cliente_id)?.saldo_proyectado ?? 0)
+    // Ya rendido: las devoluciones tienen su NC/REV y el 10 % contado su REV, aplicadas a los
+    // comprobantes del viaje (bajan su saldo sin ser plata). Lo que bajó el saldo de esos
+    // comprobantes y no es un cobro confirmado del viaje también cubre lo exigido.
+    const cobradoConfirmadoViaje = pagosCli
+      .filter((x) => x.estado === "confirmado")
+      .flatMap((x) => x.imputaciones)
+      .filter((i) => i.de_este_viaje)
+      .reduce((s, i) => s + i.monto, 0)
+    const bajadoEnLibro = pedidosHoja.reduce((s, p) => s + p.comprobantes.reduce((x, k) => x + Math.max(0, k.total - k.saldo), 0), 0)
+    const creditosEnLibro = Math.max(0, bajadoEnLibro - cobradoConfirmadoViaje)
+    const descuentosCobro = r2(Math.max(0, bajaDelViaje - cobradoPendiente - devuelto) + creditosEnLibro)
+    const cumplido = minimo <= 0 || cobrado + descuentosCobro + 0.01 >= minimo
 
     return {
       id: pa.id,
@@ -355,15 +401,18 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       resuelto_at: pa.resuelto_at,
       pedidos: pedidosHoja,
       bultos: pedidosHoja.reduce((s, p) => s + p.bultos, 0),
+      pallets: pedidosHoja.reduce((s, p) => s + p.pallets, 0),
       total_viaje: totalViaje,
       saldo_anterior: saldoAnterior,
       total_a_cobrar,
       minimo_exigido: minimo,
+      descuentos_cobro: descuentosCobro,
       cobrado,
       cobrado_anterior: cobradoAnterior,
       cobrado_viaje: cobradoViaje,
       devuelto,
-      cobro_cumplido: cobrado + 0.01 >= minimo,
+      cobro_cumplido: cumplido,
+      entrega_bloqueada: !!pa.bloquear_entrega && !cumplido,
       pagos: pagosCli,
     }
   })
@@ -430,6 +479,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       paradas: paradasHoja.length,
       pedidos: todosPedidos.length,
       bultos: paradasHoja.reduce((s, p) => s + p.bultos, 0),
+      pallets: paradasHoja.reduce((s, p) => s + p.pallets, 0),
       total_viaje: r2(paradasHoja.reduce((s, p) => s + p.total_viaje, 0)),
       saldo_anterior: r2(paradasHoja.reduce((s, p) => s + p.saldo_anterior, 0)),
       total_a_cobrar: r2(paradasHoja.reduce((s, p) => s + p.total_a_cobrar, 0)),

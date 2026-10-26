@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth"
 import { esTripulante } from "@/lib/viajes/chofer"
 import { esUuid } from "@/lib/mobile/uuid"
 import { prepararRenglonesDevolucion } from "@/lib/cobranzas/origen-devolucion"
+import { CODIGO_TOPE_DEVOLUCION, excedeTopeDevolucion } from "@/lib/cobranzas/tope-devolucion"
 
 // POST /api/chofer/viaje/[id]/devolucion
 // El chofer registra una devolución durante el reparto.
@@ -73,7 +74,14 @@ export async function POST(
 
     // Cada renglón contra su comprobante de origen (lo del pedido entregado, contra
     // el comprobante de ESE pedido) y al precio facturado (regla del dueño 21/10/2026)
-    items = await prepararRenglonesDevolucion(supabase, cliente_id, items, { pedidoId: pedido_id })
+    items = await prepararRenglonesDevolucion(supabase, cliente_id, items, { pedidoId: pedido_id })
+
+
+    // Tope en el servidor: no devolver más de lo vendido en el comprobante de origen (#25)
+
+    const tope = await excedeTopeDevolucion(supabase, items)
+
+    if (tope) return NextResponse.json({ error: tope, codigo: CODIGO_TOPE_DEVOLUCION }, { status: 409 })
 
     const montoTotal = items.reduce(
       (s: number, i: any) => s + Number(i.cantidad) * Number(i.precio_venta_original),

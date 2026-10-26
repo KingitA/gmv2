@@ -26,11 +26,15 @@ type ClientePrevia = {
   saldo_reporte: number
   saldo_actual_gmv2: number
   ya_cargados: number
+  ajustes: number
   renglones: RenglonApertura[]
   errores: string[]
   avisos: string[]
 }
-type Previa = { clientes: ClientePrevia[]; total: number; renglones: number; bloqueantes: number; puede_confirmar: boolean }
+type Previa = {
+  clientes: ClientePrevia[]; total: number; renglones: number; bloqueantes: number
+  importables: number; total_importable: number; total_con_error: number; puede_confirmar: boolean
+}
 
 const TANDA = 40
 
@@ -43,7 +47,7 @@ export default function AperturaPage() {
   const [previa, setPrevia] = useState<Previa | null>(null)
   const [cargando, setCargando] = useState(false)
   const [progreso, setProgreso] = useState<string>("")
-  const [resultado, setResultado] = useState<{ comprobantes: number; a_cuenta: number; salteados: number; errores: string[]; no_cuadran: string[] } | null>(null)
+  const [resultado, setResultado] = useState<{ comprobantes: number; a_cuenta: number; ajustes: number; salteados: number; errores: string[]; no_cuadran: string[]; no_importados: string[] } | null>(null)
   const [abierto, setAbierto] = useState<string | null>(null)
 
   const leer = async (f: File) => {
@@ -78,9 +82,11 @@ export default function AperturaPage() {
   const confirmar = async () => {
     if (!previa?.puede_confirmar) return
     setCargando(true)
-    const total = { comprobantes: 0, a_cuenta: 0, salteados: 0, errores: [] as string[], no_cuadran: [] as string[] }
+    const total = { comprobantes: 0, a_cuenta: 0, ajustes: 0, salteados: 0, errores: [] as string[], no_cuadran: [] as string[], no_importados: [] as string[] }
     try {
-      const clientes = previa.clientes
+      // Solo los clientes sin error (#5): los otros se corrigen y se vuelve a subir el archivo
+      const clientes = previa.clientes.filter((c) => !c.errores.length)
+      total.no_importados = previa.clientes.filter((c) => c.errores.length).map((c) => `${c.codigo_cliente} ${c.nombre}`)
       for (let i = 0; i < clientes.length; i += TANDA) {
         const lote = clientes.slice(i, i + TANDA)
         setProgreso(`Cargando clientes ${i + 1} a ${Math.min(i + TANDA, clientes.length)} de ${clientes.length}…`)
@@ -93,12 +99,13 @@ export default function AperturaPage() {
         if (!res.ok) throw new Error(j.error)
         total.comprobantes += j.comprobantes
         total.a_cuenta += j.a_cuenta
+        total.ajustes += j.ajustes || 0
         total.salteados += j.salteados
         total.errores.push(...(j.errores || []))
         total.no_cuadran.push(...(j.control || []).filter((c: any) => !c.cuadra).map((c: any) => `${c.codigo_cliente} ${c.nombre}: libro ${moneda(c.saldo_libro)} · reporte ${moneda(c.saldo_reporte)}`))
       }
       setResultado(total)
-      toast({ title: "Apertura cargada", description: `${total.comprobantes} comprobantes y ${total.a_cuenta} entregas a cuenta.` })
+      toast({ title: "Apertura cargada", description: `${total.comprobantes} comprobantes, ${total.a_cuenta} entregas a cuenta y ${total.ajustes} ajustes.` })
     } catch (e: any) {
       toast({ variant: "destructive", title: "Se cortó la carga", description: `${e.message}. Lo ya cargado quedó; volvé a confirmar y sigue desde ahí (no duplica).` })
       setResultado(total)
@@ -146,13 +153,24 @@ export default function AperturaPage() {
         <>
           <Card>
             <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">
-              <div className="text-sm">
-                <b>{previa.clientes.length}</b> clientes · <b>{previa.renglones}</b> comprobantes · total <b className="tabular-nums">{moneda(previa.total)}</b>
-                {previa.bloqueantes > 0
-                  ? <span className="ml-2 font-semibold text-red-600">{previa.bloqueantes} clientes con errores: hay que corregirlos antes de confirmar</span>
-                  : <span className="ml-2 font-semibold text-green-700">Todo cuadra</span>}
+              <div className="space-y-0.5 text-sm">
+                <div>
+                  <b>{previa.clientes.length}</b> clientes · <b>{previa.renglones}</b> renglones · total del archivo <b className="tabular-nums">{moneda(previa.total)}</b>
+                </div>
+                <div className="text-green-700">
+                  Se cargan <b>{previa.importables}</b> clientes por <b className="tabular-nums">{moneda(previa.total_importable)}</b>
+                </div>
+                {previa.bloqueantes > 0 ? (
+                  <div className="font-semibold text-red-600">
+                    {previa.bloqueantes} clientes con error por <span className="tabular-nums">{moneda(previa.total_con_error)}</span> NO se cargan: corregilos y volvé a subir el archivo (lo ya cargado no se duplica)
+                  </div>
+                ) : (
+                  <div className="font-semibold text-green-700">Todos los clientes cuadran</div>
+                )}
               </div>
-              <Button onClick={confirmar} disabled={!previa.puede_confirmar || cargando}>Confirmar apertura</Button>
+              <Button onClick={confirmar} disabled={!previa.puede_confirmar || cargando}>
+                {previa.bloqueantes > 0 ? `Cargar los ${previa.importables} clientes sin error` : "Confirmar apertura"}
+              </Button>
             </CardContent>
           </Card>
 
@@ -160,7 +178,8 @@ export default function AperturaPage() {
             <Card className={resultado.errores.length || resultado.no_cuadran.length ? "border-red-300" : "border-green-300"}>
               <CardHeader><CardTitle className="text-base">Resultado</CardTitle></CardHeader>
               <CardContent className="space-y-1 text-sm">
-                <p>{resultado.comprobantes} comprobantes y {resultado.a_cuenta} entregas a cuenta cargados · {resultado.salteados} ya estaban (no se duplicaron).</p>
+                <p>{resultado.comprobantes} comprobantes, {resultado.a_cuenta} entregas a cuenta y {resultado.ajustes} ajustes cargados · {resultado.salteados} ya estaban (no se duplicaron).</p>
+                {resultado.no_importados.length > 0 && <p className="font-semibold text-amber-700">No se cargaron por tener error: {resultado.no_importados.join(" · ")}</p>}
                 {resultado.no_cuadran.length > 0 && <p className="font-semibold text-red-600">No cuadran contra el reporte: {resultado.no_cuadran.join(" · ")}</p>}
                 {resultado.errores.map((e) => <p key={e} className="text-red-600">{e}</p>)}
               </CardContent>
@@ -199,7 +218,7 @@ export default function AperturaPage() {
                         <td className="py-1 pr-2">{c.codigo_cliente} · {c.nombre}</td>
                         <td className="pr-2">{c.nombre_gmv2 || <span className="text-red-600">no existe</span>}{c.es_empleado && <Badge variant="secondary" className="ml-1">personal</Badge>}</td>
                         <td className="pr-2 text-muted-foreground">{c.viajante}</td>
-                        <td className="pr-2 text-right tabular-nums">{c.renglones.length}{c.ya_cargados ? ` (${c.ya_cargados} ya cargados)` : ""}</td>
+                        <td className="pr-2 text-right tabular-nums">{c.renglones.length}{c.ajustes ? ` · ${c.ajustes} ajustes` : ""}{c.ya_cargados ? ` (${c.ya_cargados} ya cargados)` : ""}</td>
                         <td className="pr-2 text-right tabular-nums">{moneda(c.suma)}</td>
                         <td className="text-right">{c.errores.length ? <Badge variant="destructive">error</Badge> : c.avisos.length ? <Badge variant="secondary">revisar</Badge> : <Badge>ok</Badge>}</td>
                       </tr>
@@ -210,7 +229,8 @@ export default function AperturaPage() {
                               <tbody>
                                 {c.renglones.map((r) => (
                                   <tr key={`${r.numero}-${r.linea}`}>
-                                    <td className="pr-2">{r.descripcion}</td><td className="pr-2">{r.numero}</td>
+                                    <td className="pr-2">{r.tipo === "AJUSTE" ? <><Badge variant="secondary" className="mr-1">ajuste</Badge>{r.descripcion}</> : r.descripcion}</td>
+                                    <td className="pr-2">{r.numero}{r.numero_original && r.numero_original !== r.numero ? <span className="text-muted-foreground"> (viejo {r.numero_original})</span> : null}</td>
                                     <td className="pr-2">{fecha(r.fecha)}</td><td className="pr-2">vto {fecha(r.vencimiento)}</td>
                                     <td className="pr-2 text-right tabular-nums">importe {moneda(r.importe)}</td>
                                     <td className="text-right tabular-nums">pendiente {moneda(r.pendiente)}</td>

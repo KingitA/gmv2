@@ -337,7 +337,7 @@ export async function POST(request: NextRequest) {
       // ── Pago transaccional (pago + detalle + cheques + imputaciones) ──
       // Clave derivada del submit por cliente (nibble de versión → 'e' + índice):
       // reintentos del viajante con mala señal no duplican ningún pago del lote.
-      const { pago_id: pagoId, dedup } = await crearCobranza(supabase, {
+      const { pago_id: pagoId, dedup, partes } = await crearCobranza(supabase, {
         idempotency_key: idempotency_key
           ? (clientes.length === 1
               ? idempotency_key
@@ -409,14 +409,16 @@ export async function POST(request: NextRequest) {
       // transferencia genera dos registros con su medio y monto reales, así el
       // historial refleja lo mismo que pagos_detalle (de donde salen el
       // desglose de la billetera y la rendición). Σ movimientos = monto del pago.
+      // #35 (26/10): solo la plata FÍSICA (efectivo, cheque papel) entra a la
+      // billetera; las transferencias/echeqs son otro pago que confirma la oficina.
+      const fisica = partes.find((p) => !p.digital)
       const porMedio = new Map<string, number>()
-      for (const d of detalles) {
-        const medio = d.tipo_pago === "cheque" ? "cheque" : d.tipo_pago === "transferencia" ? "transferencia" : "efectivo"
+      for (const d of fisica?.detalles || []) {
+        const medio = d.tipo_pago === "cheque" ? "cheque" : "efectivo"
         porMedio.set(medio, Math.round(((porMedio.get(medio) || 0) + d.monto) * 100) / 100)
       }
-      if (!porMedio.size) porMedio.set("efectivo", montoPago)
       const nombreCliente = nombreDe.get(c.cliente_id) || "cliente"
-      await supabase.from("billetera_movimientos").insert(
+      if (fisica && porMedio.size) await supabase.from("billetera_movimientos").insert(
         [...porMedio.entries()].map(([medio, monto]) => ({
           viajante_id: vendedorId,
           tipo: "cobro_cliente",
@@ -430,12 +432,16 @@ export async function POST(request: NextRequest) {
         }))
       )
 
-      pagosCreados.push({
-        pago_id: pago.id,
-        cliente_id: c.cliente_id,
-        monto: montoPago,
-        estado: "pendiente_rendicion",
-      })
+      // Una entrada por pago creado: con transferencias son dos (#35)
+      for (const p of partes) {
+        pagosCreados.push({
+          pago_id: p.pago_id,
+          cliente_id: c.cliente_id,
+          monto: p.monto,
+          estado: p.estado,
+          ...(p.digital ? { transferencia_a_confirmar: true } : {}),
+        })
+      }
     }
 
     // Saldo actual de la billetera

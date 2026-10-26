@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import Link from "next/link"
 import { moneda } from "@/lib/formato"
+import { TIPOS_SOLO_CUENTA_PERSONAL } from "@/lib/cobranzas/billetera-cc"
 
 function ars(n: number) {
   return moneda(n)
@@ -20,7 +21,7 @@ export default async function ViajantesPage() {
 
   const { data: balances } = await supabase
     .from("billetera_movimientos")
-    .select("viajante_id, monto")
+    .select("viajante_id, monto, referencia_tipo")
     .in("viajante_id", viajantesIds)
 
   const { data: comisionesPendientes } = await supabase
@@ -31,7 +32,9 @@ export default async function ViajantesPage() {
     .eq("pagado", false)
 
   const balanceMap = new Map<string, number>()
+  const soloPersonal = new Set<string>(TIPOS_SOLO_CUENTA_PERSONAL)
   for (const m of balances ?? []) {
+    if (m.referencia_tipo && soloPersonal.has(m.referencia_tipo)) continue // es de la cuenta personal (#29)
     balanceMap.set(m.viajante_id, (balanceMap.get(m.viajante_id) ?? 0) + Number(m.monto))
   }
 
