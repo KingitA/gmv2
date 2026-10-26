@@ -3,6 +3,7 @@
 // Modal de confirmación/rechazo de un pago pendiente desde la Caja del Día.
 // Mismo backend que Revisión de Pagos: PATCH /api/pagos/[id]/confirmar.
 // Si el pago tiene cheques a cuenta sin color, exige elegir BLANCO/NEGRO.
+// El color que puso la regla automática se puede cambiar tocándolo (#34).
 
 import { useMemo, useState } from "react"
 import { useToast } from "@/hooks/use-toast"
@@ -52,6 +53,7 @@ export function ConfirmarDialog({
   const { toast } = useToast()
   const [modo, setModo] = useState<"confirmar" | "rechazar">("confirmar")
   const [color, setColor] = useState<"BLANCO" | "NEGRO" | "">("")
+  const [colorCambio, setColorCambio] = useState<"BLANCO" | "NEGRO" | "">("")
   const [motivo, setMotivo] = useState("")
   const [guardando, setGuardando] = useState(false)
   // Imputar al confirmar (pagos a cuenta): lo tildado viaja con la confirmación
@@ -88,6 +90,7 @@ export function ConfirmarDialog({
     try {
       const body: any = { usuario_confirmador: usuarioId, accion: modo }
       if (modo === "confirmar" && color) body.color_cheques = color
+      if (modo === "confirmar" && colorCambio) body.color_cheques_cambio = colorCambio
       if (modo === "confirmar" && imputarAhora && totalImputado > 0) {
         body.imputaciones = Object.entries(seleccionados)
           .filter(([k, v]) => !k.startsWith("pedido:") && Number(v) > 0)
@@ -145,7 +148,20 @@ export function ConfirmarDialog({
               <span className="text-slate-600">
                 {ICONO[d.tipo] ?? "💳"} {d.tipo.charAt(0).toUpperCase() + d.tipo.slice(1)}
                 {d.descripcion ? ` · ${d.descripcion}` : ""}
-                {d.color && d.color !== "ECHEQ" && (
+                {d.color && d.color !== "ECHEQ" && (d.color === "BLANCO" || d.color === "NEGRO") && modo === "confirmar" ? (
+                  <button
+                    type="button"
+                    title="Tocá para cambiar el color"
+                    onClick={() => {
+                      const actual = colorCambio || d.color
+                      const otro = actual === "BLANCO" ? "NEGRO" : "BLANCO"
+                      setColorCambio(otro === d.color ? "" : otro)
+                    }}
+                    className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold hover:ring-2 hover:ring-azul-300 ${COLOR_BADGE[colorCambio || d.color] ?? "bg-slate-100 text-slate-600"}`}
+                  >
+                    {colorCambio || d.color} ⇄
+                  </button>
+                ) : d.color && d.color !== "ECHEQ" && (
                   <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold ${COLOR_BADGE[d.color] ?? "bg-slate-100 text-slate-600"}`}>
                     {d.color}
                   </span>

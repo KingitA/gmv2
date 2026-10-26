@@ -113,3 +113,23 @@ export async function resolverColorPendientes(
   }
   return { pendiente: false }
 }
+
+/**
+ * Cambio de color a mano (#34 de la prueba de salida): la regla automática
+ * queda igual, pero la oficina la puede corregir. Antes de confirmar en Caja el
+ * cheque todavía no existe en la cartera: el color vive en pagos_detalle y
+ * cobranza_confirmar lo usa para el alta del cheque y el kardex. Los echeq no
+ * se tocan (ECHEQ marca el canal, no el color).
+ */
+export async function cambiarColorChequesPago(supabase: SupabaseClient, pagoId: string, color: ColorCheque) {
+  const { data: pago, error: pErr } = await supabase.from("pagos_clientes").select("estado").eq("id", pagoId).maybeSingle()
+  if (pErr) throw new Error(`cambiarColorChequesPago: ${pErr.message}`)
+  if (!pago || pago.estado === "confirmado") return
+  const { error } = await supabase
+    .from("pagos_detalle")
+    .update({ color_cheque: color })
+    .eq("pago_id", pagoId)
+    .eq("tipo_pago", "cheque")
+    .in("color_cheque", ["BLANCO", "NEGRO", COLOR_PENDIENTE])
+  if (error) throw new Error(`cambiarColorChequesPago: ${error.message}`)
+}

@@ -225,6 +225,25 @@ function ChequesContenido() {
     setFechaDebito(hoy)
   }
 
+  // #34: el color se cambia a mano tocándolo (solo cheques de tercero en cartera)
+  const cambiarColor = async (cheque: Cheque) => {
+    const nuevo = cheque.color === "NEGRO" ? "BLANCO" : "NEGRO"
+    if (!confirm(`¿Pasar el cheque ${cheque.numero} a ${nuevo}?`)) return
+    try {
+      const res = await fetch(`/api/cheques/${cheque.id}/color`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ color: nuevo }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "No se pudo cambiar el color")
+      toast.success(`Cheque ${cheque.numero} en ${nuevo}`)
+      loadCheques()
+    } catch (e: any) {
+      toast.error(e.message)
+    }
+  }
+
   const ejecutarAccion = async () => {
     if (!accion) return
     const { tipo: t, cheque } = accion
@@ -705,7 +724,7 @@ function ChequesContenido() {
               </thead>
               <tbody>
                 {visibles.map((c) => (
-                  <FilaCheque key={c.id} c={c} hoy={hoy} onAccion={abrirAccion} />
+                  <FilaCheque key={c.id} c={c} hoy={hoy} onAccion={abrirAccion} onCambiarColor={cambiarColor} />
                 ))}
               </tbody>
             </table>
@@ -830,7 +849,8 @@ function EstadoBadge({ estado }: { estado: string }) {
   )
 }
 
-function FilaCheque({ c, hoy, onAccion }: { c: Cheque; hoy: string; onAccion: (t: TipoAccion, c: Cheque) => void }) {
+function FilaCheque({ c, hoy, onAccion, onCambiarColor }: { c: Cheque; hoy: string; onAccion: (t: TipoAccion, c: Cheque) => void; onCambiarColor: (c: Cheque) => void }) {
+  const colorEditable = c.tipo === "TERCERO" && !c.es_echeq && ["EN_CARTERA", "EN_VERIFICACION"].includes(c.estado)
   const esPropio = c.tipo === "PROPIO"
   const manual = origenManual(c.observaciones)
   const deA = esPropio
@@ -869,7 +889,15 @@ function FilaCheque({ c, hoy, onAccion }: { c: Cheque; hoy: string; onAccion: (t
           {deA}
         </span>
       </td>
-      <td className="border-b border-neutro-100 px-3 py-2"><CarteraBadge cartera={carteraDe(c)} /></td>
+      <td className="border-b border-neutro-100 px-3 py-2">
+        {colorEditable ? (
+          <button type="button" title="Tocá para cambiar el color" onClick={() => onCambiarColor(c)} className="rounded-full hover:ring-2 hover:ring-azul-300">
+            <CarteraBadge cartera={carteraDe(c)} />
+          </button>
+        ) : (
+          <CarteraBadge cartera={carteraDe(c)} />
+        )}
+      </td>
       <td className="border-b border-neutro-100 px-3 py-2">
         <EstadoBadge estado={c.estado} />
         {detalle && (

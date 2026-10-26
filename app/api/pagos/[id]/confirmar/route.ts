@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { nowArgentina } from "@/lib/utils"
 import { requirePermiso } from "@/lib/auth"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
+import { cambiarColorChequesPago, colorOverride } from "@/lib/actions/color-cheque"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 
 /**
@@ -24,7 +25,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const { id } = await params
     // accion: 'confirmar' | 'rechazar'. color_cheques (BLANCO|NEGRO): asignación
     // de la oficina para cheques que quedaron PENDIENTE (pago a cuenta).
-    const { usuario_confirmador, accion, motivo_rechazo, imputaciones, color_cheques } = body
+    const { usuario_confirmador, accion, motivo_rechazo, imputaciones, color_cheques, color_cheques_cambio } = body
 
     if (!usuario_confirmador || !accion) {
       return NextResponse.json({ error: "usuario_confirmador y accion son requeridos" }, { status: 400 })
@@ -44,6 +45,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         })
         if (insErr) throw new Error(`imputación ${imp.comprobante_id}: ${insErr.message}`)
       }
+
+      // #34: la oficina cambió a mano el color de los cheques del cobro
+      const colorCambio = colorOverride(color_cheques_cambio)
+      if (colorCambio) await cambiarColorChequesPago(supabase, id, colorCambio)
 
       const admin = createAdminClient()
       const result = await confirmarCobranza(supabase, admin, {
