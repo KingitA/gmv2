@@ -65,9 +65,9 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | ~~22~~ | ~~Cargar bultos o pallets en el ERP antes de finalizar el viaje~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (e0b8b3f, falta que Juan aplique `supabase/migrations/20261026_pedidos_pallets.sql`) |
 | ~~43~~ | ~~Aprobar los gastos del viaje al aceptar la rendición~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (839f9db, falta que Juan aplique `supabase/migrations/20261026b_viajes_gastos_aprobacion.sql`) |
 | ~~21~~ | ~~Hoja del viaje: "PRES 0001-0001-…"~~ | Hojas de ruta/viajes y cobranzas | **Hecho 26/10** (daab2b3, ver §4) |
-| 13 | Pedido con 10 % contado desde la venta (lado servidor de V1) | Listas de precios y descuentos | Pendiente |
-| 16 | Condiciones editables hasta facturar, y repreciar al guardar | Listas de precios y descuentos | Pendiente |
-| 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | Pendiente |
+| 13 | Pedido con 10 % contado desde la venta (lado servidor de V1) | Listas de precios y descuentos | **En curso 26/10** (listas de precios) |
+| 16 | Condiciones editables hasta facturar, y repreciar al guardar | Listas de precios y descuentos | **En curso 26/10** (listas de precios) |
+| 19, 20 | Botón "Anular comprobantes" y volver a emitir con condiciones nuevas | **Listas de precios y descuentos** (dirige el flujo) + Frontend (botón y modal) + Cuentas corrientes (anular todo junto) | **En curso 26/10**: listas de precios arma el plan (ver §5) |
 | 17, 39 | Pedido con todo faltante: volver a pendiente o eliminar; que no aparezca como cobrable | Frontend | Pendiente |
 | 14 | Mostrar "preparado 30 de 36" y el total a facturar | Frontend | Pendiente |
 | 34 | Cambiar el color del cheque en /caja y en la cartera | Frontend | Pendiente |
