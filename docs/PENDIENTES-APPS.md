@@ -30,7 +30,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | App Vendedor v0.4.1 (la rendición propone efectivo − retiros) y v0.4.2 (la ficha explica el proyectado, "A favor del cliente") | Cuentas corrientes (auditoría 21/10, con OK de Juan) | Hecho 21/10 (ccff0fb, 29b07c5), APK v0.4.2 instalada en el NuStar |
 | V1 — Cobrar: créditos ya usados por un cobro sin rendir figuran "disponibles" (riesgo de usarlos dos veces) | Cuentas corrientes | **Hecho 21/10 en el servidor (460c095)**: el servidor no lo frenaba; ahora reserva lo tomado por cobros sin confirmar, rechaza el segundo uso y la ficha manda el disponible real. La app no necesita cambios. |
 | ~~V2 — Cobrar: el renglón del pedido muestra el TOTAL del pedido y no lo que debe~~ | App Vendedor | Hecho 23/10, APK v0.4.3 |
-| V3 — Comisiones: "Mercadería cobrada" lista comisiones y "Comisiones ganadas" dice $0 | Cuentas corrientes | Pendiente — revisar después de la puesta a cero + "Poner al día" |
+| ~~V3 — Comisiones: "Mercadería cobrada" y "Comisiones ganadas" no coinciden~~ | App Vendedor | Hecho 26/10 (servidor en main; APK v0.4.4 compilada, sin instalar) |
 | App Chofer v0.3.0 (Tu cuenta, valor de devolución, 10 % contado, formatos, verificar en_cobro y cheque único, cobrado duplicado al sincronizar, "debe" del buscador) | App Chofer | Hecho 21/10 (merge 246e87f), APK v0.3.0 instalada en el NuStar |
 | App Chofer v0.3.1 (borrador del cobro, pedido del viaje primero, "$0"/"A favor", ficha explica el saldo, valor de devolución, sobrante, viajes viejos) | App Chofer | Hecho 21/10 (merge 7d62a2c), APK v0.3.1 instalada en el NuStar |
 | App Depósito v0.3.0 (devolución por renglón, formatos, mercadería por cupo, **reactivar artículos dados de baja**) | App Depósito | Hecho 20/10 (rama `deposito-v030`), APK v0.3.0 |
@@ -56,7 +56,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 
 Todo lo que estaba pendiente quedó en la v0.4.0 (detalle en MOBILE.md §18, "v0.4.0"): 10 % contado con la regla del 07/10, fila del proyectado en Resumen, devolución sin enviar valuada como el servidor, billetera en dos cajitas, pantalla de retiro (`retiro.registrar`), "Para retirar" en Comisiones, y los precios pendientes del 06/10 (descuento general y contado por pedido, condiciones por proveedor/marca, mercadería por cupo eligiendo artículos, "sin precio base, sin precio" también en el servidor). Un cheque = un papel: verificado, la app no lo duplica sin señal.
 
-**Queda para probar en la calle:** un retiro real con la cuenta personal vinculada, y un pedido con cupo de mercadería hasta el picking.
+~~**Queda para probar en la calle:** un retiro real con la cuenta personal vinculada, y un pedido con cupo de mercadería hasta el picking.~~ **Probado por Juan (26/10).**
 
 ## App Vendedor → v0.4.1 y v0.4.2 HECHAS (21/10/2026, auditoría de cuentas corrientes, instalada v0.4.2 en el NuStar)
 
@@ -71,7 +71,7 @@ Las hizo la sesión de cuentas corrientes con el OK de Juan (tocan `mobile/apps/
 
 1. ~~**V1 — créditos usados dos veces.**~~ **Resuelto en el servidor 21/10 (460c095)** — la app ya recibe el disponible real; queda el texto original como referencia: En Cobrar, URQUIZA muestra disponibles el a cuenta de $14.011,02 y el anticipo de $170.019, que ya usa el cobro de $122.000 del 14/10 todavía sin rendir (marca `[CREDITOS:…]`). Hace falta que el servidor descuente de cada crédito lo que tienen tomado los cobros pendientes (como `en_cobro` hace con los comprobantes) y que la app lo muestre. Primero confirmar si el servidor ya rechaza el segundo uso.
 2. ~~**V2 — total del pedido vs. lo que debe.**~~ **Hecho 23/10 (v0.4.3):** si el pedido tiene comprobantes, el número grande es lo que debe (suma de sus saldos) y abajo chico "debe · de $total"; el título ya no se corta. El renglón del pedido #001454 dice $8.646.266,97 (total) y el cliente debe $155.005,43 de ese pedido; se ve recién abriendo la flechita. Mostrar "debe $X" como número principal y el total chico.
-3. **V3 — comisiones.** La lista "Mercadería cobrada" sale del cálculo viejo y "Comisiones ganadas" de la cuenta personal (todavía sin "Poner al día"): no coinciden. Revisarlo el día de la puesta a cero.
+3. ~~**V3 — comisiones.**~~ **Hecho 26/10:** con la cuenta personal vinculada, "Mercadería cobrada" sale de los renglones `comision` de la cuenta (`comisionGanadaPorComprobante`, `lib/cuenta-corriente/cuenta-personal.ts`), agrupados por pedido; el detalle por comprobante también. La lista suma exactamente "Comisiones ganadas" y ya descuenta devoluciones y contado (muestra "pactada $X − devoluciones/contado"). Validado en solo lectura: 001939 = $51.175,19 (antes $65.822,31), 001941 = $14.254,52, total $65.429,71 = Comisiones ganadas. Sin cuenta vinculada sigue el cálculo viejo. Lo del servidor ya rige con la APK instalada; la APK v0.4.4 agrega los textos.
 
 ## App Chofer → v0.3.0 HECHA (21/10/2026, merge 246e87f, instalada en el NuStar)
 
@@ -141,7 +141,7 @@ Detalle en MOBILE.md §17 "v0.3.0".
 
 ### D1 — App Vendedor (agente de la app Vendedor) — HECHO 23/10, v0.4.3
 
-Revisado el código de 188385d (misma función que la NC, precio facturado bloqueado, `valor_estimado` = total que se ve). Probado con el mock (FA $1.500 neto → $1.815). Queda para la calle: comparar con la NC que emite la oficina en un caso real.
+Revisado el código de 188385d (misma función que la NC, precio facturado bloqueado, `valor_estimado` = total que se ve). Probado con el mock (FA $1.500 neto → $1.815). ~~Queda para la calle: comparar con la NC que emite la oficina en un caso real.~~ **Probado por Juan (26/10).**
 
 
 El código **ya está** en `mobile/apps/vendedor` (commit 188385d): `pantallas/clientes/Devolucion.tsx` (cada ítem guarda `origen_comp`; lo facturado se muestra sin poder editar el precio; "Precio unitario neto/final"; el total es `valorDevolucionConOrigen` con `contexto_devolucion.alicuota_iibb`; desde el catálogo entra con el neto del motor y `elegirOrigenDevolucion`) y `datasets.ts` (tipos). Falta:

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { agruparPorComprobante, mapArticuloComision } from "@/lib/vendedor/comisiones-detalle"
+import { comisionGanadaPorComprobante, cuentaPersonalDe } from "@/lib/cuenta-corriente/cuenta-personal"
 
 // GET /api/vendedor/comisiones/detalle?pedido_id=&tipo=cobrada|vendida
 // Drill-down de un pedido: artículos con precio, % comisión y comisión.
@@ -52,7 +53,10 @@ export async function GET(req: NextRequest) {
       for (const c of comps || []) compMap.set(c.id, c)
     }
 
-    return NextResponse.json({ tipo, comprobantes: agruparPorComprobante(rows || [], compMap) })
+    // V3: con la cuenta personal, el total de cada comprobante es lo GANADO en esa cuenta
+    const cuentaId = await cuentaPersonalDe(supabase, { usuarioId: session.user.id, vendedorIds: session.vendedorIds })
+    const ganada = cuentaId ? await comisionGanadaPorComprobante(supabase, cuentaId) : undefined
+    return NextResponse.json({ tipo, comprobantes: agruparPorComprobante(rows || [], compMap, ganada) })
   } catch (error: any) {
     console.error("[vendedor] Error en GET /api/vendedor/comisiones/detalle:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })

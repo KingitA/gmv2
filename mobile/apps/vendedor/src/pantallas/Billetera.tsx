@@ -33,6 +33,8 @@ interface PedidoComision {
   total_monto: number
   total_comision: number
   total_debito_contado?: number
+  /** Comisión pactada en la venta (kardex). Con la cuenta personal, total_comision es lo GANADO */
+  total_pactada?: number
   cantidad_skus: number
 }
 
@@ -53,8 +55,10 @@ interface ArticuloComision {
 
 interface ComisionesData {
   tipo: string
-  totales: { disponible: number; sin_cobrar: number; retirado: number }
+  totales: { disponible: number; sin_cobrar: number; retirado: number; comisiones_ganadas?: number }
   pedidos: PedidoComision[]
+  /** "cuenta" = la lista cobrada sale de la cuenta personal (V3, = Comisiones ganadas). Ausente = servidor viejo */
+  fuente?: "cuenta" | "kardex"
 }
 
 interface DetalleData {
@@ -69,6 +73,8 @@ interface DetalleData {
     total: number
     total_comision: number
     debito_contado?: number
+    /** total_comision = lo ganado en la cuenta personal (sin devoluciones ni contado) */
+    ganada_en_cuenta?: boolean
     articulos: ArticuloComision[]
   }[]
 }
@@ -249,6 +255,13 @@ export function Billetera() {
                 ))}
               </div>
 
+              {/* V3: la lista cobrada suma exactamente lo de "Comisiones ganadas" */}
+              {comTipo === "cobrada" && comData?.fuente === "cuenta" && comData.totales.comisiones_ganadas !== undefined && (
+                <p className="px-1 text-xs text-gray-500">
+                  Total: <b className="text-gray-800">{formatCurrency(comData.totales.comisiones_ganadas)}</b> = tus comisiones ganadas. Se calculan sobre lo que el cliente pagó: sin devoluciones ni 10% contado.
+                </p>
+              )}
+
               {comCargando ? null : !comData ? (
                 <SinDescargar que="las comisiones" />
               ) : comData.pedidos?.length ? (
@@ -272,7 +285,12 @@ export function Billetera() {
                             {formatCurrency(p.total_monto)} <span className="text-gray-300">s/IVA</span>
                           </p>
                           <p className="font-bold text-emerald-700">{formatCurrency(p.total_comision)}</p>
-                          {(p.total_debito_contado || 0) > 0 && <p className="text-[10px] leading-tight text-amber-600">neto (−10% contado aplicado)</p>}
+                          {(p.total_debito_contado || 0) > 0.005 &&
+                            (comData.fuente === "cuenta" && comTipo === "cobrada" ? (
+                              <p className="text-[10px] leading-tight text-amber-600">pactada {formatCurrency(p.total_pactada || 0)} − devoluciones/contado</p>
+                            ) : (
+                              <p className="text-[10px] leading-tight text-amber-600">neto (−10% contado aplicado)</p>
+                            ))}
                         </div>
                       </div>
                     </button>
@@ -397,7 +415,12 @@ export function ComisionPedido() {
                   <p className="text-xs text-emerald-700">
                     Cobrado {fechaCorta(c.fecha_cobro)} · Neto {formatCurrency(c.total_neto)} + IVA {formatCurrency(c.total_iva)}
                   </p>
-                  {(c.debito_contado || 0) > 0 && <p className="mt-0.5 text-xs text-amber-700">Débito 10% pago contado: −{formatCurrency(c.debito_contado || 0)}</p>}
+                  {(c.debito_contado || 0) > 0.005 &&
+                    (c.ganada_en_cuenta ? (
+                      <p className="mt-0.5 text-xs text-amber-700">Pactada {formatCurrency(c.total_comision + (c.debito_contado || 0))} − {formatCurrency(c.debito_contado || 0)} por devoluciones o 10% contado: ganás sobre lo que el cliente pagó</p>
+                    ) : (
+                      <p className="mt-0.5 text-xs text-amber-700">Débito 10% pago contado: −{formatCurrency(c.debito_contado || 0)}</p>
+                    ))}
                 </div>
                 <p className="font-bold text-emerald-700">{formatCurrency(c.total_comision)}</p>
               </div>
