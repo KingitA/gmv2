@@ -26,6 +26,7 @@ import { marcaPagoBonif } from "@/lib/cobranzas/marca-pago"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
 import { cuitDigitos, cuitValido } from "@/lib/formato"
 import { actualizarDescuentoFinancieroKardex } from "@/lib/kardex/insertar-kardex"
+import { devueltoPorComprobante } from "@/lib/cobranzas/devuelto"
 import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
@@ -419,6 +420,24 @@ export async function generarBonificacionContado(
 
   const bonificacionId = await getBonificacionArticuloId(supabase)
 
+  // #33 (prueba de salida 26/10): el 10% es sobre lo que el cliente SE QUEDÓ.
+  // Las NC/REV de devolución ya emitidas quedan imputadas a su comprobante de
+  // origen; se descuentan de la base. Así da lo mismo devolver antes o después
+  // de cobrar contado (URQUIZA: REV de $230.921,56 sobre el total original en
+  // vez de $201.561,82). La devolución posterior ya sale neta del 10%
+  // (valorarDevoluciones), así que los dos órdenes terminan en 90% × (total − devuelto).
+  const devuelto = await devueltoPorComprobante(supabase, comprobantes.map((c) => c.id))
+  const factorQuedado = (c: ComprobanteInput): number => {
+    const total = Math.abs(Number(c.total_factura) || 0)
+    if (total <= 0.005) return 1
+    return Math.max(0, Math.min(1, (total - (devuelto.get(c.id) ?? 0)) / total))
+  }
+  const fraccionBase = fraccionDe
+  const fraccionNeta = (compId: string): number => {
+    const c = comprobantes.find((x) => x.id === compId)
+    return fraccionBase(compId) * (c ? factorQuedado(c) : 1)
+  }
+
   // Separar por tipo
   const presupuestos: ComprobanteInput[] = comprobantes.filter(c => c.tipo_comprobante === "PRES")
   const facturasA: ComprobanteInput[] = comprobantes.filter(c => c.tipo_comprobante === "FA")
@@ -436,7 +455,7 @@ export async function generarBonificacionContado(
 
     const lineas = presupuestos.map(c => ({
       descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
-      precio_neto: r2(Math.abs(c.total_factura) * (DESCUENTO_CONTADO_PCT / 100) * fraccionDe(c.id)),
+      precio_neto: r2(Math.abs(c.total_factura) * (DESCUENTO_CONTADO_PCT / 100) * fraccionNeta(c.id)),
     }))
 
     const totalNeto = r2(lineas.reduce((s, l) => s + l.precio_neto, 0))
@@ -567,7 +586,7 @@ export async function generarBonificacionContado(
         percepcion_iibb: c.percepcion_iibb,
         apertura: esComprobanteApertura(c.observaciones),
       })),
-      fraccionDe,
+      fraccionNeta,
       DESCUENTO_CONTADO_PCT,
     )
     const totalTrib = r2(percepIva + percepIibb)

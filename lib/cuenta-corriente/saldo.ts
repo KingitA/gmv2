@@ -97,7 +97,10 @@ async function calcularBajasExtra(
       .in("id", todosDebitos)
       .in("tipo_comprobante", ["FA", "FB", "FC", "PRES"])
       .is("anulado_en", null)
-    for (const c of comps || []) totalDe.set(c.id, Math.abs(Number(c.total_factura)))
+    // #33: la base del 10% es lo que el cliente se quedó (total − devoluciones con NC/REV)
+    const { devueltoPorComprobante } = await import("@/lib/cobranzas/devuelto")
+    const devuelto = await devueltoPorComprobante(supabase, (comps || []).map((c: any) => c.id))
+    for (const c of comps || []) totalDe.set(c.id, Math.max(0, Math.abs(Number(c.total_factura)) - (devuelto.get(c.id) ?? 0)))
   }
 
   // REGLA 07/10 (dueño, reemplaza la del 01/10): la NC del 10% contado es por el

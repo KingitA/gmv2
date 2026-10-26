@@ -54,7 +54,7 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | ~~5, 6, 7, 8, 18~~ | ~~Apertura: importar el reporte real (no frenar todo, texto libre como ajuste, cuentas del personal, segunda columna de saldo, PRES viejos como PV 2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | 28 | Devolución de un artículo que no está en el comprobante: comprobante anterior o el 0002-00000001 | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | ~~29, 36~~ | ~~Billeteras con plata "fantasma" después de rendir~~ | Cuentas corrientes | **Hecho 26/10, falta que Juan aplique** `supabase/migrations/20261026_billeteras_sin_fantasma.sql` |
-| 33 | El 10 % contado sobre mercadería ya devuelta (lado servidor de V2) | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
+| ~~33~~ | ~~El 10 % contado sobre mercadería ya devuelta (lado servidor de V2)~~ | Cuentas corrientes | **Hecho 26/10** (ver §3) |
 | 10, 11, 42 | Comisiones: "sin cobrar" inflado, pedidos sin número, Playroom en $0 | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
 | ~~30~~ | ~~Números sin formato en los textos de la rendición~~ | Cuentas corrientes | **Hecho 26/10** en la misma migración (`fmt_moneda`) |
 | 37 | /caja: el total no descuenta lo que el cliente tiene a cuenta | Cuentas corrientes | Tomada 26/10 por cuentas corrientes (en cola, en este orden: 29/36, 33, 25, 35, 37, 30, 10/11/42, 28) |
@@ -135,6 +135,8 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 - [ ] Misma base que la app vendedor (V2) y la app chofer (C3): acordala con esos agentes.
 
 **Dónde:** `lib/comprobantes/generar-bonificacion.ts`.
+
+**HECHO 26/10 (cuentas corrientes):** base del 10% = total − lo imputado por NC/REV de devolución (`lib/cobranzas/devuelto.ts`, `devueltoPorComprobante`). La usan la emisión (`generar-bonificacion`), el `nc_contado` que reciben las apps (`bonif-pendiente`: ficha del vendedor, cuenta de cobro del chofer, cobro del chofer) y el saldo proyectado (`saldo.ts`). Verificado con URQUIZA en la base: daría $201.561,82 (antes $230.921,56). La devolución posterior al cobro ya salía neta del 10%: los dos órdenes terminan iguales. Sin migración.
 
 ### #10, #11, #42 — Comisiones mostradas mal
 
