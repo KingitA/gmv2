@@ -160,10 +160,51 @@ export function Contadores({ pendientes, ok, faltantes, estilo }: { pendientes: 
   )
 }
 
-/** Etiqueta "sin enviar" de un renglón guardado en el equipo que todavía no llegó al servidor. */
-export const SinEnviar = () => (
-  <span style={{ background: C.yellowL, color: C.yellow, border: `1px solid ${C.yellowB}`, fontSize: 11, fontWeight: 800, padding: "1px 7px", borderRadius: 999, flexShrink: 0 }}>⇪ sin enviar</span>
+/**
+ * Etiqueta "sin enviar" de un renglón guardado en el equipo que todavía no llegó al servidor.
+ * Con `n`, cuántos renglones (cola de pedidos). Nunca se parte en dos líneas.
+ */
+export const SinEnviar = ({ n }: { n?: number } = {}) => (
+  <span style={{ background: C.yellowL, color: C.yellow, border: `1px solid ${C.yellowB}`, fontSize: 11, fontWeight: 800, padding: "1px 7px", borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap" }}>⇪ {n != null ? `${n} ` : ""}sin enviar</span>
 )
+
+// Alto de la ventana SIN teclado, aprendido una vez por sesión de la app (si una pantalla
+// se monta con el teclado ya abierto, igual sabe cuál es el alto completo).
+let altoSinTeclado = typeof window === "undefined" ? 0 : window.visualViewport?.height ?? window.innerHeight
+
+/**
+ * true mientras el teclado en pantalla está abierto. En Android el WebView se achica
+ * (adjustResize): con el teclado, el alto visible baja a ~la mitad. Lo usan las pantallas
+ * de búsqueda para esconder el pie y los contadores y dejarle lugar a los resultados.
+ */
+export function useTecladoAbierto(): boolean {
+  const [abierto, setAbierto] = useState(false)
+  useEffect(() => {
+    const vv = window.visualViewport
+    const medir = () => {
+      const alto = vv?.height ?? window.innerHeight
+      if (alto > altoSinTeclado) altoSinTeclado = alto
+      setAbierto(alto < altoSinTeclado * 0.75)
+    }
+    // Además de "resize": al enfocar/soltar un campo el teclado tarda en abrir/cerrar
+    // (animación); se vuelve a medir un rato después por si el WebView no avisa.
+    const timers: number[] = []
+    const luego = () => { for (const ms of [150, 400]) timers.push(window.setTimeout(medir, ms)) }
+    medir()
+    vv?.addEventListener("resize", medir)
+    window.addEventListener("resize", medir)
+    document.addEventListener("focusin", luego)
+    document.addEventListener("focusout", luego)
+    return () => {
+      vv?.removeEventListener("resize", medir)
+      window.removeEventListener("resize", medir)
+      document.removeEventListener("focusin", luego)
+      document.removeEventListener("focusout", luego)
+      timers.forEach(clearTimeout)
+    }
+  }, [])
+  return abierto
+}
 
 /** Operaciones que el servidor rechazó: visibles en la pantalla donde importan, con acción clara. */
 export function Rechazos({ items, ayuda }: { items: ItemOutbox[]; ayuda: string }) {

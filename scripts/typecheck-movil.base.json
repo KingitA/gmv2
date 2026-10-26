@@ -5,7 +5,6 @@
     "app/admin/usuarios/page.tsx": 2,
     "app/api/articulos/[id]/packaging/route.ts": 1,
     "app/api/articulos/mappings/route.ts": 1,
-    "app/api/comprobantes-venta/[id]/anular/route.ts": 1,
     "app/api/comprobantes-venta/backfill-pdf/route.ts": 1,
     "app/api/comprobantes-venta/generar-nd/route.ts": 1,
     "app/api/comprobantes-venta/preview/route.ts": 1,

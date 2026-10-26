@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.1 (versionCode 9) — 2026-10-26
+
+- Buscar: con el teclado abierto se esconden el pie y los contadores (mas resultados a la vista); cola: '⇪ N sin enviar' en una sola linea
+
 ## v0.3.0 (versionCode 8) — 2026-10-20
 
 - Revision de devoluciones por renglon (Editar: cantidad aceptada, rechazar, motivo); mercaderia por cupo como el servidor; tope de reintentos del outbox (O10); reactivar articulos dados de baja

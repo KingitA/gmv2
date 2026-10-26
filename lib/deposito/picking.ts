@@ -183,6 +183,58 @@ export async function aplicarPickingItem(supabase: any, args: ArgsPickingItem, u
   return { ...data, bonificados_actualizados, preparado_por }
 }
 
+/**
+ * Devuelve a la cola del depósito un pedido ya preparado, como si nunca se hubiera
+ * preparado (PENDIENTES-ERP-SALIDA #17: pedido con TODO faltante que quedó en
+ * "pendiente_facturacion" sin nada para facturar).
+ *
+ * NO alcanza con cambiar `pedidos.estado`: los renglones seguirían en FALTANTE (el pedido
+ * aparecería "Listo" al 100 % en la web y en la APK) y los `picking_items` seguirían a
+ * nombre de quien lo preparó (índice único ux_picking_items_renglon): otro operario no
+ * podría tocarlos ("Ya lo preparó X"). Cada renglón queda igual que cuando un operario
+ * lo devuelve a pendiente en `aplicarPickingItem`: cantidad_preparada 0, PENDIENTE, sin
+ * dueño. Los bonificados se recalculan con el primer renglón que se prepare.
+ *
+ * Solo desde "pendiente_facturacion" y sin ningún renglón facturado. Idempotente: si el
+ * pedido ya está en `estadoNuevo`, no hace nada.
+ */
+export async function reiniciarPicking(supabase: any, pedido_id: string, estadoNuevo: "pendiente" = "pendiente") {
+  if (!pedido_id) throw new ErrorDeposito("pedido_id requerido", 400)
+  const { data: pedido } = await supabase.from("pedidos").select("id, numero_pedido, estado").eq("id", pedido_id).maybeSingle()
+  if (!pedido) throw new ErrorDeposito("Pedido no encontrado", 404)
+  if (pedido.estado === estadoNuevo) return { ok: true, ya_estaba: true }
+  if (pedido.estado !== "pendiente_facturacion") {
+    throw new ErrorDeposito(`El pedido ${pedido.numero_pedido} está ${pedido.estado}: solo se puede volver a la cola desde "pendiente de facturación".`, 409, { codigo: "pedido_no_reiniciable" })
+  }
+
+  const { data: renglones, error: rErr } = await supabase
+    .from("pedidos_detalle")
+    .select("id, comprobante_venta_detalle_id")
+    .eq("pedido_id", pedido_id)
+  if (rErr) throw rErr
+  if ((renglones || []).some((r: any) => r.comprobante_venta_detalle_id)) {
+    throw new ErrorDeposito(`El pedido ${pedido.numero_pedido} ya tiene renglones facturados: no se puede volver a preparar.`, 409, { codigo: "pedido_facturado" })
+  }
+  const ids = (renglones || []).map((r: any) => r.id)
+
+  // 1) Renglones a pendiente y sin dueño (antes de cambiar el estado: la cola nunca lo ve "Listo")
+  if (ids.length) {
+    const { error: dErr } = await supabase.from("pedidos_detalle").update({ cantidad_preparada: 0, estado_item: "PENDIENTE" }).eq("pedido_id", pedido_id)
+    if (dErr) throw dErr
+    const { error: pErr } = await supabase.from("picking_items").delete().in("pedido_detalle_id", ids)
+    if (pErr) throw pErr
+  }
+  // 2) Ninguna sesión queda abierta (cerrarPicking ya las terminó; por las dudas)
+  await supabase.from("picking_sesiones").update({ estado: "TERMINADO", fin_at: nowArgentina() }).eq("pedido_id", pedido_id).eq("estado", "EN_PROGRESO")
+  // Bonificados: NO se recalculan acá (con enPicking los marcaría COMPLETO con la cola
+  // todavía sin preparar); aplicarPickingItem los recalcula con el primer renglón, como
+  // en cualquier pedido.
+  // 3) Recién ahora vuelve a la cola (web /deposito y réplica deposito_pedidos por el log de cambios)
+  const { error: eErr } = await supabase.from("pedidos").update({ estado: estadoNuevo }).eq("id", pedido_id).eq("estado", "pendiente_facturacion")
+  if (eErr) throw eErr
+  return { ok: true, renglones: ids.length }
+}
+
 /** Finaliza la preparación (POST /api/deposito/picking/item). Idempotente: cerrar dos veces = una. */
 export async function cerrarPicking(supabase: any, pedido_id: string) {
   if (!pedido_id) throw new ErrorDeposito("pedido_id requerido", 400)

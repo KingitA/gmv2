@@ -4,7 +4,7 @@ import { useLector, useOverlay } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
 import { useEncolar, usePedido } from "../../datos/hooks"
 import { estadoDe, tomadoPorOtro } from "../../datos/overlay"
-import { BarraProgreso, C, Contadores, dejarAviso, Marco, Rechazos, TITULO_GRUPO, useAvisoEntrante, useToast, useVolver } from "../../ui"
+import { BarraProgreso, C, Contadores, dejarAviso, Marco, Rechazos, TITULO_GRUPO, useAvisoEntrante, useTecladoAbierto, useToast, useVolver } from "../../ui"
 import { PanelBuscar } from "../comunes/Buscar"
 import { FichaArticulo, useAbrirFicha, useFichaAbierta, type DatosFicha } from "../comunes/FichaArticulo"
 import { PanelCantidad } from "../comunes/Cantidad"
@@ -166,6 +166,9 @@ export function PedidoBuscar() {
   const { yo, resolverCodigo, abrirItem } = usePicking(pedido, mostrar)
   const fin = useFinalizar(pedido, mostrar)
   const volver = useVolver()
+  // Con el teclado abierto la pantalla queda a la mitad: contadores y pie se esconden
+  // para que entren los resultados (vuelven solos al cerrarlo)
+  const teclado = useTecladoAbierto()
 
   if (!pedido || pedido.cierrePendiente) return <Marco titulo="Buscar artículo">{toast}<PedidoNoDisponible cargando={cargando} finalizado={pedido?.cierrePendiente} /></Marco>
   const { progreso } = pedido
@@ -175,10 +178,12 @@ export function PedidoBuscar() {
   return (
     <Marco titulo="Buscar artículo">
       {toast}
-      <div style={{ background: C.white, borderBottom: `1px solid ${C.border}`, padding: "14px 16px" }}>
-        <div style={{ fontSize: 13, color: C.sub, marginBottom: 4 }}>{pedido.numero_pedido} · {clienteDe(pedido)}</div>
-        <Contadores pendientes={progreso.pendientes} ok={progreso.completos} faltantes={progreso.faltantes} />
-      </div>
+      {!teclado && (
+        <div style={{ background: C.white, borderBottom: `1px solid ${C.border}`, padding: "14px 16px" }}>
+          <div style={{ fontSize: 13, color: C.sub, marginBottom: 4 }}>{pedido.numero_pedido} · {clienteDe(pedido)}</div>
+          <Contadores pendientes={progreso.pendientes} ok={progreso.completos} faltantes={progreso.faltantes} />
+        </div>
+      )}
       <PanelBuscar
         placeholder="Escanear EAN o buscar artículo..."
         vacio={{ icono: "📱", texto: <>Escaneá el código de barras<br />o escribí para buscar</> }}
@@ -202,10 +207,12 @@ export function PedidoBuscar() {
         }}
         onCodigo={(c) => { const det = resolverCodigo(c); if (det) abrirItem(det, { replace: true }) }}
       />
-      <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 10 }}>
-        <button onClick={() => volver()} style={{ flex: 1, background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}` }}>📋 Lista</button>
-        <BotonFinalizar pedido={pedido} etiqueta="Finalizar" onClick={() => fin.pedir(1)} />
-      </div>
+      {!teclado && (
+        <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 10 }}>
+          <button onClick={() => volver()} style={{ flex: 1, background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}` }}>📋 Lista</button>
+          <BotonFinalizar pedido={pedido} etiqueta="Finalizar" onClick={() => fin.pedir(1)} />
+        </div>
+      )}
       {fin.nodo(1)}
     </Marco>
   )

@@ -82,10 +82,15 @@ export async function POST(request: Request) {
     // ─── Guard: el pedido ya tiene comprobantes vigentes → no regenerar ───
     // Evita la doble emisión por doble click / UI desactualizada. Para volver
     // a generar hay que anular los comprobantes existentes primero.
+    // Solo cuentan los DÉBITOS vivos: la NC/REV espejo de una anulación lleva el
+    // pedido_id y queda viva (es el crédito del cliente); con ella el pedido
+    // anulado para refacturar (#19/#20) no se podía volver a generar nunca.
+    // Tampoco frenan las NC/REV de devoluciones.
     const { data: yaEmitidos } = await supabase
       .from("comprobantes_venta")
       .select("id, tipo_comprobante, numero_comprobante")
       .eq("pedido_id", pedido_id)
+      .in("tipo_comprobante", ["FA", "FB", "FC", "PRES", "ND", "NDA", "NDB", "NDC"])
       .is("anulado_en", null)
     if (yaEmitidos?.length) {
       return NextResponse.json(

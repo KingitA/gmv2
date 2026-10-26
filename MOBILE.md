@@ -891,6 +891,11 @@ recorrido Anterior/Siguiente de Modificación de artículos (calculado sobre la 
   `deposito_ajustes_movil` audita cada ajuste (incluye el motivo) y evita la doble suma.
 - **Datos de artículo**: compare-and-set por campo; lo que otro cambió no se pisa y
   vuelve como rechazo explicando qué campo.
+- **Volver un pedido ya preparado a la cola** (26/10, para el "volver a pendiente" del #17 de
+  la prueba de salida): SIEMPRE con `reiniciarPicking` (`lib/deposito/picking.ts`), nunca
+  cambiando solo `pedidos.estado`. Deja cada renglón PENDIENTE, en 0 y sin dueño en
+  `picking_items`; si no, el pedido se ve "Listo" y los renglones quedan trabados a nombre
+  de quien los preparó (índice único). La app no cambia: le llega como un pendiente más.
 
 ### Renglón del artículo y ficha (22/09/2026, pedido del dueño tras el primer uso)
 **Problema:** la descripción iba en UNA línea a 22 px y se cortaba a los ~14 caracteres:
@@ -1159,9 +1164,16 @@ pantalla contra el mock (parcial 2 de 3 + rechazado + validación de "más de lo
    operario la ve, reiniciar el NuStar.
 4. Gestos con el dedo (swipe, objetivos táctiles): los prueba el depósito; acá se hicieron por adb.
    Incluye el TOQUE que abre la ficha del artículo y que el swipe siga saliendo natural.
-5. Detalles vistos en el equipo: en Buscar, con el teclado abierto, la lista de resultados queda
-   chica (los botones del pie ocupan lugar); en la cola, "⇪ N sin enviar" se parte en dos líneas.
-   Resuelto el 22/09: la descripción del artículo se cortaba a los ~14 caracteres (ver arriba).
+5. ~~Detalles vistos en el equipo~~ **Resueltos el 26/10 (v0.3.1)**:
+   - En Buscar (pedido, recepción, devoluciones), con el teclado abierto la lista quedaba chica:
+     ahora `useTecladoAbierto()` (`ui.tsx`) esconde el pie y los contadores mientras el teclado
+     está abierto y vuelven al cerrarlo. Detecta el teclado porque el WebView se achica (evento
+     `resize` / `visualViewport`) y además vuelve a medir al enfocar o soltar un campo. Medido
+     con la ventana a la mitad: de 1,2 a 2,8 artículos a la vista.
+   - En la cola, "⇪ N sin enviar" iba al lado del número y la fecha y se partía en dos líneas:
+     ahora es una etiqueta `SinEnviar n={N}` en la fila de la barra de progreso (que se achica),
+     siempre en una línea.
+   - Resuelto el 22/09: la descripción del artículo se cortaba a los ~14 caracteres (ver arriba).
 6. Tarea aparte ya anotada: depuración de los `impreso` viejos (arriba).
 
 ### Devoluciones: FUERA del checklist contra producción (decisión del dueño, 18/09/2026)

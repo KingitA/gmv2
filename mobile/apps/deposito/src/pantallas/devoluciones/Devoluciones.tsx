@@ -6,7 +6,7 @@ import { DS, type DetalleDevolucion, type Devolucion, type OpRevisionDevolucion 
 import { OPS_DEVOLUCION } from "../../datos/overlay"
 import { buscarPorCodigo, lineaInfo, sufijoMarca } from "../../datos/busqueda"
 import { useArticulos, useDevoluciones, useEncolar, useRefrescarAlEntrar } from "../../datos/hooks"
-import { C, dejarAviso, Marco, Rechazos, useAvisoEntrante, useToast, useVolver } from "../../ui"
+import { C, dejarAviso, Marco, Rechazos, useAvisoEntrante, useTecladoAbierto, useToast, useVolver } from "../../ui"
 import { PanelBuscar } from "../comunes/Buscar"
 import { useDadoDeBaja } from "../comunes/DadoDeBaja"
 
@@ -104,6 +104,7 @@ export function DevolucionesBuscar() {
   const volver = useVolver()
   const { toast, mostrar } = useToast()
   const { escanear, baja } = useEscaneoDevolucion(mostrar, true)
+  const teclado = useTecladoAbierto() // con el teclado abierto el pie le deja lugar a los resultados
   return (
     <Marco titulo="Buscar artículo">
       {toast}
@@ -117,9 +118,11 @@ export function DevolucionesBuscar() {
         dadoDeBaja={baja}
       />
       {baja.hoja}
-      <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px" }}>
-        <button onClick={() => volver()} style={{ width: "100%", background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "17px 0", borderRadius: 16, border: `1.5px solid ${C.border}` }}>📋 Ver listado de devoluciones</button>
-      </div>
+      {!teclado && (
+        <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px" }}>
+          <button onClick={() => volver()} style={{ width: "100%", background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "17px 0", borderRadius: 16, border: `1.5px solid ${C.border}` }}>📋 Ver listado de devoluciones</button>
+        </div>
+      )}
     </Marco>
   )
 }
