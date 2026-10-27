@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { PEDIDO_PREFIX } from "@gm/cobro"
+import { ESTADO_LABEL } from "@gm/vendedor"
 import type { ComprobanteCobro, PedidoCobro } from "../datasets"
 import {
   agruparCuenta, alternarAnticipo, alternarComprobante, alternarContadoPedido, alternarContadoTodo, alternarGrupo, alternarTodo, clavesDeLaCuenta,
@@ -86,6 +87,7 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir,
                   <span className="text-sm font-semibold">Pedido #{ped.numero_pedido}</span>
                   <span className="text-xs">{formatDateAR(ped.fecha)}</span>
                   <span className="rounded border border-green-200 bg-green-50 px-1.5 text-[10px] text-green-700">Saldado</span>
+                  {ped.estado === "sistema_viejo" && <span className="rounded border border-gray-200 bg-gray-100 px-1.5 text-[10px] text-gray-600">{ESTADO_LABEL.sistema_viejo}</span>}
                   <span className="ml-auto font-mono text-sm">{moneda(ped.total)}</span>
                 </div>
               )
@@ -104,6 +106,7 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir,
                       <span className="rounded border border-amber-200 bg-amber-50 px-1.5 text-[10px] text-amber-700">Sin facturar (anticipo)</span>
                     )}
                     {ped.anticipo_pago_id && !facturado && <span className="rounded border border-gray-200 bg-gray-100 px-1.5 text-[10px] text-gray-600">ya anticipado</span>}
+                    {ped.estado === "sistema_viejo" && <span className="rounded border border-gray-200 bg-gray-100 px-1.5 text-[10px] text-gray-600">{ESTADO_LABEL.sistema_viejo}</span>}
                   </button>
                   {!facturado && (
                     <label className="mr-1 flex min-h-11 items-center gap-1 text-[11px] text-amber-700"><input type="checkbox" checked={conContado} onChange={() => onChange(alternarContadoPedido(estado, ped))} className="h-5 w-5" /> 10%</label>

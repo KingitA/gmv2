@@ -137,6 +137,18 @@ describe("C3 · cobro contado con devoluciones (#26)", () => {
     expect(r.totalCobro).toBe(81000)
   })
 
+  it("devolución MIXTA (un renglón ya neto del 10 %, otro no): se decide por renglón (revisión 27/10)", () => {
+    const mixta = { id: "dm", monto_total: 19000, valor_cobro: 19000, aplica_10: false, estado: "pendiente", devoluciones_detalle: [
+      { cantidad: 1, precio_venta_original: 9000, comprobante_venta_id: "pres", bonificado_contado: true },
+      { cantidad: 1, precio_venta_original: 10000, comprobante_venta_id: "pres", bonificado_contado: false },
+    ] }
+    const r = resumenCuenta(cuenta([comp("pres", 100000)], [mixta]), contado({ pres: 100000 }))
+    expect(r.devTotal).toBe(19000)
+    // Solo el renglón sin contado baja la base del 10 %: 10 % de (100.000 − 10.000) = 9.000
+    expect(r.bonificacionEstimada).toBe(9000)
+    expect(r.totalCobro).toBe(72000)
+  })
+
   it("una devolución contra OTRO comprobante (no cobrado contado) no toca el 10 %", () => {
     const r = resumenCuenta(cuenta([comp("pres", 100000)], [dev(10000, "otro")]), contado({ pres: 100000 }))
     expect(r.bonificacionEstimada).toBe(10000)

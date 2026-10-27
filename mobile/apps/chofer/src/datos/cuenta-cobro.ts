@@ -36,7 +36,7 @@ export interface DatosCuenta {
     estado: string
     local?: boolean
     numero_devolucion?: string
-    devoluciones_detalle?: Array<{ cantidad: number; precio_venta_original: number; comprobante_venta_id?: string | null; estado_renglon?: string | null; articulos?: { sku: string | null; descripcion: string } | null }>
+    devoluciones_detalle?: Array<{ cantidad: number; precio_venta_original: number; comprobante_venta_id?: string | null; estado_renglon?: string | null; bonificado_contado?: boolean | null; articulos?: { sku: string | null; descripcion: string } | null }>
   }>
 }
 
@@ -47,6 +47,8 @@ export interface DatosCuenta {
  * lo devuelto contra él. Ej.: PRES $100.000, devolución $10.000 → se cobran $81.000, no $80.000.
  * Devuelve, por comprobante, el valor de lo devuelto contra él (renglón por renglón, a su valor).
  * Una devolución que ya vino neta del 10 % (`aplica_10`) o sin origen por renglón (réplica vieja) no cuenta.
+ * En una devolución mixta (renglones con y sin contado en origen) se decide POR RENGLÓN (revisión 27/10):
+ * los renglones cuya factura ya tuvo el 10 % no cuentan; los demás sí.
  */
 export function devueltoSinNcPorComprobante(devoluciones: DatosCuenta["devoluciones"]): Map<string, number> {
   const out = new Map<string, number>()
@@ -57,7 +59,7 @@ export function devueltoSinNcPorComprobante(devoluciones: DatosCuenta["devolucio
     if (!(bruto > 0)) continue
     const valor = valorDeDevolucion(d)
     for (const x of renglones) {
-      if (!x.comprobante_venta_id) continue
+      if (!x.comprobante_venta_id || x.bonificado_contado) continue
       const parte = (valor * (Number(x.cantidad) || 0) * (Number(x.precio_venta_original) || 0)) / bruto
       out.set(x.comprobante_venta_id, r2((out.get(x.comprobante_venta_id) ?? 0) + parte))
     }

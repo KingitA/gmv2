@@ -174,7 +174,7 @@ export interface DevolucionRow {
   /** La factura de origen ya tenía el 10 % contado (el valor ya viene neto). Falta en réplicas viejas. */
   aplica_10?: boolean
   estado: string
-  devoluciones_detalle?: Array<{ id: string; articulo_id: string; cantidad: number; precio_venta_original: number; motivo: string; condicion: string; comprobante_venta_id?: string | null; estado_renglon?: string | null; articulos?: { sku: string | null; descripcion: string } | null }>
+  devoluciones_detalle?: Array<{ id: string; articulo_id: string; cantidad: number; precio_venta_original: number; motivo: string; condicion: string; comprobante_venta_id?: string | null; estado_renglon?: string | null; bonificado_contado?: boolean | null; articulos?: { sku: string | null; descripcion: string } | null }>
   /** Registrada en este equipo y todavía sin enviar */
   local?: boolean
 }

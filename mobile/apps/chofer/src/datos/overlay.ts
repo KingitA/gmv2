@@ -339,9 +339,11 @@ export function clienteVisible(c: ClienteViajeRow, ops: ItemOutbox[]): ClienteVi
         valor_cobro: total,
         estado: "pendiente",
         local: true,
-        // Origen por renglón y si ya venía con el 10 %: el cobro contado lo necesita (#26)
-        aplica_10: p.items.some((i) => !!i.origen_comp?.bonificado_contado),
-        devoluciones_detalle: p.items.map((i, n) => ({ id: `${p.id}:${n}`, articulo_id: i.articulo_id, cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, motivo: i.motivo, condicion: i.condicion, comprobante_venta_id: i.comprobante_venta_id ?? i.origen_comp?.comprobante_venta_id ?? null, articulos: { sku: i.sku, descripcion: i.descripcion } })),
+        // Origen por renglón y si ya venía con el 10 %: el cobro contado lo necesita (#26). Toda la
+        // devolución es "neta" solo si TODOS sus renglones lo son; si es mixta se decide por renglón
+        // (bonificado_contado en cada uno, revisión 27/10).
+        aplica_10: p.items.length > 0 && p.items.every((i) => !!i.origen_comp?.bonificado_contado),
+        devoluciones_detalle: p.items.map((i, n) => ({ id: `${p.id}:${n}`, articulo_id: i.articulo_id, cantidad: i.cantidad, precio_venta_original: i.precio_venta_original, motivo: i.motivo, condicion: i.condicion, comprobante_venta_id: i.comprobante_venta_id ?? i.origen_comp?.comprobante_venta_id ?? null, bonificado_contado: !!i.origen_comp?.bonificado_contado, articulos: { sku: i.sku, descripcion: i.descripcion } })),
       },
       ...out.devoluciones,
     ]
