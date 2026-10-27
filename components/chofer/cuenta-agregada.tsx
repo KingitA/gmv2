@@ -6,6 +6,7 @@ import { anticiposDeSeleccion, pedidosContadoAEnviar } from "@/lib/cobranzas/reg
 import { formatCurrency } from "@/lib/utils"
 import { InputMonto } from "@/components/ui/input-monto"
 import { redondear } from "@/lib/formato"
+import { useVistaContado } from "@/components/pagos/useVistaContado"
 
 // Cliente AGREGADO a un cobro conjunto del chofer (web): su cuenta completa, igual que la del
 // cliente de la parada — pedidos y comprobantes seleccionables, "Incluir devoluciones como
@@ -52,6 +53,9 @@ export function CuentaAgregada({ viajeId, cliente, onResumen, onQuitar }: {
     return () => { vivo = false }
   }, [viajeId, id])
 
+  // R5 (27/10): la base del 10 % la da el servidor (completo − lo ya devuelto)
+  const compsElegidos = useMemo(() => Object.keys(sel).filter((k) => !k.startsWith("pedido:")), [sel])
+  const vistaContado = useVistaContado(id, compsElegidos, [], contadoGeneral)
   const bonificacion = useMemo(() => {
     if (!contadoGeneral) return 0
     let b = 0
@@ -60,10 +64,11 @@ export function CuentaAgregada({ viajeId, cliente, onResumen, onQuitar }: {
       if (imp === undefined || dtosHechos.has(cp.id)) continue
       if (!TIPOS_BONIFICABLES.includes(String(cp.tipo_comprobante || "").toUpperCase())) continue
       // REGLA 07/10 (dueño): 10% del TOTAL, una sola vez, aunque pague una parte
-      b += Math.min(imp, Math.abs(Number(cp.total_factura) || 0) * 0.1)
+      const base = vistaContado.listo ? vistaContado.bonif[cp.id] ?? 0 : Math.abs(Number(cp.total_factura) || 0) * 0.1
+      b += Math.min(imp, base)
     }
     return r2(b)
-  }, [contadoGeneral, comps, sel, dtosHechos])
+  }, [contadoGeneral, comps, sel, dtosHechos, vistaContado])
   const totalImputado = r2(Object.values(sel).reduce((s, v) => s + v, 0))
   const devTotal = incluirDevoluciones ? r2(devoluciones.reduce((s, d) => s + Number(d.monto_total), 0)) : 0
   const total = r2(Math.max(0, r2(totalImputado - devTotal - bonificacion)) + Math.max(0, aCuenta))

@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { colorOverride } from "@/lib/actions/color-cheque"
 
 /**
@@ -12,7 +12,7 @@ import { colorOverride } from "@/lib/actions/color-cheque"
  * Body: { color: "BLANCO" | "NEGRO" }
  */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const { id } = await params

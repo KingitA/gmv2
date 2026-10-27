@@ -141,6 +141,8 @@
     "app/finanzas/page.tsx",
     "lib/finanzas/nombres-cobradores.ts",
     "lib/pedidos/totales-pedido.ts",
+    "components/pagos/useVistaContado.ts",
+    "app/api/cobranzas/vista-contado/route.ts",
     "app/api/cheques/[id]/color/route.ts",
     "components/caja/confirmar-dialog.tsx",
     "lib/pedidos/sin-mercaderia.ts",

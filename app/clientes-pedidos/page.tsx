@@ -266,6 +266,22 @@ export default function ClientesPedidosPage() {
   const [modalDetalleAbierto, setModalDetalleAbierto] = useState(false)
   const [pedidoAEliminar, setPedidoAEliminar] = useState<Pedido | null>(null)
   const [anularAbierto, setAnularAbierto] = useState(false)
+  // R1/R3: se puede refacturar en cualquier estado hasta que está cobrado al 100 %.
+  // Se pregunta al abrir el pedido para mostrar el botón ya deshabilitado con el motivo.
+  const [anulacionBloqueada, setAnulacionBloqueada] = useState<{ pedidoId: string; motivo: string } | null>(null)
+  const pedidoConComprobantes = pedidoSeleccionado && totalFacturado(comprobantesGenerados[pedidoSeleccionado.id], pedidoSeleccionado.id) != null ? pedidoSeleccionado.id : null
+  useEffect(() => {
+    setAnulacionBloqueada(null)
+    if (!pedidoConComprobantes) return
+    let vigente = true
+    fetch(`/api/pedidos/${pedidoConComprobantes}/anular-comprobantes`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((ev) => {
+        if (vigente && ev && !ev.puede) setAnulacionBloqueada({ pedidoId: pedidoConComprobantes, motivo: ev.motivo || "No se puede refacturar." })
+      })
+      .catch(() => {})
+    return () => { vigente = false }
+  }, [pedidoConComprobantes, comprobantesGenerados])
   const [eliminando, setEliminando] = useState(false)
   const [pickingStatus, setPickingStatus] = useState<Record<string, any>>({})
   const [expandedPriorities, setExpandedPriorities] = useState<Record<string, boolean>>({ "1": true, "2": true, "3": true })
@@ -1781,11 +1797,18 @@ export default function ClientesPedidosPage() {
                   <Printer className="h-3.5 w-3.5 mr-1.5" />Imprimir
                 </Button>
                 {tieneComprobantes(pedidoSeleccionado.id) && (
-                  <Button size="sm" onClick={() => setAnularAbierto(true)}
-                    title="Anula todos los comprobantes del pedido para volver a facturarlo"
-                    className="bg-transparent border border-red-300/60 text-red-100 hover:bg-red-500/20 font-medium">
-                    <Undo2 className="h-3.5 w-3.5 mr-1.5" />Anular comprobantes
-                  </Button>
+                  anulacionBloqueada?.pedidoId === pedidoSeleccionado.id ? (
+                    <Button size="sm" disabled title={anulacionBloqueada.motivo}
+                      className="bg-transparent border border-white/20 text-white/60 font-medium disabled:opacity-100">
+                      <Undo2 className="h-3.5 w-3.5 mr-1.5" />Cobrado al 100 %
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={() => setAnularAbierto(true)}
+                      title="Anula todos los comprobantes del pedido para volver a facturarlo"
+                      className="bg-transparent border border-red-300/60 text-red-100 hover:bg-red-500/20 font-medium">
+                      <Undo2 className="h-3.5 w-3.5 mr-1.5" />Anular comprobantes
+                    </Button>
+                  )
                 )}
                 {!tieneComprobantes(pedidoSeleccionado.id) && pedidoSeleccionado.estado !== "eliminado" && (
                   <Button size="sm" onClick={() => repreciarPedidoActual(pedidoSeleccionado)}
@@ -2125,8 +2148,8 @@ export default function ClientesPedidosPage() {
           numeroPedido={pedidoSeleccionado.numero_pedido}
           open={anularAbierto}
           onOpenChange={setAnularAbierto}
-          onAnulado={async (completo) => {
-            if (completo) setPedidoSeleccionado((prev: any) => (prev && prev.id === pedidoSeleccionado.id ? { ...prev, estado: "pendiente_facturacion" } : prev))
+          onAnulado={async () => {
+            // R1: anular no cambia el estado del pedido (entregado, en viaje…)
             await Promise.all([cargarPedidos(true), cargarComprobantesExistentes()])
           }}
         />

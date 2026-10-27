@@ -32,6 +32,7 @@ import { InputCUIT } from "@/components/ui/input-cuit"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { DialogoFalta, DialogoSobra } from "@/components/pagos/DialogoDiferencia"
 import { Camera, ClipboardPaste, Loader2, Paperclip, Plus, X } from "lucide-react"
+import { useVistaContado } from "@/components/pagos/useVistaContado"
 
 export interface CuentaFondos {
   cuenta_tipo: string
@@ -179,21 +180,34 @@ export function RegistrarCobro({
 
   // Preview del 10% contado — REGLA 07/10 (dueño): la NC es el 10% del TOTAL
   // de cada comprobante, una sola vez, aunque este cobro pague una parte.
+  // R5 (27/10): la base la da el servidor (completo − lo ya devuelto), así la
+  // vista previa y la nota dan lo mismo. Mientras carga, el cálculo de siempre.
+  const compsElegidos = useMemo(() => Object.keys(seleccionados).filter((k) => !k.startsWith(PEDIDO_PREFIX)), [seleccionados])
+  const credsElegidos = useMemo(() => Object.keys(credSel).filter((k) => k.startsWith("nc:")).map((k) => k.slice(3)), [credSel])
+  const vistaContado = useVistaContado(cliente?.id, compsElegidos, credsElegidos, aplicarContado)
   const bonificacionEstimada = useMemo(() => {
     if (!aplicarContado) return 0
     let total = 0
+    let bonificaEsteCobro = false
     for (const [key, v] of Object.entries(seleccionados)) {
       if (key.startsWith(PEDIDO_PREFIX) || dtosHechos.has(key)) continue
       const comp = comprobantes.find((c) => c.id === key)
-      if (comp) total += Math.min(Math.max(0, Number(v) || 0), Math.abs(Number(comp.total_factura) || 0) * 0.1)
+      if (!comp) continue
+      const base = vistaContado.listo ? vistaContado.bonif[key] ?? 0 : Math.abs(Number(comp.total_factura) || 0) * 0.1
+      if (base > 0) bonificaEsteCobro = true
+      total += Math.min(Math.max(0, Number(v) || 0), base)
     }
-    // Crédito de mercadería sin el 10% hecho: el 10% de lo usado va en contra
-    // (regla 25/08 — el servidor asienta ese débito al ejecutar el crédito)
     for (const [key, m] of Object.entries(credSel)) {
-      if (key.startsWith("nc:") && cred10[key] && m > 0) total -= m * 0.1
+      if (!key.startsWith("nc:") || !(m > 0)) continue
+      // NC de devolución contra un comprobante que este cobro bonifica: baja la base
+      // del 10 % (no va el 10 % en contra, sería restarlo dos veces)
+      if (vistaContado.devolucion.has(key.slice(3)) && bonificaEsteCobro) total -= m * 0.1
+      // Crédito de mercadería sin el 10% hecho: el 10% de lo usado va en contra
+      // (regla 25/08 — el servidor asienta ese débito al ejecutar el crédito)
+      else if (cred10[key]) total -= m * 0.1
     }
     return round2(Math.max(0, total))
-  }, [aplicarContado, seleccionados, dtosHechos, comprobantes, credSel, cred10])
+  }, [aplicarContado, seleccionados, dtosHechos, comprobantes, credSel, cred10, vistaContado])
 
   // ── Fotos: subir / cámara / pegar captura ──
   const subirArchivos = useCallback(
