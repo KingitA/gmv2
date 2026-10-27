@@ -46,9 +46,56 @@ const OBS_RESPALDO = "RESPALDO DEVOLUCIONES — comprobante en $0 para asociar d
 const VENTAS = [...FISCALES, "PRES"]
 const r2 = (n: number) => Math.round(n * 100) / 100
 
-type ClienteDev = ClientePercepcion & { cuit?: string | null }
+type ClienteDev = ClientePercepcion & {
+  cuit?: string | null
+  metodo_facturacion?: string | null
+  metodo_limpieza?: string | null
+  metodo_perf0?: string | null
+  metodo_perf_plus?: string | null
+}
 
-const CLIENTE_COLS = "id, cuit, condicion_iva, exento_iva, exento_iibb, provincia, percepcion_iibb"
+const CLIENTE_COLS = "id, cuit, condicion_iva, exento_iva, exento_iibb, provincia, percepcion_iibb, metodo_facturacion, metodo_limpieza, metodo_perf0, metodo_perf_plus"
+
+/**
+ * Cómo está configurado el cliente (regla de Juan 26/10 para #28, R2/R9 27/10):
+ *  - "negro": todos sus segmentos van por Presupuesto, o no tiene CUIT (sin CUIT
+ *    no hay comprobante fiscal) → lo devuelto sale con REV;
+ *  - "blanco": todos sus segmentos van por Factura → sale con NC;
+ *  - "mixto": "Final" o segmentos distintos → depende de cada artículo.
+ * Método por segmento = el del segmento o, si no tiene, el general (mismo criterio
+ * que el motor de precios: vacío = "Final").
+ */
+export function configuracionCliente(c: ClienteDev): "negro" | "blanco" | "mixto" {
+  if (!c.cuit || !String(c.cuit).trim() || /^0{2}-?0{8}-?0$/.test(String(c.cuit).trim())) return "negro"
+  const gen = c.metodo_facturacion && c.metodo_facturacion !== "PorSegmento" ? c.metodo_facturacion : null
+  const clase = (raw: string | null | undefined) => {
+    const m = raw || gen
+    if (m === "Presupuesto") return "negro"
+    if (m === "Factura" || m === "Factura (21% IVA)") return "blanco"
+    return "mixto"
+  }
+  const segs = [clase(c.metodo_limpieza), clase(c.metodo_perf0), clase(c.metodo_perf_plus)]
+  if (segs.every((s) => s === "negro")) return "negro"
+  if (segs.every((s) => s === "blanco")) return "blanco"
+  return "mixto"
+}
+
+/**
+ * Cómo va un artículo cuando el motor de precios no lo pudo resolver (sin precio
+ * calculable): manda la configuración del cliente. Mixto → no se sabe (null):
+ * NUNCA "factura" por defecto (R2 27/10, riesgo de NC con CAE sin querer).
+ */
+function vaPorCliente(c: ClienteDev): "factura" | "presupuesto" | null {
+  const conf = configuracionCliente(c)
+  return conf === "negro" ? "presupuesto" : conf === "blanco" ? "factura" : null
+}
+
+/** elegirOrigenDevolucion con el "cómo va" ya resuelto; si no se sabe, presupuesto marcado indeterminado. */
+function elegirConVa(exacto: OrigenDevolucion | null, contexto: ContextoDevolucion | null, va: "factura" | "presupuesto" | null): OrigenDevolucion {
+  if (va) return elegirOrigenDevolucion(exacto, contexto, va)
+  const o = elegirOrigenDevolucion(exacto, contexto, "presupuesto")
+  return o.exacto ? o : { ...o, indeterminado: true }
+}
 
 async function leerCliente(supabase: SupabaseClient, clienteId: string, cliente?: ClienteDev | null): Promise<ClienteDev> {
   if (cliente && "cuit" in cliente) return cliente
@@ -165,11 +212,18 @@ export async function origenesComprados(supabase: SupabaseClient, clienteId: str
       .in("comprobante.tipo_comprobante", VENTAS)
       .is("comprobante.anulado_en", null),
   )
-  // Último comprobante por artículo (renglones a $0 de mercadería bonificada no cuentan)
+  // Último comprobante por artículo (renglones a $0 de mercadería bonificada no cuentan).
+  // R9 (27/10, regla de Juan del #28): si el cliente está configurado todo negro
+  // o todo blanco "manda el cliente": solo cuentan los comprobantes de su clase
+  // (PRES o FA/FB/FC). Si no hay ninguno de esa clase con el artículo, va por el
+  // camino sin comprobante (respaldo 0002-00000001 o NC con período).
+  const conf = configuracionCliente(cliente)
   const ult = new Map<string, { comp: CompRow; precio_unitario: number; cantidad_total: number }>()
   for (const r of rows as any[]) {
     if (!r.articulo_id || !r.comprobante || r.es_bonificado === true || !(Number(r.precio_unitario) > 0)) continue
     const comp = r.comprobante as CompRow
+    const esFiscal = FISCALES.includes(comp.tipo_comprobante)
+    if ((conf === "negro" && esFiscal) || (conf === "blanco" && !esFiscal)) continue
     const clave = `${comp.fecha || ""}|${comp.created_at || ""}`
     const actual = ult.get(r.articulo_id)
     const claveActual = actual ? `${actual.comp.fecha || ""}|${actual.comp.created_at || ""}` : ""
@@ -325,7 +379,10 @@ export async function resolverOrigenesDevolucion(
       .is("anulado_en", null)
     const lista = (comps || []) as any[]
     const renglones: Array<{ comp: CompRow; articulo_id: string; precio_unitario: number }> = []
+    const confPedido = configuracionCliente(cliente)
     for (const c of lista) {
+      const esFiscalC = FISCALES.includes(c.tipo_comprobante)
+      if ((confPedido === "negro" && esFiscalC) || (confPedido === "blanco" && !esFiscalC)) continue
       for (const d of c.comprobantes_venta_detalle || []) {
         if (d.es_bonificado === true || !(Number(d.precio_unitario) > 0) || !ids.includes(d.articulo_id)) continue
         renglones.push({ comp: c, articulo_id: d.articulo_id, precio_unitario: Number(d.precio_unitario) })
@@ -346,7 +403,8 @@ export async function resolverOrigenesDevolucion(
   for (const id of ids) {
     const exacto = delPedido.get(id) ?? comprados.get(id) ?? null
     const hoyArt = hoy.get(id)
-    const o = elegirOrigenDevolucion(exacto, contexto, hoyArt?.va ?? "factura")
+    // R2: si el motor no lo resolvió, manda el cliente; si es mixto, indeterminado (nunca "factura" por defecto)
+    const o = elegirConVa(exacto, contexto, hoyArt?.va ?? vaPorCliente(cliente))
     origenes.set(id, { ...o, precio_sugerido: o.exacto ? o.precio : hoyArt?.precio ?? null, precio_al_cliente: hoyArt?.alCliente ?? null })
   }
   return { origenes, contexto }
@@ -428,7 +486,7 @@ export async function origenesDeRenglones(
   ])
   return renglones.map((r) => {
     const c = r.comprobante_venta_id ? compDe.get(r.comprobante_venta_id) : null
-    if (!c) return elegirOrigenDevolucion(null, null, hoy.get(r.articulo_id)?.va ?? "factura")
+    if (!c) return elegirConVa(null, null, hoy.get(r.articulo_id)?.va ?? vaPorCliente(cliente))
     const ex = exactos.find((e) => e.comp.id === c.id && e.articulo_id === r.articulo_id && Math.abs(e.precio_unitario - (Number(r.precio_venta_original) || 0)) < 0.005)
     return origenDe(c, cliente, bonificados, {
       exacto: !!ex,

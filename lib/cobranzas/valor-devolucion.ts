@@ -154,6 +154,12 @@ export interface OrigenDevolucion {
   precio: number | null
   /** IVA por unidad del renglón facturado; null = 21% del neto */
   iva_unitario: number | null
+  /**
+   * R2 (27/10): no se sabe si va por factura o por presupuesto (cliente mixto y
+   * el artículo sin precio calculable). Se valúa como presupuesto, pero la NC
+   * NO se emite hasta resolverlo: nunca "factura" por defecto (riesgo fiscal).
+   */
+  indeterminado?: boolean
 }
 
 /** Lo que hace falta del cliente para valuar una devolución sin señal (apps). */

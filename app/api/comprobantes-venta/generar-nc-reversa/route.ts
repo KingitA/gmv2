@@ -132,6 +132,17 @@ export async function POST(request: Request) {
       cliente: devolucion.cliente,
     })).get(devolucion.id)!
     const origenDe = new Map(valoracion.renglones.map((r) => [r.id, r.origen]))
+
+    // R2 (27/10): si de algún renglón no se sabe si va por factura o por
+    // presupuesto (cliente mixto y artículo sin precio calculable), NO se emite:
+    // antes se asumía "factura" y podía salir una NC con CAE sin querer.
+    const indeterminados = devolucion.detalle.filter((it: any) => origenDe.get(it.id)?.indeterminado)
+    if (indeterminados.length) {
+      return NextResponse.json({
+        error: `No se puede saber si ${indeterminados.length === 1 ? "este artículo va" : "estos artículos van"} por factura o por presupuesto (el cliente tiene método mixto y el artículo no tiene precio calculable): ${indeterminados.map((it: any) => it.articulos?.descripcion || it.articulo_id).join(", ")}. Revisá la lista y el método del cliente o el precio del artículo antes de emitir. No se emitió nada.`,
+        error_code: "ORIGEN_INDETERMINADO",
+      }, { status: 422 })
+    }
     const alicuotaIIBB = valoracion.alicuota_iibb
 
     // Partes: lo que se facturó con factura → NC A/B; lo de presupuesto → REV
@@ -297,7 +308,21 @@ export async function POST(request: Request) {
         // para ARCA ni para el sistema (Juan 26/10). Período = del 1° del mes a la
         // fecha de emisión: con percepciones ARCA exige el mismo mes/año (10217)
         // y la fecha "hasta" no puede pasar la de emisión.
+        // R2 (27/10): el período va SOLO en el caso exacto del #28 — TODOS los
+        // renglones de esta parte son artículos que van en blanco y no están en
+        // ningún comprobante (sin origen asociado). Cualquier otro caso sin
+        // asociado se frena: no se emite una NC con CAE "a ciegas".
         if (cbteAsoc.length === 0) {
+          const caso28 = parte.items.length > 0 && parte.items.every((it: any) => {
+            const o = origenDe.get(it.id)
+            return o?.fiscal === true && !o.indeterminado && !o.comprobante_venta_id && !it.comprobante_venta_id && !it.comprobante_original?.numero_comprobante
+          })
+          if (!caso28) {
+            throw corte({
+              error: "La nota de crédito no tiene comprobante asociado y no es el caso de un artículo sin ningún comprobante (#28). Indicá el comprobante asociado (tipo y número) antes de emitir. No se emitió nada.",
+              error_code: "NC_SIN_ASOCIADO",
+            }, 422)
+          }
           const hoyNc = todayArgentina()
           periodoAsoc = { desde: `${hoyNc.slice(0, 7).replace("-", "")}01`, hasta: hoyNc.replace(/-/g, "") }
         }
