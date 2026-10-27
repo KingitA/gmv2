@@ -420,7 +420,7 @@ Lo que salió de la revisión, con un número nuevo para seguir la misma tabla. 
 | R12 | Baja | Detalles: #6 un "Fact.E" o "N.Cr.X" real entraría como ajuste sin avisar; #22 el remito guarda los bultos al generarse y queda viejo si se cargan después; #34 `PATCH /api/cheques/[id]/color` pide solo estar logueado (sin permiso de Caja); #17 si falla el borrado después de `reiniciarPicking`, el pedido vuelve a la cola | varios | El dueño de cada # |
 
 **Respuestas de Juan (27/10):**
-1. **#19/#20:** **sí**, un pedido en viaje o entregado también se puede anular y refacturar (ej.: el cliente pagó una parte al chofer y el chofer avisa "hay que refacturarlo"; la oficina lo rehace y el chofer vuelve después a cobrar lo que resta). **El pedido se bloquea recién cuando está cobrado al 100 %.**
+1. **#19/#20:** **sí**, un pedido en viaje o entregado también se puede anular y refacturar (ej.: el cliente pagó una parte al chofer y el chofer avisa "hay que refacturarlo"; la oficina lo rehace y el chofer vuelve después a cobrar lo que resta). **El pedido se bloquea recién cuando está cobrado al 100 %.** Al refacturar, **el pedido queda en el estado de logística en que estaba** (entregado sigue entregado, en viaje sigue en viaje, etc.). **Lo ya pagado respeta lo que eligió quien cobró**: si el chofer lo imputó a este pedido, va al comprobante nuevo de este pedido; si lo puso a cuenta de lo anterior, sigue a cuenta de lo anterior.
 2. **10 % contado:** es el **10 % de los comprobantes completos**, no de la plata a cuenta ni de pagos parciales. Factura de 00 → NC/REV de 0, pague el cliente 0, 0 o 20. (#37 queda bien como está: el 10 % no baja con la plata a cuenta.)
 
 **Apps:**
