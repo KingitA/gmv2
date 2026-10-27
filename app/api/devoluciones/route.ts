@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from '@/lib/auth'
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { prepararRenglonesDevolucion } from "@/lib/cobranzas/origen-devolucion"
-import { CODIGO_TOPE_DEVOLUCION, excedeTopeDevolucion } from "@/lib/cobranzas/tope-devolucion"
+import { CODIGO_TOPE_DEVOLUCION, excedeTopeDevolucion, esErrorTopeDevolucion, mensajeErrorTopeDevolucion } from "@/lib/cobranzas/tope-devolucion"
 import { redondear } from "@/lib/formato"
 
 export async function GET(request: NextRequest) {
@@ -184,7 +184,14 @@ export async function POST(request: NextRequest) {
 
     const { error: itemsError } = await supabase.from("devoluciones_detalle").insert(itemsConDevolucionId)
 
-    if (itemsError) throw itemsError
+    if (itemsError) {
+      // R8: el disparador de la base frenó (otra devolución del mismo artículo se grabó a la vez)
+      if (esErrorTopeDevolucion(itemsError)) {
+        await supabase.from("devoluciones").delete().eq("id", devolucion.id)
+        return NextResponse.json({ error: mensajeErrorTopeDevolucion(itemsError), codigo: CODIGO_TOPE_DEVOLUCION }, { status: 409 })
+      }
+      throw itemsError
+    }
 
     return NextResponse.json({
       success: true,

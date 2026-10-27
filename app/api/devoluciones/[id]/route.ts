@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
 import { requirePermiso } from "@/lib/auth"
 import { redondear } from "@/lib/formato"
+import { CODIGO_TOPE_DEVOLUCION, esErrorTopeDevolucion, excedeTopeDevolucion, mensajeErrorTopeDevolucion } from "@/lib/cobranzas/tope-devolucion"
 
 // PUT /api/devoluciones/[id] — editar cantidades / quitar renglones ANTES de la NC.
 // Solo en estado "pendiente" (todavía no se controló en depósito ni se devolvió stock).
@@ -23,6 +24,23 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         { status: 400 }
       )
     }
+
+    // R8 (#25): la revisión tampoco puede devolver más de lo vendido. Se controla
+    // con las cantidades FINALES de esta devolución (sin contarla a ella misma);
+    // la base vuelve a controlar al grabar, con candado (20261027_devoluciones_tope.sql).
+    const { data: actuales } = await supabase
+      .from("devoluciones_detalle").select("id, articulo_id, cantidad, comprobante_venta_id").eq("devolucion_id", id)
+    const quitar = new Set<string>((eliminar ?? []).map(String))
+    const nueva = new Map<string, number>()
+    for (const it of (items ?? [])) {
+      const cant = Number(it.cantidad)
+      if (it.id && Number.isFinite(cant) && cant > 0) nueva.set(String(it.id), cant)
+    }
+    const finales = (actuales || [])
+      .filter((d: any) => !quitar.has(d.id))
+      .map((d: any) => ({ articulo_id: d.articulo_id, comprobante_venta_id: d.comprobante_venta_id, cantidad: nueva.get(d.id) ?? Number(d.cantidad) }))
+    const tope = await excedeTopeDevolucion(supabase, finales, { excluirDevolucionId: id })
+    if (tope) return NextResponse.json({ error: tope, codigo: CODIGO_TOPE_DEVOLUCION }, { status: 409 })
 
     for (const detId of (eliminar ?? [])) {
       const { error } = await supabase.from("devoluciones_detalle").delete().eq("id", detId).eq("devolucion_id", id)
@@ -55,6 +73,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     return NextResponse.json({ success: true, monto_total: total })
   } catch (error: any) {
+    if (esErrorTopeDevolucion(error)) {
+      return NextResponse.json({ error: mensajeErrorTopeDevolucion(error), codigo: CODIGO_TOPE_DEVOLUCION }, { status: 409 })
+    }
     console.error("[devoluciones PUT] error:", error)
     return NextResponse.json({ error: error.message || "Error editando devolución" }, { status: 500 })
   }

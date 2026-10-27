@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.6 (versionCode 15) — 2026-10-27
+
+- Pedidos del sistema viejo con su nombre (Mis pedidos y Cobrar); el inicio descuenta los retiros sin enviar aunque la billetera no se haya descargado
+
 ## v0.4.5 (versionCode 14) — 2026-10-26
 
 - Login con usuario o mail; checkbox 10% pago contado al cerrar el pedido con total en vivo; cuenta del pedido (reversas y pagos); plata en mano descuenta el retiro al instante; transferencias aparte, fuera de la rendición; deuda del sistema anterior en Cobrar; comisiones = comisiones ganadas

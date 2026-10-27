@@ -6,6 +6,7 @@ import { ARTICULO_PRECIO_COLS, cargarInsumosCliente } from "@/lib/pricing/cargar
 import { descuentosPorArticulo, prepararMotorCliente, type ArticuloMotor } from "@/lib/pricing/motor"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { hoyISO } from "@/lib/formato"
+import { NUMERO_RESPALDO_DEVOLUCION } from "./respaldo-devolucion"
 import {
   elegirOrigenDevolucion,
   type ContextoDevolucion,
@@ -40,8 +41,8 @@ import {
 
 const FISCALES = ["FA", "FB", "FC"]
 
-/** #28: PRES de respaldo, uno por cliente, para lo devuelto sin comprobante con ese artículo (negro). */
-export const NUMERO_RESPALDO_DEVOLUCION = "0002-00000001"
+/** #28: PRES de respaldo, uno por cliente (respaldo-devolucion.ts) */
+export { NUMERO_RESPALDO_DEVOLUCION }
 const OBS_RESPALDO = "RESPALDO DEVOLUCIONES — comprobante en $0 para asociar devoluciones de artículos sin comprobante de origen (#28)"
 const VENTAS = [...FISCALES, "PRES"]
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -317,6 +318,11 @@ export async function asegurarComprobanteRespaldo(supabase: SupabaseClient, clie
     })
     .select("id")
     .single()
+  // R9: dos devoluciones a la vez → el índice único frena la segunda; se usa el que creó la primera
+  if (error?.code === "23505") {
+    const ya = await comprobanteRespaldo(supabase, clienteId)
+    if (ya) return ya.id
+  }
   if (error || !data) throw new Error(`No se pudo crear el comprobante de respaldo ${NUMERO_RESPALDO_DEVOLUCION}: ${error?.message ?? "sin respuesta"}`)
   return data.id
 }

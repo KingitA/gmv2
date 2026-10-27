@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { Outbox, backoffMs } from "../src/sync/outbox"
 import { apiFalsa, dbNueva, type Manejador } from "./helpers"
 
@@ -121,7 +121,7 @@ describe("Outbox", () => {
     for (let i = 0; i < 40; i++) {
       reloj.t += 15_000
       await ob.enviar({ forzar: true })
-      reloj.t += 6 * 60_000 // pasa el backoff
+      reloj.t += 7 * 60_000 // pasa el backoff (máximo 6,25 min con el azar)
     }
     expect((await ob.item(a.key))!.estado).toBe("pendiente")
     expect((await ob.item(b.key))!.estado).toBe("pendiente")
@@ -151,18 +151,27 @@ describe("Outbox", () => {
     const db = await dbNueva()
     const srv = servidor({ fallar: () => 503 })
     const { ob, reloj } = crear(db, srv.manejador)
-    await ob.encolar({ tipo: "t", payload: {} })
-    for (let i = 0; i < 30; i++) {
+    // El backoff tiene azar (Math.random): hasta 5 min × 1,25 = 6,25 min. Antes el reloj
+    // avanzaba 6 min y ~1 de cada 10 corridas el fallo 31 seguía en backoff y no salía
+    // ("expected 30 to be 31"). Se fija el PEOR caso del azar y se avanza más que el máximo.
+    const azar = vi.spyOn(Math, "random").mockReturnValue(0.999)
+    try {
+      await ob.encolar({ tipo: "t", payload: {} })
+      for (let i = 0; i < 30; i++) {
+        await ob.enviar({ forzar: true })
+        reloj.t += 7 * 60_000
+      }
+      await ob.enviar({ forzar: true }) // fallo 31: queda con backoff pendiente
+      const n = srv.requests
+      expect(n).toBe(31)
+      reloj.t += 15_000
       await ob.enviar({ forzar: true })
-      reloj.t += 6 * 60_000
+      reloj.t += 15_000
+      await ob.enviar({ forzar: true })
+      expect(srv.requests).toBe(n)
+    } finally {
+      azar.mockRestore()
     }
-    await ob.enviar({ forzar: true }) // fallo 31: queda con backoff pendiente
-    const n = srv.requests
-    reloj.t += 15_000
-    await ob.enviar({ forzar: true })
-    reloj.t += 15_000
-    await ob.enviar({ forzar: true })
-    expect(srv.requests).toBe(n)
   })
 
   it("O5: envíos concurrentes no duplican requests", async () => {
