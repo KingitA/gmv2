@@ -129,8 +129,10 @@ Además, en el viaje: **gastos** de nafta (con el vehículo), peón y comida; **
 Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro primero, que revisamos juntos.
 
 - [x] 1.1 Foto antes (27/10 15:06): 618 clientes (600 activos), 3.293 artículos, 94 proveedores, 1.994 pedidos (1.640 sistema viejo, 302 eliminados, 47 impreso, 3 entregado, 1 listo para enviar, 1 pendiente de facturación), 80.063 renglones, 12 con CAE ($0), 3 echeqs propios. Prueba: 15 comprobantes sin CAE, 4 cheques, 5 cobros, 4 devoluciones, 13 mov. billetera, 0 comisiones cobradas, 2 viajes, 4 preparaciones, 21 mov. de caja, 39 asientos.
-- [ ] 1.2 `SELECT * FROM cc_puesta_a_cero_simulacro();` → revisamos → `SELECT cc_puesta_a_cero('PONER A CERO');`
+- [x] 1.2 `SELECT * FROM cc_puesta_a_cero_simulacro();` → revisamos → `SELECT cc_puesta_a_cero('PONER A CERO');`
   - Simulacro 27/10 ~15:15, coincide con la foto: se borran 15 comprobantes sin CAE, 27 asientos, 5 cobros, 18 imputaciones, 5 recibos, 2 rendiciones, 4 devoluciones, 13 mov. billetera, 1 cheque, 21 mov. de caja, 6 saldos a cero, 2 fondos/gastos; se conservan 12 con CAE, 12 asientos y 6 imputaciones de esos, 3 echeqs, 60.539 comisiones vendidas y los 1.994 pedidos. Controlado aparte: 0 pedidos con la marca de 10 % contado (la puesta a cero la limpia) y 0 extractos bancarios enganchados.
+  - Ejecutada por Juan 27/10 ~15:20. Verificado en la base: 0 comprobantes sin CAE, 12 con CAE ($0), 12 asientos, 0 cobros, 0 devoluciones, 0 billetera, 0 mov. de caja, 3 cheques (los echeqs), todas las cajas, bancos, inversiones y billeteras en $0; clientes, artículos, proveedores y pedidos iguales a la foto.
+  - Simulacro de la limpieza: 2 viajes, 3 paradas, 1 chofer, 3 zonas, 8 historial, 0 remitos, 4 preparaciones, 2 pedidos a los que se les saca el viaje; BLOQUEA = 0.
 - [ ] 1.3 `SELECT * FROM prueba_limpieza_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba_limpieza('LIMPIAR');`
 - [ ] 1.4 `SELECT * FROM prueba2_preparar_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba2_preparar('PREPARAR');`
 - [ ] 1.5 `SELECT * FROM pedidos_sistema_viejo_simulacro(now(), '{}');` → `SELECT pedidos_pasar_a_sistema_viejo(now(), '{}', 'PASAR');` (pasan los reales nuevos, incluido el 001986).
