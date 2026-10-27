@@ -472,10 +472,10 @@ Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 
 **Hoy los ajustes están desparramados:** movimientos "ajuste" en la cuenta corriente (Ajustar saldo, texto libre de la apertura), la marca `[AJUSTE:x]` en las observaciones del cobro (redondeo de menos del 1 % desde la app), `AJUSTE_CAJA` en `kardex_contable` (ajuste manual de saldo de cajas y bancos), `cierres_caja.ajuste_kardex_id`, y la tabla `cuenta_corriente_ajustes` (vacía).
 
-**Propuesta (pendiente del OK de Juan — no programar hasta que esté tildado acá):**
+**Propuesta — aprobada por Juan el 27/10 con cambios; se termina de definir DESPUÉS de la prueba (no programar antes):**
 - No es una caja con plata: ahí no entra ni sale efectivo, así que **no se mezcla con el arqueo** de cajas y bancos. Es un **registro único**: cada ajuste deja un renglón con fecha, de dónde viene, cliente o cuenta, monto (a favor o en contra de la empresa), motivo, quién lo hizo y a qué cobro/comprobante pertenece. El "saldo" de la caja es la suma.
-- **Entran:** redondeos de cobros (app chofer, app vendedor, /caja), "Ajustar saldo" en la ficha, texto libre de la apertura, deuda asumida al eliminar un cliente (P2-02), sobrantes que la oficina decide no dejarle a favor al cliente, y —en un grupo aparte— los ajustes manuales de saldo de cajas y bancos.
-- **No entran:** diferencias de rendición (van a la cuenta personal del chofer/vendedor: no es plata perdida) ni el saldo a favor de los clientes (es plata del cliente).
+- **Entran:** redondeos de cobros desde **cualquier lugar donde se ingresen pagos** (app chofer, app vendedor, /caja, /pagos-clientes y cualquier otro), "Ajustar saldo" en la ficha, deuda asumida al eliminar un cliente (P2-02) y sobrantes que la oficina decide no dejarle a favor al cliente.
+- **No entran (Juan 27/10):** el texto libre de la apertura, los ajustes manuales de saldo de cajas y bancos, las diferencias de rendición (van a la cuenta personal del chofer/vendedor) y el saldo a favor de los clientes (es plata del cliente).
 - **Pantalla:** totales por mes, por tipo de ajuste y por usuario, con el detalle de cada renglón.
 - **Cuándo:** después de la prueba y antes del pase. Durante la prueba, la sesión de la prueba lista los ajustes a mano desde la base.
-- [ ] OK de Juan
+- [x] OK de Juan a la idea (27/10). Falta redondearla después de la prueba.
