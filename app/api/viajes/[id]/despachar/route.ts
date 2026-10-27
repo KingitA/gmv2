@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireOficina, errorJson, sincronizarParadas } from "@/lib/viajes/servidor"
 import { esViajePorTransporte, pedidoListoParaDespacho } from "@/lib/viajes/estados"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { sincronizarBultosRemitos } from "@/lib/remitos/rehacer-pdf"
 
 // POST /api/viajes/[id]/despachar — oficina cierra papeles y el viaje sale.
 //  - pedidos → en_viaje, la hoja de ruta queda fija.
@@ -127,6 +129,15 @@ export async function POST(
     // Solo los que tienen papeles pasan a en_viaje; el resto (si se eligió
     // despachar igual) conserva su estado hasta facturarse.
     const listos = pedidos.filter((p: any) => pedidoListoParaDespacho(p.estado)).map((p: any) => p.id)
+
+    // R12 (#22): los remitos salen con los bultos/pallets cargados después de
+    // facturar. Nunca frena el despacho: si falla, queda en el log.
+    try {
+      const r = await sincronizarBultosRemitos(createAdminClient(), listos)
+      if (r.errores.length) console.error("[viajes/despachar] remitos con bultos viejos:", r.errores)
+    } catch (e: any) {
+      console.error("[viajes/despachar] remitos:", e?.message)
+    }
     if (listos.length) {
       const { error } = await supabase.from("pedidos").update({ estado: "en_viaje" }).in("id", listos)
       if (error) throw error

@@ -119,6 +119,8 @@ export interface RemitoPDFData {
     fecha: string
     valor_declarado: number
     bultos?: number | null
+    /** #22: pallets del pedido (se imprime solo si hay) */
+    pallets?: number | null
     observaciones?: string | null
     comprobante_numero?: string | null   // "s/ Factura A 0007-00000123" (solo REM)
     comprobante_tipo?: string | null
@@ -303,6 +305,12 @@ function RemitoPagina({ data, copia }: { data: RemitoPDFData; copia: string }) {
               <Text style={s.totLbl}>Bultos</Text>
               <Text style={s.totVal}>{remito.bultos && remito.bultos > 0 ? entero(remito.bultos) : '________'}</Text>
             </View>
+            {remito.pallets && remito.pallets > 0 ? (
+              <View style={s.totRow}>
+                <Text style={s.totLbl}>Pallets</Text>
+                <Text style={s.totVal}>{entero(remito.pallets)}</Text>
+              </View>
+            ) : null}
             {esR ? (
               <View style={s.subGrand}>
                 <Text style={s.subGLbl}>VALOR DECLARADO</Text>

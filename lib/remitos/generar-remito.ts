@@ -27,6 +27,7 @@ export type { RemitoPDFData }
 import { calcularHashPDF } from '@/lib/pdf/generar'
 import { REQUIERE_CAE } from '@/lib/arca/tipos'
 import { todayArgentina } from '@/lib/utils'
+import { palletsDePedidos } from '@/lib/viajes/bultos'
 
 const BUCKET = 'comprobantes_venta'
 const PV_REMITO = '0001'
@@ -95,6 +96,9 @@ export async function generarRemitosParaPedido(
     )
     return resultado
   }
+
+  // #22: pallets del pedido para el PDF (0 si todavía no hay columna)
+  const palletsPedido = (await palletsDePedidos(supabase, [pedido.id])).get(pedido.id) || 0
 
   // ─── 2. Transporte (cascada: viaje.transporte_id → zona del viaje) ───
   // Si al facturar no hay viaje asignado, el remito sale con el bloque de
@@ -229,6 +233,7 @@ export async function generarRemitosParaPedido(
             fecha:              todayArgentina(),
             valor_declarado:    Number(comp.total_factura ?? 0),
             bultos:             pedido.bultos && pedido.bultos > 0 ? pedido.bultos : null,
+            pallets:            palletsPedido || null,
             comprobante_numero: comp.numero_comprobante,
             comprobante_tipo:   comp.tipo_comprobante,
           },

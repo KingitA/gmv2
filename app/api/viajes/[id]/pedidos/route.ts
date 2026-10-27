@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireOficina, errorJson, sincronizarParadas } from "@/lib/viajes/servidor"
 import { viajeEditable, pedidoAsignableAViaje } from "@/lib/viajes/estados"
 import { ESTADOS_CARGA_BULTOS, palletsDePedidos } from "@/lib/viajes/bultos"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { sincronizarBultosRemitos } from "@/lib/remitos/rehacer-pdf"
 
 // GET /api/viajes/[id]/pedidos
 // Pedidos del viaje + CANDIDATOS: pedidos sin viaje, en cualquier estado previo
@@ -247,7 +249,20 @@ export async function PATCH(
       throw error
     }
     if (!hechos?.length) return errorJson("El pedido no está en este viaje", 404)
-    return NextResponse.json({ success: true, ...cambios })
+
+    // R12: antes de despachar, el remito ya emitido toma los bultos/pallets nuevos
+    // (se rehace su PDF con el mismo número). Después de despachar no se toca:
+    // el chofer ya lleva el papel.
+    let remitos = { rehechos: 0, errores: [] as string[] }
+    if (viaje.estado === "programado") {
+      try {
+        remitos = await sincronizarBultosRemitos(createAdminClient(), [body.pedido_id])
+      } catch (e: any) {
+        remitos.errores.push(e?.message || String(e))
+      }
+      if (remitos.errores.length) console.error("[viajes] remito con bultos viejos:", remitos.errores)
+    }
+    return NextResponse.json({ success: true, ...cambios, remitos_rehechos: remitos.rehechos, remitos_errores: remitos.errores.length ? remitos.errores : undefined })
   } catch (error: any) {
     console.error("[viajes] Error en PATCH pedidos (bultos):", error)
     return NextResponse.json({ error: error.message }, { status: 500 })
