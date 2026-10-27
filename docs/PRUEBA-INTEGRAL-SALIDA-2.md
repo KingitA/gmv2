@@ -130,6 +130,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 - [x] 1.1 Foto antes (27/10 15:06): 618 clientes (600 activos), 3.293 artículos, 94 proveedores, 1.994 pedidos (1.640 sistema viejo, 302 eliminados, 47 impreso, 3 entregado, 1 listo para enviar, 1 pendiente de facturación), 80.063 renglones, 12 con CAE ($0), 3 echeqs propios. Prueba: 15 comprobantes sin CAE, 4 cheques, 5 cobros, 4 devoluciones, 13 mov. billetera, 0 comisiones cobradas, 2 viajes, 4 preparaciones, 21 mov. de caja, 39 asientos.
 - [ ] 1.2 `SELECT * FROM cc_puesta_a_cero_simulacro();` → revisamos → `SELECT cc_puesta_a_cero('PONER A CERO');`
+  - Simulacro 27/10 ~15:15, coincide con la foto: se borran 15 comprobantes sin CAE, 27 asientos, 5 cobros, 18 imputaciones, 5 recibos, 2 rendiciones, 4 devoluciones, 13 mov. billetera, 1 cheque, 21 mov. de caja, 6 saldos a cero, 2 fondos/gastos; se conservan 12 con CAE, 12 asientos y 6 imputaciones de esos, 3 echeqs, 60.539 comisiones vendidas y los 1.994 pedidos. Controlado aparte: 0 pedidos con la marca de 10 % contado (la puesta a cero la limpia) y 0 extractos bancarios enganchados.
 - [ ] 1.3 `SELECT * FROM prueba_limpieza_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba_limpieza('LIMPIAR');`
 - [ ] 1.4 `SELECT * FROM prueba2_preparar_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba2_preparar('PREPARAR');`
 - [ ] 1.5 `SELECT * FROM pedidos_sistema_viejo_simulacro(now(), '{}');` → `SELECT pedidos_pasar_a_sistema_viejo(now(), '{}', 'PASAR');` (pasan los reales nuevos, incluido el 001986).
@@ -151,7 +152,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 - [ ] 2.1 Vista previa del `.chr` completo: los clientes con error van **aparte** y no frenan al resto (#5).
 - [ ] 2.2 En la vista previa: el texto libre entra como ajuste (#6), las cuentas de empleados van a la cuenta personal (#7), se toma la **segunda** columna de saldo (#8), los PRES viejos quedan en punto de venta **0002** (#18).
 - [ ] 2.3 Casos raros: 56 y 1381 (cambiaron de dueño), 765 y 766 (no existen en gmv2), que **nada** caiga en el cliente 3 (A1) ni en los PRUEBA 90029-90034.
-- [ ] 2.4 Si el reporte trae deuda de **tu** cuenta como empleado, se anota: rompe el "Juan en $0". Se decide en el momento.
+- [ ] 2.4 El reporte trae a Juan (194) con $131.642,05. **Decisión de Juan 27/10: entra como deuda.** Verificar que vaya a su cuenta personal y no a un cliente. Para el control final, la cuenta de Juan arranca en −$131.642,05.
 - [ ] 2.5 Confirmar. Total importado = total del reporte, al peso.
 - [ ] 2.6 La deuda de 556 se ve igual en la base, la ficha del ERP, la antigüedad del tablero y la app vendedor.
 - [ ] 2.7 La apertura no genera comisiones. Control fiscal = 0.
