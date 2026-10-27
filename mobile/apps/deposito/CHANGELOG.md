@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.2 (versionCode 10) — 2026-10-27
+
+- Login con nombre de usuario o mail (T1); incluye v0.3.1 (Buscar con teclado abierto, 'sin enviar' en una linea)
+
 ## v0.3.1 (versionCode 9) — 2026-10-26
 
 - Buscar: con el teclado abierto se esconden el pie y los contadores (mas resultados a la vista); cola: '⇪ N sin enviar' en una sola linea

@@ -8,7 +8,7 @@
 
 > **App Vendedor (26/10):** V1–V5, T1 y los avisos que tocan a vendedor (ajustes de apertura, "Retiros ya descontados") en curso por la sesión APK Vendedor, en `main` (worktree `gmv2-vendedor`). Archivos que toca: `mobile/apps/vendedor/**`, `mobile/packages/core/test/vendedor-*.test.ts`, `mobile/scripts/mock-vendedor.mjs`, `mobile/scripts/fixture-vendedor.mjs`, la sección §18 de `MOBILE.md` y, **por T1**, el login compartido: `mobile/packages/core/src/auth/**`, la pantalla de login de `mobile/packages/core/src/ui/pantallas.tsx` y `app/api/mobile/auth/login/**`. **No los edites desde otra sesión**; si necesitás algo ahí, pedíselo a Juan.
 
-> **App Depósito (26/10):** D1 esperando T1; D3 hecho (ver §6). Archivos que son de esta sesión: `mobile/apps/deposito/**`, `mobile/packages/core/test/deposito-*.test.ts`, `mobile/scripts/mock-deposito.mjs`, la sección §17 de `MOBILE.md`, y del servidor del depósito: `lib/deposito/**` (picking, recepciones, devoluciones del depósito), `lib/mobile/sync/deposito.ts`, `lib/mobile/outbox/deposito.ts`, `app/api/deposito/**`, `app/deposito/**`. **No los edites desde otra sesión**; si necesitás algo ahí, pedíselo a Juan. En especial: el picking de un pedido (renglones, `picking_items`, sesiones) solo se toca con las funciones de `lib/deposito/picking.ts` — para volver un pedido a la cola, `reiniciarPicking` (D3).
+> **App Depósito (27/10):** D1 hecho (v0.3.2 instalada, falta la prueba de login de Juan); D3 hecho (ver §6). Archivos que son de esta sesión: `mobile/apps/deposito/**`, `mobile/packages/core/test/deposito-*.test.ts`, `mobile/scripts/mock-deposito.mjs`, la sección §17 de `MOBILE.md`, y del servidor del depósito: `lib/deposito/**` (picking, recepciones, devoluciones del depósito), `lib/mobile/sync/deposito.ts`, `lib/mobile/outbox/deposito.ts`, `app/api/deposito/**`, `app/deposito/**`. **No los edites desde otra sesión**; si necesitás algo ahí, pedíselo a Juan. En especial: el picking de un pedido (renglones, `picking_items`, sesiones) solo se toca con las funciones de `lib/deposito/picking.ts` — para volver un pedido a la cola, `reiniciarPicking` (D3).
 
 ---
 
@@ -107,7 +107,7 @@ Son reglas de negocio nuevas. Si algo de tu app hoy hace otra cosa, **manda la r
 | ~~V5 — Transferencias fuera de la rendición (#35)~~ | App Vendedor | — | **Hecho 26/10** |
 | ~~V6 — "Mercadería cobrada" = "Comisiones ganadas" (#41)~~ | App Vendedor | — | **Hecho 26/10** (ea55e14, APK v0.4.4 compilada). Validado: 001939 = $51.175,19 |
 | T1 — Iniciar sesión con **nombre de usuario** (#2) — **toca `@gm/core` (las 3 apps)** | **App Vendedor** hace el cambio en core y en el servidor del login; chofer y depósito solo recompilan | Sí (endpoint del login, ver T1) | **Hecho 26/10, en `main`**: chofer y depósito solo recompilan |
-| D1 — Recompilar con el login nuevo (T1) | App Depósito | — | **T1 ya en `main` (26/10): recompilar** — Esperando T1 (sesión App Depósito atenta; la v0.3.1 ya está en `main`, sin instalar) |
+| ~~D1 — Recompilar con el login nuevo (T1)~~ | App Depósito | — | **Hecho 27/10: APK v0.3.2 (versionCode 10) instalada en el NuStar**, encima de la anterior (sin desinstalar ni force-stop): abre sin pantalla blanca, figura "v0.3.2", la sesión siguió activa y la cola de preparación carga (28 pedidos). **Falta que Juan entre una vez con usuario y otra con mail**: es la cuenta real de depósito y el agente no escribe contraseñas reales. |
 | D2 — Nada que hacer con bultos ni con pedidos todo faltante (solo para que lo sepas) | App Depósito | — | Informativo |
 | ~~D3 — `reiniciarPicking` para el "volver a pendiente" del #17 (lo usa Frontend)~~ | App Depósito | — | **Hecho 26/10** (ver §6 D3 y el aviso en PENDIENTES-ERP-SALIDA #17) |
 
@@ -274,8 +274,10 @@ Igual que C6:
 
 ## 6. App Depósito
 
-### D1 — Recompilar con el login nuevo (T1)
-- [ ] Cuando T1 esté en `main`, la próxima APK de depósito ya lo trae. Probá entrar con usuario y con mail.
+### ~~D1 — Recompilar con el login nuevo (T1)~~ · Hecho 27/10
+**Hecho 27/10: APK v0.3.2 (versionCode 10) instalada en el NuStar**, encima de la anterior (sin desinstalar ni force-stop): abre sin pantalla blanca, figura "v0.3.2", la sesión siguió activa y la cola de preparación carga (28 pedidos). **Falta que Juan entre una vez con usuario y otra con mail**: es la cuenta real de depósito y el agente no escribe contraseñas reales.
+- [x] Recompilada con T1 e instalada (v0.3.2).
+- [ ] **Juan:** en el NuStar, salir con el botón ⇥ del encabezado (la cola está en ⇪ 0, no se pierde nada) y entrar una vez con el **nombre de usuario** y otra con el **mail**.
 
 ### D2 — Para que lo sepas (no hay que programar)
 - **Bultos (#22):** por decisión de Juan, por ahora se cargan **en el ERP**, no en la app. No agregues nada al cierre del picking.
@@ -290,7 +292,7 @@ Igual que C6:
 - **Frontend:** usar esta función en el botón/endpoint del #17 (aviso escrito en PENDIENTES-ERP-SALIDA #17). No la llamé contra ningún pedido real: el 001942 queda para la prueba del #17.
 
 ### Ya en `main` y sin instalar: v0.3.1 (26/10)
-Con el teclado abierto, Buscar esconde el pie y los contadores (más resultados a la vista), y en la cola "⇪ N sin enviar" ya no se parte en dos líneas. Compilada en `gmv2-deposito/dist-apks/deposito-v0.3.1.apk`; por pedido de Juan se instala junto con D1 (login nuevo) en una sola versión.
+Con el teclado abierto, Buscar esconde el pie y los contadores (más resultados a la vista), y en la cola "⇪ N sin enviar" ya no se parte en dos líneas. Se publicó dentro de la v0.3.2 (D1, 27/10), instalada en el NuStar.
 
 ---
 
@@ -308,7 +310,7 @@ Con el teclado abierto, Buscar esconde el pie y los contadores (más resultados 
 Revisado en el código: C1 a C6, V1 a V5, T1 y D3 están **bien hechos**. Pendientes:
 
 - [x] **App Chofer: recompilar como v0.3.4.** ~~La v0.3.3 se compiló 20 segundos antes de que entrara T1 (login con usuario) y no lo trae.~~ Hecho 27/10: v0.3.4 (versionCode 10) con T1, instalada en el NuStar encima de la v0.3.3. Trae además los dos menores: C3 por renglón en devoluciones mixtas y el estado "Sistema viejo" en el selector del cobro.
-- [ ] **App Depósito: recompilar como v0.3.2 (D1).** La v0.3.1 es anterior a T1.
+- [x] **App Depósito: recompilar como v0.3.2 (D1).** Hecho 27/10: v0.3.2 (versionCode 10) instalada en el NuStar; trae la v0.3.1. Falta la prueba de login de Juan (usuario y mail).
 - [ ] Las 3 APK nuevas (vendedor v0.4.5, chofer v0.3.4 y depósito v0.3.2): Juan las instala en el NuStar antes de la segunda prueba.
 - [x] Menor (casilla 0.6 del roadmap): mostrar el estado "sistema_viejo" con nombre ("Sistema viejo") donde aparezca un pedido viejo. — App Chofer: hecho en v0.3.4 (selector del cobro, `ESTADO_LABEL` compartido).
 - Riesgos menores que vio la revisión (no frenan la prueba):
