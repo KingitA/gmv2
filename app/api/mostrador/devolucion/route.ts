@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { prepararRenglonesDevolucion } from "@/lib/cobranzas/origen-devolucion"
-import { CODIGO_TOPE_DEVOLUCION, excedeTopeDevolucion } from "@/lib/cobranzas/tope-devolucion"
+import { CODIGO_TOPE_DEVOLUCION, excedeTopeDevolucion, esErrorTopeDevolucion, mensajeErrorTopeDevolucion } from "@/lib/cobranzas/tope-devolucion"
 
 /**
  * POST /api/mostrador/devolucion — devolución en mostrador (Fase D).
@@ -85,7 +85,14 @@ export async function POST(request: NextRequest) {
     const { error: itemsError } = await supabase
       .from("devoluciones_detalle")
       .insert(itemsInsert)
-    if (itemsError) throw itemsError
+    if (itemsError) {
+      // R8: el disparador de la base frenó (otra devolución del mismo artículo se grabó a la vez)
+      if (esErrorTopeDevolucion(itemsError)) {
+        await supabase.from("devoluciones").delete().eq("id", devolucion.id)
+        return NextResponse.json({ error: mensajeErrorTopeDevolucion(itemsError), codigo: CODIGO_TOPE_DEVOLUCION }, { status: 409 })
+      }
+      throw itemsError
+    }
 
     return NextResponse.json({
       success: true,

@@ -16,6 +16,19 @@ import type { SupabaseClient } from "@supabase/supabase-js"
  */
 export const CODIGO_TOPE_DEVOLUCION = "TOPE_DEVOLUCION"
 
+/**
+ * R8 (27/10): el mismo tope vive en la base (disparador de
+ * 20261027_devoluciones_tope.sql), con candado: si dos devoluciones del mismo
+ * artículo se graban a la vez, la segunda falla con "TOPE_DEVOLUCION: …".
+ */
+export function esErrorTopeDevolucion(e: unknown): boolean {
+  return String((e as any)?.message || "").includes(`${CODIGO_TOPE_DEVOLUCION}:`)
+}
+export function mensajeErrorTopeDevolucion(e: unknown): string {
+  const m = String((e as any)?.message || "").replace(/^.*TOPE_DEVOLUCION:\s*/, "")
+  return `No se puede devolver más de lo vendido: ${m}. Otra devolución del mismo artículo se cargó recién.`
+}
+
 export async function excedeTopeDevolucion(
   supabase: SupabaseClient,
   items: Array<{ articulo_id: string; cantidad: number | string; comprobante_venta_id?: string | null }>,

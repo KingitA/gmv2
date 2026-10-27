@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { esUuid } from "@/lib/mobile/uuid"
 import { prepararRenglonesDevolucion } from "@/lib/cobranzas/origen-devolucion"
-import { CODIGO_TOPE_DEVOLUCION, excedeTopeDevolucion } from "@/lib/cobranzas/tope-devolucion"
+import { CODIGO_TOPE_DEVOLUCION, excedeTopeDevolucion, esErrorTopeDevolucion, mensajeErrorTopeDevolucion } from "@/lib/cobranzas/tope-devolucion"
 
 /**
  * POST /api/viajante/devolucion — devolución registrada en la calle (Fase E).
@@ -117,7 +117,14 @@ export async function POST(request: NextRequest) {
         fecha_venta_original: i.fecha_venta_original || null,
       }))
     )
-    if (itemsErr) throw itemsErr
+    if (itemsErr) {
+      // R8: el disparador de la base frenó (otra devolución del mismo artículo se grabó a la vez)
+      if (esErrorTopeDevolucion(itemsErr)) {
+        await supabase.from("devoluciones").delete().eq("id", devolucion!.id)
+        return NextResponse.json({ error: mensajeErrorTopeDevolucion(itemsErr), codigo: CODIGO_TOPE_DEVOLUCION }, { status: 409 })
+      }
+      throw itemsErr
+    }
 
     return NextResponse.json(
       {

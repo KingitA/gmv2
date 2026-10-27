@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { NUMERO_RESPALDO_DEVOLUCION } from "../cobranzas/respaldo-devolucion"
 import { agruparPorCliente, ES_DEBITO, PREFIJO_AJUSTE_APERTURA, type ClienteApertura, type RenglonApertura, type TipoApertura } from "./parsear-chr"
 
 /**
@@ -152,6 +153,13 @@ export async function previsualizarApertura(supabase: SupabaseClient, renglones:
       if (!Number.isFinite(r.pendiente) || !Number.isFinite(r.importe)) errores.push(`${r.numero}: importe inválido`)
       if (r.tipo && r.tipo !== "AJUSTE" && ES_DEBITO.has(r.tipo) && r.pendiente < 0) errores.push(`${r.numero}: ${r.descripcion} con pendiente negativo`)
       if (r.tipo && r.tipo !== "AJUSTE" && !ES_DEBITO.has(r.tipo) && r.pendiente > 0) errores.push(`${r.numero}: ${r.descripcion} con pendiente positivo`)
+      // R9 (#18): los PRES viejos entran con PV 0002. Solo está previsto el PV 0001
+      // del sistema viejo (otro PV chocaría con sus mismos números) y ninguno puede
+      // caer en el número del respaldo de devoluciones (#28).
+      if (r.tipo === "PRES" && r.numero_original.split("-")[0] !== "0001")
+        errores.push(`${r.numero_original}: PRES de un punto de venta del sistema viejo que no es el 0001. Entraría como ${r.numero} y podría chocar con otro: avisá antes de cargarlo.`)
+      if (r.tipo === "PRES" && r.numero === NUMERO_RESPALDO_DEVOLUCION)
+        errores.push(`${r.numero_original}: entraría como ${r.numero}, el mismo número del comprobante de respaldo de devoluciones. Avisá antes de cargarlo.`)
     }
     if (!g.cuadra) errores.push(`La suma de lo pendiente (${g.suma}) no da el saldo del reporte (${g.saldo_reporte})`)
 
