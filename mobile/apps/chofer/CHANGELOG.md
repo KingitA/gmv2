@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.4 (versionCode 10) — 2026-10-27
+
+- Ingreso con nombre de usuario o mail. Devolución mixta (renglones con y sin contado): el 10% se decide por renglón. Pedidos del sistema viejo se muestran como tales.
+
 ## v0.3.3 (versionCode 9) — 2026-10-26
 
 - v0.3.3: entrega bloqueada real, tope de devolución, contado con devoluciones, un solo texto al no entregar, sin -$0,00, transferencias aparte
