@@ -145,9 +145,9 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | | | | |
 
   Si la caja chica en $0 no deja entregarle el fondo al chofer (5.6), es un hallazgo: se anota y Juan carga un monto de prueba en la caja chica (va a esta tabla).
-- [ ] 1.9 `/personal` → "Poner al día": comisiones $0 y la cuenta de Juan en $0.
-- [ ] 1.10 Pantallas del ERP en cero: "Pendientes de revisar" al día, caja del día sin movimientos, `/personal` todo en $0, fichas de 199/1190/556 en $0, cola del depósito vacía, sin viajes, tablero de Finanzas con billeteras en $0.
-- [ ] 1.11 (27/10 15:23: datos borrados en las 3 apps con pm clear; falta que Juan entre) Apps: borrar datos de las 3 apps y entrar de nuevo, **una con usuario y otra con mail** (T1). Vendedor: plata en mano $0, cuenta $0, comisiones $0. Chofer: sin viaje, billetera $0. Depósito: 0 pedidos.
+- [x] 1.9 (27/10 15:22: Juan apretó; en la base 0 movimientos nuevos, 0 billetera, 0 comisiones cobradas) `/personal` → "Poner al día": comisiones $0 y la cuenta de Juan en $0.
+- [x] 1.10 (verificado en la base 15:22; las pantallas se ven en las fases siguientes) Pantallas del ERP en cero: "Pendientes de revisar" al día, caja del día sin movimientos, `/personal` todo en $0, fichas de 199/1190/556 en $0, cola del depósito vacía, sin viajes, tablero de Finanzas con billeteras en $0.
+- [x] 1.11 (27/10 15:22, capturas: vendedor plata en mano $0, cuenta $0, 9 clientes; chofer sin viaje, entró con mail; depósito 0 pedidos para preparar, quedan 2 recepciones de mercadería pendientes = oficina #4, no es de esta prueba; las 3 con 0 pendientes de enviar) Apps: borrar datos de las 3 apps y entrar de nuevo, **una con usuario y otra con mail** (T1). Vendedor: plata en mano $0, cuenta $0, comisiones $0. Chofer: sin viaje, billetera $0. Depósito: 0 pedidos.
 
 ## Fase 2 — Importación de deudas del sistema viejo (`/apertura`)
 
