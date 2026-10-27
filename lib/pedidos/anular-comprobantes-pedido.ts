@@ -50,7 +50,45 @@ export class CorteAnulacionPedido extends Error {
   }
 }
 
+// R11 (27/10): candado por pedido. Dos anulaciones a la vez (doble clic, dos
+// pestañas) emitían dos reversas: la segunda ahora espera a que termine la primera.
+const CANDADO_VENCE_MS = 10 * 60 * 1000
+
+async function tomarCandado(supabase: any, pedidoId: string): Promise<boolean | null> {
+  const vencido = new Date(Date.now() - CANDADO_VENCE_MS).toISOString()
+  const { data, error } = await supabase
+    .from("pedidos")
+    .update({ anulando_comprobantes_at: new Date().toISOString() })
+    .eq("id", pedidoId)
+    .or(`anulando_comprobantes_at.is.null,anulando_comprobantes_at.lt.${vencido}`)
+    .select("id")
+  if (error) {
+    // Sin la migración 20261027c todavía: sigue sin candado (como antes)
+    if (/anulando_comprobantes_at/.test(error.message)) return null
+    throw new Error(`candado de anulación: ${error.message}`)
+  }
+  return !!data?.length
+}
+
 export async function anularComprobantesPedido(supabase: any, pedidoId: string, usuarioId: string): Promise<ResultadoAnulacionPedido> {
+  const candado = await tomarCandado(supabase, pedidoId)
+  if (candado === false) {
+    throw new CorteAnulacionPedido(
+      { error: "Ya se están anulando los comprobantes de este pedido (otra pestaña u otra persona). Esperá que termine y volvé a abrir el pedido.", error_code: "ANULACION_EN_CURSO" },
+      409,
+    )
+  }
+  try {
+    return await anularConCandado(supabase, pedidoId, usuarioId)
+  } finally {
+    if (candado) {
+      const { error } = await supabase.from("pedidos").update({ anulando_comprobantes_at: null }).eq("id", pedidoId)
+      if (error) console.error("[anular-comprobantes] no se pudo soltar el candado:", error.message)
+    }
+  }
+}
+
+async function anularConCandado(supabase: any, pedidoId: string, usuarioId: string): Promise<ResultadoAnulacionPedido> {
   const ev = await evaluarAnulacionPedido(supabase, pedidoId)
   if (!ev.puede) throw new CorteAnulacionPedido({ error: ev.motivo, error_code: "PEDIDO_NO_ANULABLE" }, 422)
 
