@@ -329,14 +329,22 @@ const HANDLERS = {
   "viaje.cobro_anular": (u, p) => {
     const v = tripulante(p.viaje_id)
     const pago = S.pagos.find((x) => x.id === p.pago_id)
+    let reabierta = false
     if (pago && pago.estado !== "anulado") {
       if (pago.viaje_id !== v.id) throw new Rechazo("Pago no encontrado en este viaje")
       if (pago.estado !== "pendiente_rendicion") throw new Rechazo(`El cobro ya fue ${pago.estado === "confirmado" ? "rendido y confirmado" : pago.estado} — no se puede eliminar`)
+      // R4 (= app/api/chofer/viaje/[id]/cobro/[pagoId]): parada bloqueada cerrada con este cobro
+      const pa = S.paradas.find((x) => x.viaje_id === v.id && x.cliente_id === p.cliente_id)
+      const antes = pa && parada(pa)
+      const enCurso = ["despachado", "en_curso"].includes(v.estado)
+      const deja = antes && antes.bloquear_entrega && ["entregado", "solo_cobro"].includes(antes.estado) && antes.cobrado - pago.monto + antes.descuentos_cobro + 0.01 < antes.minimo_exigido
+      if (deja && !enCurso) throw new Rechazo("La parada era \"NO ENTREGAR SIN COBRAR\" y se cerró como entregada con este cobro, y el viaje ya terminó: no se puede anular el cobro. Avisá a la oficina.")
+      if (deja) { Object.assign(pa, { estado: "pendiente", bultos_entregados: null, motivo_no_cobro: null, motivo_no_entrega: null, resuelto_at: null }); reabierta = true }
       pago.estado = "anulado"
       for (const i of pago.imputaciones) { const k = S.comprobantes.find((c) => c.id === i.comprobante_id); if (k) { k.saldo_pendiente = r2(k.saldo_pendiente + i.monto_imputado); k.estado_pago = k.saldo_pendiente >= k.total_factura - 0.009 ? "pendiente" : "parcial" } }
       for (const ped of S.pedidos) if (ped.anticipo_pago_id === pago.id) { ped.anticipo_pago_id = null; ped.pago_contado_10 = false }
     }
-    return { success: true, replica: [parcheViaje(v.id), parcheClientes(v.id, [p.cliente_id]), parcheBilletera()] }
+    return { success: true, ...(reabierta ? { parada_reabierta: true, mensaje: "La parada era \"NO ENTREGAR SIN COBRAR\": volvió a pendiente. Cobrá de nuevo o marcá \"no entregado\"." } : {}), replica: [parcheViaje(v.id), parcheClientes(v.id, [p.cliente_id]), parcheBilletera()] }
   },
   "viaje.devolucion": (u, p) => {
     const v = tripulante(p.viaje_id)

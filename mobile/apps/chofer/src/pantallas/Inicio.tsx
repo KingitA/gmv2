@@ -3,7 +3,7 @@ import { useContadoresOutbox, useNoEnviados, useOverlay, useRuntime } from "@gm/
 import { fechaHoraCorta } from "@gm/core/ui"
 import { DS, type ViajeResumen } from "../datasets"
 import { rechazosDe, useDescargaViaje, useMe, useRefrescarAlEntrar, useViaje, useYo } from "../datos/hooks"
-import { AvisosBcra, fechaViaje, formatDateAR, HojaConfirmar, Pantalla, Rechazos, useAvisoEntrante, useEnterCierraTeclado, useToast } from "../ui"
+import { AvisosAnulacion, AvisosBcra, fechaViaje, formatDateAR, HojaConfirmar, Pantalla, Rechazos, useAvisoEntrante, useEnterCierraTeclado, useToast } from "../ui"
 
 // Inicio del chofer (port de app/chofer/page.tsx). Atrás acá MINIMIZA la app (lo
 // resuelve el core): no existe ninguna ruta del ERP a la que se pueda llegar.
@@ -92,6 +92,7 @@ export function Inicio() {
       <Rechazos items={rechazosDe(ops, "")} ayuda="Eso NO quedó registrado en el sistema. Revisalo y, si corresponde, cargalo de nuevo." />
       {/* Veredicto del BCRA de los cheques cobrados (llega después del cobro, también si se cargó sin señal) */}
       <AvisosBcra />
+      <AvisosAnulacion />
       <div className="mx-auto w-full max-w-2xl space-y-6 p-4">
         <section>
           <h2 className="mb-3 text-lg font-bold text-gray-700">Viaje Activo</h2>

@@ -3,8 +3,8 @@ import type { ItemOutbox } from "../src/db/idb"
 import { TEXTO_ENTREGA_BLOQUEADA } from "@gm/cobro"
 import { estadoCuentaVacio, resumenCuenta, type DatosCuenta } from "../../../apps/chofer/src/datos/cuenta-cobro"
 import { primerExceso, textoTope, topeDevolucion } from "../../../apps/chofer/src/datos/devolucion-tope"
-import { transferenciasDelViaje, viajeVisible } from "../../../apps/chofer/src/datos/overlay"
-import { formatResta, nombreGasto } from "../../../apps/chofer/src/ui"
+import { cierreAConservar, transferenciasDelViaje, viajeVisible } from "../../../apps/chofer/src/datos/overlay"
+import { avisosParadaReabierta, formatResta, nombreGasto } from "../../../apps/chofer/src/ui"
 import type { ComprobanteCobro, OpCobrar, ParadaHoja, ViajeDetalle } from "../../../apps/chofer/src/datasets"
 
 // App Chofer — pendientes de la prueba integral de salida (26/10/2026, docs/PENDIENTES-APPS-SALIDA.md):
@@ -182,5 +182,45 @@ describe("C6 · transferencias aparte (#35)", () => {
     expect(transferenciasDelViaje(v).map((t) => [t.monto, t.estado])).toEqual([[5000, "a_confirmar"], [7000, "confirmada"], [3000, "sin_enviar"]])
     // Sin señal, la transferencia no suma a la plata en mano
     expect(v.dinero!.efectivo_en_mano).toBe(0)
+  })
+})
+
+describe("C7 · anular el cobro de una parada bloqueada la reabre (R4)", () => {
+  const pagoSrv = (id: string, monto: number) => ({ id, monto, estado: "pendiente_rendicion", fecha: "", cargado_por: "", metodos: [{ tipo: "efectivo", monto, detalle: "" }], imputaciones: [], a_cuenta: 0, contado_10: false, ajuste: 0 })
+  const cerrada = (extra: Partial<ParadaHoja> = {}) => parada({ estado: "entregado", cobrado: 100000, cobro_cumplido: true, entrega_bloqueada: false, pagos: [pagoSrv("pg1", 100000)], ...extra })
+  const anular = (pago_id = "pg1") => op("viaje.cobro_anular", { viaje_id: V, pago_id, cliente_id: "c1" })
+
+  it("sin señal: la parada entregada vuelve a pendiente y queda bloqueada otra vez", () => {
+    const v = viajeVisible(viaje(cerrada()), [anular()])
+    expect(v.paradas[0]).toMatchObject({ estado: "pendiente", cobrado: 0, entrega_bloqueada: true, cobro_cumplido: false, reabiertaPorAnulacion: true })
+  })
+  it("si queda otro cobro que cubre lo exigido, no se toca", () => {
+    const v = viajeVisible(viaje(cerrada({ cobrado: 200000, pagos: [pagoSrv("pg1", 100000), pagoSrv("pg2", 100000)] })), [anular()])
+    expect(v.paradas[0]).toMatchObject({ estado: "entregado", entrega_bloqueada: false })
+  })
+  it("sin bloqueo, anular no reabre (regla del 29/09)", () => {
+    const v = viajeVisible(viaje(cerrada({ bloquear_entrega: false })), [anular()])
+    expect(v.paradas[0]!.estado).toBe("entregado")
+  })
+  it("un resultado de parada posterior a la anulación manda", () => {
+    const v = viajeVisible(viaje(cerrada()), [anular(), op("viaje.parada", { viaje_id: V, parada_id: "p1", cliente_id: "c1", estado: "no_entregado", motivo_no_entrega: "No pagó", motivo_no_cobro: "No pagó" })])
+    expect(v.paradas[0]!.estado).toBe("no_entregado")
+  })
+  it("viaje terminado: el equipo no la reabre (el servidor frena con 422)", () => {
+    const d = viaje(cerrada())
+    d.viaje.estado = "en_rendicion"
+    expect(viajeVisible(d, [anular()]).paradas[0]!.estado).toBe("entregado")
+  })
+  it("cobro local descartado en una bloqueada: el cierre NO se conserva", () => {
+    const c = op("viaje.cobrar", cobro(100000))
+    const v = viajeVisible(viaje(parada()), [c])
+    expect(v.paradas[0]!.estado).toBe("entregado")
+    expect(cierreAConservar(v, "c1", v.paradas[0]!.pagos[0]!.id)).toBeNull()
+  })
+  it("el aviso del servidor (parada_reabierta + mensaje) se muestra hasta marcarlo visto", () => {
+    const it1 = { ...anular(), estado: "enviado" as const, resultado: { parada_reabierta: true, mensaje: "volvió a pendiente" } }
+    const it2 = { ...anular(), estado: "enviado" as const, resultado: {} }
+    expect(avisosParadaReabierta([it1, it2], []).map((a) => a.mensaje)).toEqual(["volvió a pendiente"])
+    expect(avisosParadaReabierta([it1], [it1.key])).toEqual([])
   })
 })

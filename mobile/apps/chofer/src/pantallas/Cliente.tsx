@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from "react"
+import { efectoAnulacionEnParada } from "@gm/cobro"
 import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOnline, useRuntime } from "@gm/core"
 import { DS, esEnCurso, ESTADOS_COBRABLES, idClienteViaje, type DetallePedido, type OpCobroAnular, type OpParada } from "../datasets"
@@ -6,7 +7,7 @@ import { agregarAlBorrador } from "../datos/borrador-devolucion"
 import { valorDeDevolucion } from "../datos/cuenta-cobro"
 import { cierreAConservar, esIdLocal, keyDeIdLocal } from "../datos/overlay"
 import { rechazosDe, useClienteViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
-import { AvisosBcra, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, RenglonesDevolucion, SinEnviar, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
+import { AvisosAnulacion, AvisosBcra, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, RenglonesDevolucion, SinEnviar, TEXTO_PARADA_REABIERTA, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
 
 // Ficha del cliente en el viaje (= app/chofer/[viajeId]/cliente/[clienteId]/page.tsx):
 // pedido con sus renglones (deslizar para devolver), saldo y devoluciones, cobros
@@ -72,6 +73,9 @@ export function Cliente() {
   const confirmarAnulacion = async () => {
     if (!pagoAnular) return
     setOcupado(true)
+    // R4/C7: ¿la parada bloqueada que cerró este cobro vuelve a pendiente? (= servidor)
+    const par = viaje?.paradas.find((p) => p.cliente_id === clienteId)
+    const reabre = !!par && efectoAnulacionEnParada({ estado: par.estado, bloqueada: !!par.bloquear_entrega, minimoExigido: par.minimo_exigido, cobradoSin: par.cobrado - pagoAnular.monto, descuentos: par.descuentos_cobro ?? 0, viajeEnCurso: ["despachado", "en_curso"].includes(viaje!.viaje.estado) }) === "reabrir"
     try {
       if (esIdLocal(pagoAnular.id)) {
         // Nunca salió del equipo: se resuelve acá, sin viajar al servidor
@@ -81,11 +85,11 @@ export function Cliente() {
         const retirado = await rt.outbox.retirar(keyDeIdLocal(pagoAnular.id))
         if (!retirado) return mostrar("Ese cobro se está enviando ahora: esperá unos segundos y volvé a intentar.", "err")
         if (conservar) await encolar("viaje.parada", conservar, `Parada ${clienteNombre}: ${conservar.estado === "solo_cobro" ? "cerrada" : "entregada"}`)
-        mostrar("Cobro descartado: nunca llegó al sistema.")
+        mostrar(reabre ? `Cobro descartado. ${TEXTO_PARADA_REABIERTA}` : "Cobro descartado: nunca llegó al sistema.", reabre ? "err" : "ok")
       } else {
         const payload: OpCobroAnular = { viaje_id: viajeId, pago_id: pagoAnular.id, cliente_id: clienteId }
         await encolar("viaje.cobro_anular", payload, `Anular cobro ${clienteNombre} ${formatCurrency(pagoAnular.monto)}`)
-        mostrar(online ? "Cobro anulado." : "Anulación guardada en el equipo: se envía al volver la señal.")
+        mostrar(reabre ? `${online ? "Cobro anulado." : "Anulación guardada en el equipo."} ${TEXTO_PARADA_REABIERTA}` : online ? "Cobro anulado." : "Anulación guardada en el equipo: se envía al volver la señal.", reabre ? "err" : "ok")
       }
       anular.cerrar()
     } finally {
@@ -119,6 +123,7 @@ export function Cliente() {
       )}
       <Rechazos items={rechazos} ayuda="Eso NO quedó registrado en el sistema. Revisalo y, si corresponde, cargalo de nuevo." />
       <AvisosBcra />
+      <AvisosAnulacion />
 
       <div className="mx-4 mt-4 rounded-2xl bg-blue-700 p-4 text-white">
         <div className="grid grid-cols-3 gap-3 text-center text-sm">

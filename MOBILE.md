@@ -2187,6 +2187,19 @@ Detalle y casos en `docs/PENDIENTES-APPS-SALIDA.md` §3. Tests: `packages/core/t
   Verificado en el navegador: bloqueo, tope ("podés devolver hasta 2" → "ya se devolvieron 2 de 2"),
   renglones en la ficha, "Gastos $0,00".
 
+### v0.3.5 (27/10/2026): C7 — anular el cobro de una parada bloqueada (R4 del servidor, 2e441b3)
+
+- El handler `viaje.cobro_anular` (`lib/mobile/outbox/chofer.ts`) devuelve `parada_reabierta` + `mensaje`
+  del DELETE; la app los muestra con `AvisosAnulacion` (`ui.tsx`; inicio, viaje y ficha) hasta "Entendido".
+- Sin señal, el overlay aplica la misma regla (`efectoAnulacionEnParada` de `@gm/cobro`): con el viaje en
+  curso, la parada bloqueada que sin ese cobro no cubre lo exigido vuelve a **pendiente** y queda
+  bloqueada otra vez. Un cobro local descartado en esa parada ya no conserva el cierre (`cierreAConservar`).
+  La ficha avisa en el momento.
+- 422 `PARADA_BLOQUEADA_ENTREGADA` (viaje terminado) = rechazo definitivo de la cola (`Rechazos`), sin reintento.
+- Tests en `chofer-salida.test.ts` (C7). Mock: `viaje.cobro_anular` reabre / rechaza igual que el servidor.
+  Verificado en el navegador: cobro que cumple → entregada → anular sin señal → pendiente y bloqueada →
+  vuelve la señal → aviso del servidor.
+
 ### Probar sin backend
 `cd mobile && node scripts/mock-chofer.mjs` (3997) → `apps/chofer/.env.development.local` con
 `VITE_API_BASE=http://localhost:3997` → `npm run dev:chofer` → http://localhost:5173 (cualquier

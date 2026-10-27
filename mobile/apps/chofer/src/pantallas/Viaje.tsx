@@ -7,7 +7,7 @@ import { paradasSinResolver, type ParadaVista } from "../datos/overlay"
 import { rechazosDe, useDescargaViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
 import { parseMonto } from "@gm/formato"
 import { TEXTO_ENTREGA_BLOQUEADA } from "@gm/cobro"
-import { AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, HojaConfirmar, Linea, MontoInput, Pantalla, Rechazos, SinDescargar, SinEnviar, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
+import { AvisosAnulacion, AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, HojaConfirmar, Linea, MontoInput, Pantalla, Rechazos, SinDescargar, SinEnviar, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
 import { GastoHoja } from "./GastoHoja"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
 
@@ -345,6 +345,7 @@ export function Viaje() {
       )}
       <Rechazos items={rechazos} ayuda="Eso NO quedó registrado en el sistema. Revisalo y, si corresponde, cargalo de nuevo." />
       <AvisosBcra />
+      <AvisosAnulacion />
 
       {/* Resumen */}
       <div className="grid grid-cols-3 gap-3 p-4">

@@ -298,6 +298,43 @@ export function useToast() {
 
 /** Aviso que sobrevive a un cambio de pantalla ("Cobro registrado" → se ve en la ficha). */
 const CLAVE_AVISO = "gm.chofer.aviso"
+// ─── R4/C7: anular el cobro de una parada "NO ENTREGAR SIN COBRAR" la reabrió ──
+// El servidor contesta `parada_reabierta: true` + `mensaje` (lib/mobile/outbox/chofer.ts): se
+// muestra hasta que el chofer lo marca como visto. El rechazo 422 PARADA_BLOQUEADA_ENTREGADA
+// (viaje terminado) llega como cualquier rechazo (`Rechazos`), sin reintento.
+const CLAVE_REABIERTAS_VISTAS = "gm.chofer.reabiertas.vistas"
+export const TEXTO_PARADA_REABIERTA = "La parada era \"NO ENTREGAR SIN COBRAR\": volvió a pendiente. Cobrá de nuevo o marcá \"no entregado\"."
+export function avisosParadaReabierta(items: Array<Pick<ItemOutbox, "key" | "tipo" | "estado" | "resultado" | "etiqueta">>, vistos: Iterable<string>) {
+  const v = new Set(vistos)
+  return items
+    .filter((it) => it.tipo === "viaje.cobro_anular" && it.estado === "enviado" && !v.has(it.key) && !!(it.resultado as { parada_reabierta?: boolean } | null)?.parada_reabierta)
+    .map((it) => ({ key: it.key, etiqueta: it.etiqueta, mensaje: String((it.resultado as { mensaje?: string }).mensaje || TEXTO_PARADA_REABIERTA) }))
+}
+export function AvisosAnulacion() {
+  const items = useItemsOutbox()
+  const [vistos, setVistos] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(CLAVE_REABIERTAS_VISTAS) || "[]") } catch { return [] }
+  })
+  const avisos = useMemo(() => avisosParadaReabierta(items, vistos), [items, vistos])
+  if (!avisos.length) return null
+  const visto = (key: string) => {
+    const v = [...vistos, key].slice(-100)
+    try { localStorage.setItem(CLAVE_REABIERTAS_VISTAS, JSON.stringify(v)) } catch { /* noop */ }
+    setVistos(v)
+  }
+  return (
+    <div className="space-y-2 px-4 pt-3">
+      {avisos.map((a) => (
+        <div key={a.key} className="rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {a.etiqueta ? <p className="text-xs opacity-70">{a.etiqueta}</p> : null}
+          <p className="font-bold">🔒 {a.mensaje}</p>
+          <button onClick={() => visto(a.key)} className="mt-2 min-h-11 rounded-lg border border-current px-4 text-sm font-bold">Entendido</button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function dejarAviso(msg: string) {
   try { sessionStorage.setItem(CLAVE_AVISO, msg) } catch { /* noop */ }
 }

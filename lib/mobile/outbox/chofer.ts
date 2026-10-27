@@ -144,10 +144,13 @@ const viajeCobroAnular: HandlerDef<{ viaje_id: string; pago_id: string; cliente_
     const { viaje_id, pago_id, cliente_id } = m.payload
     const { data: pago } = await ctx.supabase.from("pagos_clientes").select("id, estado").eq("id", pago_id).maybeSingle()
     // Ya anulado (reintento tras un corte): éxito, no un rechazo
+    // R4: la respuesta trae parada_reabierta + mensaje si la parada bloqueada volvió a pendiente;
+    // 422 PARADA_BLOQUEADA_ENTREGADA (viaje terminado) llega como rechazo, sin reintento.
+    let r: any = null
     if (pago && pago.estado !== "anulado") {
-      await llamarRuta(cobroDELETE, ctx, { ruta: `/api/chofer/viaje/${viaje_id}/cobro/${pago_id}`, method: "DELETE", params: { id: viaje_id, pagoId: pago_id } })
+      r = await llamarRuta(cobroDELETE, ctx, { ruta: `/api/chofer/viaje/${viaje_id}/cobro/${pago_id}`, method: "DELETE", params: { id: viaje_id, pagoId: pago_id } })
     }
-    return { replica: await parches(() => parcheViaje(ctx, viaje_id), () => parcheClientes(ctx, viaje_id, [cliente_id]), () => parcheClientesCatalogo(ctx, [cliente_id]), () => parcheBilletera(ctx)) }
+    return { ...(r?.parada_reabierta ? { parada_reabierta: true, mensaje: r.mensaje } : {}), replica: await parches(() => parcheViaje(ctx, viaje_id), () => parcheClientes(ctx, viaje_id, [cliente_id]), () => parcheClientesCatalogo(ctx, [cliente_id]), () => parcheBilletera(ctx)) }
   },
 }
 
