@@ -461,7 +461,21 @@ Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 
 **Regla de Juan (27/10):** eliminar tiene que **eliminar** el cliente, no sacarlo de la vista. Si tiene deuda, tiene que aparecer el cartel **"¿Asumir deuda y eliminarlo de todas formas?"**.
 
-**A resolver con Juan antes de programar** (no está decidido):
-- un cliente con **comprobantes con CAE** no se puede borrar de la base sin perder los registros fiscales: ¿qué se hace en ese caso?
-- "asumir deuda": ¿con qué movimiento queda registrada la pérdida (ajuste en su cuenta, cuenta de incobrables)?
-- con pedidos o comprobantes sin CAE pero sin deuda: ¿se borra todo lo suyo o se frena?
+**Decisiones de Juan (27/10, por el chat):**
+1. **Cliente con comprobantes con CAE:** se borra todo lo demás, pero el cliente queda **escondido** solo para que esas facturas/notas tengan dueño: no aparece en ninguna lista (ni en "Inactivos") ni en búsquedas, y **su código queda libre**.
+2. **"Asumir deuda":** la deuda que se asume va a la **caja de ajustes** (P2-03). Hasta que exista, no programar el cartel con un movimiento provisorio: coordinar con P2-03.
+3. **Cliente sin deuda pero con pedidos, comprobantes o cobros:** se **conservan** sus pedidos y comprobantes (historial de ventas y comisiones); el cliente desaparece de las listas y de las búsquedas.
+
+### P2-03 — Caja de ajustes · Dueño: Cambios general · PROPUESTA, espera el OK de Juan
+
+**Idea de Juan (27/10):** un solo lugar donde caen **todos** los ajustes de plata, para ver cada tanto cuánto se ajustó y tomar decisiones.
+
+**Hoy los ajustes están desparramados:** movimientos "ajuste" en la cuenta corriente (Ajustar saldo, texto libre de la apertura), la marca `[AJUSTE:x]` en las observaciones del cobro (redondeo de menos del 1 % desde la app), `AJUSTE_CAJA` en `kardex_contable` (ajuste manual de saldo de cajas y bancos), `cierres_caja.ajuste_kardex_id`, y la tabla `cuenta_corriente_ajustes` (vacía).
+
+**Propuesta (pendiente del OK de Juan — no programar hasta que esté tildado acá):**
+- No es una caja con plata: ahí no entra ni sale efectivo, así que **no se mezcla con el arqueo** de cajas y bancos. Es un **registro único**: cada ajuste deja un renglón con fecha, de dónde viene, cliente o cuenta, monto (a favor o en contra de la empresa), motivo, quién lo hizo y a qué cobro/comprobante pertenece. El "saldo" de la caja es la suma.
+- **Entran:** redondeos de cobros (app chofer, app vendedor, /caja), "Ajustar saldo" en la ficha, texto libre de la apertura, deuda asumida al eliminar un cliente (P2-02), sobrantes que la oficina decide no dejarle a favor al cliente, y —en un grupo aparte— los ajustes manuales de saldo de cajas y bancos.
+- **No entran:** diferencias de rendición (van a la cuenta personal del chofer/vendedor: no es plata perdida) ni el saldo a favor de los clientes (es plata del cliente).
+- **Pantalla:** totales por mes, por tipo de ajuste y por usuario, con el detalle de cada renglón.
+- **Cuándo:** después de la prueba y antes del pase. Durante la prueba, la sesión de la prueba lista los ajustes a mano desde la base.
+- [ ] OK de Juan
