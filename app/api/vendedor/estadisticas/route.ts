@@ -5,6 +5,8 @@ import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { fechaISO, hoyISO, sumarDiasISO } from "@/lib/formato"
 import { idsClientesEmpleados } from "@/lib/personal/empleados"
+import { cuentaPersonalDe, resumenCuentaPersonal } from "@/lib/cuenta-corriente/cuenta-personal"
+import { startOfDayArgentina } from "@/lib/utils"
 
 // GET /api/vendedor/estadisticas
 // KPIs del vendedor autenticado: ventas por mes (últimos 6), top clientes
@@ -68,21 +70,43 @@ export async function GET() {
       .sort((a, b) => b.total - a.total)
       .slice(0, 5)
 
-    // Comisiones
-    const comisiones = await fetchAllRows(() =>
-      supabase
-        .from("comisiones")
-        .select("monto, pagado, tipo, created_at")
-        .in("viajante_id", session.vendedorIds)
-        .eq("tipo", "cobrada")
-    )
-    const comisionesPendientes = (comisiones || [])
-      .filter((c) => !c.pagado)
-      .reduce((s, c) => s + Number(c.monto), 0)
+    let comisionesPendientes = 0
+    let comisionesMes = 0
+    // Comisiones — R10 (27/10): desde la etapa 3 lo GANADO está en la cuenta
+    // personal del vendedor (renglones 'comision', lib/comisiones/liquidar.ts);
+    // la tabla vieja `comisiones` ya no se escribe y daba $0. "Pend. retiro" =
+    // lo que tiene a favor en su cuenta (= "Para retirar" de la billetera).
     const inicioMes = hoy.slice(0, 7)
-    const comisionesMes = (comisiones || [])
-      .filter((c) => fechaISO(c.created_at).slice(0, 7) === inicioMes)
-      .reduce((s, c) => s + Number(c.monto), 0)
+    const cuentaId = await cuentaPersonalDe(supabase, { usuarioId: session.user.id, vendedorIds: session.vendedorIds })
+    if (cuentaId) {
+      const [resumen, movsMes] = await Promise.all([
+        resumenCuentaPersonal(supabase, cuentaId),
+        fetchAllRows<{ debe: number; haber: number }>(() =>
+          supabase
+            .from("cuenta_corriente_clientes")
+            .select("debe, haber")
+            .eq("cliente_id", cuentaId)
+            .eq("tipo_movimiento", "comision")
+            .gte("fecha", startOfDayArgentina(`${inicioMes}-01`)),
+        ),
+      ])
+      comisionesPendientes = resumen.a_favor
+      comisionesMes = Math.round(movsMes.reduce((s, m) => s + Number(m.haber || 0) - Number(m.debe || 0), 0) * 100) / 100
+    } else {
+      const comisiones = await fetchAllRows(() =>
+        supabase
+          .from("comisiones")
+          .select("monto, pagado, tipo, created_at")
+          .in("viajante_id", session.vendedorIds)
+          .eq("tipo", "cobrada")
+      )
+      comisionesPendientes = (comisiones || [])
+        .filter((c) => !c.pagado)
+        .reduce((s, c) => s + Number(c.monto), 0)
+      comisionesMes = (comisiones || [])
+        .filter((c) => fechaISO(c.created_at).slice(0, 7) === inicioMes)
+        .reduce((s, c) => s + Number(c.monto), 0)
+    }
 
     // Deuda de cartera: saldo PROYECTADO desde la fuente única (lo que ve el
     // vendedor en cada cliente), solo los que deben. Sin las cuentas de

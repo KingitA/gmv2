@@ -78,6 +78,18 @@ export function tipoDeDescripcion(desc: string): TipoApertura | null {
   return null
 }
 
+/**
+ * R12 (#6, 27/10): ¿el texto es un COMPROBANTE del sistema viejo de un tipo que
+ * gmv2 no reconoce, con el formato abreviado del sistema ("Fact.E", "N.Cr.X",
+ * "N.Db.E")? Esos no son texto libre ("FACTURA LOREAL" sí lo es): si
+ * entraran como AJUSTE se perdería que es un comprobante. La apertura los frena.
+ */
+export function pareceComprobanteNoReconocido(desc: string): boolean {
+  const d = String(desc || "").toUpperCase().replace(/\s+/g, " ").trim()
+  if (tipoDeDescripcion(d)) return false
+  return /^(FACT\.\s*[A-Z]|N\.?\s*CR\.\s*[A-Z]|N\.?\s*D[EÉ]?B\.\s*[A-Z])\b/.test(d)
+}
+
 /** Separa un renglón CSV con comillas dobles (sin comillas escapadas en el reporte) */
 export function separarCsv(linea: string): string[] {
   const out: string[] = []

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { NUMERO_RESPALDO_DEVOLUCION } from "../cobranzas/respaldo-devolucion"
-import { agruparPorCliente, ES_DEBITO, PREFIJO_AJUSTE_APERTURA, type ClienteApertura, type RenglonApertura, type TipoApertura } from "./parsear-chr"
+import { agruparPorCliente, ES_DEBITO, pareceComprobanteNoReconocido, PREFIJO_AJUSTE_APERTURA, type ClienteApertura, type RenglonApertura, type TipoApertura } from "./parsear-chr"
 
 /**
  * APERTURA de cuentas corrientes desde el sistema viejo (regla del dueño
@@ -149,6 +149,9 @@ export async function previsualizarApertura(supabase: SupabaseClient, renglones:
     if (!cl) errores.push(`El cliente ${g.codigo_cliente} (${g.nombre}) no existe en gmv2: hay que darlo de alta`)
     for (const r of g.renglones) {
       if (!r.tipo) errores.push(`${r.numero}: tipo desconocido "${r.descripcion}"`)
+      // R12 (#6): un comprobante de un tipo que gmv2 no tiene NO entra callado como ajuste
+      if (r.tipo === "AJUSTE" && pareceComprobanteNoReconocido(r.descripcion))
+        errores.push(`${r.numero_original}: "${r.descripcion}" es un comprobante del sistema viejo de un tipo que gmv2 no reconoce. No se carga como ajuste: avisá qué es antes de cargar este cliente.`)
       if (!r.fecha) errores.push(`${r.numero}: fecha inválida`)
       if (!Number.isFinite(r.pendiente) || !Number.isFinite(r.importe)) errores.push(`${r.numero}: importe inválido`)
       if (r.tipo && r.tipo !== "AJUSTE" && ES_DEBITO.has(r.tipo) && r.pendiente < 0) errores.push(`${r.numero}: ${r.descripcion} con pendiente negativo`)
