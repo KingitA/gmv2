@@ -300,3 +300,18 @@ Con el teclado abierto, Buscar esconde el pie y los contadores (más resultados 
 2. Si cambió algo que el roadmap tiene como problema, agregá en [`docs/PRUEBA-INTEGRAL-SALIDA.md`](PRUEBA-INTEGRAL-SALIDA.md), columna "Estado" de ese #, "Hecho dd/mm (commit)".
 3. CHANGELOG de la app y `MOBILE.md` si cambió una regla.
 4. APK nueva: avisale a Juan para instalarla en el NuStar. Las pruebas de campo las hace él.
+
+---
+
+## Revisión del 27/10 (sesión de la prueba integral)
+
+Revisado en el código: C1 a C6, V1 a V5, T1 y D3 están **bien hechos**. Pendientes:
+
+- [ ] **App Chofer: recompilar como v0.3.4.** La v0.3.3 se compiló 20 segundos antes de que entrara T1 (login con usuario) y no lo trae.
+- [ ] **App Depósito: recompilar como v0.3.2 (D1).** La v0.3.1 es anterior a T1.
+- [ ] Las 3 APK nuevas (vendedor v0.4.5, chofer v0.3.4 y depósito v0.3.2): Juan las instala en el NuStar antes de la segunda prueba.
+- [ ] Menor (casilla 0.6 del roadmap): mostrar el estado "sistema_viejo" con nombre ("Sistema viejo") donde aparezca un pedido viejo.
+- Riesgos menores que vio la revisión (no frenan la prueba):
+  - C3: en un cobro parcial de un comprobante se descuenta igual el 10 % completo de lo devuelto;
+  - C3: en una devolución local que mezcla renglones con y sin contado, `aplica_10` usa `some()` y toda la devolución queda como neta;
+  - V4: si la billetera nunca se descargó, el inicio usa `me.billetera.balance` sin descontar los retiros que no salieron (`Inicio.tsx:32`).
