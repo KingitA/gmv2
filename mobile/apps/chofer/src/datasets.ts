@@ -262,7 +262,7 @@ export interface ClienteViajeRow {
   /** Para valuar devoluciones igual que el servidor (IIBB vigente, comprobante más reciente). Ausente = réplica vieja */
   contexto_devolucion?: ContextoDevolucion | null
   /** #25: por (comprobante de origen, artículo) lo vendido y lo ya devuelto (= tope del servidor). Ausente = réplica vieja */
-  devolvible?: Array<{ comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number }> | null
+  devolvible?: Array<{ comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number; presupuesto?: boolean }> | null
 }
 
 // ─── Billetera (= GET /api/chofer/billetera) ─────────────────────────────────

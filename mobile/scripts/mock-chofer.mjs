@@ -75,7 +75,7 @@ function reset() {
     S.pedidos.push({ id: pedidoId, numero_pedido: String(1700 + i).padStart(6, "0"), fecha: hoy(), estado: "en_viaje", total, bultos: 3 + i, cliente_id: c.id, viaje_id: viajeId, observaciones: null, detalle, pago_contado_10: false, anticipo_pago_id: null })
     if (i === 2) S.pedidos.push({ id: uid(3050), numero_pedido: "001750", fecha: hoy(), estado: "impreso", total: 352718.8, bultos: 4, cliente_id: c.id, viaje_id: null, observaciones: null, detalle: [], pago_contado_10: false, anticipo_pago_id: null })
     if (i !== 2) {
-      S.comprobantes.push({ id: uid(4000 + i), cliente_id: c.id, pedido_id: pedidoId, tipo_comprobante: "FA", numero_comprobante: `0003-${String(5000 + i).padStart(8, "0")}`, fecha: hoy(), total_neto: r2(total / 1.21), total_factura: total, saldo_pendiente: total, estado_pago: "pendiente", anulado_en: null })
+      S.comprobantes.push({ id: uid(4000 + i), cliente_id: c.id, pedido_id: pedidoId, tipo_comprobante: i === 5 ? "PRES" : "FA", numero_comprobante: i === 5 ? "0001-00000022" : `0003-${String(5000 + i).padStart(8, "0")}`, fecha: hoy(), total_neto: i === 5 ? total : r2(total / 1.21), total_factura: total, saldo_pendiente: total, estado_pago: "pendiente", anulado_en: null })
       S.remitos.push({ id: uid(4500 + i), pedido_id: pedidoId, tipo_remito: "REM", numero_remito: `0001-${String(800 + i).padStart(8, "0")}`, estado_pdf: "generado" })
     }
     if (i === 1 || i === 3) {
@@ -165,7 +165,7 @@ function filaCliente(viajeId, clienteId) {
     if (!comp) continue
     for (const dd of p.detalle) {
       const devuelto = S.devoluciones.filter((d) => d.cliente_id === clienteId).flatMap((d) => d.items).filter((i) => i.articulo_id === dd.articulo_id && i.origen_comp?.comprobante_venta_id === comp.id).reduce((s, i) => s + Number(i.cantidad), 0)
-      devolvible.push({ comprobante_venta_id: comp.id, articulo_id: dd.articulo_id, vendido: dd.cantidad, devuelto })
+      devolvible.push({ comprobante_venta_id: comp.id, articulo_id: dd.articulo_id, vendido: dd.cantidad, devuelto, presupuesto: comp.tipo_comprobante === "PRES" })
     }
   }
   const pedidosCli = S.pedidos.filter((p) => p.cliente_id === clienteId && p.estado !== "eliminado")
@@ -353,6 +353,7 @@ const HANDLERS = {
       if (!["despachado", "en_curso"].includes(v.estado)) throw new Rechazo("El viaje no está activo")
       for (const it of p.items) {
         const comp = it.origen_comp?.comprobante_venta_id
+        if (S.comprobantes.find((k) => k.id === comp)?.tipo_comprobante === "PRES") continue // C8: va al respaldo
         const ped = comp && S.pedidos.find((x) => x.id === S.comprobantes.find((k) => k.id === comp)?.pedido_id)
         const vendido = ped?.detalle.filter((x) => x.articulo_id === it.articulo_id).reduce((s, x) => s + x.cantidad, 0)
         if (!vendido) continue

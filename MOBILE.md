@@ -2200,6 +2200,17 @@ Detalle y casos en `docs/PENDIENTES-APPS-SALIDA.md` §3. Tests: `packages/core/t
   Verificado en el navegador: cobro que cumple → entregada → anular sin señal → pendiente y bloqueada →
   vuelve la señal → aviso del servidor.
 
+### v0.3.6 (27/10/2026): C8 — presupuesto: lo devuelto de más va como "sistema viejo"
+
+- `devolvible` trae `presupuesto` (PRES que no es el respaldo 0002-00000001; `devolvibleDe`). Réplica vieja:
+  decide el origen del renglón (`fiscal: false` y no el respaldo).
+- `datos/devolucion-tope.ts`: `frena(t)` (factura sí, presupuesto no), `excedenteSistemaViejo`, `textoExcedente`.
+  En presupuesto la pantalla no recorta ni bloquea: muestra "Presupuesto: se vendieron N" y "🕰 Lo que pasa de
+  lo comprado (N) va como sistema viejo: lo revisa la oficina". El servidor manda ese excedente al respaldo
+  (`repartirExcedenteAlRespaldo`). En FACTURA el tope de C2 sigue igual.
+- Tests C8 en `chofer-salida.test.ts`. Mock: la parada 6 va con PRES 0001-00000022 y el tope del mock no
+  frena presupuestos. Verificado en el navegador: 5 devueltas de 2 vendidas → aviso (3) → registrada sin rechazo.
+
 ### Probar sin backend
 `cd mobile && node scripts/mock-chofer.mjs` (3997) → `apps/chofer/.env.development.local` con
 `VITE_API_BASE=http://localhost:3997` → `npm run dev:chofer` → http://localhost:5173 (cualquier

@@ -16,6 +16,7 @@
 // lib/viajes/* (la misma que llama la route), para no re-autenticar N veces.
 
 import { GET as meGET } from "@/app/api/chofer/me/route"
+import { NUMERO_RESPALDO_DEVOLUCION } from "@/lib/cobranzas/respaldo-devolucion"
 import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 import { GET as viajeGET } from "@/app/api/chofer/viaje/[id]/route"
 import { GET as billeteraGET } from "@/app/api/chofer/billetera/route"
@@ -135,26 +136,29 @@ export async function devolvibleDe(
   clienteId: string,
   ficha: { pedido?: { id: string; detalle?: Array<{ pedido_id?: string | null }> } | null },
   comprados: Array<{ comprobante_venta_id?: string | null }>,
-): Promise<Array<{ comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number }>> {
+): Promise<Array<{ comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number; presupuesto: boolean }>> {
   const pedidoIds = [...new Set([ficha.pedido?.id, ...(ficha.pedido?.detalle ?? []).map((d) => d.pedido_id)].filter((x): x is string => !!x))]
   const { data: delViaje } = pedidoIds.length
     ? await supabase.from("comprobantes_venta").select("id").eq("cliente_id", clienteId).in("pedido_id", pedidoIds).is("anulado_en", null)
     : { data: [] as any[] }
   const compIds = [...new Set([...(delViaje || []).map((c: any) => c.id as string), ...comprados.map((c) => c.comprobante_venta_id).filter((x): x is string => !!x)])]
   if (!compIds.length) return []
-  const [{ data: vendidos }, { data: devueltos }] = await Promise.all([
+  const [{ data: vendidos }, { data: devueltos }, { data: tipos }] = await Promise.all([
     supabase.from("comprobantes_venta_detalle").select("comprobante_id, articulo_id, cantidad").in("comprobante_id", compIds),
     supabase
       .from("devoluciones_detalle")
       .select("comprobante_venta_id, articulo_id, cantidad, estado_renglon, devolucion:devoluciones!inner(estado)")
       .in("comprobante_venta_id", compIds)
       .in("devolucion.estado", ["pendiente", "confirmado", "facturado"]),
+    supabase.from("comprobantes_venta").select("id, tipo_comprobante, numero_comprobante").in("id", compIds),
   ])
-  const filas = new Map<string, { comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number }>()
+  // C8: en un PRESUPUESTO (que no sea el respaldo) lo devuelto de más no se frena en la app
+  const presupuestos = new Set(((tipos || []) as any[]).filter((c) => c.tipo_comprobante === "PRES" && c.numero_comprobante !== NUMERO_RESPALDO_DEVOLUCION).map((c) => c.id as string))
+  const filas = new Map<string, { comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number; presupuesto: boolean }>()
   for (const v of vendidos || []) {
     if (!v.articulo_id) continue
     const k = `${v.comprobante_id}|${v.articulo_id}`
-    const f = filas.get(k) ?? { comprobante_venta_id: v.comprobante_id, articulo_id: v.articulo_id, vendido: 0, devuelto: 0 }
+    const f = filas.get(k) ?? { comprobante_venta_id: v.comprobante_id, articulo_id: v.articulo_id, vendido: 0, devuelto: 0, presupuesto: presupuestos.has(v.comprobante_id) }
     f.vendido += Number(v.cantidad) || 0
     filas.set(k, f)
   }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { ItemOutbox } from "../src/db/idb"
 import { TEXTO_ENTREGA_BLOQUEADA } from "@gm/cobro"
 import { estadoCuentaVacio, resumenCuenta, type DatosCuenta } from "../../../apps/chofer/src/datos/cuenta-cobro"
-import { primerExceso, textoTope, topeDevolucion } from "../../../apps/chofer/src/datos/devolucion-tope"
+import { excedenteSistemaViejo, frena, primerExceso, textoExcedente, textoTope, topeDevolucion } from "../../../apps/chofer/src/datos/devolucion-tope"
 import { cierreAConservar, transferenciasDelViaje, viajeVisible } from "../../../apps/chofer/src/datos/overlay"
 import { avisosParadaReabierta, formatResta, nombreGasto } from "../../../apps/chofer/src/ui"
 import type { ComprobanteCobro, OpCobrar, ParadaHoja, ViajeDetalle } from "../../../apps/chofer/src/datasets"
@@ -85,10 +85,10 @@ describe("C1 · bloqueo de entrega (#23)", () => {
 describe("C2 · no devolver más de lo vendido (#25)", () => {
   const devolvible = [{ comprobante_venta_id: "pres22", articulo_id: "naft", vendido: 6, devuelto: 0 }]
   it("máximo = vendido − devuelto (servidor) − lo cargado en el equipo sin enviar", () => {
-    expect(topeDevolucion(devolvible, { articulo_id: "naft", cantidad: 6, comprobante_venta_id: "pres22" })).toEqual({ vendido: 6, devuelto: 0, maximo: 6 })
+    expect(topeDevolucion(devolvible, { articulo_id: "naft", cantidad: 6, comprobante_venta_id: "pres22" })).toEqual({ vendido: 6, devuelto: 0, maximo: 6, presupuesto: false })
     const sinEnviar = [{ articulo_id: "naft", cantidad: 6, origen_comp: { comprobante_venta_id: "pres22" } }]
     const t = topeDevolucion(devolvible, { articulo_id: "naft", cantidad: 1, comprobante_venta_id: "pres22" }, sinEnviar)
-    expect(t).toEqual({ vendido: 6, devuelto: 6, maximo: 0 })
+    expect(t).toEqual({ vendido: 6, devuelto: 6, maximo: 0, presupuesto: false })
     expect(textoTope(t!, "NAFTALINA")).toBe("NAFTALINA: ya se devolvieron 6 de 6. No se puede devolver más.")
   })
   it("lo ya devuelto en el servidor (de cualquier app) cuenta", () => {
@@ -222,5 +222,38 @@ describe("C7 · anular el cobro de una parada bloqueada la reabre (R4)", () => {
     const it2 = { ...anular(), estado: "enviado" as const, resultado: {} }
     expect(avisosParadaReabierta([it1, it2], []).map((a) => a.mensaje)).toEqual(["volvió a pendiente"])
     expect(avisosParadaReabierta([it1], [it1.key])).toEqual([])
+  })
+})
+
+describe("C8 · presupuesto: lo devuelto de más va como sistema viejo (Juan 27/10)", () => {
+  const pres = [{ comprobante_venta_id: "pres22", articulo_id: "naft", vendido: 6, devuelto: 0, presupuesto: true }]
+  const fa = [{ comprobante_venta_id: "fa1", articulo_id: "naft", vendido: 6, devuelto: 0, presupuesto: false }]
+  it("en presupuesto no frena: primerExceso no corta y el excedente se informa", () => {
+    const t = topeDevolucion(pres, { articulo_id: "naft", cantidad: 10, comprobante_venta_id: "pres22" })
+    expect(t).toMatchObject({ maximo: 6, presupuesto: true })
+    expect(frena(t)).toBe(false)
+    expect(primerExceso(pres, [{ articulo_id: "naft", cantidad: 10, comprobante_venta_id: "pres22" }])).toBeNull()
+    expect(excedenteSistemaViejo(t, 10)).toBe(4)
+    expect(excedenteSistemaViejo(t, 5)).toBe(0)
+    expect(textoExcedente(4)).toBe("Lo que pasa de lo comprado (4) va como sistema viejo: lo revisa la oficina.")
+  })
+  it("ya devuelto todo en presupuesto: igual deja cargar (todo va al respaldo)", () => {
+    const sinEnviar = [{ articulo_id: "naft", cantidad: 6, comprobante_venta_id: "pres22" }]
+    const t = topeDevolucion(pres, { articulo_id: "naft", cantidad: 2, comprobante_venta_id: "pres22" }, sinEnviar)
+    expect(t!.maximo).toBe(0)
+    expect(frena(t)).toBe(false)
+    expect(excedenteSistemaViejo(t, 2)).toBe(2)
+  })
+  it("en factura el tope sigue igual", () => {
+    const t = topeDevolucion(fa, { articulo_id: "naft", cantidad: 10, comprobante_venta_id: "fa1" })
+    expect(frena(t)).toBe(true)
+    expect(excedenteSistemaViejo(t, 10)).toBe(0)
+    expect(primerExceso(fa, [{ articulo_id: "naft", cantidad: 10, comprobante_venta_id: "fa1", descripcion: "NAFTALINA" }])).toMatch(/podés devolver hasta 6/)
+  })
+  it("réplica vieja sin el dato: decide el origen (fiscal false = presupuesto; el respaldo no cuenta)", () => {
+    const viejo = [{ comprobante_venta_id: "pres22", articulo_id: "naft", vendido: 6, devuelto: 0 }]
+    expect(topeDevolucion(viejo, { articulo_id: "naft", cantidad: 1, origen_comp: { comprobante_venta_id: "pres22", fiscal: false, numero_comprobante: "0001-00000022" } })!.presupuesto).toBe(true)
+    expect(topeDevolucion(viejo, { articulo_id: "naft", cantidad: 1, origen_comp: { comprobante_venta_id: "pres22", fiscal: true } })!.presupuesto).toBe(false)
+    expect(topeDevolucion(viejo, { articulo_id: "naft", cantidad: 1, origen_comp: { comprobante_venta_id: "pres22", fiscal: false, numero_comprobante: "0002-00000001" } })!.presupuesto).toBe(false)
   })
 })
