@@ -530,9 +530,9 @@ Lo que salió de la revisión, con un número nuevo para seguir la misma tabla. 
 | R11 | Baja | Dos POST simultáneos a `/api/pedidos/[id]/anular-comprobantes` pueden emitir dos reversas (el diálogo se deshabilita, pero el servidor no bloquea) | `lib/pedidos/anular-comprobantes-pedido.ts` | Cuentas corrientes |
 | R12 | Baja | Detalles: #6 un "Fact.E" o "N.Cr.X" real entraría como ajuste sin avisar; #22 el remito guarda los bultos al generarse y queda viejo si se cargan después; #34 `PATCH /api/cheques/[id]/color` pide solo estar logueado (sin permiso de Caja); #17 si falla el borrado después de `reiniciarPicking`, el pedido vuelve a la cola | varios | El dueño de cada # |
 
-**Preguntas para Juan:**
-1. **#19/#20:** ¿un pedido que ya estaba **en viaje o entregado** también se puede anular y refacturar? Hoy vuelve a "Pendiente Facturación" y Generar lo deja "facturado" de nuevo.
-2. **#37:** cuando el cliente tiene plata a cuenta, ¿el 10 % contado va sobre el total bruto (como está ahora) o sobre lo que efectivamente paga?
+**Respuestas de Juan (27/10):**
+1. **#19/#20:** **sí**, un pedido en viaje o entregado también se puede anular y refacturar (ej.: el cliente pagó una parte al chofer y el chofer avisa "hay que refacturarlo"; la oficina lo rehace y el chofer vuelve después a cobrar lo que resta). **El pedido se bloquea recién cuando está cobrado al 100 %.**
+2. **10 % contado:** es el **10 % de los comprobantes completos**, no de la plata a cuenta ni de pagos parciales. Factura de 00 → NC/REV de 0, pague el cliente 0, 0 o 20. (#37 queda bien como está: el 10 % no baja con la plata a cuenta.)
 
 **Apps:**
 - La **App Chofer v0.3.3** se compiló 20 segundos antes de que entrara el login con usuario (T1). La **App Depósito v0.3.1** es de la mañana. **Las dos hay que recompilarlas** (chofer v0.3.4 y depósito v0.3.2) para que tengan el login con usuario.
