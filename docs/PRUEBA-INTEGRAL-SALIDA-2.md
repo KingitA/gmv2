@@ -151,9 +151,9 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Fase 2 — Importación de deudas del sistema viejo (`/apertura`)
 
-- [ ] 2.1 Vista previa del `.chr` completo: los clientes con error van **aparte** y no frenan al resto (#5).
+- [x] 2.1 (27/10 ~15:30, captura de Juan) 251 clientes, 1.883 renglones, total $704.019.017,98 (igual a mi lectura). Se cargan **247 por $691.994.778,70**; **4 con error por $12.024.239,28** quedan aparte sin frenar al resto (247 + 4 = total, al peso). Vista previa del `.chr` completo: los clientes con error van **aparte** y no frenan al resto (#5).
 - [ ] 2.2 En la vista previa: el texto libre entra como ajuste (#6), las cuentas de empleados van a la cuenta personal (#7), se toma la **segunda** columna de saldo (#8), los PRES viejos quedan en punto de venta **0002** (#18).
-- [ ] 2.3 Casos raros: 56 y 1381 (cambiaron de dueño), 765 y 766 (no existen en gmv2), que **nada** caiga en el cliente 3 (A1) ni en los PRUEBA 90029-90034.
+- [x] 2.3 (errores: 56 y 1381 "cambió de dueño", 765 y 766 "no existe en gmv2" = oficina #9, ya sabidos; avisos que igual cargan: nombre 622 y 817; CUIT distinto 830, 1249, 1470, 1501 → ver P2-04; nada cae en el cliente 3 ni en 90029-90034) Casos raros: 56 y 1381 (cambiaron de dueño), 765 y 766 (no existen en gmv2), que **nada** caiga en el cliente 3 (A1) ni en los PRUEBA 90029-90034.
 - [ ] 2.4 El reporte trae a Juan (194) con $131.642,05. **Decisión de Juan 27/10: entra como deuda.** Verificar que vaya a su cuenta personal y no a un cliente. Para el control final, la cuenta de Juan arranca en −$131.642,05.
 - [ ] 2.5 Confirmar. Total importado = total del reporte, al peso.
 - [ ] 2.6 La deuda de 556 se ve igual en la base, la ficha del ERP, la antigüedad del tablero y la app vendedor.
@@ -273,4 +273,5 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 |---|---|---|---|---|---|
 | P2-01 | Auditoría | Alta de cliente toma el primer número libre (así el de prueba agarró el 3). **Regla de Juan:** el siguiente al más alto (hoy 90029), en el ERP, en la app vendedor y en la base. | Media (para el pase) | Cambios general | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
 | P2-02 | 0 (D2) | El tacho de `/clientes` **desactiva** el cliente en vez de eliminarlo; sigue con su código, pedidos, comprobantes y deuda. **Regla de Juan:** eliminar de verdad; si tiene deuda, cartel "¿Asumir deuda y eliminarlo de todas formas?". Decisiones de Juan 27/10: con CAE queda escondido y código libre; deuda asumida → caja de ajustes (P2-03); sin deuda se conservan pedidos y comprobantes. | Media | Cambios general | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
+| P2-04 | 2 | Apertura, datos de la oficina: (a) CUIT distinto entre el sistema viejo y gmv2 en 830, 1249, 1470 y 1501 (830 y 1470 parecen errores de tipeo; **1249 GIMENO ADRIANA y 1501 XUE GUIPING tienen CUITs totalmente distintos**: revisar que sea el mismo cliente antes del pase). (b) **YOU JUNJUN** figura en el sistema viejo con dos códigos (249 y 766); en gmv2 solo está el 249. (c) 56, 1381, 765, 766 siguen pendientes (oficina #9). | Media (antes del pase) | Oficina (Juan) | abierto |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |
