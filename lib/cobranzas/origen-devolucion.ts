@@ -6,7 +6,8 @@ import { ARTICULO_PRECIO_COLS, cargarInsumosCliente } from "@/lib/pricing/cargar
 import { descuentosPorArticulo, prepararMotorCliente, type ArticuloMotor } from "@/lib/pricing/motor"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { hoyISO } from "@/lib/formato"
-import { NUMERO_RESPALDO_DEVOLUCION } from "./respaldo-devolucion"
+import { AL_RESPALDO, NUMERO_RESPALDO_DEVOLUCION, repartirExcedenteAlRespaldo } from "./respaldo-devolucion"
+import { vendidoYDevuelto } from "./tope-devolucion"
 import {
   elegirOrigenDevolucion,
   type ContextoDevolucion,
@@ -451,7 +452,31 @@ export async function prepararRenglonesDevolucion<T extends { articulo_id: strin
     }
     out.push({ ...it, precio_venta_original: r2(precio), comprobante_venta_id: o?.comprobante_venta_id ?? null })
   }
-  return out
+
+  // Juan (27/10): lo devuelto de más sobre lo comprado en gmv2 en un PRESUPUESTO va
+  // al respaldo "del sistema viejo" (la oficina lo controla con el aviso de
+  // /revision-devoluciones). En factura no: ahí sigue el tope (una NC con CAE
+  // necesita su comprobante asociado).
+  const presOrigen = new Set(
+    [...origenes.values()].filter((o) => o.comprobante_venta_id && !o.fiscal && o.numero_comprobante !== NUMERO_RESPALDO_DEVOLUCION).map((o) => o.comprobante_venta_id as string),
+  )
+  const candidatos = out.filter((x) => x.comprobante_venta_id && presOrigen.has(x.comprobante_venta_id))
+  if (!candidatos.length) return out
+  const { vendido, yaDevuelto } = await vendidoYDevuelto(
+    supabase,
+    [...new Set(candidatos.map((x) => x.comprobante_venta_id as string))],
+    [...new Set(candidatos.map((x) => x.articulo_id))],
+  )
+  const disponible = new Map<string, number>()
+  for (const [k, v] of vendido) disponible.set(k, v - (yaDevuelto.get(k) ?? 0))
+  const repartidos = repartirExcedenteAlRespaldo(
+    out as any[],
+    disponible,
+    (x: any) => presOrigen.has(x.comprobante_venta_id),
+  ) as typeof out
+  if (!repartidos.some((x) => x.comprobante_venta_id === AL_RESPALDO)) return out
+  respaldoId ??= await asegurarComprobanteRespaldo(supabase, clienteId)
+  return repartidos.map((x) => (x.comprobante_venta_id === AL_RESPALDO ? { ...x, comprobante_venta_id: respaldoId } : x))
 }
 
 

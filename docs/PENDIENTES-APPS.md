@@ -41,6 +41,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | ~~D1 — APK Vendedor con el valor de devolución nuevo~~ | App Vendedor | Hecho 23/10, APK v0.4.3 instalada en el NuStar |
 | ~~D2 — APK Chofer con el valor de devolución nuevo~~ | App Chofer | Hecho 23/10, APK v0.3.2 (versionCode 8) instalada en el NuStar; falta la prueba de campo con un pedido facturado real (ver D2) |
 | ~~C7 — Al anular un cobro, el servidor puede devolver `parada_reabierta: true` + `mensaje` (la parada "NO ENTREGAR SIN COBRAR" volvió a pendiente: refrescar la hoja y mostrar el mensaje) o 422 `PARADA_BLOQUEADA_ENTREGADA` con `reintentable: false` (viaje terminado: mostrar el error, no reintentar). R4 del 27/10~~ | App Chofer | **Hecho 27/10 — App Chofer v0.3.5**: aviso "volvió a pendiente" (también sin señal, con el overlay), 422 como rechazo sin reintento |
+| C8 — Devolución: si el artículo vino en un PRESUPUESTO, NO frenar en el celular lo que pasa de lo comprado (`topeDevolucion` en `datos/devolucion-tope`): el servidor manda el excedente al respaldo 0002-00000001 como "sistema viejo" y la oficina lo controla. Mostrar un aviso tipo "Lo que pasa de lo comprado (N) va como sistema viejo: lo revisa la oficina". En FACTURA el tope sigue igual. Regla de Juan 27/10 | App Chofer | Pendiente (servidor en main 27/10) |
 | D3 — Poner en 0 las devoluciones de prueba antes de producción (dato sucio) | Cuentas corrientes / oficina | Pendiente (día del corte) |
 
 ## Versiones instaladas hoy

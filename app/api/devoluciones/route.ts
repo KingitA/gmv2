@@ -22,25 +22,43 @@ async function marcarRenglonesRespaldo(supabase: any, devoluciones: any[]): Prom
   if (!aMarcar.length) return
 
   const compras = new Map<string, CompraDelArticulo[]>() // cliente|artículo
+  const devueltoContraCompras = new Map<string, number>() // cliente|artículo
   for (const clienteId of [...new Set(aMarcar.map((x) => x.cliente_id))]) {
     const arts = [...new Set(aMarcar.filter((x) => x.cliente_id === clienteId).map((x) => x.it.articulo_id))]
     const { data: filas } = await supabase
       .from("comprobantes_venta_detalle")
-      .select("articulo_id, cantidad, comprobante:comprobantes_venta!inner(cliente_id, tipo_comprobante, numero_comprobante, fecha, anulado_en)")
+      .select("articulo_id, cantidad, comprobante_id, comprobante:comprobantes_venta!inner(cliente_id, tipo_comprobante, numero_comprobante, fecha, anulado_en)")
       .in("articulo_id", arts)
       .eq("comprobante.cliente_id", clienteId)
       .in("comprobante.tipo_comprobante", ["FA", "FB", "FC", "PRES"])
       .is("comprobante.anulado_en", null)
+    const compsCompra = new Set<string>()
     for (const f of filas || []) {
       const c = Array.isArray(f.comprobante) ? f.comprobante[0] : f.comprobante
       if (!c || !(Number(f.cantidad) > 0)) continue
+      compsCompra.add(f.comprobante_id)
       const k = `${clienteId}|${f.articulo_id}`
       compras.set(k, [...(compras.get(k) || []), { fecha: fechaISO(c.fecha), cantidad: Number(f.cantidad), comprobante: `${c.tipo_comprobante} ${c.numero_comprobante}` }])
     }
+    // Lo ya devuelto contra esas compras (esta devolución incluida: es la parte que sí tenía venta)
+    if (compsCompra.size) {
+      const { data: devs } = await supabase
+        .from("devoluciones_detalle")
+        .select("articulo_id, cantidad, estado_renglon, devolucion:devoluciones!inner(estado)")
+        .in("articulo_id", arts)
+        .in("comprobante_venta_id", [...compsCompra])
+        .in("devolucion.estado", ["pendiente", "confirmado", "facturado"])
+      for (const d of devs || []) {
+        if (d.estado_renglon === "rechazado") continue
+        const k = `${clienteId}|${d.articulo_id}`
+        devueltoContraCompras.set(k, (devueltoContraCompras.get(k) || 0) + (Number(d.cantidad) || 0))
+      }
+    }
   }
   for (const { it, cliente_id } of aMarcar) {
+    const k = `${cliente_id}|${it.articulo_id}`
     it.sin_venta_registrada = true
-    it.aviso_respaldo = textoAvisoRespaldo(Number(it.cantidad_original ?? it.cantidad) || 0, compras.get(`${cliente_id}|${it.articulo_id}`) || [])
+    it.aviso_respaldo = textoAvisoRespaldo(Number(it.cantidad) || 0, compras.get(k) || [], devueltoContraCompras.get(k) || 0)
   }
 }
 
