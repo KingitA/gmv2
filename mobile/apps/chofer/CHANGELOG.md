@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.6 (versionCode 12) — 2026-10-27
+
+- v0.3.6: C8 en presupuesto lo devuelto de más no se frena, va como sistema viejo (lo revisa la oficina)
+
 ## v0.3.5 (versionCode 11) — 2026-10-27
 
 - v0.3.5: C7 anular el cobro de una parada NO ENTREGAR SIN COBRAR la vuelve a pendiente (también sin señal)
