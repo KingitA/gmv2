@@ -28,8 +28,9 @@ export function Inicio() {
   // Dos números, nunca sumados (regla del dueño 19/10): la plata de la EMPRESA en la mano y SU
   // cuenta personal. Misma fila que la pantalla Billetera (datos/billetera.ts), con los retiros
   // sin enviar descontados. Sin la billetera descargada, el resumen de "me".
-  const { data: billetera } = useBilletera()
-  const plataEmpresa = billetera?.balance ?? me?.billetera?.balance ?? me?.billetera?.saldo ?? 0
+  const { data: billetera, retirosSinEnviar } = useBilletera()
+  // Sin la billetera descargada, "me" no conoce los retiros que todavía no salieron: se descuentan acá
+  const plataEmpresa = billetera?.balance ?? (me?.billetera?.balance ?? me?.billetera?.saldo ?? 0) - retirosSinEnviar
   const cheques = billetera?.cheques_cantidad ?? me?.billetera?.cheques_cantidad ?? 0
   const cuenta = billetera?.cuenta_personal ?? null
   const { clientes } = useClientes()

@@ -485,8 +485,10 @@ export const ESTADO_BADGE: Record<string, string> = {
   facturado: "bg-cian-50 text-cian-800",
   entregado: "bg-exito-50 text-exito-700",
   cancelado: "bg-error-50 text-error-700",
+  // Pedido cargado antes del pase: se entregó y cobró en el sistema viejo (0.6 del roadmap de salida)
+  sistema_viejo: "bg-neutro-100 text-neutro-700",
 }
-const ESTADO_TEXTO: Record<string, string> = { en_revision: "EN REVISIÓN", en_venta: "EN VENTA", pendiente: "PENDIENTE", impreso: "IMPRESO", en_preparacion: "EN PREPARACIÓN", en_viaje: "EN VIAJE" }
+const ESTADO_TEXTO: Record<string, string> = { en_revision: "EN REVISIÓN", en_venta: "EN VENTA", pendiente: "PENDIENTE", impreso: "IMPRESO", en_preparacion: "EN PREPARACIÓN", en_viaje: "EN VIAJE", sistema_viejo: "SISTEMA VIEJO" }
 export const estadoTexto = (e: string) => ESTADO_TEXTO[e] || e.toUpperCase()
 export function BadgeEstado({ estado }: { estado: string }) {
   return (

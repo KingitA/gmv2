@@ -68,6 +68,7 @@ const ESTADO_PEDIDO: Record<string, { label: string; cls: string }> = {
   en_viaje: { label: "EN VIAJE", cls: "bg-indigo-100 text-indigo-700" },
   entregado: { label: "ENTREGADO", cls: "bg-green-100 text-green-700" },
   confirmado: { label: "CONFIRMADO", cls: "bg-blue-100 text-blue-700" },
+  sistema_viejo: { label: "SISTEMA VIEJO", cls: "bg-gray-100 text-gray-600" },
 }
 
 const nuevoMetodo = (tipo: Metodo["tipo"]): Metodo => filaVacia(uuidv4(), tipo)

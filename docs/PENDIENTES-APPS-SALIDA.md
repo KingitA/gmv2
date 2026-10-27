@@ -311,9 +311,9 @@ Revisado en el código: C1 a C6, V1 a V5, T1 y D3 están **bien hechos**. Pendie
 
 - [x] **App Chofer: recompilar como v0.3.4.** ~~La v0.3.3 se compiló 20 segundos antes de que entrara T1 (login con usuario) y no lo trae.~~ Hecho 27/10: v0.3.4 (versionCode 10) con T1, instalada en el NuStar encima de la v0.3.3. Trae además los dos menores: C3 por renglón en devoluciones mixtas y el estado "Sistema viejo" en el selector del cobro.
 - [x] **App Depósito: recompilar como v0.3.2 (D1).** Hecho 27/10: v0.3.2 (versionCode 10) instalada en el NuStar; trae la v0.3.1. Falta la prueba de login de Juan (usuario y mail).
-- [ ] Las 3 APK nuevas (vendedor v0.4.5, chofer v0.3.4 y depósito v0.3.2): Juan las instala en el NuStar antes de la segunda prueba.
-- [x] Menor (casilla 0.6 del roadmap): mostrar el estado "sistema_viejo" con nombre ("Sistema viejo") donde aparezca un pedido viejo. — App Chofer: hecho en v0.3.4 (selector del cobro, `ESTADO_LABEL` compartido).
+- [ ] Las 3 APK nuevas (vendedor **v0.4.6**, chofer v0.3.4 y depósito v0.3.2): Juan las instala en el NuStar antes de la segunda prueba.
+- [x] Menor (casilla 0.6 del roadmap): mostrar el estado "sistema_viejo" con nombre ("Sistema viejo") donde aparezca un pedido viejo. — App Chofer: hecho en v0.3.4 (selector del cobro, `ESTADO_LABEL` compartido). App Vendedor: hecho 27/10 en v0.4.6 ("SISTEMA VIEJO" en Mis pedidos y en Cobrar).
 - Riesgos menores que vio la revisión (no frenan la prueba):
   - C3: en un cobro parcial de un comprobante se descuenta igual el 10 % completo de lo devuelto;
   - ~~C3: en una devolución local que mezcla renglones con y sin contado, `aplica_10` usa `some()` y toda la devolución queda como neta;~~ hecho 27/10 en v0.3.4: se decide por renglón (`bonificado_contado` en cada renglón local; `aplica_10` solo si todos lo son);
-  - V4: si la billetera nunca se descargó, el inicio usa `me.billetera.balance` sin descontar los retiros que no salieron (`Inicio.tsx:32`).
+  - ~~V4: si la billetera nunca se descargó, el inicio usa `me.billetera.balance` sin descontar los retiros que no salieron (`Inicio.tsx:32`).~~ Hecho 27/10 en v0.4.6: descuenta los retiros sin enviar también en ese caso.
