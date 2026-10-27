@@ -103,11 +103,30 @@ async function anularConCandado(supabase: any, pedidoId: string, usuarioId: stri
           const { data: p } = await supabase.from("pedidos").select("id, numero_pedido").eq("id", pedidoId).single()
           pedidoInfo = p || { id: pedidoId, numero_pedido: null }
         }
-        const pres = await anularParteContado(supabase, c, c.parcial, pedidoInfo!, usuarioId)
-        anulados.push({
-          original: { id: c.id, tipo_comprobante: c.tipo_comprobante, numero_comprobante: c.numero_comprobante, total: c.parcial },
-          inverso: { id: pres.id, tipo_comprobante: pres.tipo_comprobante, numero: pres.numero_comprobante, total: pres.total, cae: null, vencimiento_cae: null },
-        })
+        const numPedido = pedidoInfo!.numero_pedido || pedidoInfo!.id
+        const original = { id: c.id, tipo_comprobante: c.tipo_comprobante, numero_comprobante: c.numero_comprobante, total: c.parcial }
+        // Reintento: si la parte de este pedido ya se anuló (corte a mitad de camino), no se emite otra vez
+        const { data: previas } = await supabase
+          .from("comprobantes_venta")
+          .select("id, tipo_comprobante, numero_comprobante, total_factura, cae, vencimiento_cae, observaciones")
+          .contains("comprobantes_relacionados_ids", [c.id])
+          .eq("motivo_ajuste", "Anulación parcial")
+          .is("anulado_en", null)
+        const delPedido = new RegExp(`pedido ${String(numPedido).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![0-9A-Za-z])`)
+        const hecha = (previas || []).find((p: any) => delPedido.test(String(p.observaciones || "")))
+        if (hecha) {
+          anulados.push({ original, inverso: { id: hecha.id, tipo_comprobante: hecha.tipo_comprobante, numero: hecha.numero_comprobante, total: Number(hecha.total_factura), cae: hecha.cae ?? null, vencimiento_cae: hecha.vencimiento_cae ?? null } })
+          continue
+        }
+        if (c.tipo_comprobante === "REV") {
+          const pres = await anularParteContado(supabase, c, c.parcial, pedidoInfo!, usuarioId)
+          anulados.push({ original, inverso: { id: pres.id, tipo_comprobante: pres.tipo_comprobante, numero: pres.numero_comprobante, total: pres.total, cae: null, vencimiento_cae: null } })
+        } else {
+          // NC con CAE compartida → ND con CAE solo por la parte de este pedido (Juan 27/10, opción B)
+          const r = await anularComprobante(supabase, c.id, usuarioId, { parcial: { monto: c.parcial, detalle: `parte del pedido ${numPedido}` } })
+          anulados.push({ original, inverso: r.inverso })
+          advertencias.push(...(r.advertencias || []))
+        }
         continue
       }
       const r = await anularComprobante(supabase, c.id, usuarioId)

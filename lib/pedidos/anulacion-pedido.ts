@@ -19,8 +19,8 @@
 //  - R3 (Juan 27/10): la NC/REV del 10 % contado es UNA por cobro y puede cubrir
 //    otros pedidos y deuda vieja. Si cubre solo comprobantes de este pedido se
 //    anula entera; si cubre otros también, se anula SOLO la parte de este pedido
-//    (REV → PRES por esa parte, anular-parte-contado.ts). Si esa nota es fiscal
-//    (NC con CAE) y es compartida, se frena: la ND con CAE la decide una persona.
+//    (REV → PRES por esa parte, anular-parte-contado.ts; NC con CAE → ND con
+//    CAE por esa parte, anularComprobante con `parcial` — Juan 27/10, opción B).
 //
 // La anulación en sí (cuenta corriente, comisión, stock, remito) es de cuentas
 // corrientes: usa `evaluarAnulacionPedido` para saber si se puede y qué anular.
@@ -80,12 +80,7 @@ export function reglaAnulacionPedido(estado: string | null | undefined, comproba
   for (const n of contado) {
     const otros = Number(n.parte_otros) || 0
     if (otros <= 0.005) { contadoAAnular.push(n); continue }
-    if (n.tipo_comprobante !== "REV") {
-      return no(
-        `La ${n.tipo_comprobante} ${n.numero_comprobante} del 10 % contado también cubre otros comprobantes del cliente. ` +
-        "Anular solo la parte de este pedido requiere una nota de débito con CAE: hacela desde la oficina antes de refacturar.",
-      )
-    }
+    // REV → PRES por la parte; NC con CAE → ND con CAE por la parte (Juan 27/10, opción B)
     const parte = Math.round((Number(n.parte_pedido) || 0) * 100) / 100
     if (parte > 0.005) contadoAAnular.push({ ...n, parcial: parte })
   }

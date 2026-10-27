@@ -46,7 +46,50 @@ export interface ResultadoAnulacion {
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
-export async function anularComprobante(supabase: any, id: string, usuarioId: string): Promise<ResultadoAnulacion> {
+/**
+ * Anulación PARCIAL (R3, Juan 27/10: "habría que hacer un débito"): la NC del 10 %
+ * contado que cubre varios pedidos se anula solo en la parte del pedido que se
+ * refactura. Mismo camino que la anulación entera (CAE, numeración, libro, PDF)
+ * pero por `monto`: los importes del original se escalan en proporción (el neto
+ * absorbe el redondeo, así neto + IVA + percepciones = monto exacto, que es lo que
+ * valida ARCA), un solo renglón de detalle, y el original NO queda anulado.
+ */
+export interface AnulacionParcial {
+  monto: number
+  /** Texto del renglón y de la leyenda (ej. "parte del pedido 0001-00000123") */
+  detalle: string
+}
+
+export function montosParciales(
+  original: { total_neto: number; total_iva?: number | null; percepcion_iva?: number | null; percepcion_iibb?: number | null; total_factura: number },
+  monto: number,
+) {
+  const total = Math.abs(Number(original.total_factura) || 0)
+  if (!(total > 0)) throw new Error('El comprobante no tiene importe: no se puede anular en parte')
+  const m = r2(Math.abs(monto))
+  if (m <= 0 || m > total + 0.005) throw new Error(`La parte a anular (${m}) tiene que ser mayor que 0 y no más que el total del comprobante (${total})`)
+  const f = m / total
+  const percepcion_iva = r2(Math.abs(Number(original.percepcion_iva) || 0) * f)
+  const percepcion_iibb = r2(Math.abs(Number(original.percepcion_iibb) || 0) * f)
+  const gravado = r2(m - percepcion_iva - percepcion_iibb)
+  // Con IVA: neto = gravado / 1,21 (ARCA controla IVA = neto × 21 % al centavo,
+  // y el inverso se informa con alícuota 21 %); sin IVA, todo es neto
+  const conIva = Math.abs(Number(original.total_iva) || 0) > 0.005
+  if (!conIva) return { total_neto: gravado, total_iva: 0, percepcion_iva, percepcion_iibb, total_factura: m }
+  // Se busca, cerca de gravado / 1,21, el neto cuyo IVA redondeado (21 %) suma
+  // EXACTO el gravado; si ningún centavo lo logra, el IVA queda a 1 centavo del
+  // 21 % (mismo criterio que la NC de apertura, nc-fiscal-componentes.ts)
+  const aprox = r2(gravado / 1.21)
+  const cents = Math.round(gravado * 100)
+  for (const d of [0, -0.01, 0.01, -0.02, 0.02, -0.03, 0.03]) {
+    const neto = r2(aprox + d)
+    const iva = r2(neto * 0.21)
+    if (Math.round(neto * 100) + Math.round(iva * 100) === cents) return { total_neto: neto, total_iva: iva, percepcion_iva, percepcion_iibb, total_factura: m }
+  }
+  return { total_neto: aprox, total_iva: r2(gravado - aprox), percepcion_iva, percepcion_iibb, total_factura: m }
+}
+
+export async function anularComprobante(supabase: any, id: string, usuarioId: string, opts: { parcial?: AnulacionParcial } = {}): Promise<ResultadoAnulacion> {
   // ─── 1. Cargar comprobante original ───
   const { data: original, error: origErr } = await supabase
     .from('comprobantes_venta')
@@ -98,6 +141,21 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
         `Si necesitás rehabilitar esa deuda, generá un comprobante nuevo.`,
       error_code: 'ES_ESPEJO_DE_ANULACION',
     }, 422)
+  }
+
+  // Parcial: importes escalados a la parte y un solo renglón de detalle
+  const parcial = opts.parcial ?? null
+  const base = parcial ? montosParciales(original, parcial.monto) : original
+  if (parcial) {
+    // Con el signo del original (la NC lleva el renglón en negativo): el espejo lo invierte
+    const s = Number(original.total_factura) < 0 ? -1 : 1
+    original.detalle = [{
+      articulo_id: null,
+      descripcion: `Anulación parcial de ${original.tipo_comprobante} ${original.numero_comprobante}: ${parcial.detalle}`,
+      cantidad: 1,
+      precio_unitario: s * base.total_neto,
+      precio_total: s * base.total_neto,
+    }]
   }
 
   // El CUIT se exige más abajo solo si el inverso es fiscal (anular un presupuesto
@@ -200,10 +258,10 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
 
     // Los montos del inverso siempre positivos para ARCA (el tipo ya indica si es NC/ND)
     // Espejo exacto de la factura original: neto, IVA y percepciones (tributos)
-    const impNeto   = r2(Math.abs(original.total_neto))
-    const impIva    = r2(Math.abs(original.total_iva ?? 0))
-    const percIvaA  = r2(Math.abs(original.percepcion_iva  ?? 0))
-    const percIibbA = r2(Math.abs(original.percepcion_iibb ?? 0))
+    const impNeto   = r2(Math.abs(base.total_neto))
+    const impIva    = r2(Math.abs(base.total_iva ?? 0))
+    const percIvaA  = r2(Math.abs(base.percepcion_iva  ?? 0))
+    const percIibbA = r2(Math.abs(base.percepcion_iibb ?? 0))
     const impTrib   = r2(percIvaA + percIibbA)
     // ImpTotal debe ser exactamente ImpNeto + ImpIVA + ImpTrib (validación ARCA)
     const impTotal  = (
@@ -265,13 +323,15 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
   const esCredito = ['NCA', 'NCB', 'REV'].includes(tipoInverso)
   const signo     = esCredito ? -1 : 1
 
-  const totalNeto    = r2(signo * Math.abs(original.total_neto))
-  const totalIva     = r2(signo * Math.abs(original.total_iva    ?? 0))
-  const percIva      = r2(signo * Math.abs(original.percepcion_iva  ?? 0))
-  const percIibb     = r2(signo * Math.abs(original.percepcion_iibb ?? 0))
-  const totalFactura = r2(signo * Math.abs(original.total_factura))
+  const totalNeto    = r2(signo * Math.abs(base.total_neto))
+  const totalIva     = r2(signo * Math.abs(base.total_iva    ?? 0))
+  const percIva      = r2(signo * Math.abs(base.percepcion_iva  ?? 0))
+  const percIibb     = r2(signo * Math.abs(base.percepcion_iibb ?? 0))
+  const totalFactura = r2(signo * Math.abs(base.total_factura))
 
-  const leyenda = leyendaAnulacion(original.numero_comprobante, original.fecha)
+  const leyenda = parcial
+    ? `Anulación parcial (${parcial.detalle}). ${leyendaAnulacion(original.numero_comprobante, original.fecha)}`
+    : leyendaAnulacion(original.numero_comprobante, original.fecha)
 
   // ─── 7. Crear comprobante inverso ───
   const inversoInsert = {
@@ -280,7 +340,8 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
     punto_venta:                  puntoVenta,
     fecha:                        todayArgentina(),
     cliente_id:                   original.cliente_id,
-    pedido_id:                    original.pedido_id ?? null,
+    // Parcial: el débito no es del pedido (si no, contaría como "factura viva" del pedido)
+    pedido_id:                    parcial ? null : original.pedido_id ?? null,
     total_neto:                   totalNeto,
     total_iva:                    totalIva,
     percepcion_iva:               percIva,
@@ -288,7 +349,7 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
     total_factura:                totalFactura,
     saldo_pendiente:              totalFactura,
     estado_pago:                  'pendiente',
-    motivo_ajuste:                'Anulación',
+    motivo_ajuste:                parcial ? 'Anulación parcial' : 'Anulación',
     observaciones:                leyenda,
     comprobantes_relacionados_ids: [original.id],
     creado_por:                   usuarioId,
@@ -342,6 +403,11 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
     if (detErr) throw new Error('Error creando detalle inverso: ' + detErr.message)
   }
 
+  const advertencias: string[] = []
+  // Parcial: el original sigue vivo (cubre otros comprobantes); no se cruza con
+  // él, no hay remito ni stock ni comisión del original que tocar. El débito
+  // parcial lo cruza quien lo pidió (anular-comprobantes-pedido.ts, paso 3).
+  if (!parcial) {
   // ─── 9. Marcar original como anulado ───
   await supabase
     .from('comprobantes_venta')
@@ -356,7 +422,6 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
   // cobrables en los selectores de pago. cc_imputar_credito los deja en 0 /
   // pagado sin tocar el libro mayor (ya posteado). No-fatal: si falla, la
   // anulación fiscal ya está hecha y el par se puede imputar a mano.
-  const advertencias: string[] = []
   try {
     const { error: impErr } = await supabase.rpc('cc_imputar_credito', {
       p_credito_id: inverso.id,
@@ -380,6 +445,7 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
     .update({ estado: 'anulado' })
     .eq('comprobante_id', original.id)
     .eq('estado', 'activo')
+  }
 
   // ─── 10. Avanzar numeración ───
   await supabase
@@ -389,7 +455,7 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
     .eq('punto_venta', puntoVenta)
 
   // ─── 11. Stock: si el original decrementó stock, lo recuperamos ───
-  if (ORIGINAL_DECREMENTO_STOCK.has(original.tipo_comprobante)) {
+  if (!parcial && ORIGINAL_DECREMENTO_STOCK.has(original.tipo_comprobante)) {
     for (const d of original.detalle) {
       const cantidad = Math.abs(d.cantidad)
       if (cantidad <= 0) continue
@@ -425,14 +491,14 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
       p_referencia_tipo:    'comprobante_venta',
       p_referencia_id:      inverso.id,
       p_numero_comprobante: numeroComprobante,
-      p_observaciones:      `Anulación ${tipoInverso} ${numeroComprobante} → ${original.numero_comprobante}`,
+      p_observaciones:      `${parcial ? 'Anulación parcial' : 'Anulación'} ${tipoInverso} ${numeroComprobante} → ${original.numero_comprobante}`,
       p_usuario_id:         usuarioId,
     }, `anulación ${tipoInverso} ${numeroComprobante}`)
     if (ccAviso) advertencias.push(ccAviso)
   }
 
   // ─── 13. Comisión: el original anulado deja de estar saldado → se revierte ───
-  try {
+  if (!parcial) try {
     const { liquidarComisiones } = await import('@/lib/comisiones/liquidar')
     await liquidarComisiones(supabase, [original.id], usuarioId)
   } catch (e) {

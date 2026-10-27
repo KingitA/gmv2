@@ -366,6 +366,11 @@ export default function RevisionDevolucionesPage() {
                                   <tr key={it.id} className={`border-t align-top ${rechazado ? "bg-red-50/40" : ""}`}>
                                     <td className={`px-2 py-1.5 font-medium ${rechazado ? "line-through text-slate-400" : ""}`}>
                                       {it.articulos?.descripcion || it.articulos?.nombre || "—"}
+                                      {it.aviso_respaldo ? (
+                                        <div className="mt-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-1 text-[11px] font-normal text-amber-900 no-underline">
+                                          ⚠ {it.aviso_respaldo}
+                                        </div>
+                                      ) : null}
                                       {!enRevision && it.motivo_revision ? <div className="text-[10px] text-slate-500 italic no-underline">Revisión: {it.motivo_revision}</div> : null}
                                       {enRevision && (
                                         <input

@@ -4,7 +4,45 @@ import { requireAuth } from '@/lib/auth'
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { prepararRenglonesDevolucion } from "@/lib/cobranzas/origen-devolucion"
 import { CODIGO_TOPE_DEVOLUCION, excedeTopeDevolucion, esErrorTopeDevolucion, mensajeErrorTopeDevolucion } from "@/lib/cobranzas/tope-devolucion"
-import { redondear } from "@/lib/formato"
+import { fechaISO, redondear } from "@/lib/formato"
+import { NUMERO_RESPALDO_DEVOLUCION, textoAvisoRespaldo, type CompraDelArticulo } from "@/lib/cobranzas/respaldo-devolucion"
+
+/**
+ * Juan (27/10): los renglones asociados al PRES de respaldo (#28) no tienen tope
+ * (no hay venta en ese comprobante): la oficina controla la cantidad. Cada uno
+ * lleva `aviso_respaldo` con lo que el cliente compró de ese artículo en gmv2.
+ */
+async function marcarRenglonesRespaldo(supabase: any, devoluciones: any[]): Promise<void> {
+  const items = devoluciones.flatMap((d) => (d.items || []).map((it: any) => ({ it, cliente_id: d.cliente_id })))
+  const compIds = [...new Set(items.map((x) => x.it.comprobante_venta_id).filter(Boolean))] as string[]
+  if (!compIds.length) return
+  const { data: comps } = await supabase.from("comprobantes_venta").select("id, numero_comprobante, tipo_comprobante").in("id", compIds)
+  const respaldos = new Set((comps || []).filter((c: any) => c.tipo_comprobante === "PRES" && c.numero_comprobante === NUMERO_RESPALDO_DEVOLUCION).map((c: any) => c.id))
+  const aMarcar = items.filter((x) => respaldos.has(x.it.comprobante_venta_id) && x.cliente_id && x.it.articulo_id)
+  if (!aMarcar.length) return
+
+  const compras = new Map<string, CompraDelArticulo[]>() // cliente|artículo
+  for (const clienteId of [...new Set(aMarcar.map((x) => x.cliente_id))]) {
+    const arts = [...new Set(aMarcar.filter((x) => x.cliente_id === clienteId).map((x) => x.it.articulo_id))]
+    const { data: filas } = await supabase
+      .from("comprobantes_venta_detalle")
+      .select("articulo_id, cantidad, comprobante:comprobantes_venta!inner(cliente_id, tipo_comprobante, numero_comprobante, fecha, anulado_en)")
+      .in("articulo_id", arts)
+      .eq("comprobante.cliente_id", clienteId)
+      .in("comprobante.tipo_comprobante", ["FA", "FB", "FC", "PRES"])
+      .is("comprobante.anulado_en", null)
+    for (const f of filas || []) {
+      const c = Array.isArray(f.comprobante) ? f.comprobante[0] : f.comprobante
+      if (!c || !(Number(f.cantidad) > 0)) continue
+      const k = `${clienteId}|${f.articulo_id}`
+      compras.set(k, [...(compras.get(k) || []), { fecha: fechaISO(c.fecha), cantidad: Number(f.cantidad), comprobante: `${c.tipo_comprobante} ${c.numero_comprobante}` }])
+    }
+  }
+  for (const { it, cliente_id } of aMarcar) {
+    it.sin_venta_registrada = true
+    it.aviso_respaldo = textoAvisoRespaldo(Number(it.cantidad_original ?? it.cantidad) || 0, compras.get(`${cliente_id}|${it.articulo_id}`) || [])
+  }
+}
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -63,6 +101,12 @@ export async function GET(request: NextRequest) {
         }
       })
     )
+
+    try {
+      await marcarRenglonesRespaldo(supabase, devolucionesConDetalle)
+    } catch (e) {
+      console.error("[devoluciones] aviso de renglones sin venta registrada:", e)
+    }
 
     // Lo ya descontado dentro de cobros (devoluciones_descuentos) contra lo que
     // vale hoy la devolución (solo lo aceptado, misma regla que el cobro y la
@@ -131,7 +175,7 @@ export async function POST(request: NextRequest) {
 
     // Cada renglón contra su comprobante de origen y, si está facturado en el
     // sistema, al precio facturado (regla del dueño 21/10/2026)
-    items = await prepararRenglonesDevolucion(supabase, cliente_id, items, { pedidoId: pedido_id })
+    items = await prepararRenglonesDevolucion(supabase, cliente_id, items, { pedidoId: pedido_id })
 
 
     // Tope en el servidor: no devolver más de lo vendido en el comprobante de origen (#25)
