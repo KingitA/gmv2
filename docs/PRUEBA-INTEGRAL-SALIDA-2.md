@@ -120,15 +120,15 @@ Además, en el viaje: **gastos** de nafta (con el vehículo), peón y comida; **
 - [x] 0.1 Auditoría de base, código, apps y cuentas de Juan (27/10, 13:30).
 - [x] 0.2 Decisiones D1-D6 (27/10).
 - [x] 0.3 (aplicado por Juan 27/10; verificado: las 3 funciones prueba2_* instaladas, todavía no se corrió) Script complementario `supabase/migrations/20261027d_prueba2_preparar.sql` (escrito 27/10, rama `prueba-integral-2`; probado en lectura: encuentra los 5 pedidos, 18 renglones de kardex y el cliente 3; hoy se niega porque esos pedidos todavía tienen 9 comprobantes, como corresponde antes de la puesta a cero). Juan lo aplica en Supabase (instala las funciones, no cambia datos). Con simulacro y copia en `archivo_pruebas`, pasa a "eliminado" los pedidos 001939, 001940, 001941, 001942 y 001990, y le cambia el código al cliente 3 a "PRUEBA-R1". No toca nada real.
-- [ ] 0.4 Pasarles el aviso a los agentes con la hora de inicio.
-- [ ] 0.5 NuStar: en las 3 apps, que no quede nada "pendiente de sincronizar" antes de borrar datos (si queda algo, se pierde).
-- [ ] 0.6 Juan tiene el `.chr` del sistema viejo del día.
+- [x] 0.4 Aviso pasado a todos los agentes (Juan, 27/10 15:05).
+- [x] 0.5 NuStar 27/10 15:07: las 3 apps con 0 pendientes de enviar (capturas). Vendedor mostraba la cuenta a favor $54.429,71 de la 1ª prueba; depósito 28 pedidos para preparar y 2 recepciones.
+- [x] 0.6 Reporte del 27/10 (`Desktop/facimpagasclientesxcodigo.chr`), leído con el lector del ERP: 1.883 renglones, 251 clientes, 0 errores de lectura, todos los clientes cuadran, saldo total **$704.019.017,98**. No trae cliente 3 ni códigos 90029-90034. 556 debe $3.784.286 (los 2 PRES del 12/06). 199 y 1190 no deben. **Trae a JUAN CRUZ ROSSI (194) con $131.642,05** en 5 PRES del 02/10 al 26/10 (ver 2.4).
 
 ## Fase 1 — Todo a cero
 
 Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro primero, que revisamos juntos.
 
-- [ ] 1.1 Foto de la base antes (la saco yo): clientes, artículos, proveedores, pedidos, comprobantes con CAE, echeqs propios.
+- [x] 1.1 Foto antes (27/10 15:06): 618 clientes (600 activos), 3.293 artículos, 94 proveedores, 1.994 pedidos (1.640 sistema viejo, 302 eliminados, 47 impreso, 3 entregado, 1 listo para enviar, 1 pendiente de facturación), 80.063 renglones, 12 con CAE ($0), 3 echeqs propios. Prueba: 15 comprobantes sin CAE, 4 cheques, 5 cobros, 4 devoluciones, 13 mov. billetera, 0 comisiones cobradas, 2 viajes, 4 preparaciones, 21 mov. de caja, 39 asientos.
 - [ ] 1.2 `SELECT * FROM cc_puesta_a_cero_simulacro();` → revisamos → `SELECT cc_puesta_a_cero('PONER A CERO');`
 - [ ] 1.3 `SELECT * FROM prueba_limpieza_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba_limpieza('LIMPIAR');`
 - [ ] 1.4 `SELECT * FROM prueba2_preparar_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba2_preparar('PREPARAR');`
