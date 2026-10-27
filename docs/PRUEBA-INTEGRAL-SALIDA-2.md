@@ -14,7 +14,7 @@ Aviso para los otros agentes: [`AVISO-AGENTES-PRUEBA-2.md`](AVISO-AGENTES-PRUEBA
 
 ## Control fiscal (se corre en cada fase)
 
-Hora de inicio de la prueba: **______** (se anota en 1.7).
+Hora de inicio de la prueba: **27/10/2026 15:19:50** (hora de Argentina) → en la consulta: `'2026-10-27 15:19:50-03'`.
 
 ```sql
 SELECT tipo_comprobante, numero_comprobante, created_at
@@ -135,10 +135,10 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
   - Simulacro de la limpieza: 2 viajes, 3 paradas, 1 chofer, 3 zonas, 8 historial, 0 remitos, 4 preparaciones, 2 pedidos a los que se les saca el viaje; BLOQUEA = 0.
 - [x] 1.3 (27/10 ~15:25, verificado: 0 viajes, 0 paradas, 0 preparaciones, 0 pedidos con viaje) `SELECT * FROM prueba_limpieza_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba_limpieza('LIMPIAR');`
 - [x] 1.4 (hecho 27/10 ~15:30, verificado: los 5 pedidos en eliminado, 18 renglones de kardex marcados, cliente 3 ahora PRUEBA-R1 e inactivo; simulacro 27/10 ~15:25: 5 pedidos, 18 renglones de kardex, cliente 3; BLOQUEA = 0) `SELECT * FROM prueba2_preparar_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba2_preparar('PREPARAR');`
-- [ ] 1.5 (simulacro 27/10 ~15:30: 47 impreso del 26 al 27/10, 0 con viaje) `SELECT * FROM pedidos_sistema_viejo_simulacro(now(), '{}');` → `SELECT pedidos_pasar_a_sistema_viejo(now(), '{}', 'PASAR');` (pasan los reales nuevos, incluido el 001986).
-- [ ] 1.6 Foto después: 0 comprobantes sin CAE, 12 con CAE ($0), 0 cobros, 0 devoluciones, 0 billetera, 0 comisiones cobradas, 0 viajes, 0 preparaciones, cola vacía, todos los saldos en $0, bancos y cajas en $0, clientes/artículos/proveedores sin cambios contra la 1.1.
-- [ ] 1.7 **Anotar la hora de inicio** (arriba, en "Control fiscal") y en el aviso.
-- [ ] 1.8 Bancos y cajas en $0 (D4). Cada ajuste que Juan haga durante la prueba se anota acá:
+- [x] 1.5 (hecho 27/10 15:19:50: 47 pedidos movidos, copia archivo_pruebas.pedidos_estado_previo_20261027_151950; simulacro 27/10 ~15:30: 47 impreso del 26 al 27/10, 0 con viaje) `SELECT * FROM pedidos_sistema_viejo_simulacro(now(), '{}');` → `SELECT pedidos_pasar_a_sistema_viejo(now(), '{}', 'PASAR');` (pasan los reales nuevos, incluido el 001986).
+- [x] 1.6 (27/10 15:22, verificado: 1.687 pedidos en sistema viejo y 307 eliminados, ninguno en otro estado; ningún cliente con saldo distinto de $0; el resto como en la 1.2) Foto después: 0 comprobantes sin CAE, 12 con CAE ($0), 0 cobros, 0 devoluciones, 0 billetera, 0 comisiones cobradas, 0 viajes, 0 preparaciones, cola vacía, todos los saldos en $0, bancos y cajas en $0, clientes/artículos/proveedores sin cambios contra la 1.1.
+- [x] 1.7 Hora de inicio: 27/10 15:19:50. Control fiscal a esa hora = 0. **Anotar la hora de inicio** (arriba, en "Control fiscal") y en el aviso.
+- [x] 1.8 Bancos y cajas en $0 (D4), verificado 15:22. Cada ajuste que Juan haga durante la prueba se anota acá:
 
 | Fecha y hora | Cuenta | Ajuste | Motivo |
 |---|---|---|---|
@@ -147,7 +147,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
   Si la caja chica en $0 no deja entregarle el fondo al chofer (5.6), es un hallazgo: se anota y Juan carga un monto de prueba en la caja chica (va a esta tabla).
 - [ ] 1.9 `/personal` → "Poner al día": comisiones $0 y la cuenta de Juan en $0.
 - [ ] 1.10 Pantallas del ERP en cero: "Pendientes de revisar" al día, caja del día sin movimientos, `/personal` todo en $0, fichas de 199/1190/556 en $0, cola del depósito vacía, sin viajes, tablero de Finanzas con billeteras en $0.
-- [ ] 1.11 Apps: borrar datos de las 3 apps y entrar de nuevo, **una con usuario y otra con mail** (T1). Vendedor: plata en mano $0, cuenta $0, comisiones $0. Chofer: sin viaje, billetera $0. Depósito: 0 pedidos.
+- [ ] 1.11 (27/10 15:23: datos borrados en las 3 apps con pm clear; falta que Juan entre) Apps: borrar datos de las 3 apps y entrar de nuevo, **una con usuario y otra con mail** (T1). Vendedor: plata en mano $0, cuenta $0, comisiones $0. Chofer: sin viaje, billetera $0. Depósito: 0 pedidos.
 
 ## Fase 2 — Importación de deudas del sistema viejo (`/apertura`)
 
