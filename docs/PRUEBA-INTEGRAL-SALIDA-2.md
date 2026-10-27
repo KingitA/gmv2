@@ -87,13 +87,13 @@ WHERE created_at >= '<HORA DE INICIO>' AND tipo_comprobante NOT IN ('PRES', 'REV
 | A3 | Otros agentes **prueban en la base de producción** (A1 es de hoy) | Si alguien cobra, genera o crea clientes mientras probamos, los controles al peso no cierran. | Aviso escrito (D5). |
 | A4 | Pedidos de prueba de la 1ª prueba y el 001990: la puesta a cero no borra pedidos | Quedarían "entregados" sin comprobante, con comisión a tu nombre y apareciendo en fichas. | Pasan a "eliminado" con el script de la 0.3 (no se borran, se guarda copia). |
 | A5 | Tabla vieja `finanzas_saldos` (312 renglones, de abril a julio) | La usa el gráfico de evolución de Finanzas. No la toca la puesta a cero. | No se toca. Confirmar con Juan si es real o de prueba (no frena la prueba). |
-| A7 | **Un cliente nuevo sin código recibe el primer número libre** (así el de prueba agarró el 3) | Antes del pase, un cliente dado de alta en gmv2 (desde el ERP o desde la **app vendedor**) puede quedarse con un código que en el sistema viejo es de otro cliente que todavía no está en gmv2 (como 765 o 766). El día de la apertura, la deuda de ese cliente iría al nuevo. | Para el pase (no frena la prueba): que el alta antes de la apertura use códigos que el sistema viejo no tenga, o que la apertura compare nombre/CUIT además del código. Dueño: cuentas corrientes / frontend. En la prueba, los clientes PRUEBA llevan códigos 99901-99906, que el reporte viejo no usa (llega hasta 15027). |
+| A7 | **Un cliente nuevo sin código recibe el primer número libre** (así el de prueba agarró el 3) | Antes del pase, un cliente dado de alta en gmv2 (desde el ERP o desde la **app vendedor**) puede quedarse con un código que en el sistema viejo es de otro cliente que todavía no está en gmv2 (como 765 o 766). El día de la apertura, la deuda de ese cliente iría al nuevo. | **Regla de Juan (27/10): el cliente nuevo recibe el número siguiente al más alto** (hoy 90028 → 90029). Traspaso P2-01. En la prueba, los clientes PRUEBA llevan 90029-90034 (los que daría la regla nueva); el reporte viejo del 23/10 llega hasta 15027. |
 
 ---
 
 ## Los clientes de la prueba
 
-Todos con **vos de vendedor**, método **Presupuesto** y lista **Neco**. Los PRUEBA son inventados: sin CUIT, Consumidor Final, códigos 99901 a 99906 (no existen en el sistema viejo). Los das de alta vos en `/clientes` (así probamos también el alta y que aparezcan en la app). Al terminar se desactivan y quedan anotados en "Cosas escondidas o forzadas".
+Todos con **vos de vendedor**, método **Presupuesto** y lista **Neco**. Los PRUEBA son inventados: sin CUIT, Consumidor Final, códigos 90029 a 90034 (no existen en el sistema viejo). Los das de alta vos en `/clientes` (así probamos también el alta y que aparezcan en la app). Al terminar se eliminan (cuando esté arreglado P2-02) y quedan anotados en "Cosas escondidas o forzadas".
 
 | Cliente | Condición | Qué pasa en el viaje | Qué prueba |
 |---|---|---|---|
@@ -101,12 +101,12 @@ Todos con **vos de vendedor**, método **Presupuesto** y lista **Neco**. Los PRU
 | **1190 CHEN** (pedido A) | "Cobrar lo de este viaje" + 10 % contado | **Devolución antes del cobro**; paga con **cheque** (foto). | 10 % sobre el comprobante completo (#33/C3); lectura del cheque; cheque en cartera. |
 | **1190 CHEN** (pedido B) | Cuenta corriente | Se entrega con un **pago parcial** en efectivo. | Refacturar un pedido entregado con pago parcial (R1/R3), Fase 8b. |
 | **556 FITTERER** | Tiene deuda vieja (apertura) + "no entregar si no paga lo anterior" | Intenta entregar sin cobrar → no deja. Cobra → entrega → **anula el cobro** → vuelve a pendiente. Cobra de nuevo con 10 % y **después** hace una devolución. | Bloqueo (R4/C7); 10 % en el otro orden (tiene que dar igual que 1190). Su pedido A va **parcial 30 de 36**; su pedido B queda **todo faltante** y no viaja. |
-| **PRUEBA 1** (99901) | Contado efectivo | Paga **de más** → "Dejar $X a cuenta". | Saldo a favor; después se usa en `/caja` contra otro comprobante. |
-| **PRUEBA 2** (99902) | Contado efectivo | Paga **apenas menos** (menos del 1 %) → "Ajuste por redondeo". | El ajuste lo confirma la oficina al rendir. |
-| **PRUEBA 3** (99903) | Contado | **No entregado** (cerrado), con motivo. | La mercadería vuelve; el pedido se reprograma para el **segundo viaje** (Fase 6b). |
-| **PRUEBA 4** (99904) | Contado | Paga con **un cheque que cubre también la deuda de PRUEBA 5** ("Agregar cliente para cobrar"). | Cobro conjunto: un solo cheque imputado a dos clientes. |
-| **PRUEBA 5** (99905) | **Retira en mostrador** (no viaja) | Retira en el depósito sin pagar; su deuda se cobra con el cheque de PRUEBA 4. | Pedido sin viaje; cobro de un cliente que no está en el viaje. |
-| **PRUEBA 6** (99906) | **Retenido** (en la ficha: retener entregas) | Aparece bloqueado solo; paga **solo con transferencia**. | Bloqueo automático por retención; transferencia que va a "por confirmar" y no a la rendición (#35). |
+| **PRUEBA 1** (90029) | Contado efectivo | Paga **de más** → "Dejar $X a cuenta". | Saldo a favor; después se usa en `/caja` contra otro comprobante. |
+| **PRUEBA 2** (90030) | Contado efectivo | Paga **apenas menos** (menos del 1 %) → "Ajuste por redondeo". | El ajuste lo confirma la oficina al rendir. |
+| **PRUEBA 3** (90031) | Contado | **No entregado** (cerrado), con motivo. | La mercadería vuelve; el pedido se reprograma para el **segundo viaje** (Fase 6b). |
+| **PRUEBA 4** (90032) | Contado | Paga con **un cheque que cubre también la deuda de PRUEBA 5** ("Agregar cliente para cobrar"). | Cobro conjunto: un solo cheque imputado a dos clientes. |
+| **PRUEBA 5** (90033) | **Retira en mostrador** (no viaja) | Retira en el depósito sin pagar; su deuda se cobra con el cheque de PRUEBA 4. | Pedido sin viaje; cobro de un cliente que no está en el viaje. |
+| **PRUEBA 6** (90034) | **Retenido** (en la ficha: retener entregas) | Aparece bloqueado solo; paga **solo con transferencia**. | Bloqueo automático por retención; transferencia que va a "por confirmar" y no a la rendición (#35). |
 
 Además, en el viaje: **gastos** de nafta (con el vehículo), peón y comida; **fondo** entregado al chofer; un **faltante** chico al rendir.
 
@@ -119,7 +119,7 @@ Además, en el viaje: **gastos** de nafta (con el vehículo), peón y comida; **
 
 - [x] 0.1 Auditoría de base, código, apps y cuentas de Juan (27/10, 13:30).
 - [x] 0.2 Decisiones D1-D6 (27/10).
-- [ ] 0.3 Script complementario `20261027d_prueba2_preparar.sql` (lo escribo con tu OK): con simulacro y copia en `archivo_pruebas`, pasa a "eliminado" los pedidos 001939, 001940, 001941, 001942 y 001990, y le cambia el código al cliente 3 a "PRUEBA-R1". No toca nada real.
+- [x] 0.3 Script complementario `supabase/migrations/20261027d_prueba2_preparar.sql` (escrito 27/10, rama `prueba-integral-2`; probado en lectura: encuentra los 5 pedidos, 18 renglones de kardex y el cliente 3; hoy se niega porque esos pedidos todavía tienen 9 comprobantes, como corresponde antes de la puesta a cero). Juan lo aplica en Supabase (instala las funciones, no cambia datos). Con simulacro y copia en `archivo_pruebas`, pasa a "eliminado" los pedidos 001939, 001940, 001941, 001942 y 001990, y le cambia el código al cliente 3 a "PRUEBA-R1". No toca nada real.
 - [ ] 0.4 Pasarles el aviso a los agentes con la hora de inicio.
 - [ ] 0.5 NuStar: en las 3 apps, que no quede nada "pendiente de sincronizar" antes de borrar datos (si queda algo, se pierde).
 - [ ] 0.6 Juan tiene el `.chr` del sistema viejo del día.
@@ -131,7 +131,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 - [ ] 1.1 Foto de la base antes (la saco yo): clientes, artículos, proveedores, pedidos, comprobantes con CAE, echeqs propios.
 - [ ] 1.2 `SELECT * FROM cc_puesta_a_cero_simulacro();` → revisamos → `SELECT cc_puesta_a_cero('PONER A CERO');`
 - [ ] 1.3 `SELECT * FROM prueba_limpieza_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba_limpieza('LIMPIAR');`
-- [ ] 1.4 Script de la 0.3: simulacro → ejecución.
+- [ ] 1.4 `SELECT * FROM prueba2_preparar_simulacro();` (la última fila tiene que dar 0) → `SELECT prueba2_preparar('PREPARAR');`
 - [ ] 1.5 `SELECT * FROM pedidos_sistema_viejo_simulacro(now(), '{}');` → `SELECT pedidos_pasar_a_sistema_viejo(now(), '{}', 'PASAR');` (pasan los reales nuevos, incluido el 001986).
 - [ ] 1.6 Foto después: 0 comprobantes sin CAE, 12 con CAE ($0), 0 cobros, 0 devoluciones, 0 billetera, 0 comisiones cobradas, 0 viajes, 0 preparaciones, cola vacía, todos los saldos en $0, bancos y cajas en $0, clientes/artículos/proveedores sin cambios contra la 1.1.
 - [ ] 1.7 **Anotar la hora de inicio** (arriba, en "Control fiscal") y en el aviso.
@@ -150,7 +150,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 - [ ] 2.1 Vista previa del `.chr` completo: los clientes con error van **aparte** y no frenan al resto (#5).
 - [ ] 2.2 En la vista previa: el texto libre entra como ajuste (#6), las cuentas de empleados van a la cuenta personal (#7), se toma la **segunda** columna de saldo (#8), los PRES viejos quedan en punto de venta **0002** (#18).
-- [ ] 2.3 Casos raros: 56 y 1381 (cambiaron de dueño), 765 y 766 (no existen en gmv2), que **nada** caiga en el cliente 3 (A1) ni en los PRUEBA 99901-99906.
+- [ ] 2.3 Casos raros: 56 y 1381 (cambiaron de dueño), 765 y 766 (no existen en gmv2), que **nada** caiga en el cliente 3 (A1) ni en los PRUEBA 90029-90034.
 - [ ] 2.4 Si el reporte trae deuda de **tu** cuenta como empleado, se anota: rompe el "Juan en $0". Se decide en el momento.
 - [ ] 2.5 Confirmar. Total importado = total del reporte, al peso.
 - [ ] 2.6 La deuda de 556 se ve igual en la base, la ficha del ERP, la antigüedad del tablero y la app vendedor.
@@ -158,7 +158,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Fase 3 — Altas y venta desde la app Vendedor
 
-- [ ] 3.1 Alta en `/clientes` de PRUEBA 1 a 6 con los códigos 99901-99906, vos de vendedor, Presupuesto, Neco. PRUEBA 5 "Retira en mostrador". PRUEBA 6 con "retener entregas".
+- [ ] 3.1 Alta en `/clientes` de PRUEBA 1 a 6 con los códigos 90029-90034, vos de vendedor, Presupuesto, Neco. PRUEBA 5 "Retira en mostrador". PRUEBA 6 con "retener entregas".
 - [ ] 3.2 Los 6 aparecen en la app vendedor después de "Actualizar", con saldo $0.
 - [ ] 3.3 Pedidos desde la app: 199; 1190-A (10 % contado tildado al finalizar, el total en vivo cambia, #13); 1190-B; 556-A (un renglón de 36); 556-B (va a quedar todo faltante); PRUEBA 1 a 6, uno cada uno.
 - [ ] 3.4 Ningún renglón en "Factura". Comisión vendida igual en la app y en la base. Los pedidos aparecen en el ERP con vos de vendedor.
@@ -247,13 +247,13 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 - [ ] 10.1 Resumen de problemas por gravedad y por dueño; traspasos escritos.
 - [ ] 10.2 Lo que dejó la prueba en la base y cómo se limpia el día del pase.
-- [ ] 10.3 Script para borrar por número los pedidos de esta prueba y desactivar los clientes PRUEBA (la puesta a cero no borra pedidos ni clientes).
+- [ ] 10.3 Script para borrar por número los pedidos de esta prueba y eliminar los clientes PRUEBA (la puesta a cero no borra pedidos ni clientes).
 
 ---
 
 ## Cada mañana mientras dure la prueba
 
-- [ ] Pasar los pedidos reales nuevos: `SELECT pedidos_pasar_a_sistema_viejo(now(), '{1190,199,556,99901,99902,99903,99904,99905,99906}', 'PASAR');`
+- [ ] Pasar los pedidos reales nuevos: `SELECT pedidos_pasar_a_sistema_viejo(now(), '{1190,199,556,90029,90030,90031,90032,90033,90034}', 'PASAR');`
 - [ ] **Ojo:** si entra un pedido **real** de 1190, 199 o 556, no se pasa solo (están excluidos) y se mezcla con la prueba. Lo miro yo cada mañana y lo anotamos.
 - [ ] Control fiscal = 0.
 
@@ -262,10 +262,11 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | Fecha | Qué | Dónde | Cómo se deshace | ¿Deshecho? |
 |---|---|---|---|---|
 | 27/10 | Cliente 3 "TEST-R1 REFACTURAR" desactivado por Juan (tacho) | `clientes` | Era de prueba de un agente: no se deshace | — |
-| | Clientes PRUEBA 1 a 6 (99901-99906) dados de alta | `clientes` | Desactivarlos al terminar (10.3) | |
+| | Clientes PRUEBA 1 a 6 (90029-90034) dados de alta | `clientes` | Eliminarlos al terminar (10.3) | |
 
 ## Problemas encontrados durante la prueba
 
 | # | Fase | Qué pasó | Gravedad | Dueño | Estado |
 |---|---|---|---|---|---|
-| P2-01 | Auditoría | Alta de cliente sin código toma el primer número libre: antes del pase puede pisar un código del sistema viejo (A7). | Media (para el pase) | cuentas corrientes / frontend | abierto |
+| P2-01 | Auditoría | Alta de cliente toma el primer número libre (así el de prueba agarró el 3). **Regla de Juan:** el siguiente al más alto (hoy 90029), en el ERP, en la app vendedor y en la base. | Media (para el pase) | ⚠ a confirmar por Juan | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
+| P2-02 | 0 (D2) | El tacho de `/clientes` **desactiva** el cliente en vez de eliminarlo; sigue con su código, pedidos, comprobantes y deuda. **Regla de Juan:** eliminar de verdad; si tiene deuda, cartel "¿Asumir deuda y eliminarlo de todas formas?". Falta decidir qué pasa con clientes con comprobantes con CAE. | Media | ⚠ a confirmar por Juan (sugerido: Frontend + Cuentas corrientes) | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |

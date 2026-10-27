@@ -11,7 +11,7 @@ Juan va a recorrer de punta a punta la salida de mercadería sobre la **base de 
 2. **No pasen a main** cambios que toquen la salida (pedidos, comprobantes, viajes, cobros, devoluciones, rendiciones, billeteras, comisiones, cuentas corrientes, `/apertura`, apps) sin el OK de Juan. Si es urgente, avisen en la sesión de la prueba.
 3. **No apliquen migraciones** en Supabase sin el OK de Juan.
 4. **No instalen APKs en el NuStar** ni le borren datos: lo está usando la prueba.
-5. **Clientes de la prueba — no tocar:** 199, 1190, 556 y los clientes "PRUEBA" con códigos 99901 a 99906. Las cuentas de Juan Cruz Rossi (vendedor, chofer y cuenta personal 194) también son de la prueba.
+5. **Clientes de la prueba — no tocar:** 199, 1190, 556 y los clientes "PRUEBA" con códigos 90029 a 90034. Las cuentas de Juan Cruz Rossi (vendedor, chofer y cuenta personal 194) también son de la prueba.
 6. **Nunca se emite un comprobante fiscal** en la prueba. Si su código toca generar, anular, notas de crédito o débito, el 10 % contado o devoluciones, avisen antes de pasarlo a main.
 
 ## Cómo les llegan los problemas
