@@ -73,6 +73,10 @@ Entre el 23 y el 25/10 Juan hizo, con esta sesión, el **recorrido completo de s
 | ~~34~~ | ~~Cambiar el color del cheque en /caja y en la cartera~~ | Frontend | **Hecho 26/10 (a9eecd3, en main 0af7935)**: en Caja se toca el color del cheque antes de confirmar (`color_cheques_cambio` en `PATCH /api/pagos/[id]/confirmar` → `cambiarColorChequesPago`); en Cheques, tocando el color de un cheque de tercero en cartera (`PATCH /api/cheques/[id]/color`). La regla automática no cambió |
 | ~~40~~ | ~~Chofer "d6ac25bb" sin nombre en el tablero de Finanzas~~ | Frontend | **Hecho 26/10 (78d66d5, en main 0af7935)**: `lib/finanzas/nombres-cobradores.ts` busca en vendedores y usuarios; aplicado en tablero, panel y cajas. Sin migración |
 | 9, 12, 4 | Datos: clientes 56, 1381, 765 y 766; artículos mal cargados; recepciones de prueba | Oficina (Juan) | Pendiente |
+| P2-01 | Código de cliente nuevo = el siguiente al más alto (ERP, app vendedor y base) | **Cambios general** (agente nuevo, 27/10) | Pendiente (ver §8) |
+| P2-02 | Eliminar un cliente de verdad, con cartel "¿Asumir deuda y eliminarlo de todas formas?" | **Cambios general** | Pendiente: faltan 3 decisiones de Juan (ver §8) |
+
+**Agente "Cambios general" (Juan, 27/10):** se hace cargo de todo problema que no le corresponde claramente a un agente existente (cuentas corrientes, frontend, listas de precios y descuentos, hojas de ruta/viajes y cobranzas, apps). Ante la duda de dueño, va a Cambios general.
 
 ---
 
@@ -438,7 +442,7 @@ Lo que salió de la revisión, con un número nuevo para seguir la misma tabla. 
 
 Roadmap: [`PRUEBA-INTEGRAL-SALIDA-2.md`](PRUEBA-INTEGRAL-SALIDA-2.md). Mientras dure la prueba, leer [`AVISO-AGENTES-PRUEBA-2.md`](AVISO-AGENTES-PRUEBA-2.md): nada de probar en producción.
 
-### P2-01 — Código de un cliente nuevo: el siguiente al último, no el primer libre · ⚠ dueño a confirmar por Juan
+### P2-01 — Código de un cliente nuevo: el siguiente al último, no el primer libre · Dueño: Cambios general
 
 **Regla de Juan (27/10):** el cliente nuevo recibe **el número siguiente al código más alto** (hoy el más alto es 90028 → el próximo es **90029**). Nunca se reusa un hueco (3, 4, 765…).
 
@@ -451,7 +455,7 @@ Roadmap: [`PRUEBA-INTEGRAL-SALIDA-2.md`](PRUEBA-INTEGRAL-SALIDA-2.md). Mientras 
 
 Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 
-### P2-02 — "Eliminar" un cliente lo desactiva en vez de eliminarlo · ⚠ dueño a confirmar por Juan (sugerido: Frontend + Cuentas corrientes)
+### P2-02 — "Eliminar" un cliente lo desactiva en vez de eliminarlo · Dueño: Cambios general
 
 **Qué pasa hoy:** el tacho de `/clientes` (`app/clientes/page.tsx:219-226`) pregunta "¿Está seguro de eliminar este cliente?" y hace `update({ activo: false })`: el cliente sigue en la base, con su código ocupado, sus pedidos, comprobantes y saldo, y aparece en "Inactivos". Visto con el cliente 3 "TEST-R1 REFACTURAR" (desactivado por Juan el 27/10 con deuda de $26.500).
 

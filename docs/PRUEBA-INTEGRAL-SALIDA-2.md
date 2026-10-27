@@ -9,7 +9,7 @@ Aviso para los otros agentes: [`AVISO-AGENTES-PRUEBA-2.md`](AVISO-AGENTES-PRUEBA
 1. **Cero comprobantes fiscales.** Ni facturas, ni notas de crédito, ni notas de débito. Solo Presupuestos (PRES) y Reversas (REV). Si sale uno fiscal, es un error encontrado: se anota, se para y se decide con Juan.
 2. **Los datos reales no se tocan:** comprobantes con CAE, artículos, clientes, proveedores y los pedidos reales (contenido, artículos, condiciones). Si algo real molesta para la prueba, se esconde, y queda anotado en "Cosas escondidas o forzadas" para deshacerlo después.
 3. **Se verifica en la base, no solo en la pantalla.** Cada casilla se tilda cuando cuadra en las dos.
-4. **Cada problema va con número** (P2-01, P2-02…) a la tabla "Problemas encontrados", con su dueño. No se arregla código de otra área: se le escribe el traspaso al agente dueño.
+4. **Cada problema va con número** (P2-01, P2-02…) a la tabla "Problemas encontrados", con su dueño. Si no le corresponde claramente a un agente existente, el dueño es **Cambios general** (agente nuevo, Juan 27/10). No se arregla código de otra área: se le escribe el traspaso al agente dueño.
 5. **Nada pasa a main sin el OK de Juan.** Este documento vive en la rama `prueba-integral-2`.
 
 ## Control fiscal (se corre en cada fase)
@@ -119,7 +119,7 @@ Además, en el viaje: **gastos** de nafta (con el vehículo), peón y comida; **
 
 - [x] 0.1 Auditoría de base, código, apps y cuentas de Juan (27/10, 13:30).
 - [x] 0.2 Decisiones D1-D6 (27/10).
-- [x] 0.3 Script complementario `supabase/migrations/20261027d_prueba2_preparar.sql` (escrito 27/10, rama `prueba-integral-2`; probado en lectura: encuentra los 5 pedidos, 18 renglones de kardex y el cliente 3; hoy se niega porque esos pedidos todavía tienen 9 comprobantes, como corresponde antes de la puesta a cero). Juan lo aplica en Supabase (instala las funciones, no cambia datos). Con simulacro y copia en `archivo_pruebas`, pasa a "eliminado" los pedidos 001939, 001940, 001941, 001942 y 001990, y le cambia el código al cliente 3 a "PRUEBA-R1". No toca nada real.
+- [x] 0.3 (aplicado por Juan 27/10; verificado: las 3 funciones prueba2_* instaladas, todavía no se corrió) Script complementario `supabase/migrations/20261027d_prueba2_preparar.sql` (escrito 27/10, rama `prueba-integral-2`; probado en lectura: encuentra los 5 pedidos, 18 renglones de kardex y el cliente 3; hoy se niega porque esos pedidos todavía tienen 9 comprobantes, como corresponde antes de la puesta a cero). Juan lo aplica en Supabase (instala las funciones, no cambia datos). Con simulacro y copia en `archivo_pruebas`, pasa a "eliminado" los pedidos 001939, 001940, 001941, 001942 y 001990, y le cambia el código al cliente 3 a "PRUEBA-R1". No toca nada real.
 - [ ] 0.4 Pasarles el aviso a los agentes con la hora de inicio.
 - [ ] 0.5 NuStar: en las 3 apps, que no quede nada "pendiente de sincronizar" antes de borrar datos (si queda algo, se pierde).
 - [ ] 0.6 Juan tiene el `.chr` del sistema viejo del día.
@@ -268,5 +268,5 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 | # | Fase | Qué pasó | Gravedad | Dueño | Estado |
 |---|---|---|---|---|---|
-| P2-01 | Auditoría | Alta de cliente toma el primer número libre (así el de prueba agarró el 3). **Regla de Juan:** el siguiente al más alto (hoy 90029), en el ERP, en la app vendedor y en la base. | Media (para el pase) | ⚠ a confirmar por Juan | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
-| P2-02 | 0 (D2) | El tacho de `/clientes` **desactiva** el cliente en vez de eliminarlo; sigue con su código, pedidos, comprobantes y deuda. **Regla de Juan:** eliminar de verdad; si tiene deuda, cartel "¿Asumir deuda y eliminarlo de todas formas?". Falta decidir qué pasa con clientes con comprobantes con CAE. | Media | ⚠ a confirmar por Juan (sugerido: Frontend + Cuentas corrientes) | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
+| P2-01 | Auditoría | Alta de cliente toma el primer número libre (así el de prueba agarró el 3). **Regla de Juan:** el siguiente al más alto (hoy 90029), en el ERP, en la app vendedor y en la base. | Media (para el pase) | Cambios general | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
+| P2-02 | 0 (D2) | El tacho de `/clientes` **desactiva** el cliente en vez de eliminarlo; sigue con su código, pedidos, comprobantes y deuda. **Regla de Juan:** eliminar de verdad; si tiene deuda, cartel "¿Asumir deuda y eliminarlo de todas formas?". Falta decidir qué pasa con clientes con comprobantes con CAE. | Media | Cambios general | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
