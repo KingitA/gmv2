@@ -9,10 +9,11 @@
 //  3. Cruza entre sí lo que quedó abierto de esta anulación: el inverso del 10 %
 //     contado es un DÉBITO (ND/PRES) y el de cada comprobante un CRÉDITO (NC/REV);
 //     sin el cruce quedaban los dos "pendientes" por el mismo importe.
-//  4. Lo que el cliente ya pagó queda A FAVOR (regla 3 de Juan, 26/10): es el
-//     crédito que le queda a la NC/REV de la anulación; no se reimputa solo (la
-//     oficina lo usa en el cobro nuevo, /caja "Tiene a favor", #37).
-//  5. Sin comprobantes vivos: el pedido vuelve a "pendiente_facturacion", se le
+//  4. Lo que el cliente ya pagó IMPUTADO A ESTE PEDIDO es el crédito que le
+//     queda a la NC/REV de la anulación. Al volver a generar, pasa al comprobante
+//     nuevo de este pedido (lib/pedidos/refacturar.ts, regla del dueño 27/10:
+//     respeta lo que eligió quien cobró). Lo que estaba a cuenta sigue a cuenta.
+//  5. Sin comprobantes vivos: el pedido QUEDA EN SU ESTADO (27/10), se le
 //     saca el 10 % contado y se resincroniza el kardex (las líneas dejan de
 //     estar vinculadas a un comprobante vivo).
 //
@@ -22,7 +23,7 @@
 import { anularComprobante, CorteAnulacion, type ResultadoAnulacion } from "@/lib/comprobantes/anular-comprobante"
 import { comprobantesDePedidos } from "@/lib/comprobantes/comprobantes-de-pedido"
 import { sincronizarKardexPedido } from "@/lib/kardex/sincronizar-pedido"
-import { ESTADO_TRAS_ANULAR, evaluarAnulacionPedido } from "./anulacion-pedido"
+import { evaluarAnulacionPedido } from "./anulacion-pedido"
 
 const CREDITOS = new Set(["NC", "NCA", "NCB", "NCC", "REV"])
 const DEBITOS_VENTA = new Set(["FA", "FB", "FC", "PRES", "ND", "NDA", "NDB", "NDC"])
@@ -121,18 +122,17 @@ export async function anularComprobantesPedido(supabase: any, pedidoId: string, 
       .reduce((s: number, c: any) => s + Math.max(0, -Number(c.saldo_pendiente || 0)), 0),
   )
 
-  // ── 5. Sin comprobantes vivos: el pedido vuelve a Pendiente Facturación ──
+  // ── 5. Sin comprobantes vivos: el pedido sigue en su estado, kardex al día ──
   const quedan = (await comprobantesDePedidos(supabase, [pedidoId])).filter(
     (c) => c.pedido_id === pedidoId && !c.anulado_en && DEBITOS_VENTA.has(c.tipo_comprobante),
   )
-  let estado = ev.estado
+  const estado = ev.estado
   if (!quedan.length) {
-    const { error } = await supabase
-      .from("pedidos")
-      .update({ estado: ESTADO_TRAS_ANULAR, pago_contado_10: false })
-      .eq("id", pedidoId)
-    if (error) advertencias.push(`Los comprobantes quedaron anulados, pero el pedido no pasó a Pendiente Facturación (${error.message}).`)
-    else estado = ESTADO_TRAS_ANULAR
+    // El pedido QUEDA EN SU ESTADO (regla del dueño 27/10): refacturar solo cambia
+    // los comprobantes. Sin débitos vivos, sus condiciones ya son editables
+    // (puedeEditarCondiciones) y Generar lo vuelve a facturar sin tocar el estado.
+    const { error } = await supabase.from("pedidos").update({ pago_contado_10: false }).eq("id", pedidoId)
+    if (error) advertencias.push(`No se pudo sacar la marca de 10 % contado del pedido (${error.message}).`)
     try {
       await sincronizarKardexPedido(supabase, pedidoId, { operadorId: usuarioId })
     } catch (e: any) {

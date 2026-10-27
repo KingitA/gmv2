@@ -45,16 +45,40 @@ export function esPedidoEditable(estado: string | null | undefined): boolean {
   return !!estado && (ESTADOS_EDITABLES as readonly string[]).includes(estado)
 }
 
+/** Comprobantes que FACTURAN un pedido. Las NC/REV (espejo de una anulación,
+ *  devolución, 10 % contado) no: un pedido sin débitos vivos no está facturado. */
+export const TIPOS_FACTURA_PEDIDO = ["FA", "FB", "FC", "PRES", "ND", "NDA", "NDB", "NDC"] as const
+
+const ESTADOS_SIN_CONDICIONES = ["eliminado", "sistema_viejo"]
+
 /**
  * Condiciones del pedido (lista, método de facturación, descuentos por segmento,
  * contado 10 %, mercadería %, condiciones por proveedor/marca). Regla del dueño
  * (23/10/2026, #16): los ARTÍCULOS y CANTIDADES se bloquean al preparar (son los
- * del depósito), pero las condiciones se pueden cambiar hasta que el pedido esté
- * FACTURADO; al guardar se reprecia solo. Además del estado, el servidor exige que
- * el pedido no tenga comprobantes vivos (assertCondicionesEditables).
+ * del depósito), pero las condiciones se pueden cambiar mientras el pedido NO
+ * esté facturado; al guardar se reprecia solo.
+ * Regla del dueño (27/10/2026, #19/#20): después de anular sus comprobantes para
+ * refacturar, el pedido QUEDA EN SU ESTADO (en viaje, entregado…): lo que manda
+ * es si le quedan comprobantes vivos que lo facturen (`tieneFacturaViva`), no el
+ * estado. Sin ese dato (pantallas viejas) se toma "pendiente_facturacion" como
+ * el único estado preparado sin facturar.
  */
-export function puedeEditarCondiciones(estado: string | null | undefined): boolean {
-  return esPedidoEditable(estado) || estado === "pendiente_facturacion"
+export function puedeEditarCondiciones(estado: string | null | undefined, tieneFacturaViva?: boolean): boolean {
+  if (esPedidoEditable(estado)) return true
+  if (!estado || ESTADOS_SIN_CONDICIONES.includes(estado)) return false
+  if (tieneFacturaViva === undefined) return estado === "pendiente_facturacion"
+  return !tieneFacturaViva
+}
+
+/**
+ * Estado del pedido al emitir sus comprobantes. Antes de salir pasa a
+ * "facturado"; si ya estaba más adelante (listo, en viaje, entregado, rechazado)
+ * —refacturado después de anular, #19/#20— se queda donde estaba: refacturar
+ * solo cambia los comprobantes, no la logística (regla del dueño 27/10/2026).
+ */
+export function estadoAlFacturar(estadoActual: string | null | undefined): string {
+  const despues = ["facturado", "listo_para_retirar", "listo_para_enviar", "en_viaje", "entregado", "rechazado"]
+  return despues.includes(estadoActual || "") ? (estadoActual as string) : "facturado"
 }
 
 /** Eliminar (baja lógica) sigue la misma regla que editar. */
@@ -102,13 +126,15 @@ export function puedeCambiarEstado(desde: string | null | undefined, hacia: stri
 }
 
 /** Texto para la UI cuando el pedido no se puede modificar. */
-export function motivoBloqueo(estado: string | null | undefined): string | null {
+export function motivoBloqueo(estado: string | null | undefined, tieneFacturaViva?: boolean): string | null {
   if (esPedidoEditable(estado)) return null
   const label = (ESTADO_LABEL[estado || ""] || estado || "").toLowerCase()
   if (estado === "eliminado") return "Este pedido está eliminado y no se puede modificar."
   if (estado === "sistema_viejo") return "Este pedido se cargó antes del pase a producción: se entregó y cobró en el sistema viejo. No se puede modificar."
-  if (puedeEditarCondiciones(estado))
-    return `Este pedido ya está ${label}: los artículos y las cantidades quedaron como los preparó el depósito. Hasta facturarlo podés cambiar las condiciones (lista, método, descuentos, contado) y la forma de entrega.`
+  if (puedeEditarCondiciones(estado, tieneFacturaViva))
+    return `Este pedido está ${label} y sin comprobantes: los artículos y las cantidades quedaron como los preparó el depósito. Podés cambiar las condiciones (lista, método, descuentos, contado) y volver a generar los comprobantes.`
+  if (tieneFacturaViva && !["en_viaje", "entregado", "rechazado"].includes(estado || ""))
+    return `Este pedido ya está facturado: para cambiar las condiciones hay que anular sus comprobantes ("Anular comprobantes"). Podés cambiar la forma de entrega.`
   if (puedeEditarEntrega(estado))
     return `Este pedido ya está ${label}: no se puede modificar. Solo podés cambiar la forma de entrega. Si hay que corregir algo, hacé un pedido nuevo.`
   return `Este pedido ya está ${label} y no se puede modificar. Si hay que corregir algo, hacé un pedido nuevo.`

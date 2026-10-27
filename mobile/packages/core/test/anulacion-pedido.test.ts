@@ -1,8 +1,9 @@
 // Refacturar un pedido (#19/#20) — reglas del dueño 26/10/2026: hasta que se cobra
 // al 100 %, se anula todo (incluido el 10 % contado, no las devoluciones), lo pagado
-// queda a cuenta y el pedido vuelve a "pendiente_facturacion".
+// queda a cuenta. 27/10: el pedido QUEDA EN SU ESTADO; lo pagado contra el pedido pasa al comprobante nuevo.
 import { describe, expect, it } from "vitest"
-import { ESTADO_TRAS_ANULAR, reglaAnulacionPedido, type ComprobanteAnulable } from "../../../../lib/pedidos/anulacion-pedido"
+import { reglaAnulacionPedido, type ComprobanteAnulable } from "../../../../lib/pedidos/anulacion-pedido"
+import { estadoAlFacturar, motivoBloqueo, puedeEditarCondiciones } from "../../../../lib/pedidos/estados"
 
 const comp = (o: Partial<ComprobanteAnulable>): ComprobanteAnulable => ({
   id: "x", tipo_comprobante: "PRES", numero_comprobante: "0001-00000001", total_factura: 1000,
@@ -39,7 +40,26 @@ describe("anular comprobantes de un pedido para refacturar (#19/#20)", () => {
     expect(reglaAnulacionPedido("sistema_viejo", [comp({})]).puede).toBe(false)
   })
 
-  it("después de anular, el pedido vuelve a pendiente de facturación", () => {
-    expect(ESTADO_TRAS_ANULAR).toBe("pendiente_facturacion")
+  it("anulado para refacturar, el pedido sigue en su estado y sus condiciones se pueden cambiar (R1, 27/10)", () => {
+    // Sin débitos vivos (la REV espejo no cuenta): condiciones editables en cualquier estado
+    for (const e of ["facturado", "listo_para_enviar", "en_viaje", "entregado", "pendiente_facturacion"]) {
+      expect(puedeEditarCondiciones(e, false)).toBe(true)
+      expect(puedeEditarCondiciones(e, true)).toBe(false)
+    }
+    expect(puedeEditarCondiciones("impreso", true)).toBe(true) // editable de siempre
+    expect(puedeEditarCondiciones("eliminado", false)).toBe(false)
+    expect(puedeEditarCondiciones("sistema_viejo", false)).toBe(false)
+    // Pantallas sin el dato: solo pendiente de facturación
+    expect(puedeEditarCondiciones("pendiente_facturacion")).toBe(true)
+    expect(puedeEditarCondiciones("entregado")).toBe(false)
+    expect(motivoBloqueo("facturado", true)).toMatch(/Anular comprobantes/)
+  })
+
+  it("al volver a facturar, el pedido no retrocede de estado", () => {
+    expect(estadoAlFacturar("pendiente_facturacion")).toBe("facturado")
+    expect(estadoAlFacturar("impreso")).toBe("facturado")
+    expect(estadoAlFacturar("entregado")).toBe("entregado")
+    expect(estadoAlFacturar("en_viaje")).toBe("en_viaje")
+    expect(estadoAlFacturar("listo_para_retirar")).toBe("listo_para_retirar")
   })
 })

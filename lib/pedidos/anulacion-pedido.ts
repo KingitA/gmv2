@@ -1,24 +1,26 @@
 // Anular los comprobantes de un pedido para refacturarlo (#19/#20) — REGLAS.
 //
-// Regla del dueño (26/10/2026):
-//  - Se puede anular mientras el pedido NO esté cobrado al 100 %: cobrado en
-//    parte se puede refacturar; saldado del todo, se bloquea. El estado del
-//    pedido (facturado, listo, en viaje, entregado) no importa.
+// Reglas del dueño (26/10 y 27/10/2026):
+//  - Se puede anular en CUALQUIER estado (facturado, listo, en viaje,
+//    entregado) mientras el pedido NO esté cobrado al 100 %: cobrado en parte se
+//    puede refacturar (ej.: el cliente pagó una parte al chofer y hay que
+//    rehacerlo; el chofer vuelve después a cobrar lo que resta).
 //  - Se anula TODO: los comprobantes del pedido y las NC/REV del 10 % contado
 //    que les quedaron imputadas. Las NC/REV de DEVOLUCIONES no se tocan (son
 //    mercadería que volvió físicamente, con su propio stock).
-//  - Lo que el cliente ya pagó queda A CUENTA (no se reimputa solo).
-//  - Sin comprobantes vivos, el pedido vuelve a "pendiente_facturacion": las
-//    condiciones son editables (#16, puedeEditarCondiciones), se reprecia y se
-//    vuelve a generar con las cantidades preparadas.
+//  - El pedido QUEDA EN SU ESTADO (entregado sigue entregado, en viaje sigue en
+//    viaje): refacturar solo cambia los comprobantes. Sin débitos vivos las
+//    condiciones son editables (#16, puedeEditarCondiciones con tieneFacturaViva)
+//    y Generar vuelve a emitir con las cantidades preparadas sin tocar el estado
+//    (estadoAlFacturar).
+//  - Lo ya pagado respeta lo que eligió quien cobró: lo imputado a este pedido
+//    pasa al comprobante nuevo de este pedido (refacturar.ts, al volver a
+//    generar); lo que quedó a cuenta sigue a cuenta.
 //
 // La anulación en sí (cuenta corriente, comisión, stock, remito) es de cuentas
 // corrientes: usa `evaluarAnulacionPedido` para saber si se puede y qué anular.
 
 import { comprobantesDePedidos, type ComprobanteDePedido } from "../comprobantes/comprobantes-de-pedido"
-
-/** Estado al que vuelve el pedido cuando ya no le queda ningún comprobante vivo. */
-export const ESTADO_TRAS_ANULAR = "pendiente_facturacion"
 
 const VENTA = new Set(["FA", "FB", "FC", "PRES", "ND", "NDA", "NDB", "NDC"])
 const CREDITO = new Set(["NCA", "NCB", "NCC", "REV"])

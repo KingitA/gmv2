@@ -30,6 +30,7 @@ import {
   puedeCambiarEstado,
   motivoBloqueo,
   ESTADO_LABEL,
+  TIPOS_FACTURA_PEDIDO,
 } from "@/lib/pedidos/estados"
 // Resolución lista/método/bonificaciones: módulo puro compartido con las apps
 // móviles (lib/pricing/resolver.ts). Ver MOBILE.md → "Precios".
@@ -1298,8 +1299,25 @@ export async function actualizarEncabezadoPedido(
   if (error || !pedido) throw new Error("Pedido no encontrado")
 
   const editable = esPedidoEditable(pedido.estado)
-  const condEditables = !editable && puedeEditarCondiciones(pedido.estado) && !(await comprobanteVivoDePedido(supabase, pedidoId))
+  const facturaViva = editable ? null : await comprobanteVivoDePedido(supabase, pedidoId)
+  const condEditables = !editable && puedeEditarCondiciones(pedido.estado, !!facturaViva)
   const update: Record<string, any> = {}
+
+  // Un cambio de condición que no se puede aplicar NO se descarta en silencio
+  // (R1, 27/10): antes contestaba "ok" y Generar volvía a emitir con lo viejo.
+  if (!editable && !condEditables) {
+    const igual = (k: string) =>
+      JSON.stringify(k === "bonif_pedido" ? normalizarBonifPedido(patch[k as keyof typeof patch]) : patch[k as keyof typeof patch] ?? null) ===
+      JSON.stringify(k === "bonif_pedido" ? normalizarBonifPedido(pedido[k]) : pedido[k] ?? null)
+    const bloqueados = CAMPOS_CONDICIONES.filter((k) => k in patch && !igual(k))
+    if (bloqueados.length) {
+      throw new Error(
+        facturaViva
+          ? `El pedido está facturado (${facturaViva.tipo_comprobante} ${facturaViva.numero_comprobante}): para cambiar lista, método, descuentos o contado primero anulá sus comprobantes ("Anular comprobantes").`
+          : motivoBloqueo(pedido.estado, false) || "Las condiciones de este pedido no se pueden cambiar.",
+      )
+    }
+  }
 
   if (editable) {
     for (const k of CAMPOS_ENCABEZADO) if (k in patch) update[k] = patch[k]
@@ -1339,25 +1357,32 @@ export async function actualizarEncabezadoPedido(
   return { success: true, aplicado: Object.keys(update), editable, repreciado: cambioCondicion && opts.repreciar !== false, total }
 }
 
-/** Comprobante vivo (no anulado) del pedido, o null. Con comprobante vivo el precio quedó cerrado. */
+/**
+ * Comprobante vivo que FACTURA el pedido (débito: FA/FB/FC/PRES/ND), o null. Con
+ * uno vivo el precio quedó cerrado. La NC/REV espejo de una anulación lleva el
+ * pedido_id y queda viva (es el crédito del cliente): no cuenta (R1, 27/10) —
+ * mismo criterio que generar y la pantalla del pedido.
+ */
 async function comprobanteVivoDePedido(supabase: any, pedidoId: string): Promise<{ tipo_comprobante: string; numero_comprobante: string } | null> {
   const { data } = await supabase
     .from("comprobantes_venta")
     .select("tipo_comprobante, numero_comprobante")
     .eq("pedido_id", pedidoId)
+    .in("tipo_comprobante", TIPOS_FACTURA_PEDIDO as unknown as string[])
     .is("anulado_en", null)
     .limit(1)
     .maybeSingle()
   return data ?? null
 }
 
-/** Condiciones editables (#16): estado editable o pendiente de facturación, y sin comprobantes vivos. */
+/** Condiciones editables (#16, #19/#20): estado editable, o preparado (en cualquier estado) sin comprobantes vivos que lo facturen. */
 async function assertCondicionesEditables(supabase: any, pedidoId: string) {
   const { data, error } = await supabase.from("pedidos").select("id, estado").eq("id", pedidoId).single()
   if (error || !data) throw new Error("Pedido no encontrado")
-  if (!puedeEditarCondiciones(data.estado)) throw new Error(motivoBloqueo(data.estado) || "El pedido no puede modificarse")
+  if (esPedidoEditable(data.estado)) return data
   const vivo = await comprobanteVivoDePedido(supabase, pedidoId)
   if (vivo) throw new Error(`El pedido ya está facturado (${vivo.tipo_comprobante} ${vivo.numero_comprobante}): para cambiar las condiciones hay que anular los comprobantes.`)
+  if (!puedeEditarCondiciones(data.estado, false)) throw new Error(motivoBloqueo(data.estado, false) || "El pedido no puede modificarse")
   return data
 }
 
@@ -1886,13 +1911,8 @@ export async function repreciarPedidoPreciosActuales(pedidoId: string) {
   if (error || !pedido) throw new Error("Pedido no encontrado")
   if (pedido.estado === "eliminado" || (pedido as any).eliminado_at) throw new Error("El pedido está eliminado.")
 
-  const { data: vivo } = await supabase
-    .from("comprobantes_venta")
-    .select("tipo_comprobante, numero_comprobante")
-    .eq("pedido_id", pedidoId)
-    .is("anulado_en", null)
-    .limit(1)
-    .maybeSingle()
+  // Solo los débitos vivos facturan el pedido (la REV espejo de una anulación no: R1)
+  const vivo = await comprobanteVivoDePedido(supabase, pedidoId)
   if (vivo) {
     throw new Error(`El pedido ya está facturado (${vivo.tipo_comprobante} ${vivo.numero_comprobante}): el precio quedó cerrado. Para cambiarlo hay que anular los comprobantes.`)
   }

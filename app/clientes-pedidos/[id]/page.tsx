@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client"
 import { agregarItemPedido, eliminarItemPedido, guardarItemsPedido, actualizarEncabezadoPedido, guardarCondicionesPedido } from "@/lib/actions/pedidos"
 import { MercaderiaCuposPedido } from "@/components/pedidos/MercaderiaCuposPedido"
 import { SegmentacionCondiciones, condRowsToProveedor, condRowsToMarca, EMPTY_SEGMENTACION, type SegmentacionValue } from "@/components/pedidos/SegmentacionCondiciones"
-import { esPedidoEditable, puedeEditarCondiciones, puedeEditarEntrega, transicionesManuales, motivoBloqueo, ESTADO_LABEL } from "@/lib/pedidos/estados"
+import { esPedidoEditable, puedeEditarCondiciones, puedeEditarEntrega, transicionesManuales, motivoBloqueo, ESTADO_LABEL, TIPOS_FACTURA_PEDIDO } from "@/lib/pedidos/estados"
 import { SEGMENTOS_BONIF, SEGMENTO_LABEL, normalizarBonifPedido, type SegmentoBonif } from "@/lib/pricing/segmento"
 import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
@@ -63,6 +63,8 @@ export default function PedidoEditPage() {
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
   const [vendedores, setVendedores] = useState<any[]>([])
   const [comprobantes, setComprobantes] = useState<any[]>([])
+  // La NC/REV espejo de una anulación lleva el pedido_id y queda viva: no factura el pedido (R1)
+  const tieneFacturaViva = comprobantes.some((c: any) => !c.anulado_en && (TIPOS_FACTURA_PEDIDO as readonly string[]).includes(c.tipo_comprobante))
   const [itemEdits, setItemEdits] = useState<Record<string, ItemEdit>>({})
   // Condiciones por proveedor / marca "solo este pedido" (editor)
   const [segPedido, setSegPedido] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
@@ -267,7 +269,7 @@ export default function PedidoEditPage() {
       // estado si es una transición válida). Si cambia una condición, el servidor
       // reprecia solo (precios de cuando se tomó el pedido) y resincroniza el kardex.
       const editableAhora = esPedidoEditable(pedido?.estado)
-      const condEditableAhora = puedeEditarCondiciones(pedido?.estado)
+      const condEditableAhora = puedeEditarCondiciones(pedido?.estado, tieneFacturaViva)
       // Condiciones por proveedor/marca "solo este pedido": UN solo Guardar.
       const cambioCond = condEditableAhora && JSON.stringify(segPedido) !== JSON.stringify(segPedidoInicial)
       // Si además cambian las condiciones por proveedor/marca, reprecia guardarCondicionesPedido (una sola vez)
@@ -371,9 +373,11 @@ export default function PedidoEditPage() {
   // Trabas por estado (lib/pedidos/estados.ts): editable = todo; preparado sin facturar =
   // condiciones (lista, método, descuentos, contado) + entrega (#16); si no, solo forma de entrega.
   const editable = esPedidoEditable(pedido?.estado)
-  const condEditable = puedeEditarCondiciones(pedido?.estado)
+  // Sin comprobantes vivos que lo facturen (nunca facturado o anulado para refacturar,
+  // en cualquier estado) las condiciones se pueden cambiar (#16, #19/#20)
+  const condEditable = puedeEditarCondiciones(pedido?.estado, tieneFacturaViva)
   const entregaEditable = puedeEditarEntrega(pedido?.estado)
-  const bloqueo = motivoBloqueo(pedido?.estado)
+  const bloqueo = motivoBloqueo(pedido?.estado, tieneFacturaViva)
   const opcionesEstado = [pedido?.estado, ...transicionesManuales(pedido?.estado)].filter(Boolean) as string[]
   const puedeGuardar = editable || condEditable || entregaEditable || opcionesEstado.length > 1
   const liveTotal = items.map(i => getDisplayItem(i)).reduce((sum, i) => sum + (i.precio_final ?? 0) * (i.cantidad ?? 0), 0)

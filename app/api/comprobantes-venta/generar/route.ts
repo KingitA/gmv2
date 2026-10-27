@@ -26,6 +26,8 @@ import { generarRemitosParaPedido, type ResultadoRemitos } from "@/lib/remitos/g
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { recalcularBonificadosPedido, cuposMercaderiaPedido, etiquetasCupos } from "@/lib/pedidos/mercaderia-bonificada"
 import { leerCondicionesCliente } from "@/lib/pedidos/condiciones-pedido"
+import { estadoAlFacturar } from "@/lib/pedidos/estados"
+import { aplicarPagosDelPedidoRefacturado } from "@/lib/pedidos/refacturar"
 import { cuitDigitos, cuitValido, normalizarCuit } from "@/lib/formato"
 
 type CondicionSegmento = {
@@ -598,10 +600,24 @@ export async function POST(request: Request) {
     // no llegaba (permisos, pestaña cerrada, red), el comprobante quedaba emitido
     // pero el pedido seguía "impreso" y editable. Con comprobante emitido, el pedido
     // queda bloqueado sí o sí (lib/pedidos/estados.ts).
+    // Refacturado (#19/#20, regla del dueño 27/10): si el pedido ya estaba más
+    // adelante (listo, en viaje, entregado) se queda donde estaba (estadoAlFacturar).
+    let pagosRefacturado: Awaited<ReturnType<typeof aplicarPagosDelPedidoRefacturado>> | null = null
     if (comprobantesGenerados.length > 0) {
       const { error: estadoErr } = await supabase
-        .from("pedidos").update({ estado: "facturado" }).eq("id", pedido_id)
+        .from("pedidos").update({ estado: estadoAlFacturar((pedido as any).estado) }).eq("id", pedido_id)
       if (estadoErr) console.error("[generar] No se pudo marcar el pedido como facturado:", estadoErr)
+
+      // Lo que el cliente había pagado contra los comprobantes anulados de ESTE
+      // pedido pasa a los nuevos (respeta lo que eligió quien cobró). Lo que estaba
+      // a cuenta sigue a cuenta. Best-effort: si falla, queda el aviso.
+      try {
+        pagosRefacturado = await aplicarPagosDelPedidoRefacturado(
+          supabase, pedido_id, comprobantesGenerados.map((c: any) => c.id).filter(Boolean), auth.user.id,
+        )
+      } catch (e: any) {
+        pagosRefacturado = { aplicados: [], advertencias: [`No se pudo aplicar lo pagado del pedido anterior: ${e?.message || e}. Imputalo a mano desde la cuenta corriente.`] }
+      }
     }
 
     // ─── 9. Generar PDFs y subirlos al bucket ───
@@ -712,6 +728,8 @@ export async function POST(request: Request) {
       ...(anticipoError ? { anticipo_error: anticipoError } : {}),
       remitos,
       ...(advertenciasLibro.length ? { advertencias_libro_mayor: advertenciasLibro } : {}),
+      ...(pagosRefacturado?.aplicados.length ? { pagos_refacturado: pagosRefacturado.aplicados } : {}),
+      ...(pagosRefacturado?.advertencias.length ? { pagos_refacturado_error: pagosRefacturado.advertencias.join(" ") } : {}),
     })
   } catch (error: any) {
     console.error("[Generar Comprobantes] Error:", error)

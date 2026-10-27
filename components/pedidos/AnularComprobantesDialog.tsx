@@ -81,11 +81,11 @@ export function AnularComprobantesDialog({
             <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-800">
               <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
               <p>
-                <strong>Pendiente Facturación:</strong> cambiá las condiciones (Editar pedido) o Repreciar, y volvé a Generar.
+                <strong>Comprobantes anulados.</strong> El pedido sigue en su estado: cambiá las condiciones (Editar pedido) o Repreciar, y volvé a Generar.
               </p>
             </div>
             {resultado.a_favor > 0 && (
-              <p className="text-slate-600">Lo que ya había pagado queda a favor del cliente: <strong>{moneda(resultado.a_favor)}</strong>.</p>
+              <p className="text-slate-600">Lo que ya había pagado contra este pedido (<strong>{moneda(resultado.a_favor)}</strong>) se aplica al comprobante nuevo cuando lo vuelvas a generar.</p>
             )}
             {resultado.advertencias?.map((a, i) => <p key={i} className="text-amber-700">{a}</p>)}
             <div className="flex justify-end"><Button onClick={() => onOpenChange(false)}>Listo</Button></div>
