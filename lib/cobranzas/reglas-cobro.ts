@@ -176,6 +176,27 @@ export function cobroCumple(p: { minimoExigido: number; cobrado: number; descuen
   return num(p.minimoExigido) <= 0 || num(p.cobrado) + num(p.descuentos) + 0.01 >= num(p.minimoExigido)
 }
 
+/**
+ * R4 (27/10): anular un cobro de una parada "NO ENTREGAR SIN COBRAR" que ya quedó
+ * cerrada (entregado / solo cobro). Si sin ese cobro deja de cumplir lo exigido:
+ * con el viaje en curso la parada VUELVE A PENDIENTE (el chofer cobra de nuevo o
+ * marca "no entregado"); con el viaje terminado se FRENA la anulación (la
+ * mercadería ya se dejó: lo corrige la oficina). Sin bloqueo o cumpliendo igual, nada.
+ */
+export function efectoAnulacionEnParada(p: {
+  estado: string
+  bloqueada: boolean
+  minimoExigido: number
+  /** Cobrado en la parada SIN el cobro que se anula */
+  cobradoSin: number
+  descuentos?: number
+  viajeEnCurso: boolean
+}): "nada" | "reabrir" | "frenar" {
+  if (!p.bloqueada || !["entregado", "solo_cobro"].includes(p.estado)) return "nada"
+  if (cobroCumple({ minimoExigido: p.minimoExigido, cobrado: p.cobradoSin, descuentos: p.descuentos })) return "nada"
+  return p.viajeEnCurso ? "reabrir" : "frenar"
+}
+
 export function cierreDeParadaPorCobro(p: ParadaParaCierre): CierrePorCobro | null {
   if (p.estado !== "pendiente") return null
   const cumplido = cobroCumple(p)

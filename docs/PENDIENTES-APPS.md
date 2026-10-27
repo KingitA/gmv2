@@ -40,6 +40,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | Devoluciones "tal cual fue facturado" — servidor, NC/REV y pantallas web | Sesión precios (con OK de Juan; toca `lib/cobranzas`) | Hecho 22/10 (rama `devoluciones-nc-exacta`, merge en main) — ver "Devoluciones tal cual facturado" abajo |
 | ~~D1 — APK Vendedor con el valor de devolución nuevo~~ | App Vendedor | Hecho 23/10, APK v0.4.3 instalada en el NuStar |
 | ~~D2 — APK Chofer con el valor de devolución nuevo~~ | App Chofer | Hecho 23/10, APK v0.3.2 (versionCode 8) instalada en el NuStar; falta la prueba de campo con un pedido facturado real (ver D2) |
+| C7 — Al anular un cobro, el servidor puede devolver `parada_reabierta: true` + `mensaje` (la parada "NO ENTREGAR SIN COBRAR" volvió a pendiente: refrescar la hoja y mostrar el mensaje) o 422 `PARADA_BLOQUEADA_ENTREGADA` con `reintentable: false` (viaje terminado: mostrar el error, no reintentar). R4 del 27/10 | App Chofer | Pendiente (servidor en main 27/10) |
 | D3 — Poner en 0 las devoluciones de prueba antes de producción (dato sucio) | Cuentas corrientes / oficina | Pendiente (día del corte) |
 
 ## Versiones instaladas hoy

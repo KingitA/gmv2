@@ -4,6 +4,7 @@ import { liquidarComisiones } from "@/lib/comisiones/liquidar"
 import { parsearMarcaCreditos, quitarMarcaCreditos, ejecutarCreditosDePago } from "@/lib/cobranzas/creditos"
 import { parsearMarcaAjuste, quitarMarcaAjuste, ejecutarAjusteDePago } from "@/lib/cobranzas/ajuste"
 import { MARCA_CONTADO } from "@/lib/constants"
+import { filtrarYaBonificados, TIPOS_BONIFICABLES } from "@/lib/comprobantes/ya-bonificados"
 
 export interface PostConfirmacionResult {
   bonificacion: { total: number } | null
@@ -72,7 +73,19 @@ export async function procesarPostConfirmacion(
   // débito del 10% de lo usado (dentro de ejecutarCreditosDePago).
   const paresCreditos = parsearMarcaCreditos(pago.observaciones)
   if (paresCreditos.length) {
-    const avisosCreditos = await ejecutarCreditosDePago(supabase, paresCreditos, pagoId)
+    // R5: débitos que este cobro va a bonificar (contado y sin NC/REV de bonificación viva)
+    let debitosQueBonifican = new Set<string>()
+    if (pago.observaciones?.includes(MARCA_CONTADO)) {
+      const { data: debs } = await supabase
+        .from("comprobantes_venta")
+        .select("id, numero_comprobante")
+        .in("id", [...new Set(paresCreditos.map((p) => p.debito_id))])
+        .in("tipo_comprobante", TIPOS_BONIFICABLES)
+        .is("anulado_en", null)
+      const pendientes = await filtrarYaBonificados(supabase, pago.cliente_id, (debs || []) as any[])
+      debitosQueBonifican = new Set(pendientes.map((d: any) => d.id))
+    }
+    const avisosCreditos = await ejecutarCreditosDePago(supabase, paresCreditos, pagoId, debitosQueBonifican)
     if (avisosCreditos.length) {
       console.error("[post-confirmacion] créditos:", avisosCreditos.join(" · "))
       result.bonificacion_error = [result.bonificacion_error, ...avisosCreditos].filter(Boolean).join(" · ")

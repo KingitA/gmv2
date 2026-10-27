@@ -243,6 +243,8 @@ export async function ejecutarCreditosDePago(
   supabase: SupabaseClient,
   pares: ParCredito[],
   pagoId: string,
+  /** R5: débitos que este cobro bonifica con el 10 % contado (todavía sin NC/REV de bonificación) */
+  debitosQueBonifican: Set<string> = new Set(),
 ): Promise<string[]> {
   const avisos: string[] = []
   for (const p of pares) {
@@ -264,10 +266,14 @@ export async function ejecutarCreditosDePago(
           if (debito10 > 0.005) {
             const { data: nc } = await supabase
               .from("comprobantes_venta")
-              .select("cliente_id, tipo_comprobante, numero_comprobante")
+              .select("cliente_id, tipo_comprobante, numero_comprobante, observaciones")
               .eq("id", p.credito_id)
               .single()
-            if (nc) {
+            // R5 (#33, 27/10): una NC/REV de DEVOLUCIÓN imputada a un débito que este
+            // mismo cobro bonifica ya baja la base del 10 % (devueltoPorComprobante en
+            // generar-bonificacion): el débito del 10 % acá sería restarlo dos veces.
+            const yaEnLaBase = String(nc?.observaciones || "").startsWith("Devolución") && debitosQueBonifican.has(p.debito_id)
+            if (nc && !yaEnLaBase) {
               const { error: ajErr } = await supabase.rpc("cc_ajuste_manual", {
                 p_cliente_id: nc.cliente_id,
                 p_tipo: "debito",
