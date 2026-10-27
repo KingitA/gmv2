@@ -433,3 +433,31 @@ Lo que salió de la revisión, con un número nuevo para seguir la misma tabla. 
 - La App Vendedor v0.4.5 ya lo tiene.
 - Ninguna de las tres está instalada en el NuStar todavía.
 - Pendiente menor de la prueba (casilla 0.6): las apps no le ponen nombre al estado "sistema_viejo".
+
+## 8. Segunda prueba integral (27/10) — problemas nuevos
+
+Roadmap: [`PRUEBA-INTEGRAL-SALIDA-2.md`](PRUEBA-INTEGRAL-SALIDA-2.md). Mientras dure la prueba, leer [`AVISO-AGENTES-PRUEBA-2.md`](AVISO-AGENTES-PRUEBA-2.md): nada de probar en producción.
+
+### P2-01 — Código de un cliente nuevo: el siguiente al último, no el primer libre · ⚠ dueño a confirmar por Juan
+
+**Regla de Juan (27/10):** el cliente nuevo recibe **el número siguiente al código más alto** (hoy el más alto es 90028 → el próximo es **90029**). Nunca se reusa un hueco (3, 4, 765…).
+
+**Por qué:** con el "primer libre" (`primer_codigo_libre` / `lib/codigos.ts → primerLibre`), el cliente de prueba de un agente se quedó con el **3**. Antes del pase, un alta en gmv2 puede quedarse con el código de un cliente del sistema viejo que todavía no está acá (765, 766…) y la apertura, que reconoce a los clientes por código, le cargaría esa deuda.
+
+**Dónde:** las tres altas tienen que dar lo mismo:
+- la base: `public.primer_codigo_libre` / `siguiente_codigo_cliente()` y el disparador `trg_codigo_unico` (migración `20261014_codigos_unicos.sql`);
+- `lib/codigos.ts` (`primerLibre`, `siguienteCodigo`), que usan `app/api/codigos/route.ts` y el alta desde la **app vendedor** (`app/api/vendedor/clientes/route.ts`);
+- el comentario de cabecera de `lib/codigos.ts` describe la regla vieja: actualizarlo.
+
+Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
+
+### P2-02 — "Eliminar" un cliente lo desactiva en vez de eliminarlo · ⚠ dueño a confirmar por Juan (sugerido: Frontend + Cuentas corrientes)
+
+**Qué pasa hoy:** el tacho de `/clientes` (`app/clientes/page.tsx:219-226`) pregunta "¿Está seguro de eliminar este cliente?" y hace `update({ activo: false })`: el cliente sigue en la base, con su código ocupado, sus pedidos, comprobantes y saldo, y aparece en "Inactivos". Visto con el cliente 3 "TEST-R1 REFACTURAR" (desactivado por Juan el 27/10 con deuda de $26.500).
+
+**Regla de Juan (27/10):** eliminar tiene que **eliminar** el cliente, no sacarlo de la vista. Si tiene deuda, tiene que aparecer el cartel **"¿Asumir deuda y eliminarlo de todas formas?"**.
+
+**A resolver con Juan antes de programar** (no está decidido):
+- un cliente con **comprobantes con CAE** no se puede borrar de la base sin perder los registros fiscales: ¿qué se hace en ese caso?
+- "asumir deuda": ¿con qué movimiento queda registrada la pérdida (ajuste en su cuenta, cuenta de incobrables)?
+- con pedidos o comprobantes sin CAE pero sin deuda: ¿se borra todo lo suyo o se frena?
