@@ -3,7 +3,7 @@ import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificac
 import { liquidarComisiones } from "@/lib/comisiones/liquidar"
 import { parsearMarcaCreditos, quitarMarcaCreditos, ejecutarCreditosDePago } from "@/lib/cobranzas/creditos"
 import { parsearMarcaAjuste, quitarMarcaAjuste, ejecutarAjusteDePago } from "@/lib/cobranzas/ajuste"
-import { MARCA_CONTADO } from "@/lib/constants"
+import { MARCA_CONTADO, RE_CONTADO_ESPERA, RE_CONTADO_PAR } from "@/lib/constants"
 import { filtrarYaBonificados, TIPOS_BONIFICABLES } from "@/lib/comprobantes/ya-bonificados"
 
 export interface PostConfirmacionResult {
@@ -106,10 +106,48 @@ export async function procesarPostConfirmacion(
       // Candidatos: los imputados por el pago Y los débitos cubiertos por
       // créditos (un débito 100% cubierto por crédito también bonifica — el
       // 10% del crédito ya se debitó en el paso 0: neto correcto).
-      const compIds = [...new Set([
+      let compIds = [...new Set([
         ...montoPorComprobante.keys(),
         ...paresCreditos.map((p) => p.debito_id),
       ])]
+      const limpiarMarcas = (o: string) => o.replace(MARCA_CONTADO, "").replace(RE_CONTADO_PAR, "").replace(RE_CONTADO_ESPERA, "").replace(/\s{2,}/g, " ").trim()
+
+      // R6 (27/10, #35): cobro partido (efectivo + transferencia). El 10 % sale
+      // cuando están confirmadas LAS DOS partes, sobre los comprobantes de las dos.
+      const clavePar = pago.observaciones.match(RE_CONTADO_PAR)?.[1]
+      let esperar = false
+      if (clavePar) {
+        const { data: socio } = await supabase
+          .from("pagos_clientes")
+          .select("id, estado, observaciones")
+          .eq("cliente_id", pago.cliente_id)
+          .neq("id", pagoId)
+          .like("observaciones", `%[CONTADO_PAR:${clavePar}]%`)
+          .limit(1)
+          .maybeSingle()
+        const socioId = socio?.id
+        const est = String(socio?.estado || "")
+        if (est === "pendiente" || est === "pendiente_rendicion") {
+          esperar = true
+          const esperaObs = `${pago.observaciones.replace(RE_CONTADO_ESPERA, "").trim()} [CONTADO_ESPERA:${compIds.join(",")}]`
+          await supabase.from("pagos_clientes").update({ observaciones: esperaObs }).eq("id", pagoId)
+          pago.observaciones = esperaObs
+        } else if (est === "confirmado") {
+          const { data: impsSocio } = await supabase
+            .from("imputaciones")
+            .select("comprobante_id")
+            .eq("pago_id", socioId)
+            .eq("estado", "confirmado")
+            .not("comprobante_id", "is", null)
+          const espera = (String(socio?.observaciones || "").match(RE_CONTADO_ESPERA)?.[1] || "").split(",").filter(Boolean)
+          compIds = [...new Set([...compIds, ...(impsSocio || []).map((i: any) => i.comprobante_id), ...espera])]
+          await supabase.from("pagos_clientes").update({ observaciones: limpiarMarcas(String(socio?.observaciones || "")) || null }).eq("id", socioId)
+        } else {
+          // La otra parte se rechazó o anuló: el cobro dejó de ser contado
+          compIds = []
+          result.bonificacion_error = "La otra parte del cobro (efectivo / transferencia) no se confirmó: no corresponde el 10 % contado."
+        }
+      }
       let bonificables: string[] = []
       if (compIds.length) {
         const { data: comps } = await supabase
@@ -124,7 +162,7 @@ export async function procesarPostConfirmacion(
         bonificables = (comps || []).map((c: any) => c.id)
       }
 
-      if (bonificables.length) {
+      if (!esperar && bonificables.length) {
         // REGLA 07/10 (dueño, reemplaza la del 01/10): la NC es por el 10% del
         // TOTAL de cada comprobante, UNA sola vez, aunque este cobro pague solo
         // una parte. Sin fracción = completa; el guard de generarBonificacionContado
@@ -137,11 +175,14 @@ export async function procesarPostConfirmacion(
         if (r.total_bonificacion > 0) result.bonificacion = { total: r.total_bonificacion }
         if (r.advertencias?.length) result.bonificacion_error = r.advertencias.join(" · ")
       }
-      // Retirar la marca (aunque no hubiera nada para bonificar): idempotencia
-      await supabase
-        .from("pagos_clientes")
-        .update({ observaciones: pago.observaciones.replace(MARCA_CONTADO, "").trim() || null })
-        .eq("id", pagoId)
+      // Retirar la marca (aunque no hubiera nada para bonificar): idempotencia.
+      // Si espera a la otra parte (R6), la marca queda hasta que esa se confirme.
+      if (!esperar) {
+        await supabase
+          .from("pagos_clientes")
+          .update({ observaciones: limpiarMarcas(pago.observaciones) || null })
+          .eq("id", pagoId)
+      }
     }
   } catch (bonifErr: any) {
     console.error("[post-confirmacion] bonificación 10% diferida falló:", bonifErr?.message)

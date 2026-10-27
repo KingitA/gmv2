@@ -48,3 +48,11 @@ export const CONDICIONES_PAGO = [
 // detecta la marca, genera la bonificación sobre los comprobantes imputados y
 // la retira (idempotencia). Así el 10% no se saltea en ningún camino.
 export const MARCA_CONTADO = "[10% CONTADO]"
+
+// R6 (27/10, #35): un cobro de la calle con efectivo + transferencia se parte en
+// dos pagos. Los dos llevan MARCA_CONTADO y la misma marca de par: el 10 % se emite
+// UNA vez, cuando están confirmados LOS DOS (si uno se rechaza, no hay contado).
+// Mientras espera al otro, el que se confirmó guarda sus candidatos en ESPERA.
+export const marcaContadoPar = (clave: string) => `[CONTADO_PAR:${clave}]`
+export const RE_CONTADO_PAR = /\[CONTADO_PAR:([0-9a-f-]{36})\]/
+export const RE_CONTADO_ESPERA = /\[CONTADO_ESPERA:([0-9a-f,-]*)\]/

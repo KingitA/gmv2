@@ -46,7 +46,30 @@ export { PREFIJO_AJUSTE_APERTURA }
 /** Clave de idempotencia de un ajuste: el mismo número de renglón trae varios textos */
 const claveAjuste = (r: RenglonApertura) => `[ap:${r.numero_original}|${r.descripcion}|${r2(r.pendiente)}]`
 const soloDigitos = (s: unknown) => String(s || "").replace(/\D/g, "")
-const primeraPalabra = (s: string) => s.toUpperCase().replace(/[^A-ZÑ0-9 ]/g, " ").trim().split(/\s+/)[0] || ""
+// R7 (27/10): el cruce por nombre era "la primera palabra del reporte aparece en
+// el nombre de gmv2" (includes): "LA" o "DON" coincidían con cualquiera. Ahora se
+// comparan palabras enteras y significativas (sin S.A., SRL, DE, LA…).
+const PALABRAS_VACIAS = new Set(["DE", "DEL", "LA", "LAS", "LOS", "EL", "Y", "SA", "SRL", "SAS", "SH", "SOC", "CIA", "HNOS"])
+export function palabrasNombre(s: string): string[] {
+  return String(s || "")
+    .toUpperCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^A-Z0-9 ]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !PALABRAS_VACIAS.has(w))
+}
+/** ¿El nombre del reporte es el mismo cliente que alguno de los nombres de gmv2? */
+export function nombresCoinciden(reporte: string, ...gmv2: Array<string | null | undefined>): boolean {
+  const r = palabrasNombre(reporte)
+  if (!r.length) return true
+  const nombres = gmv2.filter(Boolean) as string[]
+  if (!nombres.length) return true
+  return nombres.some((n) => {
+    const g = new Set(palabrasNombre(n))
+    const comunes = r.filter((w) => g.has(w)).length
+    return comunes >= 2 || (comunes >= 1 && Math.min(r.length, g.size) === 1)
+  })
+}
 
 export interface ClientePrevia extends ClienteApertura {
   cliente_id: string | null
@@ -91,6 +114,9 @@ export async function previsualizarApertura(supabase: SupabaseClient, renglones:
   const porCodigo = new Map<string, any>()
   for (const c of clientes) porCodigo.set(String(c.codigo_cliente).replace(/^0+(?=\d)/, ""), c)
 
+  // R7: cuentas del personal, para no cargar la deuda de un empleado a un cliente (o al revés)
+  const { data: empleados } = await supabase.from("clientes").select("id, codigo_cliente, nombre, nombre_razon_social").eq("es_empleado", true)
+
   const ids = clientes.map((c) => c.id)
   const saldoDe = new Map<string, number>()
   const yaComp = new Set<string>()
@@ -131,8 +157,15 @@ export async function previsualizarApertura(supabase: SupabaseClient, renglones:
 
     let ya = 0
     if (cl) {
-      const nombreG = String(cl.nombre || cl.nombre_razon_social || "").toUpperCase()
-      const nombreCoincide = !nombreG || nombreG.includes(primeraPalabra(g.nombre))
+      const nombreCoincide = nombresCoinciden(g.nombre, cl.nombre, cl.nombre_razon_social)
+      // R7: el código lleva a una cuenta del personal, o el nombre es el de un
+      // empleado y el código lleva a otro cliente: no se carga sin revisar.
+      const empleadoPorNombre = (empleados || []).find((e: any) => e.id !== cl.id && nombresCoinciden(g.nombre, e.nombre, e.nombre_razon_social) && palabrasNombre(g.nombre).length > 0)
+      if (!nombreCoincide && cl.es_empleado) {
+        errores.push(`El ${g.codigo_cliente} en gmv2 es la cuenta del personal de "${cl.nombre || cl.nombre_razon_social}", pero en el reporte es "${g.nombre}". Revisá el código antes de cargarlo (no se carga deuda de otro a una cuenta del personal).`)
+      } else if (!nombreCoincide && empleadoPorNombre) {
+        errores.push(`"${g.nombre}" parece la cuenta del personal de "${empleadoPorNombre.nombre || empleadoPorNombre.nombre_razon_social}" (código ${empleadoPorNombre.codigo_cliente} en gmv2), pero el código ${g.codigo_cliente} es "${cl.nombre || cl.nombre_razon_social}". Revisá el código antes de cargarlo.`)
+      }
       const cuitR = soloDigitos(g.renglones[0]?.cuit)
       const cuitG = soloDigitos(cl.cuit)
       if (cuitR && cuitG && cuitR !== cuitG) {

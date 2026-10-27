@@ -1,6 +1,7 @@
 import { chequeDuplicadoDe, ErrorReglaCobranza, errorDeRpcCobranza, mensajeChequeDuplicado } from "./errores"
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { createHash } from "crypto"
+import { createHash, randomUUID } from "crypto"
+import { MARCA_CONTADO, marcaContadoPar } from "../constants"
 
 /**
  * Alta transaccional de una cobranza vía RPC `cobranza_crear`
@@ -106,7 +107,9 @@ export interface ParteCobranza {
  * Las imputaciones se reparten en orden (primero la parte digital, que se confirma
  * antes); el resto del pago queda a cuenta como siempre. Las marcas de la
  * confirmación ([CREDITOS], [AJUSTE], anticipo) viajan con la parte física; la de
- * contado [10% CONTADO] con las dos (la NC sale una sola vez por comprobante).
+ * contado [10% CONTADO] con las dos, con la misma marca de par
+ * ([CONTADO_PAR:clave], R6 27/10): la NC sale UNA vez, cuando están confirmadas las
+ * dos (post-confirmacion.ts); si se rechaza una, no hay 10 %.
  * `pago_id` = la parte física si la hay (los llamadores le cuelgan billetera,
  * fotos, devoluciones y anticipos); `partes` = todas.
  */
@@ -145,12 +148,17 @@ export async function crearCobranza(
     }
   }
   const impsFisico = imps.filter((i) => Number(i.monto_imputado) > 0.005)
-  const obs = params.observaciones || ""
-  const obsDigital = [obs.includes("[10% CONTADO]") ? "[10% CONTADO]" : "", "Transferencia del cobro en la calle: se confirma en Caja (no va en la rendición)"]
+  const contado = (params.observaciones || "").includes(MARCA_CONTADO)
+  // R6: las dos partes llevan la misma marca de par (el 10 % espera a las dos)
+  const par = contado
+    ? marcaContadoPar(params.idempotency_key ? claveDerivada(params.idempotency_key, "par") : randomUUID())
+    : ""
+  const obs = [params.observaciones || "", par].filter(Boolean).join(" ")
+  const obsDigital = [contado ? MARCA_CONTADO : "", par, "Transferencia del cobro en la calle: se confirma en Caja (no va en la rendición)"]
     .filter(Boolean)
     .join(" · ")
 
-  const fisico = await crearCobranzaRpc(supabase, { ...params, monto: montoFisico, detalles: fisicos, imputaciones: impsFisico })
+  const fisico = await crearCobranzaRpc(supabase, { ...params, monto: montoFisico, detalles: fisicos, imputaciones: impsFisico, observaciones: obs || params.observaciones })
   const digital = await crearCobranzaRpc(supabase, {
     ...params,
     idempotency_key: params.idempotency_key ? claveDerivada(params.idempotency_key, "digital") : null,

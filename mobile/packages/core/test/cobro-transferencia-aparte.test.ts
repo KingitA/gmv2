@@ -55,6 +55,10 @@ describe("cobro de la calle con transferencia", () => {
     expect(fisico.observaciones).toContain("[CREDITOS:")
     expect(digital.observaciones).toContain("[10% CONTADO]")
     expect(digital.observaciones).not.toContain("[CREDITOS:")
+    // R6 (27/10): las dos partes llevan la MISMA marca de par; el 10 % sale cuando se confirman las dos
+    const par = String(fisico.observaciones).match(/\[CONTADO_PAR:([0-9a-f-]{36})\]/)?.[1]
+    expect(par).toBeTruthy()
+    expect(digital.observaciones).toContain(`[CONTADO_PAR:${par}]`)
     // Idempotencia: la parte digital tiene su propia clave, estable
     expect(digital.idempotency_key).not.toBe(base.idempotency_key)
     expect(digital.idempotency_key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-a[0-9a-f]{3}-[0-9a-f]{12}$/)
