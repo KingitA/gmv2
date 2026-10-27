@@ -45,7 +45,7 @@ export async function liquidarComisiones(
   const [{ data: comps }, { data: lineas }, { data: imps }, { data: posteados }] = await Promise.all([
     supabase
       .from("comprobantes_venta")
-      .select("id, tipo_comprobante, numero_comprobante, total_factura, saldo_pendiente, anulado_en, estado_pago, cliente_id")
+      .select("id, tipo_comprobante, numero_comprobante, total_factura, saldo_pendiente, anulado_en, estado_pago, cliente_id, pedido_id")
       .in("id", ids),
     supabase
       .from("kardex")
@@ -75,6 +75,26 @@ export async function liquidarComisiones(
   }
   const plataDe = new Map<string, number>()
   for (const i of imps || []) plataDe.set(i.comprobante_id, (plataDe.get(i.comprobante_id) || 0) + (Number(i.monto_imputado) || 0))
+
+  // Refacturar (R3, Juan 27/10): lo que el cliente pagó del comprobante anulado
+  // llega al nuevo del MISMO pedido como crédito de la NC/REV espejo de la
+  // anulación (lib/pedidos/refacturar.ts). Es plata cobrada de verdad: cuenta
+  // para la comisión igual que un cobro. Las NC/REV de devoluciones y del 10 %
+  // contado no (esas sí la reducen).
+  const pedidoDe = new Map((comps || []).filter((c: any) => c.pedido_id).map((c: any) => [c.id, c.pedido_id]))
+  if (pedidoDe.size) {
+    const { data: impsCredito } = await supabase
+      .from("imputaciones")
+      .select("comprobante_id, monto_imputado, credito:comprobantes_venta!imputaciones_credito_comprobante_id_fkey(pedido_id, motivo_ajuste)")
+      .in("comprobante_id", [...pedidoDe.keys()])
+      .eq("estado", "confirmado")
+      .not("credito_comprobante_id", "is", null)
+    for (const i of (impsCredito || []) as any[]) {
+      const cr = Array.isArray(i.credito) ? i.credito[0] : i.credito
+      if (cr?.motivo_ajuste !== "Anulación" || !cr.pedido_id || cr.pedido_id !== pedidoDe.get(i.comprobante_id)) continue
+      plataDe.set(i.comprobante_id, (plataDe.get(i.comprobante_id) || 0) + (Number(i.monto_imputado) || 0))
+    }
+  }
   const posteadoDe = new Map<string, Map<string, number>>()
   for (const p of posteados || []) {
     const m = posteadoDe.get(p.referencia_id) || new Map<string, number>()

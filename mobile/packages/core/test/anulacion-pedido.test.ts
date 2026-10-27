@@ -34,6 +34,24 @@ describe("anular comprobantes de un pedido para refacturar (#19/#20)", () => {
     expect(r.aAnular.map((c) => c.id)).toEqual(["rev10", "fa", "pres"])
   })
 
+  it("R3: la REV del 10 % que cubre también otros pedidos se anula SOLO en la parte de este pedido", () => {
+    const r = reglaAnulacionPedido("entregado", [
+      comp({ id: "pres", saldo_pendiente: 500 }),
+      comp({ id: "rev10", tipo_comprobante: "REV", propio: false, observaciones: "Bonificación contado 10% — presupuestos …", parte_pedido: 100, parte_otros: 50 }),
+    ])
+    expect(r.puede).toBe(true)
+    expect(r.aAnular.map((c) => [c.id, c.parcial])).toEqual([["rev10", 100], ["pres", undefined]])
+  })
+
+  it("R3: una NC fiscal del 10 % compartida con otros comprobantes frena (la ND con CAE la decide una persona)", () => {
+    const r = reglaAnulacionPedido("facturado", [
+      comp({ id: "fa", tipo_comprobante: "FA" }),
+      comp({ id: "nca10", tipo_comprobante: "NCA", propio: false, observaciones: "Bonificación contado 10%", parte_pedido: 100, parte_otros: 30 }),
+    ])
+    expect(r.puede).toBe(false)
+    expect(r.motivo).toMatch(/nota de débito con CAE/)
+  })
+
   it("sin comprobantes vivos, eliminado o del sistema viejo: no", () => {
     expect(reglaAnulacionPedido("facturado", [comp({ anulado_en: "2026-10-01" })]).puede).toBe(false)
     expect(reglaAnulacionPedido("eliminado", [comp({})]).puede).toBe(false)

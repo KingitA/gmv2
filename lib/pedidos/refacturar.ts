@@ -77,5 +77,15 @@ export async function aplicarPagosDelPedidoRefacturado(
       disponible = restanteCredito
     }
   }
+  // La plata pagada antes de refacturar cuenta para la comisión del comprobante
+  // nuevo (lib/comisiones/liquidar.ts, R3 de cuentas corrientes)
+  if (aplicados.length) {
+    try {
+      const { liquidarComisiones } = await import("@/lib/comisiones/liquidar")
+      await liquidarComisiones(supabase, nuevosIds, usuarioId)
+    } catch (e: any) {
+      advertencias.push(`Comisión del pedido refacturado sin recalcular (${e?.message || e}).`)
+    }
+  }
   return { aplicados, advertencias }
 }

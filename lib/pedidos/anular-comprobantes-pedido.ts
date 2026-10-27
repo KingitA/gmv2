@@ -23,6 +23,7 @@
 import { anularComprobante, CorteAnulacion, type ResultadoAnulacion } from "@/lib/comprobantes/anular-comprobante"
 import { comprobantesDePedidos } from "@/lib/comprobantes/comprobantes-de-pedido"
 import { sincronizarKardexPedido } from "@/lib/kardex/sincronizar-pedido"
+import { anularParteContado } from "./anular-parte-contado"
 import { evaluarAnulacionPedido } from "./anulacion-pedido"
 
 const CREDITOS = new Set(["NC", "NCA", "NCB", "NCC", "REV"])
@@ -55,8 +56,22 @@ export async function anularComprobantesPedido(supabase: any, pedidoId: string, 
 
   const anulados: AnuladoDePedido[] = []
   const advertencias: string[] = []
+  let pedidoInfo: { id: string; numero_pedido: string | null } | null = null
   for (const c of ev.aAnular) {
     try {
+      // R3: la REV del 10 % compartida con otros comprobantes se anula solo en la parte de este pedido
+      if (c.parcial) {
+        if (!pedidoInfo) {
+          const { data: p } = await supabase.from("pedidos").select("id, numero_pedido").eq("id", pedidoId).single()
+          pedidoInfo = p || { id: pedidoId, numero_pedido: null }
+        }
+        const pres = await anularParteContado(supabase, c, c.parcial, pedidoInfo!, usuarioId)
+        anulados.push({
+          original: { id: c.id, tipo_comprobante: c.tipo_comprobante, numero_comprobante: c.numero_comprobante, total: c.parcial },
+          inverso: { id: pres.id, tipo_comprobante: pres.tipo_comprobante, numero: pres.numero_comprobante, total: pres.total, cae: null, vencimiento_cae: null },
+        })
+        continue
+      }
       const r = await anularComprobante(supabase, c.id, usuarioId)
       anulados.push({
         original: { id: c.id, tipo_comprobante: c.tipo_comprobante, numero_comprobante: c.numero_comprobante, total: c.total_factura },

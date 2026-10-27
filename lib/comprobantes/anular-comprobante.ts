@@ -507,7 +507,8 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
     }).eq('id', inverso.id)
   } catch (pdfErr: any) {
     console.error('[Anular PDF] Error generando PDF del inverso:', pdfErr.message)
-    await supabase.from('comprobantes_venta').update({ estado_pdf: 'error' }).eq('id', inverso.id).catch(() => {})
+    const { error: pdfMarcaErr } = await supabase.from('comprobantes_venta').update({ estado_pdf: 'error' }).eq('id', inverso.id)
+    if (pdfMarcaErr) console.error('[Anular PDF] No se pudo marcar estado_pdf=error:', pdfMarcaErr.message)
   }
 
   return {

@@ -16,6 +16,11 @@
 //  - Lo ya pagado respeta lo que eligió quien cobró: lo imputado a este pedido
 //    pasa al comprobante nuevo de este pedido (refacturar.ts, al volver a
 //    generar); lo que quedó a cuenta sigue a cuenta.
+//  - R3 (Juan 27/10): la NC/REV del 10 % contado es UNA por cobro y puede cubrir
+//    otros pedidos y deuda vieja. Si cubre solo comprobantes de este pedido se
+//    anula entera; si cubre otros también, se anula SOLO la parte de este pedido
+//    (REV → PRES por esa parte, anular-parte-contado.ts). Si esa nota es fiscal
+//    (NC con CAE) y es compartida, se frena: la ND con CAE la decide una persona.
 //
 // La anulación en sí (cuenta corriente, comisión, stock, remito) es de cuentas
 // corrientes: usa `evaluarAnulacionPedido` para saber si se puede y qué anular.
@@ -40,6 +45,12 @@ export interface ComprobanteAnulable {
   observaciones?: string | null
   /** true = emitido al facturar el pedido (pedido_id); false = NC/REV imputada */
   propio: boolean
+  /** NC/REV del 10 % contado: cuánto de ella está imputado a comprobantes de ESTE pedido */
+  parte_pedido?: number
+  /** NC/REV del 10 % contado: cuánto está imputado a comprobantes de OTROS pedidos o deuda vieja */
+  parte_otros?: number
+  /** Si se anula solo una parte (R3): el monto de esa parte */
+  parcial?: number
 }
 
 export interface ReglaAnulacion {
@@ -64,9 +75,24 @@ export function reglaAnulacionPedido(estado: string | null | undefined, comproba
   const saldado = propios.every((c) => Math.abs(Number(c.saldo_pendiente) || 0) < 0.005)
   if (saldado) return no("El pedido ya está cobrado al 100 %: no se puede refacturar.")
 
+  // R3: la nota del 10 % compartida con otros comprobantes se anula solo en la parte de este pedido
+  const contadoAAnular: ComprobanteAnulable[] = []
+  for (const n of contado) {
+    const otros = Number(n.parte_otros) || 0
+    if (otros <= 0.005) { contadoAAnular.push(n); continue }
+    if (n.tipo_comprobante !== "REV") {
+      return no(
+        `La ${n.tipo_comprobante} ${n.numero_comprobante} del 10 % contado también cubre otros comprobantes del cliente. ` +
+        "Anular solo la parte de este pedido requiere una nota de débito con CAE: hacela desde la oficina antes de refacturar.",
+      )
+    }
+    const parte = Math.round((Number(n.parte_pedido) || 0) * 100) / 100
+    if (parte > 0.005) contadoAAnular.push({ ...n, parcial: parte })
+  }
+
   const fiscalPrimero = (a: ComprobanteAnulable, b: ComprobanteAnulable) =>
     Number(a.tipo_comprobante === "PRES") - Number(b.tipo_comprobante === "PRES") || a.numero_comprobante.localeCompare(b.numero_comprobante)
-  return { puede: true, motivo: null, aAnular: [...contado.sort(fiscalPrimero), ...propios.sort(fiscalPrimero)] }
+  return { puede: true, motivo: null, aAnular: [...contadoAAnular.sort(fiscalPrimero), ...propios.sort(fiscalPrimero)] }
 }
 
 /** Servidor: carga el pedido y sus comprobantes y aplica la regla. */
@@ -79,6 +105,23 @@ export async function evaluarAnulacionPedido(supabase: any, pedidoId: string): P
     ? await supabase.from("comprobantes_venta").select("id, saldo_pendiente, observaciones").in("id", ids)
     : { data: [] as any[] }
   const extraDe = new Map((extra || []).map((x: any) => [x.id, x]))
+  // R3: de cada NC/REV imputada, cuánto va a comprobantes de este pedido y cuánto a otros
+  const propiosIds = new Set(todos.filter((c) => c.pedido_id === pedidoId).map((c) => c.id))
+  const creditoIds = todos.filter((c) => c.pedido_id !== pedidoId).map((c) => c.id)
+  const partes = new Map<string, { pedido: number; otros: number }>()
+  if (creditoIds.length) {
+    const { data: imps } = await supabase
+      .from("imputaciones")
+      .select("credito_comprobante_id, comprobante_id, monto_imputado")
+      .in("credito_comprobante_id", creditoIds)
+      .neq("estado", "anulado")
+    for (const i of imps || []) {
+      const p = partes.get(i.credito_comprobante_id) || { pedido: 0, otros: 0 }
+      if (propiosIds.has(i.comprobante_id)) p.pedido += Number(i.monto_imputado) || 0
+      else p.otros += Number(i.monto_imputado) || 0
+      partes.set(i.credito_comprobante_id, p)
+    }
+  }
   const comprobantes: ComprobanteAnulable[] = todos.map((c) => ({
     id: c.id,
     tipo_comprobante: c.tipo_comprobante,
@@ -88,6 +131,8 @@ export async function evaluarAnulacionPedido(supabase: any, pedidoId: string): P
     anulado_en: c.anulado_en,
     observaciones: (extraDe.get(c.id) as any)?.observaciones ?? null,
     propio: c.pedido_id === pedidoId,
+    parte_pedido: partes.get(c.id)?.pedido,
+    parte_otros: partes.get(c.id)?.otros,
   }))
   return { ...reglaAnulacionPedido(pedido.estado, comprobantes), estado: pedido.estado }
 }
