@@ -171,10 +171,10 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Fase 4 — Preparación en la app Depósito
 
-- [ ] 4.1 Preparar completos todos menos 556-A y 556-B.
-- [ ] 4.2 556-A parcial: 30 de 36. El ERP muestra "30 de 36" (#14).
-- [ ] 4.3 556-B todo faltante: avisa; se puede volver a pendiente o eliminar; no aparece como cobrable en ningún lado (#17/#39).
-- [ ] 4.4 "Reiniciar preparación" funciona (D3 de la app).
+- [x] 4.1 (28/10 11:31-11:41, verificado) Preparar completos todos menos 556-A y 556-B.
+- [x] 4.2 (002018: renglón 60 → 50 PARCIAL, total 86 de 96; falta ver "50 de 60" en el ERP) 556-A parcial: 30 de 36. El ERP muestra "30 de 36" (#14).
+- [ ] 4.3 (002019: 2 renglones FALTANTE, 0 de 20, quedó en pendiente_facturacion; falta ver el aviso en el ERP) 556-B todo faltante: avisa; se puede volver a pendiente o eliminar; no aparece como cobrable en ningún lado (#17/#39).
+- [x] 4.4 NO existe en la app → P2-18.
 
 ## Fase 5 — Gestión en el ERP
 
@@ -295,4 +295,9 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-13 | 3 | App vendedor: un pedido nuevo arranca con todo abierto como el anterior; tiene que arrancar con categorías, subcategorías, novedades, ofertas, habituales y proveedor cerrados. | Baja | App Vendedor | traspaso escrito |
 | P2-14 | 3 | App vendedor: el teclado tapa el campo de cantidad de los artículos de la mitad de abajo. | Media | App Vendedor | traspaso escrito |
 | P2-15 | 3 | ERP: los pedidos "en revisión" no aparecen en /clientes-pedidos salvo con el filtro "Todos". | Media | Frontend | traspaso escrito |
+| P2-16 | 4 | App depósito: la cantidad separada arranca completa con lo pedido; tiene que arrancar vacía. | Alta | App Depósito | traspaso escrito |
+| P2-17 | 4 | App depósito: el teclado tapa Aceptar/Rechazar. | Media | App Depósito | traspaso escrito |
+| P2-18 | 4 | App depósito: no hay "Reiniciar preparación" ni forma de soltar un pedido abierto por error (quedó el real 001945 en preparación). | Alta | App Depósito | traspaso escrito |
+| P2-19 | 4 | App depósito: al finalizar, elegir "Cargar bultos" o "Dejar para después del control". | Media | App Depósito | traspaso escrito |
+| P2-20 | 4 | 001945, 001956 y 001972 (reales) volvieron de sistema viejo a impreso sin registro de quién. | Media | Cambios general | traspaso escrito; preguntar a Juan si fue la oficina |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |

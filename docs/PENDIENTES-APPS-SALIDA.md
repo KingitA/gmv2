@@ -335,3 +335,17 @@ Hoy un pedido nuevo abre todo como quedó en el anterior. Tiene que arrancar en 
 
 ### P2-14 — El teclado tapa el campo de cantidad
 Si se toca la cantidad de un artículo que está de la mitad de la pantalla para abajo, el teclado lo tapa. Al tocarlo, el artículo tiene que **subir** y quedar visible arriba del teclado.
+
+## Segunda prueba integral (28/10) — App Depósito
+
+### P2-16 — "Cantidad que separaste" tiene que arrancar vacía
+Al escanear un artículo, la pantalla muestra la cantidad pedida y la separada **ya completa con lo pedido**. Así el operario aprieta Aceptar sin contar. La separada tiene que arrancar **vacía** y el operario escribe lo que juntó.
+
+### P2-17 — El teclado tapa Aceptar / Rechazar
+Al escribir la cantidad, el teclado tapa los botones Aceptar y Rechazar. El cartel tiene que subir y quedar visible arriba del teclado.
+
+### P2-18 — No existe "Reiniciar preparación" ni forma de soltar un pedido abierto por error
+Juan no encontró en ningún lado "Reiniciar preparación". `reiniciarPicking` existe solo en el servidor (`lib/deposito/picking.ts`, lo usa el ERP para el pedido sin mercadería). Tampoco hay cómo **soltar** un pedido que se abrió por error: en la prueba, el pedido real **001945** quedó "en preparación" con una sesión abierta a nombre de Juan sin ningún artículo escaneado. Agregar en la app: dentro del pedido, "Reiniciar preparación" (vuelve a cero lo separado) y "Soltar pedido" (vuelve a la cola, sin sesión), con confirmación.
+
+### P2-19 — Bultos al finalizar: ahora o después del control
+Regla de Juan (28/10): el pedido se tiene que poder cerrar **con o sin bultos**. Al finalizar, cartel con dos opciones: **"Cargar bultos"** (pedidos de cajas cerradas que no pasan por control: el operario los carga ahí) o **"Dejar para después del control"** (el pedido queda preparado sin bultos; la oficina los carga al armar el viaje, ya existe en el ERP #22). Hoy la app no pregunta nada.

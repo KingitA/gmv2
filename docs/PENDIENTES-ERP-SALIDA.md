@@ -505,3 +505,7 @@ PRUEBA 2 quedó guardado como "PRUEBA 2 " (con espacio al final) y PRUEBA 1 en m
 ### P2-15 — Pedidos "en revisión" no se ven en /clientes-pedidos · Dueño: Frontend
 
 El primer pedido de un cliente nuevo tomado en la app vendedor nace **en revisión** (está bien, regla del 09/10). Pero el listado de `/clientes-pedidos` abre filtrado en Pendiente + Impreso y esos pedidos **no aparecen salvo que se toque "Todos"**: la oficina no se entera de que tiene pedidos para revisar. Que "En revisión" esté incluido en el filtro por defecto (o un aviso arriba: "Hay N pedidos para revisar"). Visto con los pedidos 002020 a 002023 (PRUEBA 1 a 4).
+
+### P2-20 — Cambios de estado de un pedido sin registro de quién · Dueño: Cambios general
+
+Entre el 27/10 15:19 y el 28/10 11:40, los pedidos reales **001945, 001956 y 001972** (del 26/10) pasaron de "sistema viejo" a "impreso", y `pedidos.actualizado_por` quedó vacío: no hay forma de saber quién ni cuándo. El cambio manual de estado (`cambiarEstadoPedidoManual`) y cualquier otro cambio de estado tienen que dejar quién y cuándo (y, si existe, una entrada en un historial del pedido).
