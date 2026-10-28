@@ -318,3 +318,20 @@ Revisado en el código: C1 a C6, V1 a V5, T1 y D3 están **bien hechos**. Pendie
   - C3: en un cobro parcial de un comprobante se descuenta igual el 10 % completo de lo devuelto;
   - ~~C3: en una devolución local que mezcla renglones con y sin contado, `aplica_10` usa `some()` y toda la devolución queda como neta;~~ hecho 27/10 en v0.3.4: se decide por renglón (`bonificado_contado` en cada renglón local; `aplica_10` solo si todos lo son);
   - ~~V4: si la billetera nunca se descargó, el inicio usa `me.billetera.balance` sin descontar los retiros que no salieron (`Inicio.tsx:32`).~~ Hecho 27/10 en v0.4.6: descuenta los retiros sin enviar también en ese caso.
+
+
+## Segunda prueba integral (28/10) — App Vendedor
+
+Roadmap: `PRUEBA-INTEGRAL-SALIDA-2.md`. No pasar a main ni instalar en el NuStar hasta que Juan termine la prueba.
+
+### P2-11 — Pantalla de "pedido terminado": botones en otro orden
+Hoy el botón principal es "Nuevo pedido para el mismo cliente", que es lo que menos se usa. Tiene que quedar: **botón principal azul "Volver al inicio"**, después **"Ver mis pedidos"**, y abajo, en chico (donde hoy está "Volver al inicio"), **"Nuevo pedido para <cliente>"**.
+
+### P2-12 — Cargar la cantidad sin apretar "+"
+Al tomar el pedido, hoy hay que apretar "+" para que el artículo quede cargado. Tiene que alcanzar con **escribir la cantidad**: al pasar a otro artículo, lo escrito queda cargado.
+
+### P2-13 — Pedido nuevo arranca con la pantalla limpia
+Hoy un pedido nuevo abre todo como quedó en el anterior. Tiene que arrancar en la pantalla por defecto: las 3 categorías **cerradas**, con sus subcategorías cerradas, y lo mismo en Novedades, Ofertas, Habituales y Proveedor.
+
+### P2-14 — El teclado tapa el campo de cantidad
+Si se toca la cantidad de un artículo que está de la mitad de la pantalla para abajo, el teclado lo tapa. Al tocarlo, el artículo tiene que **subir** y quedar visible arriba del teclado.

@@ -165,9 +165,9 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 ## Fase 3 — Altas y venta desde la app Vendedor
 
 - [x] 3.1 (28/10, verificado en la base: 90029-90034 con Juan de vendedor, Presupuesto, Consumidor Final, sin CUIT, Neco, Bahía Blanca zona BAHIA, Efectivo; PRUEBA 5 retira en mostrador. El sistema proponía el código **3** = P2-01 confirmado. PRUEBA 6 sin retener: P2-08) Alta en `/clientes` de PRUEBA 1 a 6 con los códigos 90029-90034, vos de vendedor, Presupuesto, Neco. PRUEBA 5 "Retira en mostrador". PRUEBA 6 con "retener entregas".
-- [ ] 3.2 Los 6 aparecen en la app vendedor después de "Actualizar", con saldo $0.
-- [ ] 3.3 Pedidos desde la app: 199; 1190-A (10 % contado tildado al finalizar, el total en vivo cambia, #13); 1190-B; 556-A (un renglón de 36); 556-B (va a quedar todo faltante); PRUEBA 1 a 6, uno cada uno.
-- [ ] 3.4 Ningún renglón en "Factura". Comisión vendida igual en la app y en la base. Los pedidos aparecen en el ERP con vos de vendedor.
+- [x] 3.2 (28/10, Juan) Los 6 aparecen en la app vendedor después de "Actualizar", con saldo $0.
+- [x] 3.3 (28/10 11:11-11:22: 002015 199 $318.366,48; 002016 1190-A $40.570,50 con 10 % contado [bonif_pedido.contado_todo]; 002017 1190-B $359.420,76; 002018 556-A $262.060,44 — sin renglón de 36: el más grande es de **60**, se preparan 50; 002019 556-B $46.587,84; 002020-002025 PRUEBA 1 a 6. Los de PRUEBA 1 a 4 nacieron en revisión (primer pedido, regla del 09/10); PRUEBA 5 y 6 ya en pendiente cuando miré; Juan pasó todos a pendiente) Pedidos desde la app: 199; 1190-A (10 % contado tildado al finalizar, el total en vivo cambia, #13); 1190-B; 556-A (un renglón de 36); 556-B (va a quedar todo faltante); PRUEBA 1 a 6, uno cada uno.
+- [x] 3.4 (todos los renglones Presupuesto; 26 renglones de comisión vendida por $83.511,51; fiscales 0; la app muestra los 001986/001830 como "SISTEMA VIEJO" con nombre lindo) Ningún renglón en "Factura". Comisión vendida igual en la app y en la base. Los pedidos aparecen en el ERP con vos de vendedor.
 
 ## Fase 4 — Preparación en la app Depósito
 
@@ -290,4 +290,9 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-08 | 3 | "Retener entregas" no se puede marcar desde la ficha del cliente, solo desde Viajes o Jarvis. PRUEBA 6 se retiene desde Viajes en la Fase 5. | Media | Frontend | traspaso escrito |
 | P2-09 | 3 | "Retira en Mostrador" guarda condicion_entrega pero no retira_en_deposito, que es lo que mira el precio para no cobrar flete (a verificar con el pedido de PRUEBA 5). | Media | Cambios general | traspaso escrito |
 | P2-10 | 3 | El alta no limpia el nombre ("PRUEBA 2 " con espacio, "prueba1" en minúsculas). | Baja | Frontend | traspaso escrito |
+| P2-11 | 3 | App vendedor: al terminar un pedido, el botón principal tiene que ser "Volver al inicio", después "Ver mis pedidos" y en chico "Nuevo pedido para…". | Baja | App Vendedor | traspaso escrito (PENDIENTES-APPS-SALIDA) |
+| P2-12 | 3 | App vendedor: hay que apretar "+" para cargar el artículo; tiene que alcanzar con escribir la cantidad. | Media | App Vendedor | traspaso escrito |
+| P2-13 | 3 | App vendedor: un pedido nuevo arranca con todo abierto como el anterior; tiene que arrancar con categorías, subcategorías, novedades, ofertas, habituales y proveedor cerrados. | Baja | App Vendedor | traspaso escrito |
+| P2-14 | 3 | App vendedor: el teclado tapa el campo de cantidad de los artículos de la mitad de abajo. | Media | App Vendedor | traspaso escrito |
+| P2-15 | 3 | ERP: los pedidos "en revisión" no aparecen en /clientes-pedidos salvo con el filtro "Todos". | Media | Frontend | traspaso escrito |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |

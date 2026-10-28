@@ -501,3 +501,7 @@ En el alta, "Retira en Mostrador" guarda `condicion_entrega = 'retira_mostrador'
 ### P2-10 — El alta de cliente no limpia el nombre · Dueño: Frontend · baja
 
 PRUEBA 2 quedó guardado como "PRUEBA 2 " (con espacio al final) y PRUEBA 1 en minúsculas ("prueba1"). El alta debería sacar los espacios de los costados (y, si es la regla de la casa, pasar a mayúsculas como el resto de los clientes).
+
+### P2-15 — Pedidos "en revisión" no se ven en /clientes-pedidos · Dueño: Frontend
+
+El primer pedido de un cliente nuevo tomado en la app vendedor nace **en revisión** (está bien, regla del 09/10). Pero el listado de `/clientes-pedidos` abre filtrado en Pendiente + Impreso y esos pedidos **no aparecen salvo que se toque "Todos"**: la oficina no se entera de que tiene pedidos para revisar. Que "En revisión" esté incluido en el filtro por defecto (o un aviso arriba: "Hay N pedidos para revisar"). Visto con los pedidos 002020 a 002023 (PRUEBA 1 a 4).
