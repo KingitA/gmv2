@@ -264,6 +264,8 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Cada mañana mientras dure la prueba
 
+> **28/10, decisión de Juan:** el pase diario a "sistema viejo" **no se corre** mientras haya gente trabajando con pedidos reales en gmv2. Los pedidos reales quedan en la cola; Juan trabaja solo sobre los de los clientes de prueba. Controles que hago yo en cada fase: que el viaje, la preparación y los comprobantes de la prueba tengan **solo** clientes de prueba, y que ningún pedido real cambie de estado por la prueba. El control fiscal mira además a qué cliente pertenece cualquier comprobante nuevo (uno de un cliente real lo hace la oficina, no la prueba).
+
 - [ ] Pasar los pedidos reales nuevos: `SELECT pedidos_pasar_a_sistema_viejo(now(), '{1190,199,556,90029,90030,90031,90032,90033,90034}', 'PASAR');`
 - [ ] **Ojo:** si entra un pedido **real** de 1190, 199 o 556, no se pasa solo (están excluidos) y se mezcla con la prueba. Lo miro yo cada mañana y lo anotamos.
 - [ ] Control fiscal = 0.
