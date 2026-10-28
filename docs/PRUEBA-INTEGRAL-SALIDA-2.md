@@ -179,8 +179,8 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 ## Fase 5 — Gestión en el ERP
 
 - [ ] 5.1 Condiciones de cada pedido según la tabla de clientes.
-- [ ] 5.2 Generar comprobantes: **antes, mirar que diga Presupuesto.** 556-A se factura por 30, no por 36 (#15). Control fiscal = 0.
-- [ ] 5.3 Modificar un pedido después de preparado: cambiar la lista (nunca el método a Factura) y repreciar (#16).
+- [ ] 5.2 (28/10 12:09-12:19: PRES 0025 002018 $242.164,04 = 50 de 60 OK; PRES 0026 002016 $40.570,50 + REV 0025 10 % $4.057,05; PRES 0027 002015; 0028 002017; 0029 002020; **0030 002021 y 0030 002022 = P2-22**; 0031 002024; 0032 002023. Todos PRES, sin CAE, 0 pedidos a ARCA. Falta 002025 PRUEBA 6) Generar comprobantes: **antes, mirar que diga Presupuesto.** 556-A se factura por 30, no por 36 (#15). Control fiscal = 0.
+- [x] 5.3 (002021 PRUEBA 2, Neco → Bahía: $13.045,32 → $11.647,56; P2-21) Modificar un pedido después de preparado: cambiar la lista (nunca el método a Factura) y repreciar (#16).
 - [ ] 5.4 PRUEBA 5 retira en mostrador: se le entrega sin viaje y queda debiendo.
 - [ ] 5.5 Bultos y pallets cargados en el ERP; el remito y la hoja de ruta los toman (#22).
 - [ ] 5.6 Armar el viaje con vos de chofer y un vehículo, con 199, 1190 (A y B), 556-A y PRUEBA 1, 2, 3, 4 y 6. Hoja de ruta con los números de PRES bien (#21).
@@ -300,4 +300,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-18 | 4 | App depósito: no hay "Reiniciar preparación" ni forma de soltar un pedido abierto por error (quedó el real 001945 en preparación). | Alta | App Depósito | traspaso escrito |
 | P2-19 | 4 | App depósito: al finalizar, elegir "Cargar bultos" o "Dejar para después del control". | Media | App Depósito | traspaso escrito |
 | P2-20 | 4 | 001945, 001956 y 001972 (reales) volvieron de sistema viejo a impreso sin registro de quién. | Media | Cambios general | traspaso escrito; preguntar a Juan si fue la oficina |
+| **P2-22** | 5 | **GRAVÍSIMO: dos pedidos generados casi a la vez salieron con el mismo número (PRES 0001-00000030 para 002021 y 002022).** La numeración no tiene candado ni índice único (también NC/REV y ND). Regla de Juan: PROHIBIDO; cola de facturación para las 5 máquinas, y botón "Facturar" para varios pedidos juntos. | **Crítica, frena el pase** | Cambios general (con Cuentas corrientes) | traspaso escrito |
+| P2-21 | 5 | "Guardar pedido" deja la pantalla en el mismo lugar; tiene que volver a donde estaba. | Baja | Frontend | traspaso escrito |
+| P2-23 | 5 | Pedido con 10 % contado: el PRES figura "parcial" y la REV "pagado" sin que el cliente haya pagado nada. | Media | Frontend (con Cuentas corrientes) | traspaso escrito |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |

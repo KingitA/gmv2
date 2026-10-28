@@ -509,3 +509,25 @@ El primer pedido de un cliente nuevo tomado en la app vendedor nace **en revisi�
 ### P2-20 — Cambios de estado de un pedido sin registro de quién · Dueño: Cambios general
 
 Entre el 27/10 15:19 y el 28/10 11:40, los pedidos reales **001945, 001956 y 001972** (del 26/10) pasaron de "sistema viejo" a "impreso", y `pedidos.actualizado_por` quedó vacío: no hay forma de saber quién ni cuándo. El cambio manual de estado (`cambiarEstadoPedidoManual`) y cualquier otro cambio de estado tienen que dejar quién y cuándo (y, si existe, una entrada en un historial del pedido).
+
+### P2-22 — DOS COMPROBANTES CON EL MISMO NÚMERO · GRAVÍSIMO · Dueño: Cambios general (consultar a Cuentas corrientes)
+
+**Qué pasó (28/10 12:14:57):** Juan apretó Generar en el pedido 002021, cerró el modal, abrió el 002022 y apretó Generar. Salieron **los dos como PRES 0001-00000030** (0,2 s de diferencia): 002021 PRUEBA 2 por $11.647,56 y 002022 PRUEBA 3 por $272.709,24.
+
+**Por qué:** `app/api/comprobantes-venta/generar/route.ts` lee `numeracion_comprobantes.ultimo_numero` (l. ~785), suma 1, inserta el comprobante y recién al final (l. ~1016) guarda el número nuevo. Sin candado y sin índice único en `comprobantes_venta (tipo_comprobante, punto_venta, numero_comprobante)`: dos pedidos generados a la vez leen el mismo número. Lo mismo en `generar-nc-reversa` (l. ~332/533) y `generar-nd` (l. ~140/195). En los **fiscales**, hoy lo frena ARCA (el segundo pide CAE para un número ya autorizado y ARCA lo rechaza) y el índice único de `arca_solicitudes_cae`; pero el segundo usuario recibe un error y nada nuestro lo impide.
+
+**Regla de Juan (28/10): ESTÁ PROHIBIDO que salgan dos comprobantes con el mismo número, de cualquier tipo.** Son 5 máquinas en la oficina; si las 5 aprietan Generar a la vez, no puede pasar nada.
+
+**Qué hay que hacer:**
+1. **Número en la base, atómico:** una función que haga `UPDATE numeracion_comprobantes SET ultimo_numero = ultimo_numero + 1 … RETURNING` (o `SELECT … FOR UPDATE`), dentro de la misma transacción que el alta. Para los fiscales, además, **una cola por (tipo, punto de venta)** (candado mientras dura el pedido de CAE a ARCA): uno atrás del otro, nunca en paralelo.
+2. **Índice único** en `comprobantes_venta (tipo_comprobante, punto_venta, numero_comprobante)` (antes, resolver el duplicado 0001-00000030 de la prueba; las copias de la apertura tienen su número original).
+3. **Facturar varios juntos** (pedido de Juan): en `/clientes-pedidos`, con varios pedidos tildados, además de "Subir a viaje / Crear viaje / Prioridad", un botón **"Facturar"**. Todos los pedidos (los tildados y los de cualquier otra máquina) pasan por **la misma cola**: no se pisan.
+4. Probarlo con 5 generaciones simultáneas (PRES y, en homologación sin grabar, FA).
+
+### P2-21 — "Guardar pedido" tiene que volver a donde estaba · Dueño: Frontend
+
+Al editar un pedido (ej. cambiar la lista) y apretar "Guardar pedido", la pantalla queda en el mismo lugar. Tiene que volver a donde estaba el usuario (el listado / el modal desde donde entró).
+
+### P2-23 — Pedido de contado: el PRES figura "parcial" y la REV del 10 % "pagado" · Dueño: Frontend (consultar a Cuentas corrientes)
+
+Con el 10 % contado tildado al vender (`bonif_pedido.contado_todo`), al generar sale el PRES y **en el mismo momento** la REV del 10 % imputada a ese PRES (diseño #13: si no paga de contado, se anula la REV). En "Comprobantes emitidos" el PRES 0001-00000026 de CHEN figura **"parcial"** (saldo $36.513,45) y la REV 0001-00000025 **"pagado"**. Para Juan se lee mal: el cliente no pagó nada. Mostrarlo como "Pendiente · con 10 % contado" y la REV como "Aplicada al PRES …".
