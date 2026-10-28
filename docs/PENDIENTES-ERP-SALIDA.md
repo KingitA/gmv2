@@ -485,3 +485,19 @@ Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 **Pedido de Juan (28/10):** en `/clientes-pedidos`, en el listado, al lado (o debajo) del nombre del cliente tiene que verse la **dirección** (calle y número). Hoy se ve solo "BAHIA BLANCA · LAUMANN KARINA" (localidad · vendedor).
 
 **Dónde:** `app/clientes-pedidos/page.tsx`, renglón del listado. La consulta ya trae `clientes.direccion` (línea ~426), así que no hace falta tocar la base. Que quede: nombre, y abajo "dirección · localidad · vendedor". Si no tiene dirección, como hoy.
+
+### P2-07 — Entrega por transporte: aclarar flete en origen o en destino · Dueño: Cambios general
+
+**Pedido de Juan (28/10):** cuando la condición de entrega del cliente es "Envío por Transporte", tiene que poder elegirse si el flete se paga **en origen** (lo pagamos nosotros al despachar) o **en destino** (lo paga el cliente al recibir). Hoy el alta/ficha del cliente no tiene ese dato. Ver dónde se usa (`condicion_entrega = 'transporte'`, tabla `transportes`) y si tiene que llegar también al pedido, al remito y a la hoja de ruta.
+
+### P2-08 — Retener entregas desde la ficha del cliente · Dueño: Frontend
+
+**Visto por Juan (28/10):** "retener entregas" (`clientes.retener_entregas`, `retener_motivo`) solo se puede marcar desde Viajes o desde Jarvis; en el alta y en la ficha del cliente no está. Tiene que poder marcarse y desmarcarse desde la ficha (con el motivo), con el mismo efecto que hoy (`lib/viajes/retencion.ts`).
+
+### P2-09 — Dos campos distintos para "retira en el depósito" · Dueño: Cambios general · a verificar
+
+En el alta, "Retira en Mostrador" guarda `condicion_entrega = 'retira_mostrador'` pero deja `retira_en_deposito = false`. Viajes y mostrador miran `condicion_entrega`; el cálculo de precios manual (`lib/pricing.ts`, `app/api/pedidos/route.ts:117`) mira `retira_en_deposito` para **no cobrar flete**. Resultado posible: a un cliente que retira se le suma el flete de su zona. Unificar en un solo dato (o mantener los dos sincronizados). Visto con PRUEBA 5 (90033).
+
+### P2-10 — El alta de cliente no limpia el nombre · Dueño: Frontend · baja
+
+PRUEBA 2 quedó guardado como "PRUEBA 2 " (con espacio al final) y PRUEBA 1 en minúsculas ("prueba1"). El alta debería sacar los espacios de los costados (y, si es la regla de la casa, pasar a mayúsculas como el resto de los clientes).

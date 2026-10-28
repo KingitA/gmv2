@@ -164,7 +164,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Fase 3 — Altas y venta desde la app Vendedor
 
-- [ ] 3.1 Alta en `/clientes` de PRUEBA 1 a 6 con los códigos 90029-90034, vos de vendedor, Presupuesto, Neco. PRUEBA 5 "Retira en mostrador". PRUEBA 6 con "retener entregas".
+- [x] 3.1 (28/10, verificado en la base: 90029-90034 con Juan de vendedor, Presupuesto, Consumidor Final, sin CUIT, Neco, Bahía Blanca zona BAHIA, Efectivo; PRUEBA 5 retira en mostrador. El sistema proponía el código **3** = P2-01 confirmado. PRUEBA 6 sin retener: P2-08) Alta en `/clientes` de PRUEBA 1 a 6 con los códigos 90029-90034, vos de vendedor, Presupuesto, Neco. PRUEBA 5 "Retira en mostrador". PRUEBA 6 con "retener entregas".
 - [ ] 3.2 Los 6 aparecen en la app vendedor después de "Actualizar", con saldo $0.
 - [ ] 3.3 Pedidos desde la app: 199; 1190-A (10 % contado tildado al finalizar, el total en vivo cambia, #13); 1190-B; 556-A (un renglón de 36); 556-B (va a quedar todo faltante); PRUEBA 1 a 6, uno cada uno.
 - [ ] 3.4 Ningún renglón en "Factura". Comisión vendida igual en la app y en la base. Los pedidos aparecen en el ERP con vos de vendedor.
@@ -286,4 +286,8 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-04 | 2 | Apertura, datos de la oficina: (a) CUIT distinto entre el sistema viejo y gmv2 en 830, 1249, 1470 y 1501 (830 y 1470 parecen errores de tipeo; **1249 GIMENO ADRIANA y 1501 XUE GUIPING tienen CUITs totalmente distintos**: revisar que sea el mismo cliente antes del pase). (b) **YOU JUNJUN** figura en el sistema viejo con dos códigos (249 y 766); en gmv2 solo está el 249. (c) 56, 1381, 765, 766 siguen pendientes (oficina #9). | Media (antes del pase) | Oficina (Juan) | abierto |
 | P2-05 | 2 | La apertura pasó los PRES viejos a 0002 (#18) pero las **REV viejas quedaron en 0001** (0001-00067473 a 0001-00120976), el mismo punto de venta que usan las REV nuevas (van por 0001-00000025). No chocan por años, pero confunde. ¿Pasarlas también a 0002? | Baja | Cuentas corrientes (pregunta a Juan) | abierto |
 | P2-06 | 3 | Listado de `/clientes-pedidos`: falta la dirección del cliente al lado del nombre (pedido de Juan). | Baja | Frontend | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
+| P2-07 | 3 | Entrega por transporte: falta elegir flete en origen o en destino. | Media | Cambios general | traspaso escrito |
+| P2-08 | 3 | "Retener entregas" no se puede marcar desde la ficha del cliente, solo desde Viajes o Jarvis. PRUEBA 6 se retiene desde Viajes en la Fase 5. | Media | Frontend | traspaso escrito |
+| P2-09 | 3 | "Retira en Mostrador" guarda condicion_entrega pero no retira_en_deposito, que es lo que mira el precio para no cobrar flete (a verificar con el pedido de PRUEBA 5). | Media | Cambios general | traspaso escrito |
+| P2-10 | 3 | El alta no limpia el nombre ("PRUEBA 2 " con espacio, "prueba1" en minúsculas). | Baja | Frontend | traspaso escrito |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |
