@@ -531,3 +531,9 @@ Al editar un pedido (ej. cambiar la lista) y apretar "Guardar pedido", la pantal
 ### P2-23 — Pedido de contado: el PRES figura "parcial" y la REV del 10 % "pagado" · Dueño: Frontend (consultar a Cuentas corrientes)
 
 Con el 10 % contado tildado al vender (`bonif_pedido.contado_todo`), al generar sale el PRES y **en el mismo momento** la REV del 10 % imputada a ese PRES (diseño #13: si no paga de contado, se anula la REV). En "Comprobantes emitidos" el PRES 0001-00000026 de CHEN figura **"parcial"** (saldo $36.513,45) y la REV 0001-00000025 **"pagado"**. Para Juan se lee mal: el cliente no pagó nada. Mostrarlo como "Pendiente · con 10 % contado" y la REV como "Aplicada al PRES …".
+
+### P2-24 — Anular comprobantes de un pedido "facturado" tiene que volverlo a "pendiente de facturación" · Dueño: Listas de precios y descuentos (dirige #19/#20) + Cuentas corrientes
+
+**Qué pasó (28/10 12:28):** se anuló el PRES 0001-00000030 del pedido 002022 (sale REV 0001-00000026, todo bien en la cuenta) y el pedido **siguió "facturado"**. Se pudo volver a generar (PRES 0001-00000033), pero el estado engaña.
+
+**Regla de Juan (28/10):** si se anulan los comprobantes, el pedido vuelve a **pendiente de facturación**. Se combina con la regla del 27/10 (#19/#20): si el pedido ya está en la logística (listo para enviar/retirar, en viaje, entregado, rechazado) **se queda donde está**; si está "facturado" (todavía en la oficina), vuelve a "pendiente de facturación". Ver `lib/pedidos/anular-comprobantes-pedido.ts` y `estadoAlFacturar` en `lib/pedidos/estados.ts`.
