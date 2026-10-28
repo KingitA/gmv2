@@ -145,7 +145,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 | Fecha y hora | Cuenta | Ajuste | Motivo |
 |---|---|---|---|
-| | | | |
+| 28/10 12:41 | Caja chica | +$50.000 | Juan, para poder entregar el fondo al chofer (la caja arrancó en $0) |
 
   Si la caja chica en $0 no deja entregarle el fondo al chofer (5.6), es un hallazgo: se anota y Juan carga un monto de prueba en la caja chica (va a esta tabla).
 - [x] 1.9 (27/10 15:22: Juan apretó; en la base 0 movimientos nuevos, 0 billetera, 0 comisiones cobradas) `/personal` → "Poner al día": comisiones $0 y la cuenta de Juan en $0.
@@ -182,11 +182,11 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 - [ ] 5.2 (28/10 12:09-12:19: PRES 0025 002018 $242.164,04 = 50 de 60 OK; PRES 0026 002016 $40.570,50 + REV 0025 10 % $4.057,05; PRES 0027 002015; 0028 002017; 0029 002020; **0030 002021 y 0030 002022 = P2-22** (12:28 anulado el de 002022 → REV 0026; 12:30 regenerado PRES 0033 $272.709,24; saldo PRUEBA 3 OK; pedido quedó "facturado" = P2-24); 0031 002024; 0032 002023. Todos PRES, sin CAE, 0 pedidos a ARCA. Falta 002025 PRUEBA 6) Generar comprobantes: **antes, mirar que diga Presupuesto.** 556-A se factura por 30, no por 36 (#15). Control fiscal = 0.
 - [x] 5.3 (002021 PRUEBA 2, Neco → Bahía: $13.045,32 → $11.647,56; P2-21) Modificar un pedido después de preparado: cambiar la lista (nunca el método a Factura) y repreciar (#16).
 - [ ] 5.4 PRUEBA 5 retira en mostrador: se le entrega sin viaje y queda debiendo.
-- [ ] 5.5 Bultos y pallets cargados en el ERP; el remito y la hoja de ruta los toman (#22).
-- [ ] 5.6 Armar el viaje con vos de chofer y un vehículo, con 199, 1190 (A y B), 556-A y PRUEBA 1, 2, 3, 4 y 6. Hoja de ruta con los números de PRES bien (#21).
-- [ ] 5.7 Bloqueos: 556 "no entregar si no paga lo anterior"; PRUEBA 6 aparece bloqueado solo por la retención.
-- [ ] 5.8 Entregarle fondo al chofer desde la caja chica. La caja baja y la billetera sube lo mismo, en la base y en el tablero.
-- [ ] 5.9 Despachar.
+- [x] 5.5 (002015 2, 002016 1, 002017 1, 002018 0 + 1 pallet, PRUEBA 1 30, 2 25, 3 32, 4 16, 6 25; hoja: 132 + 1 pal.; P2-26/P2-27) Bultos y pallets cargados en el ERP; el remito y la hoja de ruta los toman (#22).
+- [x] 5.6 (viaje PRUEBA2 96240d81…, chofer Juan, BOXER, 8 paradas solo de clientes de prueba, 9 pedidos en viaje; hoja con PRES 0001-000000xx bien; P2-25, P2-28) Armar el viaje con vos de chofer y un vehículo, con 199, 1190 (A y B), 556-A y PRUEBA 1, 2, 3, 4 y 6. Hoja de ruta con los números de PRES bien (#21).
+- [x] 5.7 (556: candado + cobrar lo anterior $3.784.286, motivo "debe mucho"; PRUEBA 6: candado + cobrar lo de este viaje $114.291,72, motivo "cliente nuevo"; retención por cliente solo desde Jarvis) Bloqueos: 556 "no entregar si no paga lo anterior"; PRUEBA 6 aparece bloqueado solo por la retención.
+- [x] 5.8 (12:42: caja chica −$50.000 → billetera chofer d6ac +$50.000, en la base y en viajes_fondos; caja chica quedó en $0) Entregarle fondo al chofer desde la caja chica. La caja baja y la billetera sube lo mismo, en la base y en el tablero.
+- [x] 5.9 Despachado 28/10 12:44. Control fiscal = 0.
 
 ## Fase 6 — Entregas desde la app Chofer (primer viaje)
 
@@ -304,4 +304,8 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-21 | 5 | "Guardar pedido" deja la pantalla en el mismo lugar; tiene que volver a donde estaba. | Baja | Frontend | traspaso escrito |
 | P2-23 | 5 | Pedido con 10 % contado: el PRES figura "parcial" y la REV "pagado" sin que el cliente haya pagado nada. | Media | Frontend (con Cuentas corrientes) | traspaso escrito |
 | P2-24 | 5 | Anular los comprobantes de un pedido "facturado" lo deja en "facturado"; tiene que volver a "pendiente de facturación" (si ya está en viaje/entregado, se queda). | Media | Listas de precios + Cuentas corrientes | traspaso escrito |
+| P2-25 | 5 | Al tildar pedidos, "subir a un viaje" no lista el viaje ya creado. | Media | Hojas de ruta/viajes | traspaso escrito |
+| P2-26 | 5 | Unificar "Pedidos del viaje" con la lista: cruz roja para sacar y bultos editables, el campo vacío y no 0 (sale "036"). | Baja | Hojas de ruta/viajes | traspaso escrito |
+| P2-27 | 5 | Hoja de ruta: "2 / 1 pal." no se entiende; escribir "2 bultos + 1 pallet". | Baja | Hojas de ruta/viajes | traspaso escrito |
+| P2-28 | 5 | Hoja de ruta: CHEN figura $399.991,26 sin restar la REV del 10 % ya emitida ($395.934,21) y sin avisar que es de contado. | Media | Hojas de ruta/viajes | a verificar en la app |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |

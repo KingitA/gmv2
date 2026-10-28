@@ -537,3 +537,19 @@ Con el 10 % contado tildado al vender (`bonif_pedido.contado_todo`), al generar 
 **Qué pasó (28/10 12:28):** se anuló el PRES 0001-00000030 del pedido 002022 (sale REV 0001-00000026, todo bien en la cuenta) y el pedido **siguió "facturado"**. Se pudo volver a generar (PRES 0001-00000033), pero el estado engaña.
 
 **Regla de Juan (28/10):** si se anulan los comprobantes, el pedido vuelve a **pendiente de facturación**. Se combina con la regla del 27/10 (#19/#20): si el pedido ya está en la logística (listo para enviar/retirar, en viaje, entregado, rechazado) **se queda donde está**; si está "facturado" (todavía en la oficina), vuelve a "pendiente de facturación". Ver `lib/pedidos/anular-comprobantes-pedido.ts` y `estadoAlFacturar` en `lib/pedidos/estados.ts`.
+
+### P2-25 — "Subir a un viaje" no ofrece el viaje ya creado · Dueño: Hojas de ruta/viajes
+
+En `/clientes-pedidos`, al tildar pedidos se abre abajo "subir a un viaje", pero **no aparece ningún viaje** aunque el viaje PRUEBA2 ya estaba creado (28/10 ~12:40). Tiene que listar los viajes abiertos (no despachados) a los que se puede subir.
+
+### P2-26 — "Pedidos del viaje": unificar con la lista de arriba · Dueño: Hojas de ruta/viajes
+
+Dentro del viaje, la sección "Pedidos del viaje" repite la lista de arriba; lo único distinto es sacar pedidos y cargar bultos. Pedido de Juan: **una sola lista**, con la **cruz roja** para sacar el pedido del viaje y la **columna de bultos editable** ahí mismo. El campo de bultos tiene que aparecer **vacío** (no "0"): con 0, al tipear 36 queda "036".
+
+### P2-27 — Bultos + pallets: que se entienda · Dueño: Hojas de ruta/viajes
+
+En la hoja de ruta, un pedido con bultos y pallets se ve "2" grande y abajo "1 pal.": no se sabe si es 1 pallet con 2 bultos o 1 pallet + 2 bultos. Mostrarlo escrito: "2 bultos + 1 pallet" (y en el total "132 bultos + 1 pallet").
+
+### P2-28 — Hoja de ruta: CHEN no descuenta el 10 % contado ya emitido · Dueño: Hojas de ruta/viajes (a verificar en la app chofer)
+
+Pedido 002016 con 10 % contado: al generar salió la REV 0001-00000025 por $4.057,05 imputada al PRES 0001-00000026 (saldo $36.513,45). La hoja del viaje PRUEBA2 muestra en CHEN "este viaje" **$399.991,26** = 40.570,50 + 359.420,76 (los totales brutos); lo que se le cobra es **$395.934,21** (36.513,45 + 359.420,76). Además la instrucción no avisa que es de contado. Ver qué muestra la app chofer.
