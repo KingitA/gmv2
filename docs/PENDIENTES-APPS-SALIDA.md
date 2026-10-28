@@ -349,3 +349,31 @@ Juan no encontró en ningún lado "Reiniciar preparación". `reiniciarPicking` e
 
 ### P2-19 — Bultos al finalizar: ahora o después del control
 Regla de Juan (28/10): el pedido se tiene que poder cerrar **con o sin bultos**. Al finalizar, cartel con dos opciones: **"Cargar bultos"** (pedidos de cajas cerradas que no pasan por control: el operario los carga ahí) o **"Dejar para después del control"** (el pedido queda preparado sin bultos; la oficina los carga al armar el viaje, ya existe en el ERP #22). Hoy la app no pregunta nada.
+
+## Segunda prueba integral (28/10) — App Chofer
+
+Viaje PRUEBA2 (96240d81…), chofer Juan, 28/10 12:45-13:15.
+
+### P2-28 (app) — CHEN muestra $399.991,26 a cobrar
+La lista del viaje muestra el total bruto de los dos PRES de CHEN (40.570,50 + 359.420,76) sin restar la REV del 10 % contado que ya salió al generar (4.057,05). En la pantalla de devolución se ven los dos PRES pero no la REV; en la de cobro sí aparece el 10 %. Mostrar en todos lados lo que realmente hay que cobrar.
+
+### P2-29 — La devolución se descuenta del comprobante equivocado al cobrar · Alta (con Cuentas corrientes)
+CHEN: devolución DEV-00001 de 2 "ACEITE BABY" ($8.105,08), artículo del pedido 002017 → la base la ata, bien, al **PRES 0001-00000028**. Después, al cobrar **solo el PRES 0001-00000026** (002016), la app restó la devolución de ese PRES: pidió $28.408,37 (36.513,45 − 8.105,08) y se cobró eso con cheque. Resultado: el 0026 queda debiendo $8.105,08 y al volver a entrar la app dice "debe saldo 8.105,08". La devolución tiene que restar **solo** del comprobante al que pertenece (o la pantalla tiene que decir contra cuál va).
+
+### P2-30 — Monto con separador de miles mientras se escribe
+Al cargar un cobro, el monto tiene que ir mostrando puntos de miles y coma de centavos **mientras se tipea** (como `InputMonto` del ERP). Hoy se escribe "3784286" y en la calle es un lío.
+
+### P2-31 — Devolución de más en un PRES: la pantalla no avisa
+URQUIZA: del artículo con 24 unidades se devolvieron **36**. La base lo hizo bien (24 contra el PRES 0001-00000027 y 12 al respaldo **0002-00000001** como sistema viejo, C8), pero la pantalla **no dijo nada**. Tiene que avisar: "24 contra el PRES …; 12 de más van como devolución del sistema viejo, la revisa la oficina".
+
+### P2-32 — El cartel "Datos al … (recién) · Actualizar" está siempre
+Que aparezca solo cuando los datos están desactualizados, como en la app vendedor.
+
+### P2-33 — No se encontró cómo anular un cobro; cobrar cerró la parada sola
+FITTERER (candado + cobrar lo anterior): al cobrar el cheque de $3.784.286, la parada **se cerró sola como entregada** (sin confirmar la entrega, bultos 0). Después Juan **no encontró dónde anular el cobro** (el botón "Anular" de "Cobros registrados" depende de `puedeCobrar`; con la parada cerrada no aparece). R4/C7 quedó sin probar: se repite en el segundo viaje. Revisar: (a) que cobrar no cierre la parada sin que el chofer confirme la entrega; (b) que "Anular" se vea mientras el viaje esté en curso, también con la parada cerrada (el servidor ya reabre la parada, R4).
+
+### P2-34 — "Agregar cliente para cobrar": se borran los datos del cliente agregado
+PRUEBA 4 pagó con un cheque que también cubría a PRUEBA 5. Al agregar PRUEBA 5 se cargaron sus datos y **se borraron**; hubo que sacarlo y volver a buscarlo. Después anduvo (los dos cobros quedaron bien en la base: $66.209,52 y $591.517 con cheque).
+
+### P2-35 — Pantalla del viaje: simple, sin ruido · Alta
+Pedido de Juan (28/10): la pantalla del viaje es confusa: carteles grandes, poco claros, mucho dato. El chofer va manejando y quiere saber **a qué cliente va ahora, si tiene que cobrar y cuántos bultos baja**. Cada parada en la lista: **cliente, dirección, bultos, "cobrar sí o sí $…" (si corresponde) y un botón "Confirmar parada"**. Todo lo demás (devolver, registrar pago, detalle de comprobantes, saldos) adentro del cliente.

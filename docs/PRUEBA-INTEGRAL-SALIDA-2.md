@@ -190,18 +190,18 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Fase 6 — Entregas desde la app Chofer (primer viaje)
 
-- [ ] 6.1 El viaje aparece con todas las paradas, las deudas y la billetera = fondo. 556 y PRUEBA 6 con el candado.
-- [ ] 6.2 **1190-A:** devolución parcial **antes** de cobrar → cobra con **cheque** (foto) con 10 % contado. El 10 % sale sobre el comprobante completo.
-- [ ] 6.3 **1190-B:** entregado con pago parcial en efectivo → "Dejar el saldo pendiente".
-- [ ] 6.4 **199:** intentar devolver más de lo vendido → no deja; la pantalla muestra artículo y cantidad. Lo devuelto de más en el PRES va al respaldo 0002-00000001 (C8). Entregado sin cobrar.
-- [ ] 6.5 **556:** intentar entregar sin cobrar → no deja. Cobrar → entregar → **anular el cobro** → la parada vuelve a pendiente (R4/C7). Volver a cobrar (deuda vieja + pedido) con 10 % y **después** registrar una devolución: el 10 % tiene que salir con la misma regla que 6.2.
-- [ ] 6.6 **PRUEBA 1:** paga de más en efectivo → "Dejar $X a cuenta".
-- [ ] 6.7 **PRUEBA 2:** paga apenas menos (menos del 1 %) → "Ajuste por redondeo".
-- [ ] 6.8 **PRUEBA 3:** no entregado, con motivo.
-- [ ] 6.9 **PRUEBA 4:** un cheque que cubre su comprobante **y** la deuda de PRUEBA 5 ("Agregar cliente para cobrar").
-- [ ] 6.10 **PRUEBA 6:** paga solo con transferencia (foto) → se desbloquea y se entrega.
-- [ ] 6.11 Gastos: nafta (con el vehículo), peón y comida.
-- [ ] 6.12 Finalizar. La propuesta de rendición = efectivo cobrado + fondo − gastos. Las transferencias **no** están (#35). Declarar $1.000 menos de lo que corresponde.
+- [x] 6.1 (CHEN muestra $399.991,26 = P2-28 confirmado en la app) El viaje aparece con todas las paradas, las deudas y la billetera = fondo. 556 y PRUEBA 6 con el candado.
+- [x] 6.2 (DEV-00001 2 aceite baby $8.105,08 — es del 002017, va al PRES 0028; cheque $28.408,37 al PRES 0026 = P2-29) **1190-A:** devolución parcial **antes** de cobrar → cobra con **cheque** (foto) con 10 % contado. El 10 % sale sobre el comprobante completo.
+- [x] 6.3 ($100.000 efectivo) **1190-B:** entregado con pago parcial en efectivo → "Dejar el saldo pendiente".
+- [x] 6.4 (DEV-00002 36 trapos consorcio: 24 al PRES 0027 + 12 al respaldo 0002-00000001 creado en $0 = C8 OK; la pantalla no avisa = P2-31) **199:** intentar devolver más de lo vendido → no deja; la pantalla muestra artículo y cantidad. Lo devuelto de más en el PRES va al respaldo 0002-00000001 (C8). Entregado sin cobrar.
+- [ ] 6.5 (no deja entregar sin cobrar OK; cheque $3.784.286; la parada se cerró sola; anular cobro no encontrado = P2-33 → se repite en el 2º viaje) **556:** intentar entregar sin cobrar → no deja. Cobrar → entregar → **anular el cobro** → la parada vuelve a pendiente (R4/C7). Volver a cobrar (deuda vieja + pedido) con 10 % y **después** registrar una devolución: el 10 % tiene que salir con la misma regla que 6.2.
+- [x] 6.6 ($60.000 efectivo) **PRUEBA 1:** paga de más en efectivo → "Dejar $X a cuenta".
+- [x] 6.7 ($11.600, [AJUSTE:47.56]) **PRUEBA 2:** paga apenas menos (menos del 1 %) → "Ajuste por redondeo".
+- [x] 6.8 (no_entregado "Cerrado") **PRUEBA 3:** no entregado, con motivo.
+- [x] 6.9 (cheque: $66.209,52 PRUEBA 4 + $591.517 PRUEBA 5; P2-34) **PRUEBA 4:** un cheque que cubre su comprobante **y** la deuda de PRUEBA 5 ("Agregar cliente para cobrar").
+- [x] 6.10 (transferencia $114.291,72 en estado pendiente, fuera de la billetera = #35 OK) **PRUEBA 6:** paga solo con transferencia (foto) → se desbloquea y se entrega.
+- [x] 6.11 (nafta 20.000, peón 10.000, comida 5.000; los 3 **sin vehículo** en la base, ver 7.2) Gastos: nafta (con el vehículo), peón y comida.
+- [x] 6.12 (esperado en mano $186.600 = cobró 171.600 + fondo 50.000 − gastos 35.000; declaró $185.600; viaje en_rendicion; la billetera anotó +$1.000 de diferencia, ver 7.1) Finalizar. La propuesta de rendición = efectivo cobrado + fondo − gastos. Las transferencias **no** están (#35). Declarar $1.000 menos de lo que corresponde.
 
 ## Fase 7 — Rendición del chofer en el ERP (`/caja`)
 
@@ -308,4 +308,11 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-26 | 5 | Unificar "Pedidos del viaje" con la lista: cruz roja para sacar y bultos editables, el campo vacío y no 0 (sale "036"). | Baja | Hojas de ruta/viajes | traspaso escrito |
 | P2-27 | 5 | Hoja de ruta: "2 / 1 pal." no se entiende; escribir "2 bultos + 1 pallet". | Baja | Hojas de ruta/viajes | traspaso escrito |
 | P2-28 | 5 | Hoja de ruta: CHEN figura $399.991,26 sin restar la REV del 10 % ya emitida ($395.934,21) y sin avisar que es de contado. | Media | Hojas de ruta/viajes | a verificar en la app |
+| P2-29 | 6 | App chofer: la devolución de CHEN (atada al PRES 0028) se restó del PRES 0026 al cobrarlo: el 0026 queda debiendo $8.105,08. | Alta | App Chofer + Cuentas corrientes | traspaso escrito |
+| P2-30 | 6 | App chofer: el monto del cobro no separa miles mientras se escribe. | Media | App Chofer | traspaso escrito |
+| P2-31 | 6 | App chofer: devolución de más en PRES (36 de 24) no avisa nada; la base sí la reparte bien (24 + 12 al respaldo 0002-00000001). | Media | App Chofer | traspaso escrito |
+| P2-32 | 6 | App chofer: cartel "Datos al… Actualizar" siempre visible. | Baja | App Chofer | traspaso escrito |
+| P2-33 | 6 | App chofer: cobrar en la parada bloqueada la cerró sola como entregada; no se encontró "Anular" el cobro → R4/C7 sin probar, se repite en el 2º viaje. | Alta | App Chofer | traspaso escrito |
+| P2-34 | 6 | App chofer: "Agregar cliente para cobrar" borra los datos del agregado; hubo que volver a buscarlo. | Media | App Chofer | traspaso escrito |
+| P2-35 | 6 | App chofer: pantalla del viaje confusa. Cada parada: cliente, dirección, bultos, cobrar sí o sí y "Confirmar parada"; el resto adentro. | Alta | App Chofer | traspaso escrito |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |
