@@ -216,8 +216,8 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Fase 6b — Segundo viaje (corto)
 
-- [ ] 6b.1 Viaje nuevo solo con PRUEBA 3. La billetera arranca en $0 (sin arrastrar nada del primero).
-- [ ] 6b.2 Entregado y cobrado en efectivo justo.
+- [x] 6b.1 (viaje PRUEBA3, sin fondo, candado + cobrar lo de este viaje; billetera arrancó en $0) Viaje nuevo solo con PRUEBA 3. La billetera arranca en $0 (sin arrastrar nada del primero).
+- [x] 6b.2 (14:12 cobro $245.438 con 10 % contado [AJUSTE 0,32] → para anular hubo que **reabrir la parada a mano** (P2-33: con la parada cerrada no aparece Anular; la reapertura automática R4 no se vio) → anulado; 14:13 cobro $245.000 [AJUSTE 438,32] anulado; 14:13:55 cobro $245.000 [10 % CONTADO, AJUSTE 438,32] vigente; cada anulación revirtió la billetera; después DEV-00003 1 unidad $17.746,82 contra PRES 0033 = orden cobro → devolución) Entregado y cobrado en efectivo justo.
 - [ ] 6b.3 Rendición sin diferencia. Billetera en $0 en las 3 vistas.
 
 ## Fase 8 — Vendedor: cobro y rendición
