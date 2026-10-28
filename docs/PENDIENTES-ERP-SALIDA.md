@@ -479,3 +479,9 @@ Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 - **Pantalla:** totales por mes, por tipo de ajuste y por usuario, con el detalle de cada renglón.
 - **Cuándo:** después de la prueba y antes del pase. Durante la prueba, la sesión de la prueba lista los ajustes a mano desde la base.
 - [x] OK de Juan a la idea (27/10). Falta redondearla después de la prueba.
+
+### P2-06 — Listado de pedidos: mostrar la dirección del cliente · Dueño: Frontend
+
+**Pedido de Juan (28/10):** en `/clientes-pedidos`, en el listado, al lado (o debajo) del nombre del cliente tiene que verse la **dirección** (calle y número). Hoy se ve solo "BAHIA BLANCA · LAUMANN KARINA" (localidad · vendedor).
+
+**Dónde:** `app/clientes-pedidos/page.tsx`, renglón del listado. La consulta ya trae `clientes.direccion` (línea ~426), así que no hace falta tocar la base. Que quede: nombre, y abajo "dirección · localidad · vendedor". Si no tiene dirección, como hoy.
