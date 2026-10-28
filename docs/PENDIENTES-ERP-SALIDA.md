@@ -565,3 +565,7 @@ PRUEBA 2 pagó $11.600 de $11.647,56 y el chofer eligió "Ajuste por redondeo �
 ### P2-38 — Movimientos de billetera del chofer que no suman cero · Dueño: Cuentas corrientes · baja
 
 Después de aceptar la rendición, la billetera del chofer da **$0** en `saldos_financieros` y en la app (bien), pero sus renglones en `billetera_movimientos` suman **$1.000**: la diferencia de rendición quedó como un renglón "debito" de **+$1.000** que nadie compensa (la diferencia fue, bien, solo a la cuenta personal). Mismo síntoma que el #29 de la 1ª prueba. Si alguna pantalla suma renglones en vez de leer el saldo, va a mostrar $1.000.
+
+### P2-39 — El pedido no toma la "forma de entrega" del cliente · Dueño: Cambios general
+
+PRUEBA 5 (90033) es "Retira en Mostrador", pero su pedido 002024 (tomado en la app vendedor) quedó con `pedidos.condicion_entrega = NULL`. Por eso **no aparece en `/mostrador` → "Para retirar"** (`app/api/mostrador/para-retirar` filtra por la condición del pedido) y podría subirse a un viaje (`app/api/viajes/[id]/pedidos` solo excluye los que dicen retira_mostrador). Desde el 01/10, 358 pedidos tienen la condición vacía y solo 3 la tienen cargada. El alta del pedido (app vendedor → `lib/mobile/outbox/vendedor.ts` / `createPedido`, y el alta desde el ERP) tiene que copiar la condición de entrega del cliente; y las pantallas, si el pedido no la tiene, usar la del cliente. Además, Juan no sabía que existe `/mostrador`: revisar que se llegue fácil (hoy hay un botón "Mostrador" arriba en Pedidos y viajes).
