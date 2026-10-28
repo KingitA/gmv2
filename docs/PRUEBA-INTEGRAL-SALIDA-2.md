@@ -222,11 +222,11 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Fase 8 — Vendedor: cobro y rendición
 
-- [ ] 8.1 Cobrar a 199 desde la app: efectivo + transferencia, con 10 % contado.
-- [ ] 8.2 Retiro de efectivo a cuenta de comisión: va a tu cuenta personal.
-- [ ] 8.3 Rendición desde la app; confirmarla en el ERP.
-- [ ] 8.4 La transferencia aparece en "Transf. por confirmar", no en la rendición.
-- [ ] 8.5 Billetera vendedor en $0 en la base, el tablero y la app (#36).
+- [x] 8.1 (14:45: $100.000 efectivo + $125.500 transferencia a MercadoPago, par [CONTADO_PAR]; REV 0031 10 % $25.061,52 una sola vez (R6 OK; base ver P2-41); ajuste $53,68; URQUIZA $0) Cobrar a 199 desde la app: efectivo + transferencia, con 10 % contado.
+- [x] 8.2 ($10.000 → cuenta 194 "retiro" debe) Retiro de efectivo a cuenta de comisión: va a tu cuenta personal.
+- [x] 8.3 (14:47: $90.000 a caja grande) Rendición desde la app; confirmarla en el ERP.
+- [x] 8.4 ($125.500 → MercadoPago al confirmarla, fuera de la rendición = #35 OK) La transferencia aparece en "Transf. por confirmar", no en la rendición.
+- [x] 8.5 (saldo $0 y movimientos suman $0: +100.000 −10.000 −100.000 +10.000; comisión 0027 $10.638,15) Billetera vendedor en $0 en la base, el tablero y la app (#36).
 
 ## Fase 8b — Refacturar un pedido entregado con pago parcial (R1/R3)
 
@@ -320,4 +320,5 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-38 | 7 | Billetera del chofer: saldo $0 (bien) pero los movimientos suman $1.000 (la diferencia quedó como renglón suelto). | Baja | Cuentas corrientes | traspaso escrito |
 | P2-39 | 6b | El pedido no copia la forma de entrega del cliente (002024 de PRUEBA 5 "retira en mostrador" quedó vacío) → no aparece en /mostrador "Para retirar". 358 de 361 pedidos desde el 01/10 la tienen vacía. | Media | Cambios general | traspaso escrito |
 | P2-40 | 6b | /mostrador "Para retirar": un pedido pagado (saldo $0) no se puede entregar (solo "Cobrar efectivo y entregar", deshabilitado); solo cobra efectivo. | Media | Frontend + Cambios general | traspaso escrito |
+| P2-41 | 8 | 10 % contado de URQUIZA: la base restó también los 12 devueltos al respaldo del sistema viejo ($25.061,52 en vez de $27.319,90); la REV de la devolución se imputó entera al PRES 0027. | Media | Cuentas corrientes | pregunta a Juan |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |
