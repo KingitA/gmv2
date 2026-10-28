@@ -553,3 +553,15 @@ En la hoja de ruta, un pedido con bultos y pallets se ve "2" grande y abajo "1 p
 ### P2-28 — Hoja de ruta: CHEN no descuenta el 10 % contado ya emitido · Dueño: Hojas de ruta/viajes (a verificar en la app chofer)
 
 Pedido 002016 con 10 % contado: al generar salió la REV 0001-00000025 por $4.057,05 imputada al PRES 0001-00000026 (saldo $36.513,45). La hoja del viaje PRUEBA2 muestra en CHEN "este viaje" **$399.991,26** = 40.570,50 + 359.420,76 (los totales brutos); lo que se le cobra es **$395.934,21** (36.513,45 + 359.420,76). Además la instrucción no avisa que es de contado. Ver qué muestra la app chofer.
+
+### P2-36 — /caja: el cheque compartido se ve como dos cheques · Dueño: Frontend (con Cuentas corrientes)
+
+PRUEBA 4 pagó con UN cheque (Provincia n.º 126, $657.726,52) que cubre también a PRUEBA 5. En la base está bien: **un solo papel** (`cheques` "Cheque compartido entre varios clientes"). Pero en la rendición de `/caja` se ven **dos cheques iguales** con montos distintos ($66.209,52 y $591.517). Mostrarlo como un cheque de $657.726,52 repartido entre los dos clientes. Además ese cheque quedó con color **"PENDIENTE"** en la base (los otros dos, NEGRO): ver por qué no tomó color al confirmar.
+
+### P2-37 — El ajuste por redondeo no se confirma en la rendición · Dueño: Cuentas corrientes (va con P2-03)
+
+PRUEBA 2 pagó $11.600 de $11.647,56 y el chofer eligió "Ajuste por redondeo — oficina lo confirma al rendir". Al aceptar la rendición **nadie preguntó nada**: el ajuste de $47,56 entró solo (el PRES quedó saldado). Juan: está bien que sea automático si es menos del 1 %, pero tiene que caer en la **caja de ajustes** (P2-03) y verse en la rendición.
+
+### P2-38 — Movimientos de billetera del chofer que no suman cero · Dueño: Cuentas corrientes · baja
+
+Después de aceptar la rendición, la billetera del chofer da **$0** en `saldos_financieros` y en la app (bien), pero sus renglones en `billetera_movimientos` suman **$1.000**: la diferencia de rendición quedó como un renglón "debito" de **+$1.000** que nadie compensa (la diferencia fue, bien, solo a la cuenta personal). Mismo síntoma que el #29 de la 1ª prueba. Si alguna pantalla suma renglones en vez de leer el saldo, va a mostrar $1.000.

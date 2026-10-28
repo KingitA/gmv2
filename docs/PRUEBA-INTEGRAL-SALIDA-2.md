@@ -205,14 +205,14 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Fase 7 — Rendición del chofer en el ERP (`/caja`)
 
-- [ ] 7.1 Aceptar la rendición: el faltante de $1.000 va **solo** a tu cuenta personal, no a la billetera (#29).
-- [ ] 7.2 Los gastos se aprueban al aceptar, con el vehículo (#43).
-- [ ] 7.3 El ajuste por redondeo de PRUEBA 2 se confirma acá.
-- [ ] 7.4 Revisar las devoluciones: aceptar/rechazar. Salen REV, **nunca NC**. Control fiscal = 0.
-- [ ] 7.5 "Transf. por confirmar": las de PRUEBA 6 están ahí y entran al banco recién al confirmarlas (#35).
-- [ ] 7.6 Cheques de 1190 y PRUEBA 4 en cartera; el de PRUEBA 4 imputado a PRUEBA 4 y a PRUEBA 5.
-- [ ] 7.7 Billetera del chofer en $0 en la base, en el tablero de Finanzas y en la app (#29/#36).
-- [ ] 7.8 PRUEBA 3 vuelve a quedar listo para un viaje nuevo.
+- [x] 7.1 (28/10 13:29: contó $185.600 → caja chica $185.600; diferencia $1.000 a la cuenta 194 (debe), NO a la billetera; billetera chofer $0 en la base y en la app; P2-38) Aceptar la rendición: el faltante de $1.000 va **solo** a tu cuenta personal, no a la billetera (#29).
+- [x] 7.2 (3 gastos aprobados, vehículo BOXER asignado solo) Los gastos se aprueban al aceptar, con el vehículo (#43).
+- [x] 7.3 (no lo pidió: entró solo = P2-37) El ajuste por redondeo de PRUEBA 2 se confirma acá.
+- [x] 7.4 (DEV-00001 → REV 0001-00000028 $8.105,08; DEV-00002 → REV 0001-00000027 $67.751,28 incl. los 12 del respaldo; aviso del respaldo visible; sin NC, sin CAE) Revisar las devoluciones: aceptar/rechazar. Salen REV, **nunca NC**. Control fiscal = 0.
+- [x] 7.5 (PRUEBA 6 $114.291,72 → Credicoop 13:32) "Transf. por confirmar": las de PRUEBA 6 están ahí y entran al banco recién al confirmarlas (#35).
+- [x] 7.6 (3 papeles en cartera: Credicoop 123 $28.408,37, Nación 124 $3.784.286, Provincia 126 $657.726,52 compartido; P2-36) Cheques de 1190 y PRUEBA 4 en cartera; el de PRUEBA 4 imputado a PRUEBA 4 y a PRUEBA 5.
+- [x] 7.7 (app: efectivo en mano $0, "Debés $94.066,93" = base) Billetera del chofer en $0 en la base, en el tablero de Finanzas y en la app (#29/#36).
+- [x] 7.8 (002022 listo_para_enviar, sin viaje) PRUEBA 3 vuelve a quedar listo para un viaje nuevo.
 
 ## Fase 6b — Segundo viaje (corto)
 
@@ -315,4 +315,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-33 | 6 | App chofer: cobrar en la parada bloqueada la cerró sola como entregada; no se encontró "Anular" el cobro → R4/C7 sin probar, se repite en el 2º viaje. | Alta | App Chofer | traspaso escrito |
 | P2-34 | 6 | App chofer: "Agregar cliente para cobrar" borra los datos del agregado; hubo que volver a buscarlo. | Media | App Chofer | traspaso escrito |
 | P2-35 | 6 | App chofer: pantalla del viaje confusa. Cada parada: cliente, dirección, bultos, cobrar sí o sí y "Confirmar parada"; el resto adentro. | Alta | App Chofer | traspaso escrito |
+| P2-36 | 7 | /caja muestra el cheque compartido de PRUEBA 4+5 como dos cheques; en la base es uno ($657.726,52) y quedó con color "PENDIENTE". | Media | Frontend + Cuentas corrientes | traspaso escrito |
+| P2-37 | 7 | El ajuste por redondeo de PRUEBA 2 ($47,56) entró solo, sin verse en la rendición; tiene que ir a la caja de ajustes. | Media | Cuentas corrientes (con P2-03) | traspaso escrito |
+| P2-38 | 7 | Billetera del chofer: saldo $0 (bien) pero los movimientos suman $1.000 (la diferencia quedó como renglón suelto). | Baja | Cuentas corrientes | traspaso escrito |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |
