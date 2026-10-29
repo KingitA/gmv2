@@ -591,3 +591,11 @@ CHEN 002017: la devolución DEV-00001 (2 aceite baby) se valuó a precio **Neco*
 ### P2-44 — "Anular comprobantes" en un pedido cobrado al 100 %: no está bloqueado de entrada y muestra un "éxito" viejo · Dueño: Frontend
 
 PRUEBA 1 (002020, cobrado completo): el botón **no** aparece deshabilitado con "Cobrado al 100 %" (frontend R1/R3 decía que sí). Juan lo apretó, trabajó un rato y recién al final salió "el pedido ya está cobrado al 100 %: no se puede refacturar". Al cerrar, apareció **"Comprobantes generados exitosamente: PRES 0001-00000035"**, que era el aviso del pedido anterior (002017). Verificado en la base: para 002020 no se anuló ni se generó nada; cuenta, comisión, caja y stock sin cambios. Arreglar: deshabilitar el botón de entrada y limpiar el aviso anterior.
+
+### P2-45 — Importar pedido (Excel / .eml): poder borrar un renglón LOW · Dueño: Frontend
+
+Pedido de Juan (29/10, le molesta mucho): en la revisión de un pedido importado por archivo (Excel o .eml), cuando un artículo aparece con coincidencia **LOW**, tiene que haber una **cruz a la derecha del renglón** para borrarlo del pedido. Ver `/imports` y `/clientes-pedidos/import-review` (tablas `imports` / `import_items`).
+
+### P2-46 — La sesión del ERP se cierra cada ~10 minutos · Dueño: Cambios general · URGENTE para la oficina
+
+Pedido de Juan (29/10, le molesta mucho): trabajando 4 personas, el ERP les pide volver a iniciar sesión **cada 10 minutos**. Revisar la renovación de la sesión de Supabase (`middleware.ts`, `lib/supabase/server.ts` / `client.ts`: que el middleware refresque el token y escriba las cookies nuevas en la respuesta), la duración del JWT y del "refresh token" en la configuración de Auth de Supabase, y si hay algún cierre por inactividad. La sesión tiene que durar la jornada.

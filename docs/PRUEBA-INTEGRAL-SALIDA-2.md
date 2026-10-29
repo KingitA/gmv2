@@ -245,9 +245,9 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 - [x] 9.1 (29/10: app vendedor $62.516,98, Playroom $62.517, base $62.516,98 en 9 comisiones; /personal y app "debe $80.125,07" = 131.642,05 + 1.000 diferencia + 10.000 retiro − 62.516,98) Comisión ganada **igual** en la app vendedor, en `/personal` y en el Playroom (#41/#42/#10).
 - [ ] 9.2 Tu cuenta personal = comisiones ganadas − retiros − faltante de rendición. Cada movimiento con su origen.
 - [ ] 9.3 Billeteras de chofer y vendedor en $0 en las 4 vistas (base, tablero, app, `/personal`).
-- [ ] 9.4 Saldo de cada cliente de la prueba, a mano contra la base: todos en $0 salvo los que quedan debiendo a propósito.
-- [ ] 9.5 Cajas y bancos: saldo = movimientos de la prueba + ajustes anotados en la 1.8, al peso.
-- [ ] 9.6 Control fiscal final = 0.
+- [x] 9.4 (29/10: 199 $0, 556 $0, 1190 $231.056,68 (PRES 0035 refacturado), PRUEBA 1 a favor $8.503,56, PRUEBA 3 a favor $15.972,14, PRUEBA 2/4/5/6 $0) Saldo de cada cliente de la prueba, a mano contra la base: todos en $0 salvo los que quedan debiendo a propósito.
+- [x] 9.5 (caja chica $656.652,72 = 50.000 ajuste − 50.000 fondo + 185.600 + 245.000 + 217.947,64 + 8.105,08; caja grande $90.000; Credicoop $114.291,72; MercadoPago $125.500; 3 cheques en cartera $4.470.420,89; cuadra al peso) Cajas y bancos: saldo = movimientos de la prueba + ajustes anotados en la 1.8, al peso.
+- [x] 9.6 Control fiscal final = 0; 0 pedidos a ARCA; 12 con CAE y 3 echeqs igual que al inicio; artículos 3.293 y proveedores 94 sin cambios (clientes 625 = 618 + 6 PRUEBA + 1 alta real de la oficina).
 
 ## Fase 10 — Cierre
 
@@ -325,4 +325,6 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-42 | 8 | App vendedor: el 10 % contado se muestra como "saldo proyectado a favor" y confunde. | Baja | App Vendedor | traspaso escrito |
 | P2-43 | 8b | La devolución de CHEN (precio Neco) quedó acreditada a ese precio después de refacturar el pedido a Bahía. | Baja | Listas de precios + Cuentas corrientes | a verificar |
 | P2-44 | 8b | "Anular comprobantes" no aparece bloqueado en un pedido cobrado al 100 % (frena recién al final) y muestra el éxito del pedido anterior. Nada cambió en la base. | Media | Frontend | traspaso escrito |
+| P2-45 | 9 | Importar pedido por archivo: cruz para borrar un renglón LOW. | Media | Frontend | traspaso escrito |
+| P2-46 | 9 | **La sesión del ERP se cierra cada ~10 minutos** (4 personas trabajando). | **Alta** | Cambios general | traspaso escrito |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |
