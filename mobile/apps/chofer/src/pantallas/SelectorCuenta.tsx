@@ -3,7 +3,7 @@ import { PEDIDO_PREFIX } from "@gm/cobro"
 import { ESTADO_LABEL } from "@gm/vendedor"
 import type { ComprobanteCobro, PedidoCobro } from "../datasets"
 import {
-  agruparCuenta, alternarAnticipo, alternarComprobante, alternarContadoPedido, alternarContadoTodo, alternarGrupo, alternarTodo, clavesDeLaCuenta,
+  agruparCuenta, alternarAnticipo, comprobantesDeDevolucion, devolucionAplica, etiquetaComprobante, alternarComprobante, alternarContadoPedido, alternarContadoTodo, alternarGrupo, alternarTodo, clavesDeLaCuenta,
   fijarMonto, montoAnticipo, resumenCuenta, saldoCobrable, separarPorViaje, valorDeDevolucion, type DatosCuenta, type EstadoCuenta,
 } from "../datos/cuenta-cobro"
 import { moneda, redondear } from "@gm/formato"
@@ -156,14 +156,26 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir,
         </div>
       )}
 
-      {/* Toggle devoluciones */}
+      {/* Toggle devoluciones. P2-29: cada una dice contra qué comprobante va y resta SOLO si ese
+          comprobante se cobra acá (si no, el cobrado quedaría debiendo lo devuelto). */}
       {devPendientes.length > 0 && (
         <div className="rounded-2xl bg-amber-50 p-4">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
               <p className="font-bold text-amber-800">Incluir devoluciones como crédito</p>
-              <p className="text-sm text-amber-600">{formatCurrency(devPendientes.reduce((s, d) => s + valorDeDevolucion(d), 0))}{devPendientes.some((d) => d.local) ? " (incluye una sin enviar)" : ""}</p>
-              {devPendientes.map((d) => <RenglonesDevolucion key={d.id} renglones={d.devoluciones_detalle} className="text-amber-800" />)}
+              <p className="text-sm text-amber-600">{estado.incluirDevoluciones ? `Se descuenta ${formatCurrency(r.devTotal)}` : "No se descuentan"}{devPendientes.some((d) => d.local) ? " (incluye una sin enviar)" : ""}</p>
+              {devPendientes.map((d) => {
+                const comps = comprobantesDeDevolucion(d)
+                const aplica = devolucionAplica(d, sel)
+                return (
+                  <div key={d.id} className={`mt-2 border-t border-amber-200 pt-2 ${aplica ? "" : "opacity-70"}`}>
+                    <p className="text-sm font-semibold text-amber-900">{d.numero_devolucion || "Devolución"} · {formatCurrency(valorDeDevolucion(d))}</p>
+                    {comps.length > 0 && <p className="text-sm text-amber-800">Va contra {comps.map((id) => etiquetaComprobante(cobro, id)).join(" y ")}</p>}
+                    {!aplica && <p className="text-sm font-medium text-amber-900">No se descuenta en este cobro: seleccioná ese comprobante para descontarla.</p>}
+                    <RenglonesDevolucion renglones={d.devoluciones_detalle} className="text-amber-800" />
+                  </div>
+                )
+              })}
             </div>
             <button onClick={() => onChange({ ...estado, incluirDevoluciones: !estado.incluirDevoluciones })} className={`h-7 w-14 rounded-full ${estado.incluirDevoluciones ? "bg-green-500" : "bg-gray-300"}`} aria-label="Incluir devoluciones">
               <span className={`mx-1 block h-5 w-5 rounded-full bg-white shadow ${estado.incluirDevoluciones ? "translate-x-7" : ""}`} />
