@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { memoCompartido } from "@/lib/memo-compartido"
 
 // GET /api/vendedor/articulos-ventas
 // Mapa articulo_id → unidades vendidas (últimos 180 días) para "ordenar por
@@ -16,10 +17,11 @@ export async function GET() {
     const supabase = await createClient()
     let rows: any[] = []
     try {
-      rows = await fetchAllRows(
+      // P2-49: igual para todos y se recalcula de noche (20261029e): 30 min alcanza
+      rows = await memoCompartido("vendedor:ventas", 30 * 60_000, () => fetchAllRows(
         () => supabase.from("v_articulos_ventas").select("articulo_id, unidades_180d, pedidos_180d"),
         "articulo_id"
-      )
+      ))
     } catch (e: any) {
       console.warn("[vendedor] v_articulos_ventas no disponible:", e?.message)
       return NextResponse.json({ ventas: {}, disponible: false })

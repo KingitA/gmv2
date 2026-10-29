@@ -46,6 +46,7 @@ import { cargarDetallePedido } from "@/lib/vendedor/detalle-pedido"
 import { cargarFichaCliente } from "@/lib/vendedor/ficha-cliente"
 import { frecuenciaHabituales, TOPE_HABITUALES } from "@/lib/vendedor/habituales"
 import type { FilaReplica } from "../contrato"
+import { memoCompartido } from "@/lib/memo-compartido"
 import type { CtxSync, DatasetDef } from "./motor"
 
 const ROLES = ["vendedor"]
@@ -128,13 +129,15 @@ const catalogos: DatasetDef = {
   nombre: "vendedor_catalogos",
   roles: ROLES,
   async cargar(ctx) {
+    // P2-49: lo que es igual para todos los vendedores se arma una vez y se
+    // comparte unos minutos (catálogo y ventas ya lo hacen en su propia ruta)
     const [catalogo, proveedores, ventas, listas, ficha, cuentas, zonas] = await Promise.all([
       llamarGET(catalogoGET, ctx),
-      llamarGET(proveedoresGET, ctx),
+      memoCompartido("vendedor:proveedores", 5 * 60_000, () => llamarGET(proveedoresGET, ctx)),
       llamarGET(ventasGET, ctx),
       llamarGET(preciosListasGET, ctx),
       llamarGET(catalogosFichaGET, ctx),
-      llamarGET(cuentasGET, ctx),
+      memoCompartido("vendedor:cuentas", 5 * 60_000, () => llamarGET(cuentasGET, ctx)),
       llamarGET(zonasGET, ctx),
     ])
     return [
