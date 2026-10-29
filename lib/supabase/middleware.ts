@@ -27,6 +27,13 @@ export async function updateSession(request: NextRequest) {
         },
         setAll(cookies) {
           cookiesToSet = cookies
+          // Patrón oficial de @supabase/ssr: los tokens renovados también viajan en
+          // el request, para que layout/server components lean los nuevos y no
+          // vuelvan a renovar con el refresh token ya usado (P2-46)
+          for (const { name, value } of cookies) {
+            if (value) request.cookies.set(name, value)
+            else request.cookies.delete(name)
+          }
         },
       },
       global: { fetch: fetchWithTimeout },
@@ -54,15 +61,26 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Rutas públicas que no requieren autenticación
-  const publicRoutes = ["/auth/login", "/auth/sign-up", "/auth/error", "/auth/sign-up-success", "/auth/pendiente", "/auth/cambiar-password"]
+  const publicRoutes = ["/auth/login", "/auth/sign-up", "/auth/error", "/auth/sign-up-success", "/auth/pendiente", "/auth/cambiar-password", "/auth/renovar"]
   const isPublicRoute = publicRoutes.some(r => pathname === r || pathname.startsWith(r + "/"))
 
-  const { data: { session } } = await supabase.auth.getSession()
+  const { data: { session }, error: sesionError } = await supabase.auth.getSession()
   const user = session?.user ?? null
+  if (cookiesToSet.length) requestHeaders.set("cookie", request.cookies.toString())
 
   if (!user) {
     if (isPublicRoute) return applyResponse(NextResponse.next({ request: { headers: requestHeaders } }), cookiesToSet)
     const url = request.nextUrl.clone()
+    // P2-46: la sesión venció y Supabase no contestó la renovación a tiempo (el
+    // corte de 1,2 s de arriba) — eso NO es "no logueado". Antes mandaba al login
+    // y la sesión se perdía; ahora la renueva el navegador (sin ese límite) y
+    // vuelve a la misma pantalla.
+    if (errorDeRed(sesionError) && tieneCookieDeSesion(request)) {
+      url.pathname = "/auth/renovar"
+      url.search = ""
+      url.searchParams.set("next", pathname + request.nextUrl.search)
+      return applyResponse(NextResponse.redirect(url), cookiesToSet)
+    }
     url.pathname = "/auth/login"
     return applyResponse(NextResponse.redirect(url), cookiesToSet)
   }
@@ -71,10 +89,20 @@ export async function updateSession(request: NextRequest) {
   if (isPublicRoute) return applyResponse(NextResponse.next({ request: { headers: requestHeaders } }), cookiesToSet)
 
   // Obtener roles del usuario (query indexada)
-  const { data: rolesData } = await supabase
+  const { data: rolesData, error: rolesError } = await supabase
     .from("usuarios_roles")
     .select("roles(nombre)")
     .eq("usuario_id", user.id)
+
+  // P2-46: si la consulta de roles no llegó a tiempo, sin roles se iba al login
+  // (parecía que se había cerrado la sesión). Se reintenta desde el navegador.
+  if (rolesError) {
+    const url = request.nextUrl.clone()
+    url.pathname = "/auth/renovar"
+    url.search = ""
+    url.searchParams.set("next", pathname + request.nextUrl.search)
+    return applyResponse(NextResponse.redirect(url), cookiesToSet)
+  }
 
   const roles: string[] = (rolesData || [])
     .map((r: any) => r.roles?.nombre)
@@ -117,6 +145,18 @@ function corsHeaders(request: NextRequest): Record<string, string> | null {
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   }
+}
+
+// Corte de red / timeout al hablar con Supabase Auth (AuthRetryableFetchError):
+// no se sabe si la sesión sirve, pero tampoco que no sirva.
+function errorDeRed(error: unknown): boolean {
+  const e = error as { name?: string; status?: number } | null
+  return !!e && (e.name === "AuthRetryableFetchError" || e.status === 0)
+}
+
+// Cookie de sesión de Supabase (sb-<ref>-auth-token, a veces partida en .0/.1)
+function tieneCookieDeSesion(request: NextRequest): boolean {
+  return request.cookies.getAll().some(c => c.name.startsWith("sb-") && c.name.includes("-auth-token") && !!c.value)
 }
 
 function applyResponse(response: NextResponse, cookiesToSet: { name: string; value: string; options: any }[]) {

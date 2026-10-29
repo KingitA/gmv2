@@ -14,6 +14,7 @@ import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { TASA_PERCEPCION_IVA_DEVOLUCION, valorDevolucionConOrigen } from "@/lib/cobranzas/valor-devolucion"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { cuitDigitos, cuitValido, ahoraISO } from "@/lib/formato"
+import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from "@/lib/comprobantes/numeracion"
 
 /** Corta la emisión con una respuesta de error (validaciones dentro de una parte). */
 class Corte extends Error {
@@ -174,6 +175,9 @@ export async function POST(request: Request) {
 
     const emitidos: Array<{ id: string; tipo: string; numero: string; total: number; ya_existia?: boolean }> = []
     const avisos: string[] = []
+    // Turno fiscal de la parte en curso (P2-22): se suelta al grabar o, si algo
+    // corta antes, en el finally del bucle de partes
+    const enCurso: { turno: TurnoFiscal | null } = { turno: null }
 
     // ─── Emisión de UNA parte (NC fiscal o REV) ───
     const emitirParte = async (parte: { fiscal: boolean; items: any[] }) => {
@@ -328,42 +332,32 @@ export async function POST(request: Request) {
         }
       }
 
-      const { data: numeracion, error: numError } = await supabase
-        .from("numeracion_comprobantes")
-        .select("*")
-        .eq("tipo_comprobante", tipoFinal)
-        .eq("punto_venta", puntoVenta)
-        .single()
-
-      if (numError) {
-        throw corte({ error: `Numeración no encontrada para ${tipoFinal} PV ${puntoVenta}` }, 500)
-      }
-
-      let nuevoNumero = numeracion.ultimo_numero + 1
-
-      // ─── Obtener TA y sincronizar numeración con ARCA ───
+      // ─── Numeración (P2-22) ───
+      // Fiscal: turno por tipo + PV mientras se pide el CAE; número = último en
+      // ARCA + 1. REV: número reservado en la base de una sola vez.
+      let nuevoNumero: number
       let arcaTa: { token: string; sign: string } | null = null
       if (esFiscal && empresaConfig) {
         const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
-        arcaTa = await obtenerTAConCache(supabase, ambiente)
+        const ta = await obtenerTAConCache(supabase, ambiente)
+        arcaTa = ta
         const cbteTipo = TIPO_CBTE_ARCA[tipoFinal]
-        if (cbteTipo) {
-          const ultimoEnArca = await ultimoAutorizado(
-            ambiente, arcaTa.token, arcaTa.sign,
-            cuitDigitos(empresaConfig.cuit),
-            parseInt(puntoVenta, 10), cbteTipo,
-          )
-          if (ultimoEnArca !== numeracion.ultimo_numero) {
-            await supabase.from('numeracion_comprobantes')
-              .update({ ultimo_numero: ultimoEnArca })
-              .eq('tipo_comprobante', tipoFinal)
-              .eq('punto_venta', puntoVenta)
-            nuevoNumero = ultimoEnArca + 1
-          }
+        if (!cbteTipo) throw corte({ error: `Tipo de comprobante ${tipoFinal} no tiene código ARCA definido.` }, 500)
+        const turno = enCurso.turno = await tomarTurnoFiscal(supabase, tipoFinal, puntoVenta, () => ultimoAutorizado(
+          ambiente, ta.token, ta.sign,
+          cuitDigitos(empresaConfig.cuit),
+          parseInt(puntoVenta, 10), cbteTipo,
+        ))
+        nuevoNumero = turno.numero
+      } else {
+        try {
+          nuevoNumero = await reservarNumero(supabase, tipoFinal, puntoVenta)
+        } catch (e: any) {
+          throw corte({ error: e.message }, 500)
         }
       }
 
-      const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, "0")}`
+      const numeroComprobante = formatoNumeroComprobante(puntoVenta, nuevoNumero)
 
       // ─── Solicitar CAE a ARCA (solo NCA/NCB, no REV) ───
       let cae: string | null = null
@@ -411,6 +405,7 @@ export async function POST(request: Request) {
         })
         cae            = respCAE.cae
         vencimientoCae = respCAE.vencimientoCae
+        enCurso.turno?.marcarUsado()
       }
 
       const comprobanteInsert = {
@@ -468,6 +463,8 @@ export async function POST(request: Request) {
       }
 
       await marcarComprobanteCreado(supabase, logId, comprobante.id)
+      // Comprobante grabado: el que espera turno ya puede pedir su CAE
+      await enCurso.turno?.soltar()
 
       const detalleInserts = detallePayload.map((d: any) => ({ ...d, comprobante_id: comprobante.id }))
 
@@ -528,12 +525,6 @@ export async function POST(request: Request) {
           },
         )
       }
-
-      await supabase
-        .from("numeracion_comprobantes")
-        .update({ ultimo_numero: nuevoNumero })
-        .eq("tipo_comprobante", tipoFinal)
-        .eq("punto_venta", numeracion.punto_venta)
 
       // Libro mayor: la NC/Reversa acredita al cliente (haber). Fuente única del
       // saldo (v_saldo_clientes); si falla, la advertencia viaja en la respuesta.
@@ -659,6 +650,9 @@ export async function POST(request: Request) {
           return NextResponse.json({ ...err, error: `${err.error} (ya se emitió ${emitidos.map((c) => `${c.tipo} ${c.numero}`).join(", ")}; al reintentar se emite solo lo que falta)`, emitidos }, { status: e.respuesta.status })
         }
         throw e
+      } finally {
+        await enCurso.turno?.soltar()
+        enCurso.turno = null
       }
     }
 

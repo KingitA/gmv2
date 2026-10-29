@@ -29,6 +29,7 @@ import { leerCondicionesCliente } from "@/lib/pedidos/condiciones-pedido"
 import { estadoAlFacturar } from "@/lib/pedidos/estados"
 import { aplicarPagosDelPedidoRefacturado } from "@/lib/pedidos/refacturar"
 import { cuitDigitos, cuitValido, normalizarCuit } from "@/lib/formato"
+import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from "@/lib/comprobantes/numeracion"
 
 type CondicionSegmento = {
   lista_precio_id: string | null
@@ -44,13 +45,70 @@ const CONDICION_PROVEEDOR_COLS =
 const CONDICION_MARCA_COLS =
   "marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct"
 
-export async function POST(request: Request) {
-  try {
-    const auth = await requirePermiso("emitir_comprobantes")
-    if (auth.error) return auth.error
+// Puede esperar turno fiscal detrás de otras máquinas (P2-22)
+export const maxDuration = 120
 
+// P2-22: candado por pedido. Dos "Generar" del mismo pedido a la vez (dos
+// máquinas, doble clic) pasaban los dos el control de "ya facturado" y emitían
+// dos veces: el segundo ahora se frena. Vence solo si una emisión se cuelga.
+const CANDADO_FACTURAR_VENCE_MS = 5 * 60 * 1000
+
+async function tomarCandadoFacturacion(supabase: any, pedidoId: string): Promise<boolean | null> {
+  const vencido = new Date(Date.now() - CANDADO_FACTURAR_VENCE_MS).toISOString()
+  const { data, error } = await supabase
+    .from("pedidos")
+    .update({ facturando_at: new Date().toISOString() })
+    .eq("id", pedidoId)
+    .or(`facturando_at.is.null,facturando_at.lt.${vencido}`)
+    .select("id")
+  if (error) {
+    // Sin la migración 20261029 todavía: sigue sin candado (como antes)
+    if (/facturando_at/.test(error.message)) return null
+    throw new Error(`candado de facturación: ${error.message}`)
+  }
+  return !!data?.length
+}
+
+export async function POST(request: Request) {
+  const auth = await requirePermiso("emitir_comprobantes")
+  if (auth.error) return auth.error
+
+  let body: any
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: "Pedido inválido" }, { status: 400 })
+  }
+  if (!body?.pedido_id || typeof body.pedido_id !== "string") {
+    return NextResponse.json({ error: "Falta el pedido a facturar" }, { status: 400 })
+  }
+
+  const supabase = createAdminClient()
+  let candado: boolean | null
+  try {
+    candado = await tomarCandadoFacturacion(supabase, body.pedido_id)
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 })
+  }
+  if (candado === false) {
+    return NextResponse.json({
+      error: "Este pedido ya se está facturando (otra máquina, otra pestaña o doble clic). Esperá que termine y actualizá la pantalla.",
+      error_code: "FACTURACION_EN_CURSO",
+    }, { status: 409 })
+  }
+  try {
+    return await generarPedido(body, auth)
+  } finally {
+    if (candado) {
+      const { error } = await supabase.from("pedidos").update({ facturando_at: null }).eq("id", body.pedido_id)
+      if (error) console.error("[generar] no se pudo soltar el candado de facturación:", error.message)
+    }
+  }
+}
+
+async function generarPedido(body: any, auth: { user: { id: string } }) {
+  try {
     const supabase = createAdminClient()
-    const body = await request.json()
     const { pedido_id, pago_contado } = body
 
     // ─── 1. Obtener pedido con cliente y detalles ───
@@ -781,256 +839,238 @@ async function generarComprobante(
   const esFiscal   = REQUIERE_CAE.has(tipoComprobante)
   const puntoVenta = esFiscal && arca ? arca.puntoVenta : '0001'
 
-  // ─── Numeración ───
-  const { data: numeracion, error: numError } = await supabase
-    .from('numeracion_comprobantes')
-    .select('*')
-    .eq('tipo_comprobante', tipoComprobante)
-    .eq('punto_venta', puntoVenta)
-    .single()
-
-  if (numError) throw new Error(
-    `Numeración no encontrada para ${tipoComprobante} punto de venta ${puntoVenta}. ` +
-    `Verificá la tabla numeracion_comprobantes.`
-  )
-
-  // ─── Sincronizar con ARCA antes de asignar el número ───
-  // FECompUltimoAutorizado garantiza que nuestro número local no diverge de ARCA.
-  let nuevoNumero = numeracion.ultimo_numero + 1
-
+  // ─── Numeración (P2-22: nunca dos comprobantes con el mismo número) ───
+  // Fiscal: turno por tipo + PV mientras se pide el CAE; el número es el último
+  // autorizado en ARCA + 1 (FECompUltimoAutorizado, ya con el turno tomado).
+  // Interno (PRES/REV): número reservado en la base de una sola vez.
+  let turno: TurnoFiscal | null = null
+  let nuevoNumero: number
   if (esFiscal && arca) {
     const cbteTipo = TIPO_CBTE_ARCA[tipoComprobante]
     if (!cbteTipo) throw new Error(`Tipo de comprobante ${tipoComprobante} no tiene código ARCA definido.`)
-
-    const ultimoEnArca = await ultimoAutorizado(
+    turno = await tomarTurnoFiscal(supabase, tipoComprobante, puntoVenta, () => ultimoAutorizado(
       arca.ambiente, arca.token, arca.sign, arca.cuitEmpresa,
       parseInt(puntoVenta, 10), cbteTipo,
-    )
-
-    if (ultimoEnArca !== numeracion.ultimo_numero) {
-      // Sincronizamos nuestra DB con el estado real de ARCA
-      await supabase
-        .from('numeracion_comprobantes')
-        .update({ ultimo_numero: ultimoEnArca })
-        .eq('tipo_comprobante', tipoComprobante)
-        .eq('punto_venta', puntoVenta)
-      nuevoNumero = ultimoEnArca + 1
-    }
+    ))
+    nuevoNumero = turno.numero
+  } else {
+    nuevoNumero = await reservarNumero(supabase, tipoComprobante, puntoVenta)
   }
 
-  const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, '0')}`
+  try {
+    const numeroComprobante = formatoNumeroComprobante(puntoVenta, nuevoNumero)
 
-  // ─── Calcular totales ───
-  const esPresupuesto = tipoComprobante === 'PRES'
-  let totalNeto = 0
-  let totalIva  = 0
+    // ─── Calcular totales ───
+    const esPresupuesto = tipoComprobante === 'PRES'
+    let totalNeto = 0
+    let totalIva  = 0
 
-  for (const item of items) {
-    if (esPresupuesto) {
-      totalNeto += item.subtotalNeto
-    } else {
-      totalNeto += round2(item.precioAntesIva * item.cantidad)
-      totalIva  += item.subtotalIva
+    for (const item of items) {
+      if (esPresupuesto) {
+        totalNeto += item.subtotalNeto
+      } else {
+        totalNeto += round2(item.precioAntesIva * item.cantidad)
+        totalIva  += item.subtotalIva
+      }
     }
-  }
-  totalNeto = round2(totalNeto)
-  totalIva  = round2(totalIva)
-  // Los descuentos general/viajante ya vienen en el neto por línea; la mercadería
-  // bonificada es una línea a $0. El neto declarado = Σ(líneas). No hay líneas negativas.
+    totalNeto = round2(totalNeto)
+    totalIva  = round2(totalIva)
+    // Los descuentos general/viajante ya vienen en el neto por línea; la mercadería
+    // bonificada es una línea a $0. El neto declarado = Σ(líneas). No hay líneas negativas.
 
-  // ─── Percepciones (IVA 3% RG 5329/2023 + IIBB según padrón provincial) ───
-  // Se calculan sobre el neto YA descontado (incluido el mínimo de $3.000)
-  // La alícuota IIBB se resuelve: override manual → padrón vigente → alícuota general
-  const tasaIIBBResuelta = esFiscal ? await resolverAlicuotaIIBB(supabase, pedido.cliente) : 0
-  const percResult = calcularPercepciones(totalNeto, { ...pedido.cliente, percepcion_iibb: tasaIIBBResuelta }, esFiscal)
-  const percIVA    = percResult.percepcion_iva
-  const percIIBB   = percResult.percepcion_iibb
-  const totalTrib  = round2(percIVA + percIIBB)
-  const totalFactura = (
-    Math.round(totalNeto * 100) +
-    Math.round(totalIva  * 100) +
-    Math.round(totalTrib * 100)
-  ) / 100
+    // ─── Percepciones (IVA 3% RG 5329/2023 + IIBB según padrón provincial) ───
+    // Se calculan sobre el neto YA descontado (incluido el mínimo de $3.000)
+    // La alícuota IIBB se resuelve: override manual → padrón vigente → alícuota general
+    const tasaIIBBResuelta = esFiscal ? await resolverAlicuotaIIBB(supabase, pedido.cliente) : 0
+    const percResult = calcularPercepciones(totalNeto, { ...pedido.cliente, percepcion_iibb: tasaIIBBResuelta }, esFiscal)
+    const percIVA    = percResult.percepcion_iva
+    const percIIBB   = percResult.percepcion_iibb
+    const totalTrib  = round2(percIVA + percIIBB)
+    const totalFactura = (
+      Math.round(totalNeto * 100) +
+      Math.round(totalIva  * 100) +
+      Math.round(totalTrib * 100)
+    ) / 100
 
-  // ─── Solicitar CAE a ARCA (solo comprobantes fiscales) ───
-  let cae: string | null = null
-  let vencimientoCae: string | null = null
+    // ─── Solicitar CAE a ARCA (solo comprobantes fiscales) ───
+    let cae: string | null = null
+    let vencimientoCae: string | null = null
 
-  if (esFiscal && arca) {
-    const clienteCuit = cuitDigitos(pedido.cliente.cuit)
-    const fecha = todayArgentina().replace(/-/g, '') // YYYYMMDD
+    if (esFiscal && arca) {
+      const clienteCuit = cuitDigitos(pedido.cliente.cuit)
+      const fecha = todayArgentina().replace(/-/g, '') // YYYYMMDD
 
-    // RG 5616/2024: condición IVA del receptor es obligatoria — sin mapeo no se emite
-    const condIvaReceptor = condicionIvaReceptorId(pedido.cliente.condicion_iva)
-    if (condIvaReceptor === null) {
-      throw new Error(
-        `El cliente "${pedido.cliente.nombre_razon_social ?? pedido.cliente.nombre ?? ''}" tiene condición de IVA ` +
-        `"${pedido.cliente.condicion_iva ?? 'sin cargar'}" que no mapea a ningún código de receptor de ARCA (RG 5616). ` +
-        `Corregí la condición de IVA del cliente antes de emitir.`
-      )
+      // RG 5616/2024: condición IVA del receptor es obligatoria — sin mapeo no se emite
+      const condIvaReceptor = condicionIvaReceptorId(pedido.cliente.condicion_iva)
+      if (condIvaReceptor === null) {
+        throw new Error(
+          `El cliente "${pedido.cliente.nombre_razon_social ?? pedido.cliente.nombre ?? ''}" tiene condición de IVA ` +
+          `"${pedido.cliente.condicion_iva ?? 'sin cargar'}" que no mapea a ningún código de receptor de ARCA (RG 5616). ` +
+          `Corregí la condición de IVA del cliente antes de emitir.`
+        )
+      }
+
+      // Armar array de tributos (percepciones) para ARCA
+      const tributos = []
+      if (percIVA > 0) {
+        tributos.push({ id: TRIBUTO_ID.PERCEPCION_IVA, desc: 'Percepcion IVA RG 5329', baseImp: totalNeto, alic: percResult.tasa_iva_aplicada, importe: percIVA })
+      }
+      if (percIIBB > 0) {
+        tributos.push({ id: TRIBUTO_ID.PERCEPCION_IIBB, desc: 'Percepcion IIBB', baseImp: totalNeto, alic: percResult.tasa_iibb_aplicada, importe: percIIBB })
+      }
+
+      const respCAE = await solicitarCAE({
+        ambiente:    arca.ambiente,
+        token:       arca.token,
+        sign:        arca.sign,
+        cuit:        arca.cuitEmpresa,
+        ptoVta:      parseInt(puntoVenta, 10),
+        cbteTipo:    TIPO_CBTE_ARCA[tipoComprobante],
+        cbteDesde:   nuevoNumero,
+        cbteHasta:   nuevoNumero,
+        concepto:    CONCEPTO.PRODUCTOS,
+        docTipo:     DOC_TIPO.CUIT,
+        docNro:      clienteCuit,
+        fecha,
+        impTotal:    totalFactura,
+        impTotConc:  0,
+        impNeto:     totalNeto,
+        impOpEx:     0,
+        impIva:      totalIva,
+        impTrib:     totalTrib,
+        iva: totalIva > 0
+          ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
+          : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
+        tributos: tributos.length > 0 ? tributos : undefined,
+        condicionIVAReceptorId: condIvaReceptor,
+      })
+
+      cae            = respCAE.cae
+      vencimientoCae = respCAE.vencimientoCae
+      turno?.marcarUsado()
+
+      if (respCAE.observaciones.length) {
+        console.warn(`[ARCA] Obs ${tipoComprobante} ${numeroComprobante}:`, respCAE.observaciones.join(' | '))
+      }
     }
 
-    // Armar array de tributos (percepciones) para ARCA
-    const tributos = []
-    if (percIVA > 0) {
-      tributos.push({ id: TRIBUTO_ID.PERCEPCION_IVA, desc: 'Percepcion IVA RG 5329', baseImp: totalNeto, alic: percResult.tasa_iva_aplicada, importe: percIVA })
+    // ─── Crear comprobante en DB (con CAE si corresponde) ───
+    const comprobanteInsert = {
+      tipo_comprobante:  tipoComprobante,
+      numero_comprobante: numeroComprobante,
+      punto_venta:       puntoVenta,
+      fecha:             todayArgentina(),
+      cliente_id:        pedido.cliente_id,
+      pedido_id:         pedido.id,
+      total_neto:        totalNeto,
+      total_iva:         totalIva,
+      percepcion_iva:    percIVA,
+      percepcion_iibb:   percIIBB,
+      total_factura:     totalFactura,
+      saldo_pendiente:   totalFactura,
+      estado_pago:       'pendiente',
+      ...(cae            ? { cae }                                  : {}),
+      ...(vencimientoCae ? { vencimiento_cae: vencimientoCae }      : {}),
+      ...(creadoPor      ? { creado_por: creadoPor }                : {}),
     }
-    if (percIIBB > 0) {
-      tributos.push({ id: TRIBUTO_ID.PERCEPCION_IIBB, desc: 'Percepcion IIBB', baseImp: totalNeto, alic: percResult.tasa_iibb_aplicada, importe: percIIBB })
+
+    // Detalle: una línea por ítem. Los descuentos general/viajante ya están en el
+    // neto; la mercadería bonificada es una línea a $0 (P.Lista real, 100% Of.).
+    // Se persiste el desglose por línea (precio_lista + % de cada descuento) para el
+    // PDF y para reconstrucción/auditoría AFIP.
+    const detallePayload = items.map(item => ({
+      articulo_id:          item.articulo_id,
+      descripcion:          item.descripcion,
+      cantidad:             item.cantidad,
+      precio_unitario:      item.precioUnitario,
+      precio_total:         item.subtotalNeto,
+      precio_lista:         item.precioListaDisplay ?? null,
+      descuento_propio_pct: item.descuentoPropioPct ?? 0,
+      bonif_general_pct:    item.bonifGeneralPct ?? 0,
+      bonif_viajante_pct:   item.bonifViajantePct ?? 0,
+      es_bonificado:        item.esBonificado === true,
+    }))
+
+    // Registro durable del CAE antes del insert (solo fiscales con CAE)
+    const logId = cae ? await registrarCAEObtenido(supabase, {
+      tipo: tipoComprobante, puntoVenta, numero: numeroComprobante,
+      cae, vencimientoCae, importe: totalFactura,
+      clienteCuit: pedido.cliente.cuit ?? null,
+      payload: { comprobante: comprobanteInsert, detalle: detallePayload },
+    }) : null
+
+    const { data: comprobante, error: compError } = await supabase
+      .from('comprobantes_venta')
+      .insert(comprobanteInsert)
+      .select('id, percepcion_iva, percepcion_iibb')
+      .single()
+
+    if (compError) {
+      if (cae) {
+        await marcarHuerfano(supabase, logId, compError.message)
+        throw new Error(mensajeHuerfano(tipoComprobante, numeroComprobante, cae))
+      }
+      throw new Error('Error creando comprobante: ' + compError.message)
     }
 
-    const respCAE = await solicitarCAE({
-      ambiente:    arca.ambiente,
-      token:       arca.token,
-      sign:        arca.sign,
-      cuit:        arca.cuitEmpresa,
-      ptoVta:      parseInt(puntoVenta, 10),
-      cbteTipo:    TIPO_CBTE_ARCA[tipoComprobante],
-      cbteDesde:   nuevoNumero,
-      cbteHasta:   nuevoNumero,
-      concepto:    CONCEPTO.PRODUCTOS,
-      docTipo:     DOC_TIPO.CUIT,
-      docNro:      clienteCuit,
-      fecha,
-      impTotal:    totalFactura,
-      impTotConc:  0,
-      impNeto:     totalNeto,
-      impOpEx:     0,
-      impIva:      totalIva,
-      impTrib:     totalTrib,
-      iva: totalIva > 0
-        ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
-        : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
-      tributos: tributos.length > 0 ? tributos : undefined,
-      condicionIVAReceptorId: condIvaReceptor,
-    })
+    await marcarComprobanteCreado(supabase, logId, comprobante.id)
+    // Comprobante grabado: el que espera turno ya puede pedir su CAE
+    await turno?.soltar()
 
-    cae            = respCAE.cae
-    vencimientoCae = respCAE.vencimientoCae
+    const detalleInserts = detallePayload.map(d => ({ ...d, comprobante_id: comprobante.id }))
 
-    if (respCAE.observaciones.length) {
-      console.warn(`[ARCA] Obs ${tipoComprobante} ${numeroComprobante}:`, respCAE.observaciones.join(' | '))
+    const { error: detError } = await supabase.from('comprobantes_venta_detalle').insert(detalleInserts)
+    if (detError) throw new Error('Error creando detalle: ' + detError.message)
+
+    // ─── Libro mayor (cuenta corriente del cliente) ───
+    // El comprobante incrementa la deuda del cliente: debe = total_factura.
+    // Fuente única del saldo (v_saldo_clientes). Si falla, no se aborta el
+    // comprobante (ya tiene CAE) pero la advertencia viaja en la respuesta.
+    const ccAviso = await postearLibroConAviso(supabase, {
+      p_cliente_id:         pedido.cliente_id,
+      p_tipo_movimiento:    tipoComprobante === 'PRES' ? 'presupuesto' : 'factura',
+      p_debe:               totalFactura,
+      p_haber:              0,
+      p_referencia_tipo:    'comprobante_venta',
+      p_referencia_id:      comprobante.id,
+      p_numero_comprobante: numeroComprobante,
+      p_observaciones:      `${tipoComprobante} ${numeroComprobante}`,
+      p_usuario_id:         creadoPor ?? null,
+    }, `${tipoComprobante} ${numeroComprobante}`)
+
+    // ─── Stock ───
+    for (const item of items) {
+      await supabase.rpc('increment_stock_actual', {
+        p_articulo_id: item.articulo_id,
+        p_cantidad:    -item.cantidad,
+      }).then(() => {})
+
+      await supabase.from('movimientos_stock').insert({
+        articulo_id:     item.articulo_id,
+        tipo_movimiento: 'salida',
+        cantidad:        item.cantidad,
+        precio_unitario: item.precioUnitario,
+        fecha_movimiento: nowArgentina(),
+        observaciones:   `Venta - ${tipoComprobante} ${numeroComprobante}`,
+      })
     }
-  }
 
-  // ─── Crear comprobante en DB (con CAE si corresponde) ───
-  const comprobanteInsert = {
-    tipo_comprobante:  tipoComprobante,
-    numero_comprobante: numeroComprobante,
-    punto_venta:       puntoVenta,
-    fecha:             todayArgentina(),
-    cliente_id:        pedido.cliente_id,
-    pedido_id:         pedido.id,
-    total_neto:        totalNeto,
-    total_iva:         totalIva,
-    percepcion_iva:    percIVA,
-    percepcion_iibb:   percIIBB,
-    total_factura:     totalFactura,
-    saldo_pendiente:   totalFactura,
-    estado_pago:       'pendiente',
-    ...(cae            ? { cae }                                  : {}),
-    ...(vencimientoCae ? { vencimiento_cae: vencimientoCae }      : {}),
-    ...(creadoPor      ? { creado_por: creadoPor }                : {}),
-  }
-
-  // Detalle: una línea por ítem. Los descuentos general/viajante ya están en el
-  // neto; la mercadería bonificada es una línea a $0 (P.Lista real, 100% Of.).
-  // Se persiste el desglose por línea (precio_lista + % de cada descuento) para el
-  // PDF y para reconstrucción/auditoría AFIP.
-  const detallePayload = items.map(item => ({
-    articulo_id:          item.articulo_id,
-    descripcion:          item.descripcion,
-    cantidad:             item.cantidad,
-    precio_unitario:      item.precioUnitario,
-    precio_total:         item.subtotalNeto,
-    precio_lista:         item.precioListaDisplay ?? null,
-    descuento_propio_pct: item.descuentoPropioPct ?? 0,
-    bonif_general_pct:    item.bonifGeneralPct ?? 0,
-    bonif_viajante_pct:   item.bonifViajantePct ?? 0,
-    es_bonificado:        item.esBonificado === true,
-  }))
-
-  // Registro durable del CAE antes del insert (solo fiscales con CAE)
-  const logId = cae ? await registrarCAEObtenido(supabase, {
-    tipo: tipoComprobante, puntoVenta, numero: numeroComprobante,
-    cae, vencimientoCae, importe: totalFactura,
-    clienteCuit: pedido.cliente.cuit ?? null,
-    payload: { comprobante: comprobanteInsert, detalle: detallePayload },
-  }) : null
-
-  const { data: comprobante, error: compError } = await supabase
-    .from('comprobantes_venta')
-    .insert(comprobanteInsert)
-    .select('id, percepcion_iva, percepcion_iibb')
-    .single()
-
-  if (compError) {
-    if (cae) {
-      await marcarHuerfano(supabase, logId, compError.message)
-      throw new Error(mensajeHuerfano(tipoComprobante, numeroComprobante, cae))
+    return {
+      tipo:              'comprobante',
+      id:                comprobante.id,
+      tipo_comprobante:  tipoComprobante,
+      numero:            numeroComprobante,
+      total_neto:        totalNeto,
+      total_iva:         totalIva,
+      total:             totalFactura,
+      percepcion_iva:    comprobante.percepcion_iva  ?? 0,
+      percepcion_iibb:   comprobante.percepcion_iibb ?? 0,
+      cae:               cae ?? null,
+      vencimiento_cae:   vencimientoCae ?? null,
+      cc_aviso:          ccAviso,
     }
-    throw new Error('Error creando comprobante: ' + compError.message)
-  }
-
-  await marcarComprobanteCreado(supabase, logId, comprobante.id)
-
-  const detalleInserts = detallePayload.map(d => ({ ...d, comprobante_id: comprobante.id }))
-
-  const { error: detError } = await supabase.from('comprobantes_venta_detalle').insert(detalleInserts)
-  if (detError) throw new Error('Error creando detalle: ' + detError.message)
-
-  // ─── Libro mayor (cuenta corriente del cliente) ───
-  // El comprobante incrementa la deuda del cliente: debe = total_factura.
-  // Fuente única del saldo (v_saldo_clientes). Si falla, no se aborta el
-  // comprobante (ya tiene CAE) pero la advertencia viaja en la respuesta.
-  const ccAviso = await postearLibroConAviso(supabase, {
-    p_cliente_id:         pedido.cliente_id,
-    p_tipo_movimiento:    tipoComprobante === 'PRES' ? 'presupuesto' : 'factura',
-    p_debe:               totalFactura,
-    p_haber:              0,
-    p_referencia_tipo:    'comprobante_venta',
-    p_referencia_id:      comprobante.id,
-    p_numero_comprobante: numeroComprobante,
-    p_observaciones:      `${tipoComprobante} ${numeroComprobante}`,
-    p_usuario_id:         creadoPor ?? null,
-  }, `${tipoComprobante} ${numeroComprobante}`)
-
-  // ─── Stock ───
-  for (const item of items) {
-    await supabase.rpc('increment_stock_actual', {
-      p_articulo_id: item.articulo_id,
-      p_cantidad:    -item.cantidad,
-    }).then(() => {})
-
-    await supabase.from('movimientos_stock').insert({
-      articulo_id:     item.articulo_id,
-      tipo_movimiento: 'salida',
-      cantidad:        item.cantidad,
-      precio_unitario: item.precioUnitario,
-      fecha_movimiento: nowArgentina(),
-      observaciones:   `Venta - ${tipoComprobante} ${numeroComprobante}`,
-    })
-  }
-
-  // ─── Avanzar numeración ───
-  await supabase
-    .from('numeracion_comprobantes')
-    .update({ ultimo_numero: nuevoNumero })
-    .eq('tipo_comprobante', tipoComprobante)
-    .eq('punto_venta', puntoVenta)
-
-  return {
-    tipo:              'comprobante',
-    id:                comprobante.id,
-    tipo_comprobante:  tipoComprobante,
-    numero:            numeroComprobante,
-    total_neto:        totalNeto,
-    total_iva:         totalIva,
-    total:             totalFactura,
-    percepcion_iva:    comprobante.percepcion_iva  ?? 0,
-    percepcion_iibb:   comprobante.percepcion_iibb ?? 0,
-    cae:               cae ?? null,
-    vencimiento_cae:   vencimientoCae ?? null,
-    cc_aviso:          ccAviso,
+  } finally {
+    // Si algo cortó antes de grabar (p. ej. ARCA rechazó), el turno se suelta igual
+    await turno?.soltar()
   }
 }

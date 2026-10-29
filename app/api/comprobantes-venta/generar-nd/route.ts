@@ -13,6 +13,7 @@ import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnaps
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { cuitDigitos, cuitValido } from "@/lib/formato"
+import { tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from "@/lib/comprobantes/numeracion"
 
 /**
  * Genera Notas de Débito (NDA/NDB) para ventas.
@@ -20,6 +21,8 @@ import { cuitDigitos, cuitValido } from "@/lib/formato"
  * Usos: cheque rechazado, diferencia de precio, recargo por mora.
  */
 export async function POST(request: Request) {
+  // Turno fiscal de la ND (P2-22): se suelta al grabar o, si algo corta antes, en el finally
+  let turno: TurnoFiscal | null = null
   try {
     const auth = await requireAuth()
     if (auth.error) return auth.error
@@ -136,20 +139,6 @@ export async function POST(request: Request) {
     }
     const puntoVenta = String(empresaConfig.arca_punto_venta).padStart(4, '0')
 
-    const { data: numeracion, error: numError } = await supabase
-      .from('numeracion_comprobantes')
-      .select('*')
-      .eq('tipo_comprobante', tipoFinal)
-      .eq('punto_venta', puntoVenta)
-      .single()
-
-    if (numError || !numeracion) {
-      return NextResponse.json(
-        { error: `No hay numeración configurada para ${tipoFinal} PV ${puntoVenta}.` },
-        { status: 500 },
-      )
-    }
-
     // ─── Calcular totales de ítems ───
     let totalNeto = 0
     let totalIva  = 0
@@ -186,33 +175,7 @@ export async function POST(request: Request) {
       Math.round(totalTrib * 100)
     ) / 100
 
-    // ─── Obtener TA y sincronizar numeración ───
-    const ambiente    = (empresaConfig?.arca_ambiente ?? 'produccion') as AmbienteARCA
-    const ta          = await obtenerTAConCache(supabase, ambiente)
-    const cuitEmpresa = cuitDigitos(empresaConfig?.cuit)
-    const cbteTipo    = TIPO_CBTE_ARCA[tipoFinal]
-
-    let nuevoNumero = numeracion.ultimo_numero + 1
-    if (cbteTipo) {
-      const ultimoEnArca = await ultimoAutorizado(
-        ambiente, ta.token, ta.sign, cuitEmpresa, parseInt(puntoVenta, 10), cbteTipo,
-      )
-      if (ultimoEnArca !== numeracion.ultimo_numero) {
-        await supabase.from('numeracion_comprobantes')
-          .update({ ultimo_numero: ultimoEnArca })
-          .eq('tipo_comprobante', tipoFinal)
-          .eq('punto_venta', puntoVenta)
-        nuevoNumero = ultimoEnArca + 1
-      }
-    }
-
-    const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, '0')}`
-
-    // ─── Solicitar CAE ───
-    const clienteCuit = cuitDigitos(cliente.cuit)
-    const fecha       = todayArgentina().replace(/-/g, '')
-
-    // RG 5616/2024: condición IVA del receptor obligatoria
+    // RG 5616/2024: condición IVA del receptor obligatoria (antes de tomar turno)
     const condIvaReceptor = condicionIvaReceptorId(cliente.condicion_iva)
     if (condIvaReceptor === null) {
       return NextResponse.json({
@@ -220,6 +183,25 @@ export async function POST(request: Request) {
         error_code: 'CONDICION_IVA_NO_MAPEA',
       }, { status: 422 })
     }
+
+    // ─── Numeración (P2-22): turno por tipo + PV; número = último en ARCA + 1 ───
+    const ambiente    = (empresaConfig?.arca_ambiente ?? 'produccion') as AmbienteARCA
+    const ta          = await obtenerTAConCache(supabase, ambiente)
+    const cuitEmpresa = cuitDigitos(empresaConfig?.cuit)
+    const cbteTipo    = TIPO_CBTE_ARCA[tipoFinal]
+    if (!cbteTipo) {
+      return NextResponse.json({ error: `Tipo de comprobante ${tipoFinal} no tiene código ARCA definido.` }, { status: 500 })
+    }
+
+    turno = await tomarTurnoFiscal(supabase, tipoFinal, puntoVenta, () => ultimoAutorizado(
+      ambiente, ta.token, ta.sign, cuitEmpresa, parseInt(puntoVenta, 10), cbteTipo,
+    ))
+    const nuevoNumero = turno.numero
+    const numeroComprobante = formatoNumeroComprobante(puntoVenta, nuevoNumero)
+
+    // ─── Solicitar CAE ───
+    const clienteCuit = cuitDigitos(cliente.cuit)
+    const fecha       = todayArgentina().replace(/-/g, '')
 
     const tributos = []
     if (percIVA > 0) {
@@ -256,6 +238,7 @@ export async function POST(request: Request) {
       periodoAsoc,
       condicionIVAReceptorId: condIvaReceptor,
     })
+    turno.marcarUsado()
 
     const comprobanteInsert = {
       tipo_comprobante:   tipoFinal,
@@ -304,6 +287,8 @@ export async function POST(request: Request) {
     }
 
     await marcarComprobanteCreado(supabase, logId, comprobante.id)
+    // Comprobante grabado: el que espera turno ya puede pedir su CAE
+    await turno.soltar()
 
     const detalleInserts = detallePayload.map((d: any) => ({ ...d, comprobante_id: comprobante.id }))
 
@@ -311,12 +296,6 @@ export async function POST(request: Request) {
     if (detError) {
       return NextResponse.json({ error: 'Error creando detalle: ' + detError.message }, { status: 500 })
     }
-
-    await supabase
-      .from('numeracion_comprobantes')
-      .update({ ultimo_numero: nuevoNumero })
-      .eq('tipo_comprobante', tipoFinal)
-      .eq('punto_venta', puntoVenta)
 
     // Libro mayor: la Nota de Débito incrementa la deuda del cliente (debe).
     // Fuente única del saldo (v_saldo_clientes); si falla, advertencia visible.
@@ -417,5 +396,7 @@ export async function POST(request: Request) {
   } catch (err: any) {
     console.error('[ND] Error generando nota de débito:', err)
     return NextResponse.json({ error: err.message || 'Error generando nota de débito' }, { status: 500 })
+  } finally {
+    await turno?.soltar()
   }
 }

@@ -9,6 +9,7 @@
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { todayArgentina } from "@/lib/utils"
 import { moneda } from "@/lib/formato"
+import { reservarNumero, formatoNumeroComprobante } from "@/lib/comprobantes/numeracion"
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -27,22 +28,8 @@ export async function anularParteContado(
   const puntoVenta = orig.punto_venta || nota.numero_comprobante.split("-")[0]
   const importe = r2(monto)
 
-  // Numeración con control de carrera: solo avanza si nadie la tomó en el medio
-  let numero = ""
-  for (let intento = 0; intento < 5 && !numero; intento++) {
-    const { data: num } = await supabase.from("numeracion_comprobantes").select("ultimo_numero").eq("tipo_comprobante", "PRES").eq("punto_venta", puntoVenta).single()
-    if (!num) throw new Error(`No hay numeración de PRES para el punto de venta ${puntoVenta}`)
-    const siguiente = Number(num.ultimo_numero) + 1
-    const { data: tomado } = await supabase
-      .from("numeracion_comprobantes")
-      .update({ ultimo_numero: siguiente })
-      .eq("tipo_comprobante", "PRES")
-      .eq("punto_venta", puntoVenta)
-      .eq("ultimo_numero", num.ultimo_numero)
-      .select("ultimo_numero")
-    if (tomado?.length) numero = `${puntoVenta}-${String(siguiente).padStart(8, "0")}`
-  }
-  if (!numero) throw new Error("No se pudo numerar el PRES de la anulación parcial (reintentá)")
+  // Número reservado en la base de una sola vez (P2-22)
+  const numero = formatoNumeroComprobante(puntoVenta, await reservarNumero(supabase, "PRES", puntoVenta))
 
   const obs = `Anulación parcial del 10% contado: REV ${nota.numero_comprobante}, parte del pedido ${pedido.numero_pedido || pedido.id} (${moneda(importe)}) — refacturación`
   const { data: pres, error: pErr } = await supabase

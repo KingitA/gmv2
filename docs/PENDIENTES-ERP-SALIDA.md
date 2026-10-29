@@ -524,6 +524,13 @@ Entre el 27/10 15:19 y el 28/10 11:40, los pedidos reales **001945, 001956 y 001
 3. **Facturar varios juntos** (pedido de Juan): en `/clientes-pedidos`, con varios pedidos tildados, además de "Subir a viaje / Crear viaje / Prioridad", un botón **"Facturar"**. Todos los pedidos (los tildados y los de cualquier otra máquina) pasan por **la misma cola**: no se pisan.
 4. Probarlo con 5 generaciones simultáneas (PRES y, en homologación sin grabar, FA).
 
+**Hecho (29/10, commit 2e7abb1, rama `cambios-general`) — falta aplicar la migración y el botón en pantalla:**
+- `supabase/migrations/20261029_numeracion_atomica.sql` (**sin aplicar**): `numeracion_reservar` (número interno atómico; saltea números que ya existen, p. ej. copias de la apertura), turno fiscal `numeracion_tomar_turno` / `numeracion_soltar_turno` (uno atrás del otro por tipo + PV; vence solo a los 90 s), renumera el PRES 0001-00000030 **anulado** de PRUEBA 3 al siguiente libre (también en su cuenta corriente y kardex; el vivo queda igual), índice único `ux_comprobantes_venta_numero` (anulados incluidos; única excepción: el PRES 0002-00000001 de respaldo de devoluciones, uno por cliente a propósito) y candado por pedido `pedidos.facturando_at`.
+- `lib/comprobantes/numeracion.ts`: `reservarNumero` (internos) y `tomarTurnoFiscal` (fiscales: número = último en ARCA + 1, se suelta apenas el comprobante queda grabado; si ARCA rechaza no se consume número ni queda hueco). Lo usan **todos** los caminos: `generar`, `generar-nc-reversa`, `generar-nd`, `anular-comprobante`, `generar-bonificacion` (NC y REV del 10 %), `anular-parte-contado`. Recibos, remitos, OP, retenciones y ND de cheque ya numeraban con candado en la base (sin cambios).
+- `generar`: candado por pedido (dos "Generar" del mismo pedido a la vez → el segundo recibe "ya se está facturando").
+- **Facturar varios:** `POST /api/comprobantes-venta/generar-lote` `{ pedido_ids: [...] }` (hasta 30): factura uno atrás del otro con el mismo circuito que "Generar" y devuelve qué salió y qué no. **Falta el botón "Facturar" en `/clientes-pedidos` (Frontend).**
+- Probado en una base local descartable: 5 máquinas × 20 PRES a la vez → 100 números distintos y correlativos; 30 FA simultáneas con ARCA simulado → sin repetidos ni huecos; turno colgado se libera solo; el índice frena repetidos. Nada probado en producción ni emitido en ARCA.
+
 ### P2-21 — "Guardar pedido" tiene que volver a donde estaba · Dueño: Frontend
 
 Al editar un pedido (ej. cambiar la lista) y apretar "Guardar pedido", la pantalla queda en el mismo lugar. Tiene que volver a donde estaba el usuario (el listado / el modal desde donde entró).
@@ -599,6 +606,12 @@ Pedido de Juan (29/10, le molesta mucho): en la revisión de un pedido importado
 ### P2-46 — La sesión del ERP se cierra cada ~10 minutos · Dueño: Cambios general · URGENTE para la oficina
 
 Pedido de Juan (29/10, le molesta mucho): trabajando 4 personas, el ERP les pide volver a iniciar sesión **cada 10 minutos**. Revisar la renovación de la sesión de Supabase (`middleware.ts`, `lib/supabase/server.ts` / `client.ts`: que el middleware refresque el token y escriba las cookies nuevas en la respuesta), la duración del JWT y del "refresh token" en la configuración de Auth de Supabase, y si hay algún cierre por inactividad. La sesión tiene que durar la jornada.
+
+**Hecho (29/10, commit e432dd8, rama `cambios-general`) — falta que Juan revise el panel de Supabase:**
+- En el código no hay ningún cierre por inactividad.
+- Causa encontrada en el código: el middleware le da 1,2 s a Supabase (para no pasar el límite de Vercel). Si al vencer el token la renovación o la consulta de roles tardaba más, quedaba "sin usuario" o "sin roles" y mandaba al **login con la sesión viva** (verificado: el corte devuelve `AuthRetryableFetchError`). Si Supabase alcanzaba a rotar el refresh token pero la respuesta se cortaba, la cookie quedaba con el token viejo y a los segundos Supabase daba la sesión por robada y la cerraba de verdad.
+- Ahora: en ese caso va a `/auth/renovar`, que renueva desde el navegador (sin el límite) y vuelve a la misma pantalla; si la sesión terminó de verdad, recién ahí va al login; si el servidor no contesta varias veces, avisa con "Reintentar" en vez de dar vueltas. Los tokens renovados viajan también en el request (patrón oficial de `@supabase/ssr`), para que las pantallas del servidor no renueven por segunda vez con el token ya usado.
+- **Panel de Supabase (Juan):** Authentication → Sessions: "Time-box user sessions" y "Inactivity timeout" en 0 / desactivados; "Detect and revoke potentially compromised refresh tokens" activado con "Refresh token reuse interval" en 10 s. Project Settings → JWT Keys (o Authentication → Sessions según la versión): "Access token expiry" en 3600 s. Si el JWT está en ~600 s, eso explica el "cada 10 minutos".
 
 ### P2-48 — NC por devolución de una factura del sistema viejo: total = precio final, percepciones adentro · Dueño: Cuentas corrientes
 
