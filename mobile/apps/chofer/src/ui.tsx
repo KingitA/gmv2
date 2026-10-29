@@ -3,6 +3,7 @@ import { useBlocker, useLocation, useNavigate, useSearchParams } from "react-rou
 import { decidirAtras, indiceHistorial, useItemsOutbox, useOnline, useRuntime, type ItemOutbox } from "@gm/core"
 import { autoFormatoFechaAR, avisosBcraPendientes, fechaARAIso, fechaIsoAAR, resultadoSinCuit, type ConsultaBcraResultado } from "@gm/cheques"
 import { Encabezado, Frescura, Hoja } from "@gm/core/ui"
+import { MINUTOS_DATO_VIEJO } from "./datos/frescura"
 import { errorCuit, fecha, fechaHora as fechaHoraAR, fechaISO, moneda, numero, parseFecha, parseMonto, redondear } from "@gm/formato"
 
 // UI compartida de la app Chofer. Mismos textos, colores y jerarquía que el módulo web
@@ -49,13 +50,14 @@ export function fechaViaje(f: string | null | undefined): string {
 export const fechaHora = (v: string | null | undefined) => fechaHoraAR(v)
 
 /** Marco de toda pantalla: encabezado del core + (opcional) frescura del dataset que se muestra. */
-export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFrescura, viejoTrasMin = 60, pie, children, fondo = "bg-gray-50" }: {
+export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFrescura, viejoTrasMin = MINUTOS_DATO_VIEJO, pie, children, fondo = "bg-gray-50" }: {
   titulo: string; atras?: boolean; derecha?: ReactNode; dataset?: string; etiquetaFrescura?: string; viejoTrasMin?: number; pie?: ReactNode; children: ReactNode; fondo?: string
 }) {
   return (
     <div className={`flex h-dvh flex-col ${fondo} text-gray-900`}>
       <Encabezado titulo={titulo} atras={atras} derecha={derecha} />
-      {dataset && <Frescura dataset={dataset} etiqueta={etiquetaFrescura} viejoTrasMin={viejoTrasMin} />}
+      {/* P2-32: el cartel "Datos al … · Actualizar" solo cuando el dato está viejo (como la app vendedor) */}
+      {dataset && <Frescura dataset={dataset} etiqueta={etiquetaFrescura} viejoTrasMin={viejoTrasMin} soloSiViejo />}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
       {pie}
     </div>

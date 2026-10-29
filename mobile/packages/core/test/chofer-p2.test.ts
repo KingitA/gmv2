@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { comprobantesDeDevolucion, estadoCuentaVacio, etiquetaComprobante, resumenCuenta, type DatosCuenta } from "../../../apps/chofer/src/datos/cuenta-cobro"
+import { datasetsViejos, MINUTOS_DATO_VIEJO } from "../../../apps/chofer/src/datos/frescura"
 import type { ComprobanteCobro } from "../../../apps/chofer/src/datasets"
 
 // App Chofer — segunda prueba integral de salida (28-29/10/2026, docs/PENDIENTES-APPS-SALIDA.md,
@@ -54,5 +55,16 @@ describe("P2-29 · la devolución resta solo del comprobante al que pertenece", 
   it("la pantalla dice contra qué comprobante va", () => {
     expect(etiquetaComprobante(chen.cobro, "p28")).toBe("PRES 0001-00000028")
     expect(etiquetaComprobante(chen.cobro, "nada")).toBe("un comprobante ya pagado")
+  })
+})
+
+describe("P2-47 / P2-32 · datos al día sin molestar", () => {
+  const ahora = Date.parse("2026-10-29T14:20:00Z")
+  const hace = (min: number) => ({ syncedAt: new Date(ahora - min * 60_000).toISOString() })
+  it("se pide lo que tiene más de 5 minutos o nunca se bajó; lo fresco no", () => {
+    expect(datasetsViejos([{ nombre: "me", meta: hace(2) }, { nombre: "billetera", meta: hace(21 * 60) }, { nombre: "viajes", meta: null }, { nombre: "x", meta: { syncedAt: null } }], ahora)).toEqual(["billetera", "viajes", "x"])
+  })
+  it("el cartel de desactualizado aparece recién a los 15 minutos (como la app vendedor)", () => {
+    expect(MINUTOS_DATO_VIEJO).toBe(15)
   })
 })
