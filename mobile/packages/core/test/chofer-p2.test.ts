@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { comprobantesDeDevolucion, estadoCuentaVacio, etiquetaComprobante, resumenCuenta, type DatosCuenta } from "../../../apps/chofer/src/datos/cuenta-cobro"
+import { textoReparto } from "../../../apps/chofer/src/datos/devolucion-tope"
 import { datasetsViejos, MINUTOS_DATO_VIEJO } from "../../../apps/chofer/src/datos/frescura"
 import type { ComprobanteCobro } from "../../../apps/chofer/src/datasets"
 
@@ -52,7 +53,15 @@ describe("P2-29 · la devolución resta solo del comprobante al que pertenece", 
     expect(comprobantesDeDevolucion(d)).toEqual(["p28"])
   })
 
+  it("lo que fue al respaldo \"sistema viejo\" o a un comprobante ya pagado no frena el descuento", () => {
+    const d = cuenta(chen.cobro.comprobantes, [dev("d5", 3000, ["p28", "resp"])])
+    expect(resumenCuenta(d, { ...estadoCuentaVacio(), sel: { p28: 40000 } }).devTotal).toBe(3000)
+    expect(resumenCuenta(d, { ...estadoCuentaVacio(), sel: { p26: 36513.45 } }).devTotal).toBe(0)
+  })
+
   it("la pantalla dice contra qué comprobante va", () => {
+    expect(etiquetaComprobante(chen.cobro, "resp", [{ id: "resp", tipo_comprobante: "PRES", numero_comprobante: "0002-00000001" }])).toContain("sistema viejo")
+    expect(etiquetaComprobante(chen.cobro, "p30", [{ id: "p30", tipo_comprobante: "PRES", numero_comprobante: "0001-00000030" }])).toBe("PRES 0001-00000030 (ya pagado)")
     expect(etiquetaComprobante(chen.cobro, "p28")).toBe("PRES 0001-00000028")
     expect(etiquetaComprobante(chen.cobro, "nada")).toBe("un comprobante ya pagado")
   })
@@ -66,5 +75,21 @@ describe("P2-47 / P2-32 · datos al día sin molestar", () => {
   })
   it("el cartel de desactualizado aparece recién a los 15 minutos (como la app vendedor)", () => {
     expect(MINUTOS_DATO_VIEJO).toBe(15)
+  })
+})
+
+describe("P2-31 · devolución de más en un PRES: la pantalla dice cómo se repartió", () => {
+  const refs = [{ id: "p27", tipo_comprobante: "PRES", numero_comprobante: "0001-00000027" }, { id: "resp", tipo_comprobante: "PRES", numero_comprobante: "0002-00000001" }]
+  const art = { descripcion: "ACEITE BABY" }
+  it("URQUIZA: 36 devueltas de 24 → 24 contra el PRES y 12 al sistema viejo", () => {
+    const r = [{ articulo_id: "a", cantidad: 24, comprobante_venta_id: "p27", articulos: art }, { articulo_id: "a", cantidad: 12, comprobante_venta_id: "resp", articulos: art }]
+    expect(textoReparto(r, refs)).toEqual(["ACEITE BABY: 24 contra el PRES 0001-00000027; 12 de más van como devolución del sistema viejo, la revisa la oficina."])
+  })
+  it("sin nada al respaldo, no dice nada; sin refs (réplica vieja), tampoco", () => {
+    expect(textoReparto([{ articulo_id: "a", cantidad: 2, comprobante_venta_id: "p27", articulos: art }], refs)).toEqual([])
+    expect(textoReparto([{ articulo_id: "a", cantidad: 12, comprobante_venta_id: "resp", articulos: art }], null)).toEqual([])
+  })
+  it("todo al respaldo: solo la parte de más", () => {
+    expect(textoReparto([{ articulo_id: "a", cantidad: 1, comprobante_venta_id: "resp", articulos: art }], refs)).toEqual(["ACEITE BABY: 1 de más va como devolución del sistema viejo, la revisa la oficina."])
   })
 })

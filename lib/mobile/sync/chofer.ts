@@ -121,7 +121,23 @@ export async function filaClienteViaje(ctx: CtxSync, viajeId: string, clienteId:
       console.error("[sync/chofer_viaje_clientes] devolvible:", e?.message || e)
       return null
     }),
+    // P2-31 / P2-29: contra qué comprobante va cada renglón devuelto (y cuál es el respaldo "sistema viejo")
+    comprobantes_ref: await comprobantesRefDe(ctx.supabase, ficha).catch((e) => {
+      console.error("[sync/chofer_viaje_clientes] comprobantes_ref:", e?.message || e)
+      return null
+    }),
   }
+}
+
+/** Tipo y número de los comprobantes de origen de las devoluciones de la ficha. Una consulta por id; nada si no hay devoluciones. */
+export async function comprobantesRefDe(
+  supabase: CtxSync["supabase"],
+  ficha: { devoluciones?: Array<{ devoluciones_detalle?: Array<{ comprobante_venta_id?: string | null }> | null }> | null },
+): Promise<Array<{ id: string; tipo_comprobante: string; numero_comprobante: string }>> {
+  const ids = [...new Set((ficha.devoluciones ?? []).flatMap((d) => (d.devoluciones_detalle ?? []).map((x) => x.comprobante_venta_id)).filter((x): x is string => !!x))]
+  if (!ids.length) return []
+  const { data } = await supabase.from("comprobantes_venta").select("id, tipo_comprobante, numero_comprobante").in("id", ids)
+  return ((data || []) as any[]).map((c) => ({ id: c.id, tipo_comprobante: c.tipo_comprobante, numero_comprobante: c.numero_comprobante }))
 }
 
 /**

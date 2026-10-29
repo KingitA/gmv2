@@ -166,11 +166,11 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir,
               <p className="text-sm text-amber-600">{estado.incluirDevoluciones ? `Se descuenta ${formatCurrency(r.devTotal)}` : "No se descuentan"}{devPendientes.some((d) => d.local) ? " (incluye una sin enviar)" : ""}</p>
               {devPendientes.map((d) => {
                 const comps = comprobantesDeDevolucion(d)
-                const aplica = devolucionAplica(d, sel)
+                const aplica = devolucionAplica(d, sel, cobro)
                 return (
                   <div key={d.id} className={`mt-2 border-t border-amber-200 pt-2 ${aplica ? "" : "opacity-70"}`}>
                     <p className="text-sm font-semibold text-amber-900">{d.numero_devolucion || "Devolución"} · {formatCurrency(valorDeDevolucion(d))}</p>
-                    {comps.length > 0 && <p className="text-sm text-amber-800">Va contra {comps.map((id) => etiquetaComprobante(cobro, id)).join(" y ")}</p>}
+                    {comps.length > 0 && <p className="text-sm text-amber-800">Va contra {comps.map((id) => etiquetaComprobante(cobro, id, datos.comprobantes_ref)).join(" y ")}</p>}
                     {!aplica && <p className="text-sm font-medium text-amber-900">No se descuenta en este cobro: seleccioná ese comprobante para descontarla.</p>}
                     <RenglonesDevolucion renglones={d.devoluciones_detalle} className="text-amber-800" />
                   </div>

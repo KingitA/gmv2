@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOnline, useRuntime } from "@gm/core"
 import { DS, esEnCurso, ESTADOS_COBRABLES, idClienteViaje, type DetallePedido, type OpCobroAnular } from "../datasets"
 import { agregarAlBorrador } from "../datos/borrador-devolucion"
+import { textoReparto } from "../datos/devolucion-tope"
 import { valorDeDevolucion } from "../datos/cuenta-cobro"
 import { esIdLocal, keyDeIdLocal } from "../datos/overlay"
 import { rechazosDe, useClienteViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
@@ -250,6 +251,10 @@ export function Cliente() {
                   <div>
                     <p className="font-medium text-green-800">↩ Devolución {dev.local ? "" : dev.numero_devolucion}</p>
                     <RenglonesDevolucion renglones={dev.devoluciones_detalle} className="text-green-900" />
+                    {/* P2-31: lo devuelto de más en un presupuesto fue al respaldo "sistema viejo" */}
+                    {textoReparto(dev.devoluciones_detalle, data.comprobantes_ref).map((t) => (
+                      <p key={t} className="mt-1 rounded-lg bg-amber-100 px-2 py-1 text-sm font-medium text-amber-900">🕰 {t}</p>
+                    ))}
                     {dev.local ? (
                       <SinEnviar />
                     ) : (

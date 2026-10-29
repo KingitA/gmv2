@@ -84,6 +84,8 @@ function reset() {
     }
     S.paradas.push({ id: uid(2000 + i), viaje_id: viajeId, cliente_id: c.id, orden: i + 1, exigir_cobro_anterior: i === 3, exigir_cobro_actual: i === 1 || i === 4, bloquear_entrega: i === 4, motivo_bloqueo: i === 4 ? "Debe 2 facturas" : null, nota_oficina: i === 0 ? "Entregar por el fondo, preguntar por Marta" : null, estado: "pendiente", bultos_entregados: null, motivo_no_entrega: null, motivo_no_cobro: null, resuelto_at: null })
   }
+  // C8 / P2-31: PRES de respaldo "sistema viejo" (lo devuelto de más en un presupuesto va acá)
+  S.comprobantes.push({ id: uid(4999), cliente_id: null, pedido_id: null, tipo_comprobante: "PRES", numero_comprobante: "0002-00000001", fecha: "2026-01-01", total_neto: 0, total_factura: 0, saldo_pendiente: 0, estado_pago: "pagado", anulado_en: null })
   // Cliente de AFUERA del viaje con deuda (para el cobro conjunto): una FA y un PRES
   S.comprobantes.push({ id: uid(4910), cliente_id: f.clientes[10].id, pedido_id: null, tipo_comprobante: "FA", numero_comprobante: "0003-00009010", fecha: "2026-09-10", total_neto: r2(20000 / 1.21), total_factura: 20000, saldo_pendiente: 20000, estado_pago: "pendiente", anulado_en: null })
   S.comprobantes.push({ id: uid(4911), cliente_id: f.clientes[10].id, pedido_id: null, tipo_comprobante: "PRES", numero_comprobante: "0001-00009011", fecha: "2026-09-12", total_neto: 8000, total_factura: 8000, saldo_pendiente: 8000, estado_pago: "pendiente", anulado_en: null })
@@ -177,6 +179,7 @@ function filaCliente(viajeId, clienteId) {
     resumen: { saldo_anterior: c.saldo_actual, saldo_real: c.saldo_actual, saldo_proyectado: r2(c.saldo_actual - totalCob), pendiente_verificacion: totalCob, total_pedido: ped?.total || 0, total_devuelto: totalDev, total_cobrado: totalCob, total_a_cobrar: r2(c.saldo_actual + (ped?.total || 0) - totalDev), ya_cobrado: totalCob > 0 },
     viaje_estado: v.estado,
     devolvible,
+    comprobantes_ref: [...new Set(devs.flatMap((d) => d.devoluciones_detalle.map((x) => x.comprobante_venta_id)).filter(Boolean))].map((id) => S.comprobantes.find((k) => k.id === id)).filter(Boolean).map((k) => ({ id: k.id, tipo_comprobante: k.tipo_comprobante, numero_comprobante: k.numero_comprobante })),
     cobro: {
       comprobantes: compsDe(clienteId).filter((k) => ["pendiente", "parcial"].includes(k.estado_pago)).map(({ id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_factura, saldo_pendiente, estado_pago, pedido_id }) => ({ id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_factura, saldo_pendiente, estado_pago, pedido_id, en_cobro: 0, nc_contado: ["FA", "FB", "FC", "PRES"].includes(tipo_comprobante) ? r2(total_factura * 0.1) : 0 })),
       pedidos: pedidosCli.map((p) => ({ id: p.id, numero_pedido: p.numero_pedido, fecha: p.fecha, total: p.total, estado: p.estado, pago_contado_10: p.pago_contado_10, anticipo_pago_id: p.anticipo_pago_id })),
@@ -347,17 +350,29 @@ const HANDLERS = {
     let d = S.devoluciones.find((x) => x.id === p.id)
     if (!d) {
       if (!["despachado", "en_curso"].includes(v.estado)) throw new Rechazo("El viaje no está activo")
+      const items = []
       for (const it of p.items) {
         const comp = it.origen_comp?.comprobante_venta_id
-        if (S.comprobantes.find((k) => k.id === comp)?.tipo_comprobante === "PRES") continue // C8: va al respaldo
+        const k = S.comprobantes.find((x) => x.id === comp)
+        if (k?.tipo_comprobante === "PRES") {
+          // C8 (= repartirExcedenteAlRespaldo): lo comprado contra el PRES, lo de más al respaldo
+          const ped = S.pedidos.find((x) => x.id === k.pedido_id)
+          const vendido = ped?.detalle.filter((x) => x.articulo_id === it.articulo_id).reduce((s, x) => s + x.cantidad, 0) || 0
+          const ya = S.devoluciones.flatMap((x) => x.items).filter((i) => i.articulo_id === it.articulo_id && i.origen_comp?.comprobante_venta_id === comp).reduce((s, i) => s + Number(i.cantidad), 0)
+          const entra = Math.max(0, Math.min(Number(it.cantidad), vendido - ya)), deMas = Number(it.cantidad) - entra
+          if (entra > 0) items.push({ ...it, cantidad: entra })
+          if (deMas > 0) items.push({ ...it, cantidad: deMas, origen_comp: { ...it.origen_comp, comprobante_venta_id: uid(4999) } })
+          continue
+        }
+        items.push(it)
         const ped = comp && S.pedidos.find((x) => x.id === S.comprobantes.find((k) => k.id === comp)?.pedido_id)
         const vendido = ped?.detalle.filter((x) => x.articulo_id === it.articulo_id).reduce((s, x) => s + x.cantidad, 0)
         if (!vendido) continue
         const ya = S.devoluciones.flatMap((x) => x.items).filter((i) => i.articulo_id === it.articulo_id && i.origen_comp?.comprobante_venta_id === comp).reduce((s, i) => s + Number(i.cantidad), 0)
         if (ya + Number(it.cantidad) > vendido) throw new Rechazo(`No se puede devolver más de lo vendido: se vendieron ${vendido}, ya se devolvieron ${ya}.`)
       }
-      const total = r2(p.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_venta_original), 0))
-      d = { id: p.id, numero_devolucion: `DEV-${String(++S.numeroDev).padStart(5, "0")}`, viaje_id: v.id, cliente_id: p.cliente_id, pedido_id: p.pedido_id || null, items: p.items, monto_total: total, estado: "pendiente", altas: 0 }
+      const total = r2(items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_venta_original), 0))
+      d = { id: p.id, numero_devolucion: `DEV-${String(++S.numeroDev).padStart(5, "0")}`, viaje_id: v.id, cliente_id: p.cliente_id, pedido_id: p.pedido_id || null, items, monto_total: total, estado: "pendiente", altas: 0 }
       S.devoluciones.push(d)
     }
     d.altas++
