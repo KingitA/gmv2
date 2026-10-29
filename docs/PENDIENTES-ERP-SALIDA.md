@@ -577,3 +577,9 @@ En `/mostrador` → "Para retirar", el pedido 002024 de PRUEBA 5 (ya pagado con 
 ### P2-41 — Base del 10 % contado: resta también lo devuelto que fue al respaldo del sistema viejo · Dueño: Cuentas corrientes · decide Juan
 
 URQUIZA (199): PRES 0001-00000027 $318.366,48. DEV-00002 devolvió 36 trapos de un artículo del que compró 24: 24 contra el PRES 0027 ($45.167,52) y 12 al respaldo 0002-00000001 ($22.583,76), pero salió **una sola REV 0001-00000027 por $67.751,28 imputada entera al PRES 0027**. Al cobrar con 10 % contado desde la app vendedor, la REV del 10 % salió por **$25.061,52** = 10 % × (318.366,48 − 67.751,28). Si lo devuelto al respaldo no es de este comprobante, la base sería 318.366,48 − 45.167,52 = 273.198,96 → **$27.319,90** (diferencia $2.258,38). Además el crédito de los 12 del sistema viejo terminó cancelando deuda del PRES 0027 y no del respaldo. Decidir con Juan cuál es la regla y, si corresponde, separar la REV de la parte del respaldo.
+
+**Regla de Juan (29/10):** el 10 % contado es **por comprobante**: cada comprobante que se paga de contado lleva su 10 %, **también los del sistema viejo** (ninguno trae el 10 % hecho). Ejemplo de Juan: PRES viejo 1111 por $10 + PRES 30 por $100 pagados de contado → REV por **$11** ($1 del 1111 y $10 del 30). Por lo tanto, lo devuelto que fue al respaldo (mercadería del sistema viejo) **no** baja la base del PRES 0027: el 10 % correcto era **$27.319,90**, y la REV de la devolución tiene que separar la parte del respaldo. Ojo: el 10 % de un comprobante viejo que sea **factura** sale como NC fiscal.
+
+### P2-42 — App vendedor: el 10 % aparece como "saldo proyectado a favor" · Dueño: App Vendedor
+
+Al cobrar a URQUIZA con 10 % contado, la app mostró "a favor del cliente: saldo proyectado $25.061,52". Es el 10 % que se le descuenta al pagar, no plata que le quede a favor (el cliente terminó en $0). Juan no lo entendió: mostrarlo como "Descuento 10 % contado: −$25.061,52 · Total a pagar $…".
