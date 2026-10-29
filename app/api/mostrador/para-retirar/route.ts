@@ -12,13 +12,17 @@ export async function GET() {
   try {
     const supabase = await createClient()
 
-    const { data: pedidos, error } = await supabase
+    // P2-39: retira en mostrador el pedido que lo dice, o el que no dice nada
+    // (pedidos viejos) si su cliente retira en mostrador
+    const { data: todos, error } = await supabase
       .from("pedidos")
-      .select("id, numero_pedido, estado, created_at, cliente_id, pago_contado_10, anticipo_pago_id, clientes(nombre)")
+      .select("id, numero_pedido, estado, created_at, cliente_id, pago_contado_10, anticipo_pago_id, condicion_entrega, clientes(nombre, condicion_entrega)")
       .in("estado", ["listo_para_retirar", "facturado"])
-      .eq("condicion_entrega", "retira_mostrador")
+      .or("condicion_entrega.is.null,condicion_entrega.eq.retira_mostrador")
       .order("created_at", { ascending: true })
     if (error) throw error
+    const pedidos = (todos || []).filter((p: any) =>
+      (p.condicion_entrega ?? p.clientes?.condicion_entrega) === "retira_mostrador")
 
     const pedidoIds = (pedidos || []).map((p) => p.id)
     const comprobantesPorPedido = new Map<string, any[]>()

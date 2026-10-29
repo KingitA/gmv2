@@ -40,6 +40,7 @@ const CAMPOS_EDITABLES = [
   "mail",
   "condicion_pago",
   "condicion_entrega",
+  "flete_pago", // P2-07: con transporte, flete en origen o destino
   "condicion_iva",
   "localidad_id",
 ] as const

@@ -369,7 +369,7 @@ export default function ClienteDetailPage() {
     if (codigo) {
       const chk = await consultarCodigo(codigo)
       if (chk?.ocupado_por) {
-        alert(`El código ${codigo} ya lo tiene "${chk.ocupado_por.nombre}"${chk.ocupado_por.activo ? "" : " (dado de baja)"}. Elegí otro: el primero libre es el ${chk.sugerido}.`)
+        alert(`El código ${codigo} ya lo tiene "${chk.ocupado_por.nombre}"${chk.ocupado_por.activo ? "" : " (dado de baja)"}. Elegí otro: el siguiente es el ${chk.sugerido}.`)
         return
       }
     }
@@ -408,7 +408,7 @@ export default function ClienteDetailPage() {
     }
     if (error) {
       alert(esCodigoDuplicado(error)
-        ? `El código ${codigo} ya lo tiene otro cliente. Elegí otro (el primero libre es el ${(await consultarCodigo(null))?.sugerido ?? "?"}).`
+        ? `El código ${codigo} ya lo tiene otro cliente. Elegí otro (el siguiente es el ${(await consultarCodigo(null))?.sugerido ?? "?"}).`
         : `Error al guardar: ${error.message}`)
     } else {
       // Sello de auditoría best-effort (requiere migración 20260707_clientes_auditoria;
@@ -562,7 +562,7 @@ export default function ClienteDetailPage() {
                 className={cn("tabular-nums", infoCodigo?.ocupado_por && normalizarCodigo(formData.codigo_cliente) === infoCodigo.codigo && "border-red-400")}
                 value={formData.codigo_cliente}
                 onChange={(e) => set("codigo_cliente", e.target.value)}
-                placeholder={infoCodigo?.sugerido ? `${infoCodigo.sugerido} (primero libre)` : ""}
+                placeholder={infoCodigo?.sugerido ? `${infoCodigo.sugerido} (siguiente)` : ""}
               />
               {infoCodigo?.ocupado_por && normalizarCodigo(formData.codigo_cliente) === infoCodigo.codigo && (
                 <div className="mt-1 text-xs text-red-600">

@@ -99,6 +99,8 @@ export const PERMISOS = {
   revisar_devoluciones_deposito: ["admin", "administrativo", "deposito"],
   /** Emitir comprobantes (facturas, NC, reversas, ND) */
   emitir_comprobantes: ["admin", "administrativo"],
+  /** Eliminar clientes (P2-02): borra o esconde, según su historial */
+  eliminar_clientes: ["admin"],
 } as const satisfies Record<string, readonly string[]>
 
 export type Permiso = keyof typeof PERMISOS
