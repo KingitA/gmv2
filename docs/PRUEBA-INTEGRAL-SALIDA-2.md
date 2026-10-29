@@ -243,15 +243,15 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 ## Fase 9 — Billeteras, cuentas y comisiones
 
 - [x] 9.1 (29/10: app vendedor $62.516,98, Playroom $62.517, base $62.516,98 en 9 comisiones; /personal y app "debe $80.125,07" = 131.642,05 + 1.000 diferencia + 10.000 retiro − 62.516,98) Comisión ganada **igual** en la app vendedor, en `/personal` y en el Playroom (#41/#42/#10).
-- [ ] 9.2 Tu cuenta personal = comisiones ganadas − retiros − faltante de rendición. Cada movimiento con su origen.
-- [ ] 9.3 Billeteras de chofer y vendedor en $0 en las 4 vistas (base, tablero, app, `/personal`).
+- [x] 9.2 (131.642,05 apertura + 1.000 diferencia + 10.000 retiro − 62.516,98 comisiones = $80.125,07, cada renglón con su origen) Tu cuenta personal = comisiones ganadas − retiros − faltante de rendición. Cada movimiento con su origen.
+- [x] 9.3 (tablero de Finanzas: todas las billeteras $0; app vendedor $0; app chofer $0 pero con datos viejos = P2-47; Finanzas: efectivo $746.653, bancos $239.792, cheques $4.470.421 = base) Billeteras de chofer y vendedor en $0 en las 4 vistas (base, tablero, app, `/personal`).
 - [x] 9.4 (29/10: 199 $0, 556 $0, 1190 $231.056,68 (PRES 0035 refacturado), PRUEBA 1 a favor $8.503,56, PRUEBA 3 a favor $15.972,14, PRUEBA 2/4/5/6 $0) Saldo de cada cliente de la prueba, a mano contra la base: todos en $0 salvo los que quedan debiendo a propósito.
 - [x] 9.5 (caja chica $656.652,72 = 50.000 ajuste − 50.000 fondo + 185.600 + 245.000 + 217.947,64 + 8.105,08; caja grande $90.000; Credicoop $114.291,72; MercadoPago $125.500; 3 cheques en cartera $4.470.420,89; cuadra al peso) Cajas y bancos: saldo = movimientos de la prueba + ajustes anotados en la 1.8, al peso.
 - [x] 9.6 Control fiscal final = 0; 0 pedidos a ARCA; 12 con CAE y 3 echeqs igual que al inicio; artículos 3.293 y proveedores 94 sin cambios (clientes 625 = 618 + 6 PRUEBA + 1 alta real de la oficina).
 
 ## Fase 10 — Cierre
 
-- [ ] 10.1 Resumen de problemas por gravedad y por dueño; traspasos escritos.
+- [x] 10.1 (29/10, ver "Resumen final") Resumen de problemas por gravedad y por dueño; traspasos escritos.
 - [ ] 10.2 Lo que dejó la prueba en la base y cómo se limpia el día del pase.
 - [ ] 10.3 Script para borrar por número los pedidos de esta prueba y eliminar los clientes PRUEBA (la puesta a cero no borra pedidos ni clientes).
 
@@ -327,4 +327,39 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-44 | 8b | "Anular comprobantes" no aparece bloqueado en un pedido cobrado al 100 % (frena recién al final) y muestra el éxito del pedido anterior. Nada cambió en la base. | Media | Frontend | traspaso escrito |
 | P2-45 | 9 | Importar pedido por archivo: cruz para borrar un renglón LOW. | Media | Frontend | traspaso escrito |
 | P2-46 | 9 | **La sesión del ERP se cierra cada ~10 minutos** (4 personas trabajando). | **Alta** | Cambios general | traspaso escrito |
+| P2-47 | 9 | App chofer: no se actualiza sola; mostraba datos de hace 21 h (deuda vieja y $245.000 "camino a oficina" ya rendidos). | Media | App Chofer | traspaso escrito |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |
+
+
+## Resumen final (29/10)
+
+**47 problemas anotados (P2-01 a P2-47).** Ningún comprobante fiscal emitido en toda la prueba, 0 pedidos a ARCA, datos reales intactos. Cajas, bancos, cheques, billeteras, cuentas de clientes, cuenta personal de Juan y comisiones cuadran al peso en la base, el ERP y las apps.
+
+### Frenan el pase
+| # | Qué | Dueño |
+|---|---|---|
+| P2-22 | Dos comprobantes con el mismo número (sin candado ni cola de facturación) | Cambios general + Cuentas corrientes |
+| P2-46 | La sesión del ERP se cierra cada ~10 minutos | Cambios general |
+| P2-29 | La app chofer resta la devolución del comprobante equivocado (cobra de menos) | App Chofer + Cuentas corrientes |
+| P2-33 | Cobrar cierra la parada sola y no se puede anular el cobro (R4/C7 sin probar) | App Chofer |
+| P2-35 | Pantalla del viaje del chofer confusa (rediseño) | App Chofer |
+| P2-16 | Depósito: la cantidad separada arranca completa | App Depósito |
+| P2-18 | Depósito: no se puede reiniciar ni soltar un pedido abierto | App Depósito |
+| P2-04 | Datos de la oficina para la apertura (CUITs, YOU JUNJUN, 56/1381/765/766) | Oficina (Juan) |
+
+### Por dueño
+- **Cambios general:** P2-01, P2-02, P2-03 (después de la prueba), P2-07, P2-09, P2-20, P2-22, P2-39, P2-40, P2-46.
+- **Frontend:** P2-06, P2-08, P2-10, P2-15, P2-21, P2-23, P2-36, P2-40, P2-44, P2-45.
+- **Cuentas corrientes:** P2-05, P2-37, P2-38, P2-41; consulta en P2-22, P2-23, P2-29, P2-36, P2-43.
+- **Listas de precios y descuentos:** P2-24, P2-43.
+- **Hojas de ruta/viajes:** P2-25, P2-26, P2-27, P2-28.
+- **App Vendedor:** P2-11, P2-12, P2-13, P2-14, P2-42.
+- **App Depósito:** P2-16, P2-17, P2-18, P2-19.
+- **App Chofer:** P2-28 (app), P2-29, P2-30, P2-31, P2-32, P2-33, P2-34, P2-35, P2-47.
+- **Oficina (Juan):** P2-04.
+
+### Lo que anduvo bien (arreglos de la 1ª prueba confirmados)
+Puesta a cero y apertura completa (247 clientes al peso, empleados a su cuenta personal, PRES viejos en 0002); preparación parcial (50 de 60) facturada por lo preparado; pedido todo faltante eliminado; candado "no entregar sin cobrar"; devolución de más en PRES al respaldo 0002-00000001; 10 % contado sobre el comprobante completo y devolución bonificada al 90 %; cobro partido efectivo + transferencia con una sola REV del 10 %; transferencias fuera de la rendición y confirmadas en /caja; diferencia de rendición solo a la cuenta personal; billeteras en $0 en base, tablero y apps; gastos aprobados con vehículo; refacturar un pedido entregado con pago parcial (sigue entregado, lo pagado pasa al nuevo); comisiones iguales en app, /personal y Playroom; login con usuario y con mail.
+
+### Queda de la prueba en la base (para limpiar el día del pase)
+Pedidos 002015-002025 (002019 eliminado), viajes PRUEBA2 y PRUEBA3, PRES 0025-0035 y REV 0025-0033, DEV-00001 a 00003, cobros y recibos REC-0060 a 0070, 3 cheques de terceros, movimientos de caja/bancos, clientes PRUEBA 1 a 6 (90029-90034) y el respaldo 0002-00000001 de URQUIZA. La puesta a cero borra la plata; **pedidos y clientes PRUEBA necesitan el script de la 10.3**.

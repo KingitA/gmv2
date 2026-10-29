@@ -377,3 +377,6 @@ PRUEBA 4 pagó con un cheque que también cubría a PRUEBA 5. Al agregar PRUEBA 
 
 ### P2-35 — Pantalla del viaje: simple, sin ruido · Alta
 Pedido de Juan (28/10): la pantalla del viaje es confusa: carteles grandes, poco claros, mucho dato. El chofer va manejando y quiere saber **a qué cliente va ahora, si tiene que cobrar y cuántos bultos baja**. Cada parada en la lista: **cliente, dirección, bultos, "cobrar sí o sí $…" (si corresponde) y un botón "Confirmar parada"**. Todo lo demás (devolver, registrar pago, detalle de comprobantes, saldos) adentro del cliente.
+
+### P2-47 — La app chofer no se actualiza sola: mostraba datos de hace 21 horas
+29/10 11:20: la billetera decía "Datos al 28/10 14:38 (hace 21 h)", "Debés $94.066,93" y "$245.000 camino a oficina", cuando la rendición ya estaba aceptada desde el día anterior y la cuenta real era $80.125,07 (la app vendedor, al mismo tiempo, mostraba bien $80.125,07). Al abrir la app o volver a ella, tiene que actualizar sola si los datos tienen más de unos minutos (y ahí sí mostrar el cartel de "desactualizado", P2-32).
