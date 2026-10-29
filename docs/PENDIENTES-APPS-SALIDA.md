@@ -364,29 +364,45 @@ Regla de Juan (28/10): el pedido se tiene que poder cerrar **con o sin bultos**.
 
 Viaje PRUEBA2 (96240d81…), chofer Juan, 28/10 12:45-13:15.
 
-### P2-28 (app) — CHEN muestra $399.991,26 a cobrar
+### P2-28 (app) — CHEN muestra $399.991,26 a cobrar · **app: hecho en parte; falta servidor**
 La lista del viaje muestra el total bruto de los dos PRES de CHEN (40.570,50 + 359.420,76) sin restar la REV del 10 % contado que ya salió al generar (4.057,05). En la pantalla de devolución se ven los dos PRES pero no la REV; en la de cobro sí aparece el 10 %. Mostrar en todos lados lo que realmente hay que cobrar.
 
-### P2-29 — La devolución se descuenta del comprobante equivocado al cobrar · Alta (con Cuentas corrientes)
+> **29/10 (App Chofer, `chofer-p2`):** la lista del viaje ya no muestra ese total (P2-35). La ficha muestra `resumen.total_a_cobrar` tal cual viene del servidor, así que el número correcto se arregla allá. El número sale de `saldoDeParada` (`lib/cuenta-corriente/saldo.ts`), que alimentan `armarHojaRuta` (`lib/viajes/hoja-ruta.ts`, `totalViaje`) y `cargarClienteViaje` (`lib/viajes/cliente-viaje.ts`, `totalViaje`). Las dos suman el **`total_factura` bruto** de los comprobantes del viaje, así que la REV del 10 % contado emitida al generar vuelve a sumar. Arreglo sugerido (Cuentas corrientes / Viajes): `totalViaje` = Σ (total − créditos REV/NC aplicados a ese comprobante). La REV tampoco tiene que figurar como "A favor" (regla de Juan).
+
+### ~~P2-29 — La devolución se descuenta del comprobante equivocado al cobrar · Alta (con Cuentas corrientes)~~
 CHEN: devolución DEV-00001 de 2 "ACEITE BABY" ($8.105,08), artículo del pedido 002017 → la base la ata, bien, al **PRES 0001-00000028**. Después, al cobrar **solo el PRES 0001-00000026** (002016), la app restó la devolución de ese PRES: pidió $28.408,37 (36.513,45 − 8.105,08) y se cobró eso con cheque. Resultado: el 0026 queda debiendo $8.105,08 y al volver a entrar la app dice "debe saldo 8.105,08". La devolución tiene que restar **solo** del comprobante al que pertenece (o la pantalla tiene que decir contra cuál va).
 
-### P2-30 — Monto con separador de miles mientras se escribe
+> **Hecho (29/10/2026, rama `chofer-p2`, affd7be + 3ec4491) — App Chofer v0.3.7.** En el cobro, una devolución resta solo si están seleccionados **todos** sus comprobantes de origen que se cobran ahí (`devolucionAplica`, `datos/cuenta-cobro.ts`). Los que ya están pagados y el respaldo 0002-00000001 no la frenan. Cada devolución dice "Va contra PRES 0001-00000028" y, si no se descuenta, "seleccioná ese comprobante para descontarla". **Servidor (no tocado):** `POST /api/chofer/viaje/[id]/cobro` acepta cualquier `devolucion_ids` del cliente; convendría que valide lo mismo (Cuentas corrientes).
+
+### P2-30 — Monto con separador de miles mientras se escribe · **pendiente: espera el campo de core (App Vendedor)**
 Al cargar un cobro, el monto tiene que ir mostrando puntos de miles y coma de centavos **mientras se tipea** (como `InputMonto` del ERP). Hoy se escribe "3784286" y en la calle es un lío.
 
-### P2-31 — Devolución de más en un PRES: la pantalla no avisa
+### ~~P2-31 — Devolución de más en un PRES: la pantalla no avisa~~
 URQUIZA: del artículo con 24 unidades se devolvieron **36**. La base lo hizo bien (24 contra el PRES 0001-00000027 y 12 al respaldo **0002-00000001** como sistema viejo, C8), pero la pantalla **no dijo nada**. Tiene que avisar: "24 contra el PRES …; 12 de más van como devolución del sistema viejo, la revisa la oficina".
 
-### P2-32 — El cartel "Datos al … (recién) · Actualizar" está siempre
+> **Hecho (29/10/2026, rama `chofer-p2`, 3ec4491) — App Chofer v0.3.7.** Causa: lo que se agregaba desde la ficha (deslizar → "Devolver") llegaba **sin comprobante de origen**, y sin origen no hay tope (C2) ni aviso (C8). Ahora la pantalla de devolución lo resuelve igual que su propio botón. Después de registrar, la ficha dice "ARTÍCULO: 24 contra el PRES 0001-00000027; 12 de más van como devolución del sistema viejo, la revisa la oficina." Toqué el sync de la app (`lib/mobile/sync/chofer.ts`): agregué `comprobantes_ref`, con tipo y número del origen de cada renglón devuelto; es una consulta por id y solo si el cliente tiene devoluciones.
+
+### ~~P2-32 — El cartel "Datos al … (recién) · Actualizar" está siempre~~
 Que aparezca solo cuando los datos están desactualizados, como en la app vendedor.
 
-### P2-33 — No se encontró cómo anular un cobro; cobrar cerró la parada sola
+> **Hecho (29/10/2026, rama `chofer-p2`, 098f97c) — App Chofer v0.3.7.** `Frescura soloSiViejo` con 15 minutos, igual que la app vendedor.
+
+### ~~P2-33 — No se encontró cómo anular un cobro; cobrar cerró la parada sola~~ · app hecha; **falta el servidor**
 FITTERER (candado + cobrar lo anterior): al cobrar el cheque de $3.784.286, la parada **se cerró sola como entregada** (sin confirmar la entrega, bultos 0). Después Juan **no encontró dónde anular el cobro** (el botón "Anular" de "Cobros registrados" depende de `puedeCobrar`; con la parada cerrada no aparece). R4/C7 quedó sin probar: se repite en el segundo viaje. Revisar: (a) que cobrar no cierre la parada sin que el chofer confirme la entrega; (b) que "Anular" se vea mientras el viaje esté en curso, también con la parada cerrada (el servidor ya reabre la parada, R4).
 
-### P2-34 — "Agregar cliente para cobrar": se borran los datos del cliente agregado
+> **Hecho (29/10/2026, rama `chofer-p2`, 8304540 + 5041606) — App Chofer v0.3.7.** (a) La app ya no cierra la parada al cobrar: queda en "Atendidos, falta confirmar" hasta que el chofer toca **Confirmar parada**. (b) "Anular" está en la ficha del cliente, con botón grande, mientras el viaje se pueda cobrar, aunque la parada esté cerrada. La ficha también tiene "Confirmar parada" / "Reabrir". Probado con el mock: cobrar → la parada sigue pendiente → confirmar (entregado) → anular → vuelve a pendiente con el aviso del servidor (R4/C7). **Falta en el servidor:** `app/api/chofer/viaje/[id]/cobro/route.ts`, bloque "Cobrar CIERRA la parada" (~l.499-536, `cierreDeParadaPorCobro`), que cierra la parada como entregada al recibir el cobro. Hay que sacarlo; si no, al sincronizar la parada vuelve cerrada.
+
+### ~~P2-34 — "Agregar cliente para cobrar": se borran los datos del cliente agregado~~
 PRUEBA 4 pagó con un cheque que también cubría a PRUEBA 5. Al agregar PRUEBA 5 se cargaron sus datos y **se borraron**; hubo que sacarlo y volver a buscarlo. Después anduvo (los dos cobros quedaron bien en la base: $66.209,52 y $591.517 con cheque).
 
-### P2-35 — Pantalla del viaje: simple, sin ruido · Alta
+> **Hecho (29/10/2026, rama `chofer-p2`, f5ec6ea) — App Chofer v0.3.7.** Causa: la ficha de un cliente de afuera del viaje se baja aparte (`porIds`) y el sync completo de `chofer_viaje_clientes` (al volver de la cámara del cheque, por ejemplo) la borra porque no es parada. La tarjeta del cliente agregado conserva la última cuenta bajada y, si se borró, la vuelve a pedir una sola vez.
+
+### ~~P2-35 — Pantalla del viaje: simple, sin ruido · Alta~~
 Pedido de Juan (28/10): la pantalla del viaje es confusa: carteles grandes, poco claros, mucho dato. El chofer va manejando y quiere saber **a qué cliente va ahora, si tiene que cobrar y cuántos bultos baja**. Cada parada en la lista: **cliente, dirección, bultos, "cobrar sí o sí $…" (si corresponde) y un botón "Confirmar parada"**. Todo lo demás (devolver, registrar pago, detalle de comprobantes, saldos) adentro del cliente.
 
-### P2-47 — La app chofer no se actualiza sola: mostraba datos de hace 21 horas
+> **Hecho (29/10/2026, rama `chofer-p2`, 5041606) — App Chofer v0.3.7.** Arriba: "N paradas faltan" y "plata en mano". Cada parada muestra el cliente, la dirección, "📦 12 bultos + 1 pallet", "COBRAR SÍ O SÍ $…" (solo si falta cubrir lo exigido; 🔒 con candado) y "✔ Confirmar parada". Las confirmadas aparecen grises, con su estado y "Reabrir". Gasto y Rendir quedaron en el pie. La nota de oficina, los remitos, los saldos, el cobro y la devolución están en la ficha del cliente. Hoja compartida: `pantallas/ResultadoParada.tsx`.
+
+### ~~P2-47 — La app chofer no se actualiza sola: mostraba datos de hace 21 horas~~
 29/10 11:20: la billetera decía "Datos al 28/10 14:38 (hace 21 h)", "Debés $94.066,93" y "$245.000 camino a oficina", cuando la rendición ya estaba aceptada desde el día anterior y la cuenta real era $80.125,07 (la app vendedor, al mismo tiempo, mostraba bien $80.125,07). Al abrir la app o volver a ella, tiene que actualizar sola si los datos tienen más de unos minutos (y ahí sí mostrar el cartel de "desactualizado", P2-32).
+
+> **Hecho (29/10/2026, rama `chofer-p2`, 098f97c) — App Chofer v0.3.7.** `datos/frescura.ts`: la app revisa al abrir, al volver a primer plano y cada minuto. Si inicio, viajes o billetera tienen más de 5 min, los pide **una vez**, en orden, sin reintentos y con al menos 2 min entre rondas (P2-49). Sospecha de la causa (no confirmada): el core frena el sync cuando la sesión se cae (`auth.suscribir → sync.detener()`). Si fue la sesión de P2-46, ya está arreglado en main.

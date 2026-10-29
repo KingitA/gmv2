@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.7 (versionCode 13) — 2026-10-29
+
+- 2da prueba de salida: pantalla del viaje simple (P2-35), cobrar no cierra la parada y Anular a la vista (P2-33), devolución contra su comprobante (P2-29), aviso de lo devuelto de más (P2-31), cliente agregado no se borra (P2-34), datos al día (P2-47/P2-32)
+
 ## v0.3.6 (versionCode 12) — 2026-10-27
 
 - v0.3.6: C8 en presupuesto lo devuelto de más no se frena, va como sistema viejo (lo revisa la oficina)
