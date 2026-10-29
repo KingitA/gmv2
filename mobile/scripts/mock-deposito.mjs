@@ -131,8 +131,22 @@ function recepcionDe(ordenId, userId) {
   }
   return o
 }
+function soltarOReiniciar(u, p, soltar) {
+  const ped = S.pedidos.find((q) => q.id === p.pedido_id)
+  if (!ped) throw new Rechazo("Pedido no encontrado")
+  if (!PREPARABLES.includes(ped.estado)) throw new Rechazo(`El pedido ${ped.numero_pedido} ya no está en preparación`)
+  const otros = [...new Set(Object.values(ped.preparadores).filter((x) => x.usuario_id !== u.id).map((x) => x.usuario_nombre))]
+  if (otros.length) throw new Rechazo(`Hay artículos preparados por ${otros.join(", ")}: los tiene que devolver esa persona o lo reinicia un administrador.`)
+  for (const d of ped.pedidos_detalle) { d.cantidad_preparada = 0; d.estado_item = "PENDIENTE" }
+  ped.preparadores = {}
+  if (soltar && ped.estado === "en_preparacion") ped.estado = ped.estadoAntes || "pendiente"
+  return { ok: true, replica: [parchePedido(ped.id)] }
+}
 const HANDLERS = {
-  "picking.abrir": (u, p) => { const x = S.pedidos.find((q) => q.id === p.pedido_id); if (x && PREPARABLES.includes(x.estado)) x.estado = "en_preparacion"; return { replica: [parchePedido(p.pedido_id)] } },
+  "picking.abrir": (u, p) => { const x = S.pedidos.find((q) => q.id === p.pedido_id); if (x && PREPARABLES.includes(x.estado)) { if (x.estado !== "en_preparacion") x.estadoAntes = x.estado; x.estado = "en_preparacion" } return { replica: [parchePedido(p.pedido_id)] } },
+  // P2-18 (como lib/deposito/picking.ts: renglones de otro ⇒ rechazo)
+  "picking.reiniciar": (u, p) => soltarOReiniciar(u, p, false),
+  "picking.soltar": (u, p) => soltarOReiniciar(u, p, true),
   "picking.item": (u, p) => {
     const ped = S.pedidos.find((q) => q.id === p.pedido_id)
     const d = ped?.pedidos_detalle.find((x) => x.id === p.pedido_detalle_id)
@@ -155,6 +169,8 @@ const HANDLERS = {
       if (pend) throw new Rechazo(`Quedan ${pend} artículos sin resolver`)
       ped.estado = "pendiente_facturacion"
       ped.cierres = (ped.cierres || 0) + 1
+      if (p.bultos !== undefined) ped.bultos = p.bultos // P2-19
+      if (p.pallets !== undefined) ped.pallets = p.pallets
     }
     return { ok: true, replica: [parchePedido(ped.id)] }
   },
@@ -269,7 +285,7 @@ createServer(async (req, res) => {
     if (url.pathname === "/__mock/urgente") { const p = S.pedidos.find((x) => x.id === uid(5000 + Number((url.searchParams.get("id") || "p2").slice(1)))); if (p) p.prioridad = 1; S.seq++ }
     return json(200, {
       red: S.red, sinRed: [...S.sinRed], seq: S.seq,
-      pedidos: S.pedidos.map((p) => ({ numero: p.numero_pedido, estado: p.estado, prioridad: p.prioridad, cierres: p.cierres || 0, renglones: p.pedidos_detalle.map((d) => `${d.estado_item}:${d.cantidad_preparada}/${d.cantidad}${p.preparadores[d.id] ? `@${p.preparadores[d.id].usuario_nombre}` : ""}`) })),
+      pedidos: S.pedidos.map((p) => ({ numero: p.numero_pedido, estado: p.estado, prioridad: p.prioridad, cierres: p.cierres || 0, bultos: p.bultos, pallets: p.pallets, renglones: p.pedidos_detalle.map((d) => `${d.estado_item}:${d.cantidad_preparada}/${d.cantidad}${p.preparadores[d.id] ? `@${p.preparadores[d.id].usuario_nombre}` : ""}`) })),
       ordenes: S.ordenes.map((o) => ({ numero: o.numero_orden, estado: o.estado, cierres: o.cierres || 0, recepcion: o.recepcion && { estado: o.recepcion.estado, conformidad: o.recepcion.conformidad_transporte, items: o.recepcion.recepciones_items.map((i) => `${i.estado_linea}:${i.cantidad_fisica}/${i.cantidad_oc}${i.fuera_de_oc ? " FUERA_OC" : ""}`) } })),
       devoluciones: S.devoluciones.map((d) => ({ numero: d.numero_devolucion, estado: d.estado })),
       claves: [...S.claves.values()].map((c) => ({ tipo: c.tipo, estado: c.body.estado, aplicaciones: c.aplicaciones, recibidas: c.recibidas, usuario: c.usuario })),

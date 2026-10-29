@@ -1,23 +1,35 @@
-import { useRef, type ReactNode } from "react"
+import { useEffect, useRef, type ReactNode } from "react"
 import { esQrOUrl, lecturaError, lecturaOk, useLector } from "@gm/core"
-import { parseMonto } from "@gm/formato"
+import { leerCantidad } from "../../datos/cantidad"
 import { eansDe, lineaInfo, padEan13, sufijoMarca, type Buscable } from "../../datos/busqueda"
-import { C, useCampoSinRafaga } from "../../ui"
+import { C, useCampoSinRafaga, useTecladoAbierto } from "../../ui"
 
 /**
  * Pantalla de cantidad (en la web: el "modal" que reemplaza toda la vista). Es una
  * RUTA: atrás vuelve a la lista sin guardar nada.
  *
- * Sin tocar la pantalla: el primer escaneo abre esta pantalla con la cantidad
- * pedida; un SEGUNDO escaneo del mismo artículo confirma esa cantidad. Escanear
- * otro artículo acá no hace nada (beep de error): primero hay que resolver este.
+ * Sin tocar la pantalla: el primer escaneo abre esta pantalla; un SEGUNDO escaneo
+ * del mismo artículo confirma la cantidad que está en el campo. Escanear otro
+ * artículo acá no hace nada (beep de error): primero hay que resolver este.
+ *
+ * `exigirCantidad` (picking, P2-16): el campo arranca vacío y no se confirma nada
+ * hasta que el operario escribe lo que contó. Ni el botón ni el segundo escaneo
+ * cargan lo pedido solos: así nadie aprieta Confirmar sin contar.
+ *
+ * Con el teclado abierto (P2-17) la pantalla queda a la mitad: se esconden la
+ * cabecera grande y "Volver al scanner" (queda `resumenTeclado`, una línea) para
+ * que Confirmar / Faltante entren arriba del teclado.
  */
-export function PanelCantidad({ articulo, titulo, cabecera, etiquetaInput, inicial, onConfirmar, onFaltante, onVolverBuscar, mostrar }: {
+export function PanelCantidad({ articulo, titulo, cabecera, resumenTeclado, etiquetaInput, ayudaInput, inicial, exigirCantidad = false, onConfirmar, onFaltante, onVolverBuscar, mostrar }: {
   articulo: Buscable & { unidades_por_bulto?: number | null }
   titulo: string
   cabecera: ReactNode
+  /** Versión de una línea de la cabecera, para cuando el teclado está abierto */
+  resumenTeclado?: ReactNode
   etiquetaInput: string
+  ayudaInput?: string
   inicial: string
+  exigirCantidad?: boolean
   onConfirmar: (cantidad: number) => void
   onFaltante: () => void
   onVolverBuscar: () => void
@@ -26,16 +38,29 @@ export function PanelCantidad({ articulo, titulo, cabecera, etiquetaInput, inici
   const { valor, cambiar, restaurar } = useCampoSinRafaga(inicial, 130)
   const montadoAt = useRef(Date.now())
   const hecho = useRef(false)
+  const botones = useRef<HTMLDivElement>(null)
+  const teclado = useTecladoAbierto()
+  const vacio = !valor.trim()
+  const bloqueado = exigirCantidad && vacio
+
+  // El teclado terminó de abrir: los botones a la vista (el contenedor scrollea)
+  useEffect(() => {
+    if (teclado) botones.current?.scrollIntoView({ block: "end" })
+  }, [teclado])
+
   const una = (fn: () => void) => () => {
     if (hecho.current) return // doble toque / doble lectura: una sola operación
     hecho.current = true
     fn()
   }
-  /** Una cantidad de 7+ cifras no es una cantidad: es un código que el lector tipeó en el campo. */
+  /** null = no se confirma (vacía con exigirCantidad, o inválida: se avisa y se limpia el campo). */
   const cantidadValida = (txt: string): number | null => {
-    // Formato argentino: "1.500" = mil quinientos, "1,5" = uno y medio (parseMonto)
-    const n = txt.trim() ? parseMonto(txt) : 0
-    if (n === null || n < 0 || n >= 1_000_000) {
+    const n = leerCantidad(txt, exigirCantidad)
+    if (n === "vacia") {
+      mostrar("Escribí cuántas separaste antes de confirmar", "err")
+      return null
+    }
+    if (n === "invalida") {
       cambiar("")
       mostrar("Esa cantidad no es válida (¿se leyó un código en el campo?). Cargala de nuevo.", "err")
       return null
@@ -43,6 +68,7 @@ export function PanelCantidad({ articulo, titulo, cabecera, etiquetaInput, inici
     return n
   }
   const confirmar = () => {
+    if (bloqueado) return
     const n = cantidadValida(valor)
     if (n !== null) una(() => onConfirmar(n))()
   }
@@ -63,36 +89,49 @@ export function PanelCantidad({ articulo, titulo, cabecera, etiquetaInput, inici
       }
       // Rebote del gatillo apenas se abrió la pantalla: ignorar
       if (Date.now() - montadoAt.current < 900) return
-      lecturaOk()
       const n = cantidadValida(cantidad)
-      if (n !== null) una(() => onConfirmar(n))()
+      if (n === null) { lecturaError(); return }
+      lecturaOk()
+      una(() => onConfirmar(n))()
     },
   })
 
   return (
-    <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 20, padding: 20 }}>
-        <div style={{ fontSize: 12, color: C.light, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>{titulo}</div>
-        <div style={{ fontSize: 20, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{articulo.descripcion}{sufijoMarca(articulo)}</div>
-        <div style={{ fontSize: 14, color: C.sub, fontFamily: "monospace", marginTop: 8 }}>{lineaInfo(articulo)}</div>
+    <div style={{ padding: teclado ? 12 : 20, display: "flex", flexDirection: "column", gap: teclado ? 10 : 14 }}>
+      <div style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 20, padding: teclado ? "10px 14px" : 20 }}>
+        {!teclado && <div style={{ fontSize: 12, color: C.light, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>{titulo}</div>}
+        <div style={{ fontSize: teclado ? 16 : 20, fontWeight: 800, color: C.text, lineHeight: 1.3, ...(teclado ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : {}) }}>
+          {articulo.descripcion}{sufijoMarca(articulo)}
+        </div>
+        {!teclado && <div style={{ fontSize: 14, color: C.sub, fontFamily: "monospace", marginTop: 8 }}>{lineaInfo(articulo)}</div>}
+        {teclado && resumenTeclado}
       </div>
-      {cabecera}
-      <div style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 20, padding: 18 }}>
-        <div style={{ color: C.sub, fontSize: 14, marginBottom: 10 }}>{etiquetaInput}</div>
+      {!teclado && cabecera}
+      <div style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 20, padding: teclado ? 12 : 18 }}>
+        <div style={{ color: C.sub, fontSize: 14, marginBottom: teclado ? 6 : 10 }}>{etiquetaInput}</div>
         <input
           type="text" inputMode="decimal" value={valor} autoFocus
+          placeholder={exigirCantidad ? "?" : undefined}
           onChange={(e) => cambiar(e.target.value)}
           onFocus={(e) => e.target.select()}
-          style={{ width: "100%", background: C.bg, color: C.text, fontSize: 48, fontWeight: 800, textAlign: "center", borderRadius: 16, padding: 16, border: `2px solid ${C.border}`, outline: "none", boxSizing: "border-box" }}
+          style={{ width: "100%", background: C.bg, color: C.text, fontSize: teclado ? 36 : 48, fontWeight: 800, textAlign: "center", borderRadius: 16, padding: teclado ? 10 : 16, border: `2px solid ${C.border}`, outline: "none", boxSizing: "border-box" }}
         />
+        {ayudaInput && !teclado && <div style={{ color: C.light, fontSize: 13, marginTop: 8, textAlign: "center" }}>{ayudaInput}</div>}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <button onClick={confirmar} style={{ background: C.green, color: "#fff", fontWeight: 800, fontSize: 20, padding: 20, borderRadius: 20, border: "none" }}>✓ Confirmar</button>
-        <button onClick={una(onFaltante)} style={{ background: C.red, color: "#fff", fontWeight: 800, fontSize: 20, padding: 20, borderRadius: 20, border: "none" }}>✕ Faltante</button>
+      <div ref={botones} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <button
+          onClick={confirmar} disabled={bloqueado}
+          style={{ background: bloqueado ? "#e5e7eb" : C.green, color: bloqueado ? C.light : "#fff", fontWeight: 800, fontSize: 20, padding: teclado ? 16 : 20, borderRadius: 20, border: "none" }}
+        >
+          ✓ Confirmar
+        </button>
+        <button onClick={una(onFaltante)} style={{ background: C.red, color: "#fff", fontWeight: 800, fontSize: 20, padding: teclado ? 16 : 20, borderRadius: 20, border: "none" }}>✕ Faltante</button>
       </div>
-      <button onClick={onVolverBuscar} style={{ background: C.white, color: C.sub, fontWeight: 600, padding: 16, borderRadius: 18, border: `1.5px solid ${C.border}`, fontSize: 16 }}>
-        ← Volver al scanner
-      </button>
+      {!teclado && (
+        <button onClick={onVolverBuscar} style={{ background: C.white, color: C.sub, fontWeight: 600, padding: 16, borderRadius: 18, border: `1.5px solid ${C.border}`, fontSize: 16 }}>
+          ← Volver al scanner
+        </button>
+      )}
     </div>
   )
 }

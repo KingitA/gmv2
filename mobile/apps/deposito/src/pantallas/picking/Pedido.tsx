@@ -1,7 +1,8 @@
-import { useMemo } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { useLector, useOverlay } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
+import { marcaPicking } from "../../datos/cantidad"
 import { useEncolar, usePedido } from "../../datos/hooks"
 import { estadoDe, tomadoPorOtro } from "../../datos/overlay"
 import { BarraProgreso, C, Contadores, dejarAviso, Marco, Rechazos, TITULO_GRUPO, useAvisoEntrante, useTecladoAbierto, useToast, useVolver } from "../../ui"
@@ -20,41 +21,174 @@ const respaldoDe = (p: PedidoVista | null) => (articuloId: string): DatosFicha |
 const clienteDe = (p: PedidoVista) => p.clientes?.razon_social || p.clientes?.nombre || "Sin cliente"
 const AYUDA_RECHAZO = "La lista ya muestra el estado real del servidor. Si hace falta, volvé a marcar el renglón."
 
-/** Finalizar: confirmación con la mercadería bonificada (como la web) y cierre por outbox. */
+/** Bultos / pallets tipeados: solo dígitos (no es un monto: nada de comas ni puntos). */
+const soloEntero = (txt: string) => txt.replace(/\D/g, "").slice(0, 4)
+
+/**
+ * Finalizar: confirmación con la mercadería bonificada (como la web) y, P2-19, los bultos:
+ * "Cargar bultos" (cajas cerradas que no pasan por control: bultos y pallets acá) o
+ * "Dejar para después del control" (queda preparado sin bultos; la oficina los carga al
+ * armar el viaje, #22). El pedido se cierra igual con o sin bultos. Cierre por outbox.
+ */
 function useFinalizar(pedido: PedidoVista | null, mostrar: (m: string, t?: "ok" | "err") => void) {
   const encolar = useEncolar()
   const volver = useVolver()
   const hoja = useOverlay("finalizar")
+  const [cargando, setCargando] = useState(false)
+  const [bultos, setBultos] = useState("")
+  const [pallets, setPallets] = useState("")
+  const enviado = useRef(false)
   const bonificados = pedido?.pedidos_detalle.filter((i) => i.es_bonificado && (i.cantidad ?? 0) > 0) ?? []
 
-  const cerrar = async (desdeHoja: boolean, pasosExtra = 0) => {
-    if (!pedido) return
-    await encolar("picking.cerrar", { pedido_id: pedido.id }, `Finalizar pedido ${pedido.numero_pedido} — ${clienteDe(pedido)}`)
-    dejarAviso("✅ Pedido finalizado")
-    volver(1 + (desdeHoja ? 1 : 0) + pasosExtra)
+  const cerrar = async (pasosExtra: number, carga: { bultos?: number; pallets?: number }) => {
+    if (!pedido || enviado.current) return
+    enviado.current = true // doble toque: un solo cierre
+    const texto = textoBultos(carga)
+    await encolar("picking.cerrar", { pedido_id: pedido.id, ...carga }, `Finalizar pedido ${pedido.numero_pedido} — ${clienteDe(pedido)}${texto ? ` (${texto})` : " (bultos después del control)"}`)
+    dejarAviso(texto ? `✅ Pedido finalizado · ${texto}` : "✅ Pedido finalizado · bultos después del control")
+    volver(2 + pasosExtra)
   }
-  const pedir = (pasosExtra = 0) => {
+  const conBultos = (pasosExtra: number) => {
+    const b = bultos ? Number(bultos) : 0
+    const p = pallets ? Number(pallets) : 0
+    if (b + p === 0) { mostrar("Cargá cuántos bultos (o pallets) lleva", "err"); return }
+    void cerrar(pasosExtra, { bultos: b, pallets: p })
+  }
+  const pedir = () => {
     if (!pedido) return
     if (pedido.progreso.pendientes > 0) { mostrar(`Faltan ${pedido.progreso.pendientes} artículos por resolver`, "err"); return }
-    if (bonificados.length > 0) hoja.abrir()
-    else void cerrar(false, pasosExtra)
+    setCargando(false)
+    setBultos("")
+    setPallets("")
+    enviado.current = false
+    hoja.abrir()
   }
+  const campo = (etiqueta: string, valor: string, cambiar: (v: string) => void, foco = false) => (
+    <label style={{ display: "block" }}>
+      <div style={{ fontSize: 14, color: C.sub, marginBottom: 6 }}>{etiqueta}</div>
+      <input
+        type="text" inputMode="numeric" value={valor} autoFocus={foco} placeholder="0"
+        onChange={(e) => cambiar(soloEntero(e.target.value))}
+        style={{ width: "100%", background: C.bg, color: C.text, fontSize: 32, fontWeight: 800, textAlign: "center", borderRadius: 14, padding: 10, border: `2px solid ${C.border}`, outline: "none", boxSizing: "border-box" }}
+      />
+    </label>
+  )
   const nodo = (pasosExtra = 0) => (
-    <Hoja abierta={hoja.abierto} onCerrar={hoja.cerrar} titulo="Mercadería bonificada a entregar">
-      <ul style={{ margin: "0 0 16px", padding: 0, listStyle: "none" }}>
-        {bonificados.map((b) => (
-          <li key={b.id} style={{ padding: "8px 0", borderBottom: `1px solid ${C.border}`, fontSize: 16 }}>
-            <b>{b.cantidad} u</b> — {b.articulos?.descripcion ?? ""}
-          </li>
-        ))}
-      </ul>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 }}>
-        <button onClick={hoja.cerrar} style={{ background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "16px 0", borderRadius: 16, border: `1.5px solid ${C.border}` }}>Cancelar</button>
-        <button onClick={() => void cerrar(true, pasosExtra)} style={{ background: C.green, color: "#fff", fontWeight: 800, fontSize: 16, padding: "16px 0", borderRadius: 16, border: "none" }}>✅ Finalizar la preparación</button>
-      </div>
+    <Hoja abierta={hoja.abierto} onCerrar={hoja.cerrar} titulo={cargando ? "Bultos del pedido" : "Finalizar la preparación"}>
+      {!cargando && bonificados.length > 0 && (
+        <>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Mercadería bonificada a entregar</div>
+          <ul style={{ margin: "0 0 16px", padding: 0, listStyle: "none" }}>
+            {bonificados.map((b) => (
+              <li key={b.id} style={{ padding: "8px 0", borderBottom: `1px solid ${C.border}`, fontSize: 16 }}>
+                <b>{b.cantidad} u</b> — {b.articulos?.descripcion ?? ""}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {!cargando ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 15, color: C.text, fontWeight: 600 }}>¿Cargás los bultos ahora?</div>
+          <button onClick={() => setCargando(true)} style={{ background: C.green, color: "#fff", fontWeight: 800, fontSize: 17, padding: "17px 12px", borderRadius: 16, border: "none", textAlign: "left" }}>
+            📦 Cargar bultos
+            <div style={{ fontSize: 13, fontWeight: 500, opacity: 0.9, marginTop: 2 }}>Cajas cerradas que no pasan por control</div>
+          </button>
+          <button onClick={() => void cerrar(pasosExtra, {})} style={{ background: C.white, color: C.text, fontWeight: 800, fontSize: 17, padding: "17px 12px", borderRadius: 16, border: `1.5px solid ${C.border}`, textAlign: "left" }}>
+            🕓 Dejar para después del control
+            <div style={{ fontSize: 13, fontWeight: 500, color: C.sub, marginTop: 2 }}>Queda preparado sin bultos; la oficina los carga al armar el viaje</div>
+          </button>
+          <button onClick={hoja.cerrar} style={{ background: C.bg, color: C.sub, fontWeight: 700, fontSize: 15, padding: "14px 0", borderRadius: 16, border: `1.5px solid ${C.border}` }}>Cancelar</button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {campo("Bultos", bultos, setBultos, true)}
+            {campo("Pallets (si hay)", pallets, setPallets)}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 }}>
+            <button onClick={() => setCargando(false)} style={{ background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "16px 0", borderRadius: 16, border: `1.5px solid ${C.border}` }}>← Volver</button>
+            <button onClick={() => conBultos(pasosExtra)} style={{ background: C.green, color: "#fff", fontWeight: 800, fontSize: 16, padding: "16px 0", borderRadius: 16, border: "none" }}>✅ Finalizar</button>
+          </div>
+        </div>
+      )}
     </Hoja>
   )
   return { pedir, nodo }
+}
+
+/** "3 bultos · 1 pallet" (vacío sin carga). Igual que textoCarga del ERP (lib/viajes/bultos.ts). */
+export function textoBultos({ bultos = 0, pallets = 0 }: { bultos?: number; pallets?: number }) {
+  const partes: string[] = []
+  if (bultos > 0) partes.push(`${bultos} ${bultos === 1 ? "bulto" : "bultos"}`)
+  if (pallets > 0) partes.push(`${pallets} ${pallets === 1 ? "pallet" : "pallets"}`)
+  return partes.join(" · ")
+}
+
+/**
+ * Menú "⋯" del pedido (P2-18): "Reiniciar preparación" (todo a cero, sigo yo) y
+ * "Soltar pedido" (vuelve a la cola sin sesión, como estaba). Los dos con confirmación.
+ * Si hay renglones de otra persona no se ofrece: el servidor lo rechazaría (solo admin).
+ */
+function useOpcionesPedido(pedido: PedidoVista | null, acciones: { reiniciar: () => Promise<void>; soltar: () => Promise<void>; deOtros: string[] }, mostrar: (m: string, t?: "ok" | "err") => void) {
+  const hoja = useOverlay("opciones")
+  const volver = useVolver()
+  const [confirmar, setConfirmar] = useState<null | "reiniciar" | "soltar">(null)
+  const hecho = useRef(false)
+  const abrir = () => { setConfirmar(null); hecho.current = false; hoja.abrir() }
+
+  const ejecutar = async () => {
+    if (!pedido || !confirmar || hecho.current) return
+    hecho.current = true
+    if (confirmar === "reiniciar") {
+      await acciones.reiniciar()
+      hoja.cerrar()
+      mostrar("↺ Preparación reiniciada: todo volvió a pendiente")
+    } else {
+      await acciones.soltar()
+      dejarAviso(`↩ Pedido ${pedido.numero_pedido} soltado: volvió a la cola`)
+      volver(2) // la hoja y el pedido
+    }
+  }
+  const botonMenu = (
+    <button onClick={abrir} aria-label="Opciones del pedido" style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 12, padding: "0 12px", minHeight: 44, fontSize: 13, fontWeight: 700, color: C.text, whiteSpace: "nowrap", flexShrink: 0 }}>⋯ Opciones</button>
+  )
+  const opcion = (icono: string, titulo: string, detalle: string, onClick: () => void, peligro = false) => (
+    <button onClick={onClick} style={{ width: "100%", background: C.white, border: `1.5px solid ${peligro ? C.redB : C.border}`, borderRadius: 16, padding: "14px 14px", textAlign: "left", display: "flex", gap: 12, alignItems: "center" }}>
+      <span style={{ fontSize: 24 }}>{icono}</span>
+      <span>
+        <div style={{ fontSize: 17, fontWeight: 800, color: peligro ? C.red : C.text }}>{titulo}</div>
+        <div style={{ fontSize: 13, color: C.sub, marginTop: 2 }}>{detalle}</div>
+      </span>
+    </button>
+  )
+  const TEXTO = {
+    reiniciar: { titulo: "¿Reiniciar la preparación?", detalle: "Todo lo que se separó en este pedido vuelve a pendiente (en 0). Seguís vos con el pedido abierto.", boton: "↺ Sí, reiniciar" },
+    soltar: { titulo: "¿Soltar el pedido?", detalle: "Lo separado vuelve a 0, el pedido sale de \"en preparación\" y vuelve a la cola como estaba. Cualquiera lo puede tomar de nuevo.", boton: "↩ Sí, soltar" },
+  }
+  const nodo = pedido && (
+    <Hoja abierta={hoja.abierto} onCerrar={hoja.cerrar} titulo={confirmar ? TEXTO[confirmar].titulo : `Pedido ${pedido.numero_pedido}`}>
+      {acciones.deOtros.length > 0 ? (
+        <div style={{ background: C.yellowL, border: `1px solid ${C.yellowB}`, borderRadius: 14, padding: 14, color: C.text, fontSize: 15, lineHeight: 1.4 }}>
+          Hay artículos preparados por <b>{acciones.deOtros.join(", ")}</b>. Para reiniciar o soltar el pedido, esa persona tiene que devolverlos a pendiente desde su equipo, o lo hace un administrador.
+        </div>
+      ) : !confirmar ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {opcion("↺", "Reiniciar preparación", "Vuelve a cero lo separado; seguís con el pedido", () => setConfirmar("reiniciar"))}
+          {opcion("↩", "Soltar pedido", "Vuelve a la cola, sin nadie preparándolo", () => setConfirmar("soltar"), true)}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontSize: 15, color: C.text, lineHeight: 1.45 }}>{TEXTO[confirmar].detalle}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 }}>
+            <button onClick={() => setConfirmar(null)} style={{ background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "16px 0", borderRadius: 16, border: `1.5px solid ${C.border}` }}>No</button>
+            <button onClick={() => void ejecutar()} style={{ background: confirmar === "soltar" ? C.red : C.orange, color: "#fff", fontWeight: 800, fontSize: 16, padding: "16px 0", borderRadius: 16, border: "none" }}>{TEXTO[confirmar].boton}</button>
+          </div>
+        </div>
+      )}
+    </Hoja>
+  )
+  return { botonMenu, nodo }
 }
 
 function BotonFinalizar({ pedido, onClick, etiqueta, flex = 1 }: { pedido: PedidoVista; onClick: () => void; etiqueta: string; flex?: number }) {
@@ -74,8 +208,9 @@ export function Pedido() {
   const { pedido, cargando } = usePedido(id)
   const { toast, mostrar } = useToast()
   useAvisoEntrante(mostrar)
-  const { marcar, resolverCodigo, abrirItem } = usePicking(pedido, mostrar)
+  const { marcar, resolverCodigo, abrirItem, reiniciar, soltar, deOtros } = usePicking(pedido, mostrar)
   const fin = useFinalizar(pedido, mostrar)
+  const opciones = useOpcionesPedido(pedido, { reiniciar, soltar, deOtros }, mostrar)
   const abrirFicha = useAbrirFicha()
   const fichaAbierta = useFichaAbierta()
   const respaldoFicha = useMemo(() => respaldoDe(pedido), [pedido])
@@ -117,6 +252,8 @@ export function Pedido() {
               ✕ {progreso.faltantes} faltante{progreso.faltantes > 1 ? "s" : ""}
             </button>
           )}
+          {/* P2-18: reiniciar / soltar, a la vista (en la barra oscura no se encontraba) */}
+          {opciones.botonMenu}
         </div>
         <BarraProgreso resueltos={progreso.resueltos} total={progreso.total} pendientes={progreso.pendientes} ok={progreso.completos} faltantes={progreso.faltantes} />
       </div>
@@ -153,6 +290,7 @@ export function Pedido() {
         <BotonFinalizar pedido={pedido} etiqueta="Listo" onClick={() => fin.pedir()} />
       </div>
       {fin.nodo()}
+      {opciones.nodo}
     </Marco>
   )
 }
@@ -210,7 +348,7 @@ export function PedidoBuscar() {
       {!teclado && (
         <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 10 }}>
           <button onClick={() => volver()} style={{ flex: 1, background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}` }}>📋 Lista</button>
-          <BotonFinalizar pedido={pedido} etiqueta="Finalizar" onClick={() => fin.pedir(1)} />
+          <BotonFinalizar pedido={pedido} etiqueta="Finalizar" onClick={() => fin.pedir()} />
         </div>
       )}
       {fin.nodo(1)}
@@ -231,7 +369,8 @@ export function PedidoItem() {
 
   if (!pedido || !item?.articulos || pedido.cierrePendiente) return <Marco titulo="Cantidad">{toast}<PedidoNoDisponible cargando={cargando} finalizado={pedido?.cierrePendiente} /></Marco>
 
-  const guardar = async (cantidad: number, esFaltante: boolean) => {
+  const guardar = async (escrita: number, faltante: boolean) => {
+    const { cantidad, esFaltante } = marcaPicking(escrita, faltante) // 0 = faltante
     if (await marcar(item, cantidad, esFaltante)) {
       dejarAviso(esFaltante ? "Marcado como faltante" : "✓ Guardado")
       volver()
@@ -244,8 +383,12 @@ export function PedidoItem() {
         articulo={item.articulos}
         titulo="Artículo encontrado"
         etiquetaInput="Cantidad que separaste físicamente:"
-        inicial={String(item.cantidad)}
+        // P2-16: arranca VACÍA; el operario escribe lo que contó (0 = faltante)
+        inicial=""
+        exigirCantidad
+        ayudaInput="Escribí lo que contaste · 0 = faltante"
         mostrar={mostrar}
+        resumenTeclado={<div style={{ color: C.orange, fontSize: 14, fontWeight: 700, marginTop: 2 }}>Pedida: {item.cantidad}</div>}
         cabecera={
           <div style={{ background: C.orangeL, border: `1.5px solid ${C.orangeB}`, borderRadius: 16, padding: "16px 20px", textAlign: "center" }}>
             <div style={{ color: C.orange, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>Cantidad pedida</div>
