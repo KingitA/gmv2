@@ -328,12 +328,13 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-45 | 9 | Importar pedido por archivo: cruz para borrar un renglón LOW. | Media | Frontend | traspaso escrito |
 | P2-46 | 9 | **La sesión del ERP se cierra cada ~10 minutos** (4 personas trabajando). | **Alta** | Cambios general | traspaso escrito |
 | P2-47 | 9 | App chofer: no se actualiza sola; mostraba datos de hace 21 h (deuda vieja y $245.000 "camino a oficina" ya rendidos). | Media | App Chofer | traspaso escrito |
+| P2-48 | 9 | NC por devolución de una factura del sistema viejo: tiene que salir por el precio final justo ($100), con IVA y percepciones adentro; hoy suma la percepción IIBB encima. | Alta (fiscal) | Cuentas corrientes | regla de Juan 29/10, traspaso escrito |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |
 
 
 ## Resumen final (29/10)
 
-**47 problemas anotados (P2-01 a P2-47).** Ningún comprobante fiscal emitido en toda la prueba, 0 pedidos a ARCA, datos reales intactos. Cajas, bancos, cheques, billeteras, cuentas de clientes, cuenta personal de Juan y comisiones cuadran al peso en la base, el ERP y las apps.
+**48 problemas anotados (P2-01 a P2-48).** Ningún comprobante fiscal emitido en toda la prueba, 0 pedidos a ARCA, datos reales intactos. Cajas, bancos, cheques, billeteras, cuentas de clientes, cuenta personal de Juan y comisiones cuadran al peso en la base, el ERP y las apps.
 
 ### Frenan el pase
 | # | Qué | Dueño |
@@ -350,7 +351,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 ### Por dueño
 - **Cambios general:** P2-01, P2-02, P2-03 (después de la prueba), P2-07, P2-09, P2-20, P2-22, P2-39, P2-40, P2-46.
 - **Frontend:** P2-06, P2-08, P2-10, P2-15, P2-21, P2-23, P2-36, P2-40, P2-44, P2-45.
-- **Cuentas corrientes:** P2-05, P2-37, P2-38, P2-41; consulta en P2-22, P2-23, P2-29, P2-36, P2-43.
+- **Cuentas corrientes:** P2-05, P2-37, P2-38, P2-41, P2-48; consulta en P2-22, P2-23, P2-29, P2-36, P2-43.
 - **Listas de precios y descuentos:** P2-24, P2-43.
 - **Hojas de ruta/viajes:** P2-25, P2-26, P2-27, P2-28.
 - **App Vendedor:** P2-11, P2-12, P2-13, P2-14, P2-42.

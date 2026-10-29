@@ -599,3 +599,9 @@ Pedido de Juan (29/10, le molesta mucho): en la revisión de un pedido importado
 ### P2-46 — La sesión del ERP se cierra cada ~10 minutos · Dueño: Cambios general · URGENTE para la oficina
 
 Pedido de Juan (29/10, le molesta mucho): trabajando 4 personas, el ERP les pide volver a iniciar sesión **cada 10 minutos**. Revisar la renovación de la sesión de Supabase (`middleware.ts`, `lib/supabase/server.ts` / `client.ts`: que el middleware refresque el token y escriba las cookies nuevas en la respuesta), la duración del JWT y del "refresh token" en la configuración de Auth de Supabase, y si hay algún cierre por inactividad. La sesión tiene que durar la jornada.
+
+### P2-48 — NC por devolución de una factura del sistema viejo: total = precio final, percepciones adentro · Dueño: Cuentas corrientes
+
+**Regla de Juan (29/10):** cuando se devuelve un artículo de una **factura del sistema viejo** (las que entraron por la apertura, sin detalle de artículos), si el precio final es **$100**, la NC sale por **$100 justos**, con **todo adentro**: neto + IVA + percepción IVA + percepción IIBB = $100. Nunca $100 + percepciones.
+
+**Hoy (lectura del código, 29/10):** `lib/cobranzas/origen-devolucion.ts` toma para esos renglones el **neto actual** del artículo para el cliente y `valorDevolucion` (`lib/cobranzas/valor-devolucion.ts`) le suma IVA 21 % y, encima, la **percepción IIBB vigente** (y la de IVA si correspondiera): con alícuota IIBB el total queda por arriba del precio final. Cambiar para este caso: partir del **precio final** y abrir hacia atrás neto, IVA y percepciones de modo que la suma dé exacto al centavo (ARCA valida ImpTotal = ImpNeto + ImpIva + ImpTrib). Las facturas emitidas en gmv2 siguen la regla "tal cual facturado" (21/10). No se probó en vivo porque emitiría una NC fiscal.
