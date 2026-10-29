@@ -2,10 +2,10 @@ import { useRef, useState, type ReactNode } from "react"
 import { efectoAnulacionEnParada } from "@gm/cobro"
 import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOnline, useRuntime } from "@gm/core"
-import { DS, esEnCurso, ESTADOS_COBRABLES, idClienteViaje, type DetallePedido, type OpCobroAnular, type OpParada } from "../datasets"
+import { DS, esEnCurso, ESTADOS_COBRABLES, idClienteViaje, type DetallePedido, type OpCobroAnular } from "../datasets"
 import { agregarAlBorrador } from "../datos/borrador-devolucion"
 import { valorDeDevolucion } from "../datos/cuenta-cobro"
-import { cierreAConservar, esIdLocal, keyDeIdLocal } from "../datos/overlay"
+import { esIdLocal, keyDeIdLocal } from "../datos/overlay"
 import { rechazosDe, useClienteViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
 import { AvisosAnulacion, AvisosBcra, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, RenglonesDevolucion, SinEnviar, TEXTO_PARADA_REABIERTA, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
 
@@ -79,12 +79,8 @@ export function Cliente() {
     try {
       if (esIdLocal(pagoAnular.id)) {
         // Nunca salió del equipo: se resuelve acá, sin viajar al servidor
-        // Anular un cobro NO reabre la entrega: si la parada la cerró este cobro, el cierre se
-        // conserva como resultado de parada propio (el cobro se va de la cola, el cierre no).
-        const conservar: OpParada | null = viaje ? cierreAConservar(viaje, clienteId, pagoAnular.id) : null
         const retirado = await rt.outbox.retirar(keyDeIdLocal(pagoAnular.id))
         if (!retirado) return mostrar("Ese cobro se está enviando ahora: esperá unos segundos y volvé a intentar.", "err")
-        if (conservar) await encolar("viaje.parada", conservar, `Parada ${clienteNombre}: ${conservar.estado === "solo_cobro" ? "cerrada" : "entregada"}`)
         mostrar(reabre ? `Cobro descartado. ${TEXTO_PARADA_REABIERTA}` : "Cobro descartado: nunca llegó al sistema.", reabre ? "err" : "ok")
       } else {
         const payload: OpCobroAnular = { viaje_id: viajeId, pago_id: pagoAnular.id, cliente_id: clienteId }
@@ -251,7 +247,7 @@ export function Cliente() {
                 <div className="flex shrink-0 items-center gap-2">
                   <p className="font-bold text-green-700">{formatCurrency(p.monto)}</p>
                   {puedeCobrar && p.estado === "pendiente_rendicion" && (!p.local || p.local.estado !== "rechazado") && (
-                    <button onClick={() => anular.abrir(p.id)} className="min-h-10 rounded-lg border border-red-200 px-3 text-xs font-bold text-red-600">Anular</button>
+                    <button onClick={() => anular.abrir(p.id)} className="min-h-12 rounded-xl border-2 border-red-300 px-4 text-base font-bold text-red-600">Anular</button>
                   )}
                 </div>
               </div>
