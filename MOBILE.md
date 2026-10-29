@@ -1541,6 +1541,13 @@ Detalle y archivos en `docs/PENDIENTES-APPS-SALIDA.md` ("Hecho por la App Vended
 - **Transferencias**: no son plata en mano ni van a la rendición; la billetera las lista con su estado.
 - **Deuda vieja que no es comprobante** (`ajustes_apertura`): se ve en Cobrar, no se tilda.
 
+### Segunda prueba de salida (29/10/2026, rama vendedor-p2, 5d16867)
+
+- **Cantidad sin "+" (P2-12):** se carga al salir de la casilla; los botones de la fila no le roban el foco.
+- **Pedido limpio (P2-13):** `limpiarArbolesCatalogo()` al montar el pedido en curso.
+- **Saldo que se muestra (P2-42):** `saldoVisible(real, proyectado)`: con deuda real nunca se ve "a favor" (el 10 % en camino no es plata a favor).
+- **Core:** teclado (`ui/teclado.ts`, lo instala `montarApp`), `CampoMonto` (miles al escribir) y freno de la sincronización (P2-49, `sync/freno.ts`: respeta el 503 "esperá X s", re-sincroniza 60-90 s después de que se calman los cambios y espacia los reintentos tras fallos, tope 10 min; afecta a "Cuándo sincroniza" de §4). Detalle en `docs/PENDIENTES-APPS-SALIDA.md`, "Core para las 3 apps".
+
 ### Resultados de las pruebas (21/09/2026)
 Mock del ERP (`mobile/scripts/mock-vendedor.mjs`, idempotencia real) con el **catálogo real** de
 solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos escritos en producción.

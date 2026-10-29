@@ -1,5 +1,6 @@
 import type { Auth } from "../auth/auth"
 import { ErrorHttp, ErrorRed, ErrorSesion } from "./errores"
+import { esperaPedida, esRutaSync } from "../sync/freno"
 
 export interface OpcionesApi {
   /** URL base del ERP, ej. https://gmv2.vercel.app */
@@ -29,7 +30,18 @@ export interface OpcionesRequest {
  */
 export class Api {
   private auth: Auth | null = null
+  /** P2-49: hasta cuándo (epoch ms) no se le pega a /api/mobile/sync/* (sync/freno.ts) */
+  private syncFrenadoHasta = 0
   constructor(private opts: OpcionesApi) {}
+
+  /** Frena las lecturas de sync `ms` (se queda con la espera más larga). */
+  frenarSync(ms: number) {
+    if (ms > 0) this.syncFrenadoHasta = Math.max(this.syncFrenadoHasta, Date.now() + ms)
+  }
+  /** ms que faltan para poder volver a sincronizar (0 = ya). */
+  get syncFrenadoMs() {
+    return Math.max(0, this.syncFrenadoHasta - Date.now())
+  }
 
   conAuth(auth: Auth) {
     this.auth = auth
@@ -41,7 +53,19 @@ export class Api {
   }
 
   async request<T = any>(path: string, o: OpcionesRequest = {}): Promise<T> {
+    // P2-49: el servidor pidió esperar ⇒ no se lo vuelve a llamar antes (ni con otro dataset)
+    if (esRutaSync(path) && this.syncFrenadoMs > 0) {
+      throw new ErrorHttp(503, { error: "El servidor está con mucha carga. La app vuelve a sincronizar sola en un rato.", frenado: true })
+    }
     const r = await this.enviar(path, o)
+    if (r.status === 503 && esRutaSync(path)) {
+      // Se lee el cuerpo acá para tomar la espera; leer() vuelve a armar el error
+      const copia = r.clone()
+      const body = await copia.json().catch(() => null)
+      const s = esperaPedida(r.headers.get("Retry-After"), body)
+      // Un poco de azar: que los equipos no vuelvan todos juntos
+      if (s) this.frenarSync(s * 1000 + Math.round(Math.random() * 15_000))
+    }
     if (r.status === 401 && o.auth !== false && this.auth) {
       const ok = await this.auth.renovar(true)
       if (!ok) throw new ErrorSesion()

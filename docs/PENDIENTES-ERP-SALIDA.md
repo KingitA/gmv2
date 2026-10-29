@@ -587,7 +587,7 @@ URQUIZA (199): PRES 0001-00000027 $318.366,48. DEV-00002 devolvió 36 trapos de 
 
 **Regla de Juan (29/10):** el 10 % contado es **por comprobante**: cada comprobante que se paga de contado lleva su 10 %, **también los del sistema viejo** (ninguno trae el 10 % hecho). Ejemplo de Juan: PRES viejo 1111 por $10 + PRES 30 por $100 pagados de contado → REV por **$11** ($1 del 1111 y $10 del 30). Por lo tanto, lo devuelto que fue al respaldo (mercadería del sistema viejo) **no** baja la base del PRES 0027: el 10 % correcto era **$27.319,90**, y la REV de la devolución tiene que separar la parte del respaldo. Ojo: el 10 % de un comprobante viejo que sea **factura** sale como NC fiscal.
 
-### P2-42 — App vendedor: el 10 % aparece como "saldo proyectado a favor" · Dueño: App Vendedor
+### P2-42 — App vendedor: el 10 % aparece como "saldo proyectado a favor" · Dueño: App Vendedor — **Hecho 29/10 (5d16867, rama vendedor-p2, APK v0.4.7)**: con deuda real, un proyectado negativo se ve $0 (lista, ficha, Cobrar y Resumen; `datos/saldo.ts`); Cobrar dice "A pagar $X" con el 10 % contado como parte del cálculo.
 
 Al cobrar a URQUIZA con 10 % contado, la app mostró "a favor del cliente: saldo proyectado $25.061,52". Es el 10 % que se le descuenta al pagar, no plata que le quede a favor (el cliente terminó en $0). **Regla de Juan (29/10): no mostrar nada del 10 % como saldo.** Si debía $100 con 10 % contado, la pantalla dice "a pagar $90"; pagó $90 → debe **$0**. Nada de "a favor" ni "saldo proyectado": confunde a los vendedores.
 
