@@ -582,4 +582,12 @@ URQUIZA (199): PRES 0001-00000027 $318.366,48. DEV-00002 devolvió 36 trapos de 
 
 ### P2-42 — App vendedor: el 10 % aparece como "saldo proyectado a favor" · Dueño: App Vendedor
 
-Al cobrar a URQUIZA con 10 % contado, la app mostró "a favor del cliente: saldo proyectado $25.061,52". Es el 10 % que se le descuenta al pagar, no plata que le quede a favor (el cliente terminó en $0). Juan no lo entendió: mostrarlo como "Descuento 10 % contado: −$25.061,52 · Total a pagar $…".
+Al cobrar a URQUIZA con 10 % contado, la app mostró "a favor del cliente: saldo proyectado $25.061,52". Es el 10 % que se le descuenta al pagar, no plata que le quede a favor (el cliente terminó en $0). **Regla de Juan (29/10): no mostrar nada del 10 % como saldo.** Si debía $100 con 10 % contado, la pantalla dice "a pagar $90"; pagó $90 → debe **$0**. Nada de "a favor" ni "saldo proyectado": confunde a los vendedores.
+
+### P2-43 — Devolución hecha antes de refacturar queda con el precio viejo · Dueño: Listas de precios (con Cuentas corrientes) · a verificar
+
+CHEN 002017: la devolución DEV-00001 (2 aceite baby) se valuó a precio **Neco** ($8.105,08, REV 0001-00000028). Después se refacturó el pedido a lista **Bahía** (REV 0001-00000032 anula el PRES 0028; PRES 0001-00000035 $339.161,76, pedido sigue entregado; el pago de $100.000 y la REV de la devolución pasaron al PRES nuevo: saldo $231.056,68). La mercadería devuelta sigue acreditada al precio Neco, más alto que el que ahora se le cobró: el cliente queda con un poco más de crédito del que corresponde. Decidir si al refacturar se revalúan las devoluciones ya hechas.
+
+### P2-44 — "Anular comprobantes" en un pedido cobrado al 100 %: no está bloqueado de entrada y muestra un "éxito" viejo · Dueño: Frontend
+
+PRUEBA 1 (002020, cobrado completo): el botón **no** aparece deshabilitado con "Cobrado al 100 %" (frontend R1/R3 decía que sí). Juan lo apretó, trabajó un rato y recién al final salió "el pedido ya está cobrado al 100 %: no se puede refacturar". Al cerrar, apareció **"Comprobantes generados exitosamente: PRES 0001-00000035"**, que era el aviso del pedido anterior (002017). Verificado en la base: para 002020 no se anuló ni se generó nada; cuenta, comisión, caja y stock sin cambios. Arreglar: deshabilitar el botón de entrada y limpiar el aviso anterior.

@@ -230,15 +230,15 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Fase 8b — Refacturar un pedido entregado con pago parcial (R1/R3)
 
-- [ ] 8b.1 1190-B: anular comprobantes → cambiar la lista → repreciar → emitir PRES. El pedido sigue "entregado" y el pago parcial pasa al comprobante nuevo.
-- [ ] 8b.2 Con un pedido cobrado al 100 % (1190-A), el botón no deja.
-- [ ] 8b.3 Control fiscal = 0 (acá es donde puede saltar una ND automática).
+- [x] 8b.1 (29/10 10:41-10:43: REV 0032 anula PRES 0028; Bahía; PRES 0035 $339.161,76; pedido sigue entregado; $100.000 + REV dev pasaron al nuevo: saldo $231.056,68; P2-43) 1190-B: anular comprobantes → cambiar la lista → repreciar → emitir PRES. El pedido sigue "entregado" y el pago parcial pasa al comprobante nuevo.
+- [x] 8b.2 (002020: frena al final, no de entrada = P2-44; nada cambió) Con un pedido cobrado al 100 % (1190-A), el botón no deja.
+- [x] 8b.3 Control fiscal = 0 (sin ND) (acá es donde puede saltar una ND automática).
 
 ## Fase 8c — En la oficina (`/caja`)
 
-- [ ] 8c.1 556 paga lo que le queda. Imputar no ofrece el pedido todo faltante (#39).
+- [x] 8c.1 (10:49: $217.947,64 efectivo + REV 0033 10 % $24.216,40 → 556 $0) 556 paga lo que le queda. Imputar no ofrece el pedido todo faltante (#39).
 - [ ] 8c.2 PRUEBA 1 usa su saldo a favor contra un comprobante nuevo (o se le devuelve, según lo que ofrezca la pantalla).
-- [ ] 8c.3 1190-B paga el saldo del comprobante refacturado.
+- [x] 8c.3 (CHEN pagó los $8.105,08 que quedaron en el PRES 0026; caja chica $656.652,72) 1190-B paga el saldo del comprobante refacturado.
 
 ## Fase 9 — Billeteras, cuentas y comisiones
 
@@ -322,4 +322,6 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-40 | 6b | /mostrador "Para retirar": un pedido pagado (saldo $0) no se puede entregar (solo "Cobrar efectivo y entregar", deshabilitado); solo cobra efectivo. | Media | Frontend + Cambios general | traspaso escrito |
 | P2-41 | 8 | 10 % contado de URQUIZA: la base restó también los 12 devueltos al respaldo del sistema viejo ($25.061,52 en vez de $27.319,90); la REV de la devolución se imputó entera al PRES 0027. | Media | Cuentas corrientes | regla de Juan 29/10: 10 % por comprobante, también los del sistema viejo → correcto $27.319,90 |
 | P2-42 | 8 | App vendedor: el 10 % contado se muestra como "saldo proyectado a favor" y confunde. | Baja | App Vendedor | traspaso escrito |
+| P2-43 | 8b | La devolución de CHEN (precio Neco) quedó acreditada a ese precio después de refacturar el pedido a Bahía. | Baja | Listas de precios + Cuentas corrientes | a verificar |
+| P2-44 | 8b | "Anular comprobantes" no aparece bloqueado en un pedido cobrado al 100 % (frena recién al final) y muestra el éxito del pedido anterior. Nada cambió en la base. | Media | Frontend | traspaso escrito |
 | P2-03 | 0 | Idea de Juan: **caja de ajustes**, un solo lugar con todos los ajustes de plata (redondeos de cualquier lugar donde se cobre, ajustar saldo, deuda asumida, sobrantes; **no** apertura ni ajustes de cajas/bancos) para ver cuánto se ajusta. | Media (antes del pase) | Cambios general | idea aprobada; se redondea después de la prueba |
