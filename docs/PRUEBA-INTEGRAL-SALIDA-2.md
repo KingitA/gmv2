@@ -242,7 +242,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 ## Fase 9 — Billeteras, cuentas y comisiones
 
-- [ ] 9.1 Comisión ganada **igual** en la app vendedor, en `/personal` y en el Playroom (#41/#42/#10).
+- [x] 9.1 (29/10: app vendedor $62.516,98, Playroom $62.517, base $62.516,98 en 9 comisiones; /personal y app "debe $80.125,07" = 131.642,05 + 1.000 diferencia + 10.000 retiro − 62.516,98) Comisión ganada **igual** en la app vendedor, en `/personal` y en el Playroom (#41/#42/#10).
 - [ ] 9.2 Tu cuenta personal = comisiones ganadas − retiros − faltante de rendición. Cada movimiento con su origen.
 - [ ] 9.3 Billeteras de chofer y vendedor en $0 en las 4 vistas (base, tablero, app, `/personal`).
 - [ ] 9.4 Saldo de cada cliente de la prueba, a mano contra la base: todos en $0 salvo los que quedan debiendo a propósito.
@@ -274,6 +274,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 
 | Fecha | Qué | Dónde | Cómo se deshace | ¿Deshecho? |
 |---|---|---|---|---|
+| 29/10 | Pedido de Juan: artículos con precio_base vacío (1.293, 50 activos) pasan a $1 | `articulos` (copia en archivo_pruebas.articulos_precio_null_20261029) | Volver a NULL con la copia | — |
 | 27/10 | Cliente 3 "TEST-R1 REFACTURAR" desactivado por Juan (tacho) | `clientes` | Era de prueba de un agente: no se deshace | — |
 | | Clientes PRUEBA 1 a 6 (90029-90034) dados de alta | `clientes` | Eliminarlos al terminar (10.3) | |
 
