@@ -2,18 +2,19 @@ import { useEffect, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOnline, useOverlay } from "@gm/core"
 import { fechaHoraCorta, Hoja } from "@gm/core/ui"
-import { DS, esEnCurso, ESTADOS_COBRABLES, type OpFinalizar, type OpIniciar, type OpParada } from "../datasets"
+import { DS, esEnCurso, type OpFinalizar, type OpIniciar } from "../datasets"
 import { paradasSinResolver, type ParadaVista } from "../datos/overlay"
 import { rechazosDe, useDescargaViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
-import { parseMonto } from "@gm/formato"
-import { TEXTO_ENTREGA_BLOQUEADA } from "@gm/cobro"
-import { AvisosAnulacion, AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, HojaConfirmar, Linea, MontoInput, Pantalla, Rechazos, SinDescargar, SinEnviar, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
+import { AvisosAnulacion, AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, Linea, MontoInput, Pantalla, Rechazos, SinDescargar, SinEnviar, useAvisoEntrante, useToast } from "../ui"
 import { GastoHoja } from "./GastoHoja"
+import { textoBultos, useResultadoParada } from "./ResultadoParada"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
 
 // Hoja de ruta del chofer (= app/chofer/[viajeId]/page.tsx): paradas en el orden que armó
-// oficina, con su instrucción; en cada parada cobrar, devolución y el resultado de la
-// entrega. Los cobros y gastos de cualquiera de la tripulación van a la billetera del
+// oficina. P2-35 (Juan 28/10): el chofer va manejando — cada parada muestra SOLO cliente,
+// dirección, bultos, "COBRAR SÍ O SÍ" (si falta cubrir lo exigido) y "Confirmar parada"; arriba,
+// cuántas paradas faltan y la plata en mano. Cobrar, devolver, comprobantes, saldos, remitos y la
+// nota de oficina van ADENTRO del cliente. Los cobros y gastos de cualquiera de la tripulación van a la billetera del
 // TITULAR; solo él rinde el viaje.
 //
 // Todo sale de la réplica (chofer_viajes) + lo hecho en este equipo sin enviar (overlay).
@@ -30,39 +31,18 @@ export function Viaje() {
   const { viaje: v, cargando } = useViaje(viajeId)
   const descarga = useDescargaViaje(viajeId)
   const { toast, mostrar } = useToast()
-  const abrirPdf = useAbrirPdf(mostrar)
   useAvisoEntrante(mostrar)
   useRefrescarFilas(DS.viajes, [viajeId])
 
-  const hojaParada = useOverlayDinamico("parada")
-  const hojaReabrir = useOverlayDinamico("reabrir")
   const gasto = useOverlay("gasto")
   const rendir = useOverlay("rendir")
+  const resultado = useResultadoParada(viajeId, v?.paradas ?? [], mostrar)
 
-  // Resultado de parada
-  const [estadoSel, setEstadoSel] = useState("entregado")
-  const [bultosEntregados, setBultosEntregados] = useState("")
-  const [motivoEntrega, setMotivoEntrega] = useState("")
-  const [motivoCobro, setMotivoCobro] = useState("")
   const [aviso, setAviso] = useState("")
   const [ocupado, setOcupado] = useState(false)
   // Rendición
   const [efectivoEntrega, setEfectivoEntrega] = useState(0)
 
-  const paradaSel = hojaParada.valor ? v?.paradas.find((p) => p.id === hojaParada.valor) ?? null : null
-  const paradaReabrir = hojaReabrir.valor ? v?.paradas.find((p) => p.id === hojaReabrir.valor) ?? null : null
-
-  // Cada apertura de la hoja de resultado arranca limpia (= abrirResultado de la web)
-  const claveHoja = hojaParada.valor
-  useEffect(() => {
-    if (!claveHoja || !paradaSel) return
-    setEstadoSel(paradaSel.entrega_bloqueada ? "no_entregado" : paradaSel.pedidos.length ? "entregado" : "solo_cobro")
-    setBultosEntregados("")
-    setMotivoEntrega("")
-    setMotivoCobro("")
-    setAviso("")
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claveHoja])
   useEffect(() => {
     if (rendir.abierto && v?.dinero) {
       setEfectivoEntrega(Math.max(0, v.dinero.efectivo_en_mano || 0))
@@ -103,57 +83,13 @@ export function Viaje() {
 
   const { viaje, paradas, dinero } = v
   const enCurso = esEnCurso(viaje.estado)
-  // en_rendicion: todavía se pueden corregir cobros hasta que oficina confirme
-  const puedeCobrar = ESTADOS_COBRABLES.includes(viaje.estado)
   const visitada = (p: ParadaVista) => p.cobrado > 0 || p.devuelto > 0
   const pendientes = paradas.filter((p) => p.estado === "pendiente" && !visitada(p))
   const visitadas = paradas.filter((p) => p.estado === "pendiente" && visitada(p))
   const resueltas = paradas.filter((p) => p.estado !== "pendiente")
-  const totalACobrar = paradas.reduce((s, p) => s + p.total_a_cobrar, 0)
-  const totalCobrado = paradas.reduce((s, p) => s + p.cobrado, 0)
+  const faltan = pendientes.length + visitadas.length
   const rechazos = rechazosDe(ops, "viaje.", viajeId)
   const cobrosSinEnviar = v.sinEnviar.cobros + v.sinEnviar.anulaciones + v.sinEnviar.devoluciones + v.sinEnviar.paradas + v.sinEnviar.gastos
-
-  const guardarResultado = async (p: ParadaVista) => {
-    // Mismas reglas que PATCH parada (el servidor las vuelve a controlar)
-    const mEntrega = motivoEntrega.trim()
-    // #24: "no entregado" sin cubrir lo exigido pide UN solo texto, que vale para los dos motivos
-    const unSoloTexto = estadoSel === "no_entregado" && !p.cobro_cumplido
-    const mCobro = unSoloTexto ? mEntrega : motivoCobro.trim()
-    // #23: bloqueada sin cubrir lo exigido ⇒ solo "no entregado" (el servidor lo vuelve a controlar)
-    if (p.entrega_bloqueada && estadoSel !== "no_entregado") return setAviso(TEXTO_ENTREGA_BLOQUEADA)
-    if (["no_entregado", "entregado_parcial"].includes(estadoSel) && !mEntrega) return setAviso(unSoloTexto ? "Contá por qué no se entregó (por ejemplo: No pagó)" : "Contá por qué no se entregó todo")
-    if (estadoSel === "solo_cobro" && p.pedidos.length) return setAviso("Esta parada tiene mercadería para entregar")
-    if (!p.cobro_cumplido && !mCobro) return setAviso(`Oficina pidió cobrar sí o sí ${formatCurrency(p.minimo_exigido)} y hay cobrado ${formatCurrency(p.cobrado)}: contá por qué no se cobró`)
-    setOcupado(true)
-    try {
-      const payload: OpParada = {
-        viaje_id: viajeId,
-        parada_id: p.id,
-        cliente_id: p.cliente_id,
-        estado: estadoSel,
-        bultos_entregados: Math.trunc(parseMonto(bultosEntregados) ?? 0),
-        motivo_no_entrega: mEntrega,
-        motivo_no_cobro: p.cobro_cumplido ? "" : mCobro,
-      }
-      await encolar("viaje.parada", payload, `Parada ${p.cliente_nombre}: ${ESTADO_PARADA[estadoSel]?.label || estadoSel}`)
-      hojaParada.cerrar()
-      mostrar(online ? "Parada cerrada." : "Parada cerrada en el equipo: se envía al volver la señal.")
-    } finally {
-      setOcupado(false)
-    }
-  }
-
-  const reabrirParada = async (p: ParadaVista) => {
-    setOcupado(true)
-    try {
-      const payload: OpParada = { viaje_id: viajeId, parada_id: p.id, cliente_id: p.cliente_id, estado: "pendiente" }
-      await encolar("viaje.parada", payload, `Parada ${p.cliente_nombre}: reabierta`)
-      hojaReabrir.cerrar()
-    } finally {
-      setOcupado(false)
-    }
-  }
 
   const rendirViaje = async () => {
     // Lo que se puede validar acá (misma regla que el servidor): paradas sin resolver.
@@ -172,118 +108,55 @@ export function Viaje() {
     }
   }
 
-  const renderParada = (p: ParadaVista, gris: boolean) => {
+  const renderParada = (p: ParadaVista) => {
+    const resuelta = p.estado !== "pendiente"
     const est = ESTADO_PARADA[p.estado] || ESTADO_PARADA.pendiente!
-    const remitos = p.pedidos.flatMap((ped) => ped.remitos)
-    const pagosLocales = p.pagos.filter((x) => x.local).length
+    const sinEnviar = p.resultadoSinEnviar || p.pagos.some((x) => x.local)
+    // P2-35: "COBRAR SÍ O SÍ" solo mientras falte cubrir lo exigido
+    const cobrarSiOSi = !resuelta && p.minimo_exigido > 0 && !p.cobro_cumplido
+    if (resuelta)
+      return (
+        <div key={p.id} id={`parada-${p.cliente_id}`} className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-gray-100 p-3">
+          <button className="flex min-h-12 min-w-0 flex-1 items-center gap-3 text-left" onClick={() => navigate(`/viajes/${viajeId}/clientes/${p.cliente_id}`)}>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-400 text-base font-bold text-white">{p.orden}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-lg font-bold text-gray-700">{p.cliente_nombre}</span>
+              <span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-xs font-bold ${est.cls}`}>{est.label}</span>
+              {sinEnviar && <span className="ml-2"><SinEnviar /></span>}
+            </span>
+          </button>
+          {enCurso && (
+            <button onClick={() => resultado.abrirReabrir(p.id)} className="min-h-12 shrink-0 rounded-xl border-2 border-gray-300 bg-white px-3 text-base font-bold text-gray-600 active:scale-95">Reabrir</button>
+          )}
+        </div>
+      )
     return (
       <div
         key={p.id}
         id={`parada-${p.cliente_id}`}
-        className={`w-full rounded-2xl border p-4 shadow-sm ${gris ? "border-gray-200 bg-gray-100 opacity-80" : p.bloquear_entrega ? "border-2 border-red-400 bg-white" : "border-gray-200 bg-white"}`}
+        className={`rounded-2xl border-2 bg-white p-4 shadow-sm ${cobrarSiOSi && p.bloquear_entrega ? "border-red-500" : "border-gray-200"}`}
       >
         <button className="flex w-full items-start gap-3 text-left" onClick={() => navigate(`/viajes/${viajeId}/clientes/${p.cliente_id}`)}>
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-700 text-sm font-bold text-white">{p.orden}</span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <p className="truncate font-bold text-gray-900">{p.cliente_nombre}</p>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${est.cls}`}>{est.label}</span>
-              {p.resultadoSinEnviar && <SinEnviar />}
-            </div>
-            <p className="mt-0.5 truncate text-sm text-gray-500">📍 {[p.direccion, p.localidad].filter(Boolean).join(" · ") || "Sin dirección"}</p>
-          </div>
-          <span className="shrink-0 text-xl text-gray-400">›</span>
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-700 text-lg font-bold text-white">{p.orden}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xl font-bold leading-tight text-gray-900">{p.cliente_nombre}</span>
+            <span className="mt-1 block text-base text-gray-600">{[p.direccion, p.localidad].filter(Boolean).join(", ") || "Sin dirección"}</span>
+            {p.pedidos.length > 0 && <span className="mt-1 block text-lg font-semibold text-gray-800">📦 {textoBultos(p.bultos, p.pallets)}</span>}
+            {p.cobrado > 0.005 && <span className="mt-1 block text-base font-semibold text-green-700">Cobrado {formatCurrency(p.cobrado)}</span>}
+            {sinEnviar && <span className="mt-1 block"><SinEnviar /></span>}
+          </span>
+          <span className="shrink-0 pt-1 text-2xl text-gray-400">›</span>
         </button>
-
-        {p.bloquear_entrega && (
-          <div className="mt-3 rounded-xl bg-red-600 px-3 py-2 text-center text-sm font-bold text-white">
-            🔒 NO ENTREGAR SIN COBRAR{p.motivo_bloqueo ? ` — ${p.motivo_bloqueo}` : ""}
-            {p.entrega_bloqueada && p.estado === "pendiente" && <span className="mt-1 block text-xs font-medium text-red-100">{TEXTO_ENTREGA_BLOQUEADA}</span>}
-          </div>
-        )}
-        {p.minimo_exigido > 0 && (
-          <div className={`mt-2 rounded-xl px-3 py-2 text-sm font-bold ${p.cobro_cumplido ? "bg-green-50 text-green-800" : "bg-red-50 text-red-700"}`}>
-            {p.cobro_cumplido ? "✓ " : "❗ "}COBRAR SÍ O SÍ {formatCurrency(p.minimo_exigido)}
-            <span className="font-medium">
-              {p.exigir_cobro_anterior && p.exigir_cobro_actual ? " (lo anterior + este viaje)" : p.exigir_cobro_anterior ? " (lo anterior)" : " (este viaje)"}
-            </span>
-          </div>
-        )}
-        {p.nota_oficina && <p className="mt-2 rounded-xl bg-yellow-50 px-3 py-2 text-sm text-yellow-900">📝 {p.nota_oficina}</p>}
-
-        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-lg bg-gray-50 py-2"><p className="text-xs text-gray-400">Bultos</p><p className="font-bold text-gray-800">{p.bultos}{(p.pallets ?? 0) > 0 && <span className="text-xs font-medium text-gray-500"> · {p.pallets} {p.pallets === 1 ? "pallet" : "pallets"}</span>}</p></div>
-          <div className="rounded-lg bg-gray-50 py-2"><p className="text-xs text-gray-400">Este viaje</p><p className="text-sm font-bold text-gray-800">{formatCurrency(p.total_viaje)}</p></div>
-          {/* Sin guiones (dueño, 21/10): $0, o "A favor" si el cliente tiene crédito */}
-          <div className={`rounded-lg py-2 ${p.saldo_anterior > 0.005 ? "bg-red-50" : p.saldo_anterior < -0.005 ? "bg-green-50" : "bg-gray-50"}`}>
-            <p className="text-xs text-gray-400">{p.saldo_anterior < -0.005 ? "A favor" : "Debe de antes"}</p>
-            <p className={`text-sm font-bold ${p.saldo_anterior > 0.005 ? "text-red-600" : p.saldo_anterior < -0.005 ? "text-green-700" : "text-gray-500"}`}>{formatCurrency(Math.abs(p.saldo_anterior))}</p>
-          </div>
-        </div>
-
-        <div className="mt-2 flex items-center justify-between rounded-lg bg-blue-50 px-3 py-2">
-          <span className="text-sm font-medium text-blue-700">Total a cobrar</span>
-          <span className="font-bold text-blue-800">{formatCurrency(p.total_a_cobrar)}</span>
-        </div>
-        {p.cobrado > 0 && (
-          <div className="mt-1 flex items-center justify-between rounded-lg bg-green-50 px-3 py-2">
-            <span className="flex items-center gap-2 text-sm font-medium text-green-700">Cobrado {pagosLocales > 0 && <SinEnviar texto={`${pagosLocales} sin enviar`} />}</span>
-            <span className="font-bold text-green-800">{formatCurrency(p.cobrado)}</span>
-          </div>
-        )}
-        {p.devuelto > 0 && (
-          <div className="mt-1 flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2">
-            <span className="text-sm font-medium text-amber-700">Devuelto</span>
-            <span className="font-bold text-amber-800">{formatCurrency(p.devuelto)}</span>
-          </div>
-        )}
-        {p.estado !== "pendiente" && (p.motivo_no_entrega || p.motivo_no_cobro || p.bultos_entregados != null) && (
-          <p className="mt-2 text-xs text-gray-500">
-            {p.bultos_entregados != null && `Bajó ${p.bultos_entregados}/${p.bultos} bultos. `}
-            {p.motivo_no_entrega && `No entregó: ${p.motivo_no_entrega}. `}
-            {p.motivo_no_cobro && `No cobró: ${p.motivo_no_cobro}.`}
+        {cobrarSiOSi && (
+          <p className="mt-3 rounded-xl border-2 border-red-500 px-3 py-2 text-center text-lg font-extrabold text-red-700">
+            {p.bloquear_entrega ? "🔒 " : ""}COBRAR SÍ O SÍ {formatCurrency(Math.max(0, p.minimo_exigido - p.cobrado - (p.descuentos_cobro ?? 0)))}
           </p>
         )}
-
-        {remitos.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {remitos.map((r) => (
-              <button
-                key={r.id}
-                disabled={r.estado_pdf !== "generado" || !online}
-                onClick={() => void abrirPdf(`/api/remitos/${r.id}/pdf`)}
-                className="min-h-11 flex-1 rounded-xl border border-sky-200 bg-sky-100 py-2 text-sm font-bold text-sky-800 active:scale-95 disabled:opacity-50"
-              >
-                📄 Remito {r.tipo_remito === "REM" ? "R" : "X"} {r.numero_remito}
-              </button>
-            ))}
-          </div>
+        {enCurso && (
+          <button onClick={() => resultado.abrir(p.id)} className="mt-3 min-h-14 w-full rounded-xl bg-green-600 py-3 text-lg font-bold text-white active:scale-95">
+            ✔ Confirmar parada
+          </button>
         )}
-
-        {puedeCobrar && (
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button
-              onClick={() => navigate(`/viajes/${viajeId}/clientes/${p.cliente_id}/devolucion`)}
-              disabled={!enCurso}
-              className="min-h-12 rounded-xl border border-amber-200 bg-amber-100 py-2.5 text-sm font-bold text-amber-800 active:scale-95 disabled:opacity-40"
-            >
-              ↩ Devolución
-            </button>
-            <button onClick={() => navigate(`/viajes/${viajeId}/clientes/${p.cliente_id}/cobrar`)} className="min-h-12 rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white active:scale-95">
-              💵 {p.cobrado > 0 ? "Editar cobro" : "Cobrar"}
-            </button>
-          </div>
-        )}
-        {enCurso &&
-          (p.estado === "pendiente" ? (
-            <button onClick={() => hojaParada.abrir(p.id)} className="mt-2 min-h-12 w-full rounded-xl bg-green-600 py-3 text-sm font-bold text-white active:scale-95">
-              {p.entrega_bloqueada ? "✕ Cerrar parada (no entregado)" : "✔ Cerrar parada (entregado / no entregado)"}
-            </button>
-          ) : (
-            <button onClick={() => hojaReabrir.abrir(p.id)} className="mt-2 min-h-11 w-full rounded-xl border border-gray-300 py-2 text-sm font-medium text-gray-600 active:scale-95">
-              Reabrir parada
-            </button>
-          ))}
       </div>
     )
   }
@@ -295,13 +168,14 @@ export function Viaje() {
       pie={
         enCurso ? (
           <div className="border-t border-gray-200 bg-white p-4">
-            {viaje.es_titular ? (
-              <button onClick={rendir.abrir} className="min-h-14 w-full rounded-2xl bg-orange-500 py-4 text-lg font-bold text-white active:scale-95">
-                🏁 Rendir viaje{pendientes.length + visitadas.length > 0 ? ` (faltan cerrar ${pendientes.length + visitadas.length})` : ""}
-              </button>
-            ) : (
-              <p className="py-2 text-center text-sm text-gray-500">El viaje lo rinde el chofer titular.</p>
-            )}
+            <div className="grid grid-cols-[auto_1fr] gap-3">
+              <button onClick={gasto.abrir} className="min-h-14 rounded-2xl border-2 border-gray-300 px-4 text-lg font-bold text-gray-700 active:scale-95">⛽ Gasto</button>
+              {viaje.es_titular ? (
+                <button onClick={rendir.abrir} className="min-h-14 rounded-2xl bg-orange-500 py-3 text-lg font-bold text-white active:scale-95">🏁 Rendir viaje</button>
+              ) : (
+                <p className="self-center text-center text-base text-gray-500">El viaje lo rinde el titular.</p>
+              )}
+            </div>
           </div>
         ) : undefined
       }
@@ -347,46 +221,26 @@ export function Viaje() {
       <AvisosBcra />
       <AvisosAnulacion />
 
-      {/* Resumen */}
-      <div className="grid grid-cols-3 gap-3 p-4">
-        <div className="rounded-xl bg-white p-3 text-center shadow-sm"><p className="text-2xl font-bold text-gray-800">{paradas.length}</p><p className="text-xs text-gray-500">Clientes</p></div>
-        <div className="rounded-xl bg-white p-3 text-center shadow-sm"><p className="text-2xl font-bold text-green-600">{resueltas.length}</p><p className="text-xs text-gray-500">Resueltos</p></div>
-        <div className="rounded-xl bg-white p-3 text-center shadow-sm">
-          <p className="text-2xl font-bold text-amber-600">{paradas.reduce((s, p) => s + (p.estado === "pendiente" ? p.bultos : 0), 0)}</p>
-          <p className="text-xs text-gray-500">Bultos por bajar</p>
+      {/* P2-35: arriba, lo justo */}
+      <div className="grid grid-cols-2 gap-3 p-4">
+        <div className="rounded-2xl bg-white p-3 text-center shadow-sm">
+          <p className="text-3xl font-extrabold text-gray-900">{faltan}</p>
+          <p className="text-base text-gray-600">{faltan === 1 ? "parada falta" : "paradas faltan"}</p>
+        </div>
+        <div className="rounded-2xl bg-white p-3 text-center shadow-sm">
+          <p className="text-2xl font-extrabold text-gray-900">{dinero ? formatCurrency(dinero.efectivo_en_mano) : "—"}</p>
+          <p className="text-base text-gray-600">plata en mano{v.sinEnviar.cobros + v.sinEnviar.gastos > 0 ? " ⇪" : ""}</p>
         </div>
       </div>
 
-      {/* Plata del viaje */}
-      {dinero && (
-        <div className="mx-4 mb-4 rounded-2xl bg-blue-700 p-4 text-white">
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div><p className="text-blue-200">Total a cobrar</p><p className="text-lg font-bold">{formatCurrency(totalACobrar)}</p></div>
-            <div><p className="text-blue-200">Cobrado</p><p className="text-lg font-bold text-green-300">{formatCurrency(totalCobrado)}</p></div>
-            <div><p className="text-blue-200">A cuenta del viaje</p><p className="text-lg font-bold">{formatCurrency(dinero.fondo_entregado)}</p></div>
-            <div><p className="text-blue-200">Gastos</p><p className="text-lg font-bold text-red-300">{formatCurrency(dinero.gastos_total)}</p></div>
-          </div>
-          <div className="mt-3 flex items-center justify-between border-t border-blue-500 pt-3">
-            <span className="text-blue-100">Efectivo en mano</span>
-            <span className="text-xl font-bold text-yellow-200">{formatCurrency(dinero.efectivo_en_mano)}</span>
-          </div>
-          {v.sinEnviar.cobros + v.sinEnviar.gastos > 0 && (
-            <p className="mt-1 text-xs text-amber-200">⇪ incluye {v.sinEnviar.cobros ? `${v.sinEnviar.cobros} cobro(s)` : ""}{v.sinEnviar.cobros && v.sinEnviar.gastos ? " y " : ""}{v.sinEnviar.gastos ? `${v.sinEnviar.gastos} gasto(s)` : ""} sin enviar</p>
-          )}
-          {enCurso && (
-            <button onClick={gasto.abrir} className="mt-3 min-h-11 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold active:scale-95">⛽ Cargar un gasto</button>
-          )}
-        </div>
-      )}
-
       {/* Paradas */}
       <div className="space-y-3 px-4 pb-6">
-        {pendientes.length > 0 && <p className="px-1 text-xs font-bold uppercase tracking-wide text-gray-500">Por visitar ({pendientes.length})</p>}
-        {pendientes.map((p) => renderParada(p, false))}
-        {visitadas.length > 0 && <p className="px-1 pt-4 text-xs font-bold uppercase tracking-wide text-amber-600">Visitados · falta cerrar la parada ({visitadas.length})</p>}
-        {visitadas.map((p) => renderParada(p, false))}
-        {resueltas.length > 0 && <p className="px-1 pt-4 text-xs font-bold uppercase tracking-wide text-gray-400">Entregados / cerrados ({resueltas.length})</p>}
-        {resueltas.map((p) => renderParada(p, true))}
+        {visitadas.length > 0 && <p className="px-1 text-base font-bold text-amber-700">Atendidos, falta confirmar ({visitadas.length})</p>}
+        {visitadas.map(renderParada)}
+        {pendientes.length > 0 && <p className={`px-1 text-base font-bold text-gray-700 ${visitadas.length ? "pt-3" : ""}`}>Por visitar ({pendientes.length})</p>}
+        {pendientes.map(renderParada)}
+        {resueltas.length > 0 && <p className="px-1 pt-3 text-base font-bold text-gray-500">Confirmadas ({resueltas.length})</p>}
+        {resueltas.map(renderParada)}
         {paradas.length === 0 && (
           <div className="py-12 text-center text-gray-400"><p className="mb-2 text-4xl">📦</p><p>No hay clientes en este viaje</p></div>
         )}
@@ -394,77 +248,7 @@ export function Viaje() {
 
       <GastoHoja viajeId={viajeId} viajeNombre={viaje.nombre} abierta={gasto.abierto} onCerrar={gasto.cerrar} onGuardado={(m) => mostrar(m)} />
 
-      {/* Resultado de la parada */}
-      <Hoja abierta={!!paradaSel} onCerrar={hojaParada.cerrar} titulo={paradaSel?.cliente_nombre || ""}>
-        {paradaSel && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-2">
-              {paradaSel.entrega_bloqueada && (
-                <div className="rounded-xl bg-red-600 px-4 py-3 text-white">
-                  <p className="font-bold">🔒 {TEXTO_ENTREGA_BLOQUEADA}</p>
-                  <p className="mt-1 text-sm text-red-100">Oficina pidió cobrar {formatCurrency(paradaSel.minimo_exigido)} y hay cubierto {formatCurrency(paradaSel.cobrado + (paradaSel.descuentos_cobro ?? 0))}. Si cobrás lo que falta, se habilita la entrega.</p>
-                </div>
-              )}
-              {(paradaSel.entrega_bloqueada
-                ? [["no_entregado", paradaSel.pedidos.length ? "✕ No entregué (retiro el pedido)" : "✕ No pude cobrar"]]
-                : paradaSel.pedidos.length
-                  ? [["entregado", `✔ Entregué todo (${paradaSel.bultos} bultos)`], ["entregado_parcial", "◐ Entregué una parte"], ["no_entregado", "✕ No entregué"]]
-                  : [["solo_cobro", "✔ Pasé a cobrar"], ["no_entregado", "✕ No pude pasar / no estaba"]]
-              ).map(([valor, texto]) => (
-                <button
-                  key={valor}
-                  onClick={() => setEstadoSel(valor!)}
-                  className={`min-h-12 rounded-xl border-2 px-4 py-3 text-left font-bold ${estadoSel === valor ? "border-blue-600 bg-blue-50 text-blue-800" : "border-gray-200 text-gray-700"}`}
-                >
-                  {texto}
-                </button>
-              ))}
-            </div>
-            {estadoSel === "entregado_parcial" && (
-              <input
-                type="text" inputMode="numeric" value={bultosEntregados} onChange={(e) => setBultosEntregados(e.target.value.replace(/\D/g, ""))}
-                placeholder={`Bultos que bajaste (de ${paradaSel.bultos})`}
-                className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg"
-              />
-            )}
-            {["entregado_parcial", "no_entregado"].includes(estadoSel) && (
-              <div className="space-y-2">
-                {estadoSel === "no_entregado" && !paradaSel.cobro_cumplido && (
-                  <div className="flex flex-wrap gap-2">
-                    {["No pagó", "Cerrado", "Rechazó la mercadería"].map((t) => (
-                      <button key={t} onClick={() => setMotivoEntrega(t)} className={`min-h-11 rounded-xl border-2 px-3 py-2 text-sm font-bold ${motivoEntrega === t ? "border-blue-600 bg-blue-50 text-blue-800" : "border-gray-200 text-gray-600"}`}>{t}</button>
-                    ))}
-                  </div>
-                )}
-                <textarea
-                  value={motivoEntrega} onChange={(e) => setMotivoEntrega(e.target.value)} rows={2}
-                  placeholder="¿Por qué no se entregó todo? (cerrado, rechazó mercadería, faltante…)"
-                  className="w-full rounded-xl border-2 border-gray-200 px-4 py-3"
-                />
-                {estadoSel === "no_entregado" && !paradaSel.cobro_cumplido && <p className="text-xs text-gray-500">Este motivo vale también para lo que no se cobró.</p>}
-              </div>
-            )}
-            {!paradaSel.cobro_cumplido && estadoSel !== "no_entregado" && (
-              <div className="space-y-2 rounded-xl bg-red-50 p-3">
-                <p className="text-sm font-bold text-red-700">
-                  Oficina pidió cobrar sí o sí {formatCurrency(paradaSel.minimo_exigido)} y hay cobrado {formatCurrency(paradaSel.cobrado)}.
-                </p>
-                <textarea
-                  value={motivoCobro} onChange={(e) => setMotivoCobro(e.target.value)} rows={2}
-                  placeholder="¿Por qué no se cobró? (obligatorio)"
-                  className="w-full rounded-xl border-2 border-red-200 bg-white px-4 py-3"
-                />
-              </div>
-            )}
-            {aviso && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{aviso}</p>}
-            <Botones ocupado={ocupado} onCancelar={hojaParada.cerrar} onConfirmar={() => void guardarResultado(paradaSel)} texto="Guardar" />
-          </div>
-        )}
-      </Hoja>
-
-      <HojaConfirmar abierta={!!paradaReabrir} onCerrar={hojaReabrir.cerrar} titulo="¿Reabrir la parada?" confirmar="Reabrir" ocupado={ocupado} onConfirmar={() => paradaReabrir && void reabrirParada(paradaReabrir)}>
-        {paradaReabrir?.cliente_nombre}: vuelve a "pendiente" para corregir el resultado de la entrega.
-      </HojaConfirmar>
+      {resultado.hojas}
 
       {/* Rendir */}
       <Hoja abierta={rendir.abierto} onCerrar={rendir.cerrar} titulo="Rendir el viaje">

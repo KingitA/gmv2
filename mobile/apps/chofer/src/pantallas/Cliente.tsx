@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react"
-import { efectoAnulacionEnParada } from "@gm/cobro"
+import { efectoAnulacionEnParada, TEXTO_ENTREGA_BLOQUEADA } from "@gm/cobro"
 import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOnline, useRuntime } from "@gm/core"
 import { DS, esEnCurso, ESTADOS_COBRABLES, idClienteViaje, type DetallePedido, type OpCobroAnular } from "../datasets"
@@ -7,9 +7,12 @@ import { agregarAlBorrador } from "../datos/borrador-devolucion"
 import { valorDeDevolucion } from "../datos/cuenta-cobro"
 import { esIdLocal, keyDeIdLocal } from "../datos/overlay"
 import { rechazosDe, useClienteViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
-import { AvisosAnulacion, AvisosBcra, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, RenglonesDevolucion, SinEnviar, TEXTO_PARADA_REABIERTA, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
+import { AvisosAnulacion, AvisosBcra, ESTADO_PARADA, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, RenglonesDevolucion, SinEnviar, TEXTO_PARADA_REABIERTA, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
+import { textoBultos, useResultadoParada } from "./ResultadoParada"
 
-// Ficha del cliente en el viaje (= app/chofer/[viajeId]/cliente/[clienteId]/page.tsx):
+// Ficha del cliente en el viaje (= app/chofer/[viajeId]/cliente/[clienteId]/page.tsx).
+// P2-35: acá adentro va todo lo que salió de la lista del viaje — bultos, "cobrar sí o sí", nota de
+// oficina, remitos y "Confirmar parada" / "Reabrir" — además de lo de siempre:
 // pedido con sus renglones (deslizar para devolver), saldo y devoluciones, cobros
 // registrados (con anulación mientras no se rindió), y las dos acciones: Devolución y Cobrar.
 // Las dos "hojas" de la web son RUTAS acá: /cobrar y /devolucion (la jerarquía es real).
@@ -29,6 +32,8 @@ export function Cliente() {
   const anular = useOverlayDinamico("anular")
   const [ocupado, setOcupado] = useState(false)
   useAvisoEntrante(mostrar)
+  const abrirPdf = useAbrirPdf(mostrar)
+  const resultado = useResultadoParada(viajeId, viaje?.paradas ?? [], mostrar)
   // Con señal, re-leer SOLO esta ficha al entrar
   useRefrescarFilas(DS.clientesViaje, [idClienteViaje(viajeId, clienteId)])
 
@@ -53,6 +58,8 @@ export function Cliente() {
     const p = it.payload as { cliente_id?: string; cobros_extra?: Array<{ cliente_id?: string }>; clientes_extra?: Array<{ cliente_id?: string }> } | null
     return p?.cliente_id === clienteId || !!p?.cobros_extra?.some((c) => c.cliente_id === clienteId) || !!p?.clientes_extra?.some((c) => c.cliente_id === clienteId)
   })
+  const par = viaje?.paradas.find((p) => p.cliente_id === clienteId) ?? null
+  const remitos = par ? par.pedidos.flatMap((ped) => ped.remitos) : []
   const pagoAnular = anular.valor ? pagos_registrados.find((p) => p.id === anular.valor) ?? null : null
 
   const irADevolucionCon = (item: DetallePedido) => {
@@ -120,6 +127,49 @@ export function Cliente() {
       <Rechazos items={rechazos} ayuda="Eso NO quedó registrado en el sistema. Revisalo y, si corresponde, cargalo de nuevo." />
       <AvisosBcra />
       <AvisosAnulacion />
+
+      {/* La parada: qué se baja, qué hay que cobrar sí o sí, y confirmar la entrega */}
+      {par && (
+        <section className={`mx-4 mt-4 space-y-3 rounded-2xl border-2 bg-white p-4 shadow-sm ${par.entrega_bloqueada && par.estado === "pendiente" ? "border-red-500" : "border-gray-200"}`}>
+          <div className="flex items-center gap-2">
+            <p className="flex-1 text-lg font-semibold text-gray-800">{par.pedidos.length ? `📦 ${textoBultos(par.bultos, par.pallets)}` : "Solo cobranza (sin mercadería)"}</p>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${(ESTADO_PARADA[par.estado] || ESTADO_PARADA.pendiente!).cls}`}>{(ESTADO_PARADA[par.estado] || ESTADO_PARADA.pendiente!).label}</span>
+          </div>
+          {par.minimo_exigido > 0 && (
+            <div className={`rounded-xl border-2 px-3 py-2 ${par.cobro_cumplido ? "border-green-500 text-green-800" : "border-red-500 text-red-700"}`}>
+              <p className="text-lg font-extrabold">{par.bloquear_entrega ? "🔒 " : ""}{par.cobro_cumplido ? "✓ " : ""}COBRAR SÍ O SÍ {formatCurrency(par.minimo_exigido)}</p>
+              <p className="text-base">
+                {par.exigir_cobro_anterior && par.exigir_cobro_actual ? "Lo anterior + este viaje" : par.exigir_cobro_anterior ? "Lo que debía de antes" : "Este viaje"}
+                {par.cobro_cumplido ? " · cubierto" : par.cobrado > 0.005 ? ` · cobrado ${formatCurrency(par.cobrado)}` : ""}
+              </p>
+              {par.bloquear_entrega && !par.cobro_cumplido && <p className="mt-1 text-base font-bold">{TEXTO_ENTREGA_BLOQUEADA}{par.motivo_bloqueo ? ` (${par.motivo_bloqueo})` : ""}</p>}
+            </div>
+          )}
+          {par.nota_oficina && <p className="rounded-xl bg-yellow-50 px-3 py-2 text-base text-yellow-900">📝 {par.nota_oficina}</p>}
+          {par.estado !== "pendiente" && (par.motivo_no_entrega || par.motivo_no_cobro || par.bultos_entregados != null) && (
+            <p className="text-base text-gray-600">
+              {par.bultos_entregados != null && `Bajó ${par.bultos_entregados} de ${par.bultos} bultos. `}
+              {par.motivo_no_entrega && `No entregó: ${par.motivo_no_entrega}. `}
+              {par.motivo_no_cobro && `No cobró: ${par.motivo_no_cobro}.`}
+            </p>
+          )}
+          {remitos.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {remitos.map((r) => (
+                <button key={r.id} disabled={r.estado_pdf !== "generado" || !online} onClick={() => void abrirPdf(`/api/remitos/${r.id}/pdf`)} className="min-h-12 flex-1 rounded-xl border border-sky-200 bg-sky-50 py-2 text-base font-bold text-sky-800 active:scale-95 disabled:opacity-50">
+                  📄 Remito {r.tipo_remito === "REM" ? "R" : "X"} {r.numero_remito}
+                </button>
+              ))}
+            </div>
+          )}
+          {enCurso &&
+            (par.estado === "pendiente" ? (
+              <button onClick={() => resultado.abrir(par.id)} className="min-h-14 w-full rounded-xl bg-green-600 py-3 text-lg font-bold text-white active:scale-95">✔ Confirmar parada</button>
+            ) : (
+              <button onClick={() => resultado.abrirReabrir(par.id)} className="min-h-12 w-full rounded-xl border-2 border-gray-300 py-2 text-base font-bold text-gray-600 active:scale-95">Reabrir parada</button>
+            ))}
+        </section>
+      )}
 
       <div className="mx-4 mt-4 rounded-2xl bg-blue-700 p-4 text-white">
         <div className="grid grid-cols-3 gap-3 text-center text-sm">
@@ -255,6 +305,8 @@ export function Cliente() {
           </section>
         )}
       </div>
+
+      {resultado.hojas}
 
       <HojaConfirmar abierta={!!pagoAnular} onCerrar={anular.cerrar} titulo="¿Anular este cobro?" confirmar="Anular cobro" peligro ocupado={ocupado} onConfirmar={() => void confirmarAnulacion()}>
         {pagoAnular && (
