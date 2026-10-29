@@ -481,8 +481,14 @@ function CuentaAgregada({ viajeId, agregado, online, onEstado, onResumen, onQuit
   onQuitar: (id: string) => void
 }) {
   const id = agregado.cliente.id
-  useRefrescarFilas(DS.clientesViaje, [idClienteViaje(viajeId, id)])
-  const { cliente: datos } = useClienteViaje(viajeId, id)
+  const { cliente: enReplica } = useClienteViaje(viajeId, id)
+  // P2-34 (28/10): la ficha de un cliente de AFUERA del viaje se baja aparte, y el sync completo de
+  // la réplica (p. ej. al volver de la cámara del cheque) la borra porque no es parada del viaje: los
+  // datos "se cargaban y se borraban". Se conserva la última cuenta bajada y, si se fue, se vuelve a pedir.
+  const [guardada, setGuardada] = useState<typeof enReplica>(null)
+  useEffect(() => { if (enReplica && !enReplica.parcial) setGuardada(enReplica) }, [enReplica])
+  const datos = enReplica && !enReplica.parcial ? enReplica : guardada ?? enReplica
+  useRefrescarFilas(DS.clientesViaje, [enReplica && !enReplica.parcial ? undefined : idClienteViaje(viajeId, id)])
   const [abierto, setAbierto] = useState("")
   const completa = !!datos && !datos.parcial
   const res = useMemo(() => resumenCuenta(completa ? datos : null, agregado.estado), [completa, datos, agregado.estado])
