@@ -35,6 +35,7 @@ import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnaps
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { filtrarYaBonificados } from "@/lib/comprobantes/ya-bonificados"
 import { componentesNCFiscal, esComprobanteApertura } from "@/lib/comprobantes/nc-fiscal-componentes"
+import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante } from "@/lib/comprobantes/numeracion"
 
 const DESCUENTO_CONTADO_PCT = 10
 const PUNTO_VENTA_INTERNO = "0001"
@@ -84,59 +85,14 @@ export interface ParamsBonificacion {
   fraccion_por_comprobante?: Record<string, number>
 }
 
-async function getNextNumero(
+/** Número interno (REV) reservado en la base de una sola vez (P2-22, lib/comprobantes/numeracion). */
+async function reservarNumeroInterno(
   supabase: SupabaseClient,
   tipo: string,
   puntoVenta: string,
 ): Promise<{ numero: string; puntoVenta: string; nextNum: number }> {
-  const { data: num } = await supabase
-    .from("numeracion_comprobantes")
-    .select("*")
-    .eq("tipo_comprobante", tipo)
-    .eq("punto_venta", puntoVenta)
-    .single()
-
-  if (!num) throw new Error(`Numeración no encontrada para ${tipo} punto de venta ${puntoVenta}`)
-  const nextNum = num.ultimo_numero + 1
-  const numero = `${num.punto_venta}-${nextNum.toString().padStart(8, "0")}`
-  return { numero, puntoVenta: num.punto_venta, nextNum }
-}
-
-async function avanzarNumeracion(
-  supabase: SupabaseClient,
-  tipo: string,
-  puntoVenta: string,
-  nextNum: number,
-): Promise<void> {
-  await supabase
-    .from("numeracion_comprobantes")
-    .update({ ultimo_numero: nextNum })
-    .eq("tipo_comprobante", tipo)
-    .eq("punto_venta", puntoVenta)
-}
-
-/**
- * Reserva el próximo número de forma atómica (lock optimista): el UPDATE solo
- * avanza si `ultimo_numero` sigue siendo el leído. Dos llamadas concurrentes
- * jamás obtienen el mismo número (una de las dos reintenta con el siguiente).
- */
-async function reservarNumero(
-  supabase: SupabaseClient,
-  tipo: string,
-  puntoVenta: string,
-): Promise<{ numero: string; puntoVenta: string; nextNum: number }> {
-  for (let intento = 0; intento < 5; intento++) {
-    const { numero, puntoVenta: pv, nextNum } = await getNextNumero(supabase, tipo, puntoVenta)
-    const { data: claimed } = await supabase
-      .from("numeracion_comprobantes")
-      .update({ ultimo_numero: nextNum })
-      .eq("tipo_comprobante", tipo)
-      .eq("punto_venta", puntoVenta)
-      .eq("ultimo_numero", nextNum - 1)
-      .select("ultimo_numero")
-    if (claimed?.length) return { numero, puntoVenta: pv, nextNum }
-  }
-  throw new Error(`No se pudo reservar numeración para ${tipo} ${puntoVenta} (concurrencia)`)
+  const nextNum = await reservarNumero(supabase, tipo, puntoVenta)
+  return { numero: formatoNumeroComprobante(puntoVenta, nextNum), puntoVenta, nextNum }
 }
 
 // filtrarYaBonificados: ahora vive en lib/comprobantes/ya-bonificados.ts (misma regla para la NC,
@@ -451,7 +407,7 @@ export async function generarBonificacionContado(
   // ─── PRESUPUESTOS → REV (documento interno: PV 0001, sin CAE, sin QR) ──────
   if (presupuestos.length > 0) {
     // Reserva atómica del número: dos REV concurrentes nunca comparten numeración.
-    const { numero, puntoVenta } = await reservarNumero(supabase, "REV", PUNTO_VENTA_INTERNO)
+    const { numero, puntoVenta } = await reservarNumeroInterno(supabase, "REV", PUNTO_VENTA_INTERNO)
 
     const lineas = presupuestos.map(c => ({
       descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
@@ -546,29 +502,7 @@ export async function generarBonificacionContado(
     const ambiente = (empresaConfig.arca_ambiente ?? "produccion") as AmbienteARCA
     const cuitEmpresa = cuitDigitos(empresaConfig.cuit)
 
-    // Numeración fiscal + sync con ARCA
     const ta = await obtenerTAConCache(supabase, ambiente)
-    const { data: num } = await supabase
-      .from("numeracion_comprobantes")
-      .select("*")
-      .eq("tipo_comprobante", tipoNC)
-      .eq("punto_venta", puntoVentaFiscal)
-      .single()
-
-    if (!num) throw new Error(`Numeración no encontrada para ${tipoNC} punto de venta ${puntoVentaFiscal}`)
-
-    let nuevoNumero = num.ultimo_numero + 1
-    const ultimoEnArca = await ultimoAutorizado(
-      ambiente, ta.token, ta.sign, cuitEmpresa, parseInt(puntoVentaFiscal, 10), cbteTipo,
-    )
-    if (ultimoEnArca !== num.ultimo_numero) {
-      await supabase.from("numeracion_comprobantes")
-        .update({ ultimo_numero: ultimoEnArca })
-        .eq("tipo_comprobante", tipoNC)
-        .eq("punto_venta", puntoVentaFiscal)
-      nuevoNumero = ultimoEnArca + 1
-    }
-    const numero = `${puntoVentaFiscal}-${nuevoNumero.toString().padStart(8, "0")}`
 
     // Totales: 10% de CADA componente de la factura (neto, IVA, percepciones)
     // → la NC devuelve exactamente el 10% del total facturado. Los comprobantes
@@ -619,95 +553,107 @@ export async function generarBonificacionContado(
       nro:    parseInt(c.numero_comprobante.split("-")[1], 10),
     }))
 
-    // CAE — si ARCA rechaza, acá se corta y NO se crea nada en DB
-    const respCAE = await solicitarCAE({
-      ambiente,
-      token:     ta.token,
-      sign:      ta.sign,
-      cuit:      cuitEmpresa,
-      ptoVta:    parseInt(puntoVentaFiscal, 10),
-      cbteTipo,
-      cbteDesde: nuevoNumero,
-      cbteHasta: nuevoNumero,
-      concepto:  CONCEPTO.PRODUCTOS,
-      docTipo:   DOC_TIPO.CUIT,
-      docNro:    cuitDigitos(cliente.cuit),
-      fecha:     todayArgentina().replace(/-/g, ""),
-      impTotal:   totalFactura,
-      impTotConc: 0,
-      impNeto:    totalNeto,
-      impOpEx:    0,
-      impIva:     totalIva,
-      impTrib:    totalTrib,
-      iva: [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }],
-      tributos: tributos.length > 0 ? tributos : undefined,
-      cbteAsoc,
-      condicionIVAReceptorId: condIvaReceptor,
-    })
-
     // La marca [pago:] va solo en el documento guardado (el PDF queda limpio)
     const observacionesPdf = `Bonificación contado 10% — facturas ${facturas.map(c => c.numero_comprobante).join(", ")}`
     const observaciones = `${observacionesPdf}${marcaOrigen}`
 
-    // Registro durable del CAE antes del insert local
-    const logId = await registrarCAEObtenido(supabase, {
-      tipo: tipoNC, puntoVenta: puntoVentaFiscal, numero,
-      cae: respCAE.cae, vencimientoCae: respCAE.vencimientoCae,
-      importe: totalFactura, clienteCuit: cliente.cuit,
-      payload: {
-        comprobante: {
-          tipo_comprobante: tipoNC,
-          numero_comprobante: numero,
-          punto_venta: puntoVentaFiscal,
-          fecha: todayArgentina(),
+    // Numeración fiscal (P2-22): turno por tipo + PV mientras se pide el CAE;
+    // número = último en ARCA + 1. Se suelta apenas la NC queda grabada.
+    const turno = await tomarTurnoFiscal(supabase, tipoNC, puntoVentaFiscal, () => ultimoAutorizado(
+      ambiente, ta.token, ta.sign, cuitEmpresa, parseInt(puntoVentaFiscal, 10), cbteTipo,
+    ))
+    const nuevoNumero = turno.numero
+    const numero = formatoNumeroComprobante(puntoVentaFiscal, nuevoNumero)
+    let respCAE: Awaited<ReturnType<typeof solicitarCAE>>
+    let id: string
+    try {
+      // CAE — si ARCA rechaza, acá se corta y NO se crea nada en DB
+      respCAE = await solicitarCAE({
+        ambiente,
+        token:     ta.token,
+        sign:      ta.sign,
+        cuit:      cuitEmpresa,
+        ptoVta:    parseInt(puntoVentaFiscal, 10),
+        cbteTipo,
+        cbteDesde: nuevoNumero,
+        cbteHasta: nuevoNumero,
+        concepto:  CONCEPTO.PRODUCTOS,
+        docTipo:   DOC_TIPO.CUIT,
+        docNro:    cuitDigitos(cliente.cuit),
+        fecha:     todayArgentina().replace(/-/g, ""),
+        impTotal:   totalFactura,
+        impTotConc: 0,
+        impNeto:    totalNeto,
+        impOpEx:    0,
+        impIva:     totalIva,
+        impTrib:    totalTrib,
+        iva: [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }],
+        tributos: tributos.length > 0 ? tributos : undefined,
+        cbteAsoc,
+        condicionIVAReceptorId: condIvaReceptor,
+      })
+      turno.marcarUsado()
+
+      // Registro durable del CAE antes del insert local
+      const logId = await registrarCAEObtenido(supabase, {
+        tipo: tipoNC, puntoVenta: puntoVentaFiscal, numero,
+        cae: respCAE.cae, vencimientoCae: respCAE.vencimientoCae,
+        importe: totalFactura, clienteCuit: cliente.cuit,
+        payload: {
+          comprobante: {
+            tipo_comprobante: tipoNC,
+            numero_comprobante: numero,
+            punto_venta: puntoVentaFiscal,
+            fecha: todayArgentina(),
+            cliente_id,
+            total_neto: -Math.abs(totalNeto),
+            total_iva: -Math.abs(totalIva),
+            percepcion_iva: -Math.abs(percepIva),
+            percepcion_iibb: -Math.abs(percepIibb),
+            total_factura: -Math.abs(totalFactura),
+            saldo_pendiente: -Math.abs(totalFactura),
+            estado_pago: "pendiente",
+            observaciones,
+            cae: respCAE.cae,
+            vencimiento_cae: respCAE.vencimientoCae,
+          },
+          detalle: lineas.map(l => ({
+            articulo_id: bonificacionId,
+            descripcion: l.descripcion,
+            cantidad: 1,
+            precio_unitario: -Math.abs(l.precio_neto),
+            precio_total: -Math.abs(l.precio_neto),
+          })),
+        },
+      })
+
+      try {
+        const res = await crearComprobante(supabase, avisosLibro, {
+          tipo: tipoNC,
+          numero,
+          puntoVenta: puntoVentaFiscal,
           cliente_id,
-          total_neto: -Math.abs(totalNeto),
-          total_iva: -Math.abs(totalIva),
-          percepcion_iva: -Math.abs(percepIva),
-          percepcion_iibb: -Math.abs(percepIibb),
-          total_factura: -Math.abs(totalFactura),
-          saldo_pendiente: -Math.abs(totalFactura),
-          estado_pago: "pendiente",
+          total_neto: totalNeto,
+          total_iva: totalIva,
+          percepcion_iva: percepIva,
+          percepcion_iibb: percepIibb,
+          total_factura: totalFactura,
           observaciones,
           cae: respCAE.cae,
           vencimiento_cae: respCAE.vencimientoCae,
-        },
-        detalle: lineas.map(l => ({
-          articulo_id: bonificacionId,
-          descripcion: l.descripcion,
-          cantidad: 1,
-          precio_unitario: -Math.abs(l.precio_neto),
-          precio_total: -Math.abs(l.precio_neto),
-        })),
-      },
-    })
+        })
+        id = res.id
+      } catch (insErr: any) {
+        await marcarHuerfano(supabase, logId, insErr.message)
+        throw new Error(mensajeHuerfano(tipoNC, numero, respCAE.cae))
+      }
 
-    let id: string
-    try {
-      const res = await crearComprobante(supabase, avisosLibro, {
-        tipo: tipoNC,
-        numero,
-        puntoVenta: puntoVentaFiscal,
-        cliente_id,
-        total_neto: totalNeto,
-        total_iva: totalIva,
-        percepcion_iva: percepIva,
-        percepcion_iibb: percepIibb,
-        total_factura: totalFactura,
-        observaciones,
-        cae: respCAE.cae,
-        vencimiento_cae: respCAE.vencimientoCae,
-      })
-      id = res.id
-    } catch (insErr: any) {
-      await marcarHuerfano(supabase, logId, insErr.message)
-      throw new Error(mensajeHuerfano(tipoNC, numero, respCAE.cae))
+      await marcarComprobanteCreado(supabase, logId, id)
+    } finally {
+      await turno.soltar()
     }
 
-    await marcarComprobanteCreado(supabase, logId, id)
-
     await crearDetalle(supabase, id, bonificacionId, lineas)
-    await avanzarNumeracion(supabase, tipoNC, puntoVentaFiscal, nuevoNumero)
 
     // El crédito de la NC cubre el 10% restante de las facturas bonificadas
     await aplicarCreditoAComprobantes(supabase, id, facturas.map(c => c.id))

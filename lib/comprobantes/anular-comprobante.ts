@@ -13,6 +13,7 @@ import { obtenerTAConCache } from '@/lib/arca/cache'
 import { ultimoAutorizado, solicitarCAE } from '@/lib/arca/wsfev1'
 import { postearLibroConAviso } from '@/lib/cuenta-corriente/postear-libro'
 import { cuitDigitos, cuitValido, normalizarCuit } from '@/lib/formato'
+import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from '@/lib/comprobantes/numeracion'
 
 /**
  * ANULAR UN COMPROBANTE de venta = emitir su inverso exacto (FA→NC con CAE,
@@ -90,6 +91,19 @@ export function montosParciales(
 }
 
 export async function anularComprobante(supabase: any, id: string, usuarioId: string, opts: { parcial?: AnulacionParcial } = {}): Promise<ResultadoAnulacion> {
+  // Turno fiscal del inverso (P2-22): se suelta al grabar o, si algo corta antes, acá
+  const ctx: { turno: TurnoFiscal | null } = { turno: null }
+  try {
+    return await anularComprobanteEnTurno(supabase, id, usuarioId, opts, ctx)
+  } finally {
+    await ctx.turno?.soltar()
+  }
+}
+
+async function anularComprobanteEnTurno(
+  supabase: any, id: string, usuarioId: string, opts: { parcial?: AnulacionParcial },
+  ctx: { turno: TurnoFiscal | null },
+): Promise<ResultadoAnulacion> {
   // ─── 1. Cargar comprobante original ───
   const { data: original, error: origErr } = await supabase
     .from('comprobantes_venta')
@@ -176,21 +190,10 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
     ? String(empresaConfig.arca_punto_venta).padStart(4, '0')
     : original.punto_venta  // PRES/REV usan el mismo PV que el original
 
-  // ─── 4. Obtener numeración y sincronizar con ARCA ───
-  const { data: numeracion, error: numErr } = await supabase
-    .from('numeracion_comprobantes')
-    .select('*')
-    .eq('tipo_comprobante', tipoInverso)
-    .eq('punto_venta', puntoVenta)
-    .single()
-
-  if (numErr || !numeracion) {
-    throw new CorteAnulacion({
-      error: `No hay numeración configurada para ${tipoInverso} en punto de venta ${puntoVenta}.`,
-    }, 500)
-  }
-
-  let nuevoNumero = numeracion.ultimo_numero + 1
+  // ─── 4. Numeración (P2-22): se toma más abajo, recién después de validar ───
+  // Fiscal: turno por tipo + PV con número = último en ARCA + 1.
+  // Interno (REV/PRES): número reservado en la base de una sola vez.
+  let nuevoNumero: number
 
   // ─── 5. CAE de ARCA si corresponde ───
   let cae: string | null = null
@@ -229,25 +232,7 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
     const cuitEmpresa = cuitDigitos(empresaConfig.cuit)
     const cbteTipo = TIPO_CBTE_ARCA[tipoInverso]
 
-    // Sincronizar con ARCA
-    const ultimoEnArca = await ultimoAutorizado(
-      ambiente, ta.token, ta.sign, cuitEmpresa,
-      parseInt(puntoVenta, 10), cbteTipo,
-    )
-    if (ultimoEnArca !== numeracion.ultimo_numero) {
-      await supabase
-        .from('numeracion_comprobantes')
-        .update({ ultimo_numero: ultimoEnArca })
-        .eq('tipo_comprobante', tipoInverso)
-        .eq('punto_venta', puntoVenta)
-      nuevoNumero = ultimoEnArca + 1
-    }
-
-    // Solicitar CAE con referencia al comprobante original
-    const clienteCuit = cuitDigitos(original.cliente.cuit)
-    const fecha = todayArgentina().replace(/-/g, '')
-
-    // RG 5616/2024: condición IVA del receptor obligatoria
+    // RG 5616/2024: condición IVA del receptor obligatoria (antes de tomar turno)
     const condIvaReceptor = condicionIvaReceptorId(original.cliente.condicion_iva)
     if (condIvaReceptor === null) {
       throw new CorteAnulacion({
@@ -255,6 +240,21 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
         error_code: 'CONDICION_IVA_NO_MAPEA',
       }, 422)
     }
+
+    // Turno fiscal: número sincronizado con ARCA
+    try {
+      ctx.turno = await tomarTurnoFiscal(supabase, tipoInverso, puntoVenta, () => ultimoAutorizado(
+        ambiente, ta.token, ta.sign, cuitEmpresa,
+        parseInt(puntoVenta, 10), cbteTipo,
+      ))
+    } catch (e: any) {
+      throw new CorteAnulacion({ error: e.message }, 500)
+    }
+    nuevoNumero = ctx.turno.numero
+
+    // Solicitar CAE con referencia al comprobante original
+    const clienteCuit = cuitDigitos(original.cliente.cuit)
+    const fecha = todayArgentina().replace(/-/g, '')
 
     // Los montos del inverso siempre positivos para ARCA (el tipo ya indica si es NC/ND)
     // Espejo exacto de la factura original: neto, IVA y percepciones (tributos)
@@ -313,9 +313,16 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
 
     cae            = respCAE.cae
     vencimientoCae = respCAE.vencimientoCae
+    ctx.turno.marcarUsado()
+  } else {
+    try {
+      nuevoNumero = await reservarNumero(supabase, tipoInverso, puntoVenta)
+    } catch (e: any) {
+      throw new CorteAnulacion({ error: e.message }, 500)
+    }
   }
 
-  const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, '0')}`
+  const numeroComprobante = formatoNumeroComprobante(puntoVenta, nuevoNumero)
 
   // ─── 6. Calcular totales del inverso ───
   // NC/REV: totales negativos (crédito para el cliente)
@@ -393,6 +400,8 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
   }
 
   await marcarComprobanteCreado(supabase, logId, inverso.id)
+  // Inverso grabado: el que espera turno ya puede pedir su CAE
+  await ctx.turno?.soltar()
 
   const detalleInserts = detallePayload.map((d: any) => ({ ...d, comprobante_id: inverso.id }))
 
@@ -446,13 +455,6 @@ export async function anularComprobante(supabase: any, id: string, usuarioId: st
     .eq('comprobante_id', original.id)
     .eq('estado', 'activo')
   }
-
-  // ─── 10. Avanzar numeración ───
-  await supabase
-    .from('numeracion_comprobantes')
-    .update({ ultimo_numero: nuevoNumero })
-    .eq('tipo_comprobante', tipoInverso)
-    .eq('punto_venta', puntoVenta)
 
   // ─── 11. Stock: si el original decrementó stock, lo recuperamos ───
   if (!parcial && ORIGINAL_DECREMENTO_STOCK.has(original.tipo_comprobante)) {
