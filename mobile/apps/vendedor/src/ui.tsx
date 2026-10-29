@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useLocation, useNavigate, useSearchParams } from "react-router"
 import { decidirAtras, indiceHistorial, useItemsOutbox, useOnline, useRuntime, type ItemOutbox } from "@gm/core"
 import { autoFormatoFechaAR, avisosBcraPendientes, fechaARAIso, fechaIsoAAR, resultadoSinCuit, type ConsultaBcraResultado } from "@gm/cheques"
-import { Encabezado, Frescura, Hoja } from "@gm/core/ui"
+import { CampoMonto, Encabezado, Frescura, Hoja } from "@gm/core/ui"
 import { CARTEL_PRECIOS_VENCIDOS } from "@gm/vendedor"
 import { errorCuit, fecha, fechaCorta as fechaCortaAR, fechaISO, moneda, numero, parseFecha, parseMonto, redondear } from "@gm/formato"
 
@@ -388,38 +388,12 @@ export function FechaInput({ valor, onCambio, className = "", placeholder = "DD/
 
 
 /**
- * Monto en pesos (o cantidad decimal): acepta "1.500", "1500,50" o "1500.50" (parseMonto,
- * formato argentino); confirma al salir o con Enter (= InputMonto de la web). Sin foco
- * se ve "1.500,00".
+ * Monto en pesos (o cantidad decimal): muestra los puntos de miles y la coma MIENTRAS se
+ * escribe (P2-30, `CampoMonto` de @gm/core/ui); confirma al salir o con Enter. Sin foco se
+ * ve "1.500,00".
  */
 export function MontoInput({ valor, onCambio, className = "", placeholder = "0", decimales = 2 }: { valor: number; onCambio: (n: number) => void; className?: string; placeholder?: string; decimales?: number }) {
-  const mostrar = (v: number) => (v ? numero(v, decimales) : "")
-  const [texto, setTexto] = useState(() => mostrar(valor))
-  const editando = useRef(false)
-  const mostrado = useRef(valor) // número que representa `texto`
-  // Sin foco, el texto sigue al valor de afuera (incluido el que el padre corrige: tope, mínimo)
-  useEffect(() => {
-    if (!editando.current && mostrado.current !== valor) { mostrado.current = valor; setTexto(mostrar(valor)) }
-  })
-  const confirmar = () => {
-    editando.current = false
-    const n = Math.max(0, redondear(parseMonto(texto) ?? 0, decimales))
-    mostrado.current = n
-    setTexto(mostrar(n))
-    onCambio(n)
-  }
-  return (
-    <input
-      value={texto}
-      inputMode="decimal"
-      placeholder={placeholder}
-      onFocus={(e) => { editando.current = true; e.target.select() }}
-      onChange={(e) => setTexto(e.target.value.replace(/[^\d.,]/g, ""))}
-      onBlur={confirmar}
-      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur() } }}
-      className={className}
-    />
-  )
+  return <CampoMonto valor={valor} onCambio={onCambio} className={className} placeholder={placeholder} decimales={decimales} />
 }
 
 /** "20123456789" / "20-12345678-9" → "20-12345678-9" mientras se tipea (solo dígitos, máximo 11). */

@@ -4,6 +4,7 @@ import { armarExtracto, esComprobanteConPdf, etiquetaMovimiento } from "@gm/vend
 import type { CuentaCliente, MovimientoCC } from "../../datasets"
 import { type ComprobantePdf, usePdfComprobantes } from "../../datos/comprobantes-pdf"
 import { formatCurrency } from "../../ui"
+import { saldoVisible } from "../../datos/saldo"
 
 // Comprobantes como PDF (pedido del dueño, 14/10/2026): tocar un comprobante abre su PDF
 // listo para compartir; "Compartir varios" permite elegir y mandar varios juntos.
@@ -79,7 +80,7 @@ export function ResumenCuenta({ cuenta, avisar }: { cuenta: CuentaCliente; avisa
   const enCalle = cuenta.pagos_recientes.filter((p) => p.estado === "pendiente" || p.estado === "pendiente_rendicion" || p.estado === "sin_enviar")
   const devSinEnviar = cuenta.devoluciones_pendientes.filter((d) => d.id && d.numero_devolucion === "Sin enviar")
   const saldo = cuenta.cliente.saldo_actual
-  const proyectado = cuenta.cliente.saldo_proyectado ?? saldo
+  const proyectado = saldoVisible(saldo, cuenta.cliente.saldo_proyectado)
 
   if (cuenta.movimientos === undefined) {
     return <p className="rounded-xl border border-gray-200 bg-white p-4 text-center text-sm text-gray-500">El resumen se descarga con la próxima actualización de la cuenta (tocá “Actualizar” con señal).</p>

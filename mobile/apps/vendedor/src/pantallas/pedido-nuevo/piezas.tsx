@@ -44,6 +44,17 @@ export function FilaArticulo({ a, precio, enCarrito, onAbrir, onZoom, onAgregar,
   const unidades = Number.isFinite(n) && n > 0 ? (bultos ? n * ub : n) : 0
   const cambiado = !!enCarrito && unidades !== enCarrito
 
+  // P2-12 (29/10): alcanza con ESCRIBIR la cantidad. Al salir de la casilla (tocar otro
+  // artículo, cerrar el teclado: ui/teclado.ts de core suelta el foco) lo escrito queda
+  // cargado. Borrar el número de algo ya cargado y salir NO lo quita (eso es el 🗑).
+  const alSalir = () => {
+    if (unidades > 0 && (!enCarrito || cambiado)) confirmar()
+    else { setEditando(false); setBultos(false) }
+  }
+  // Los botones y "bultos" no le sacan el foco a la casilla: si no, al tocar "+" primero se
+  // cargaría por el blur y el mismo botón (ya "🗑") recibiría el toque.
+  const sinRobarFoco = (e: { preventDefault(): void }) => e.preventDefault()
+
   const confirmar = () => {
     setEditando(false)
     if (!enCarrito) {
@@ -89,25 +100,26 @@ export function FilaArticulo({ a, precio, enCarrito, onAbrir, onZoom, onAgregar,
             value={cant}
             onFocus={() => setEditando(true)}
             onChange={(e) => { setEditando(true); setCant(e.target.value.replace(/[^\d.,]/g, "")) }}
-            onBlur={() => { if (enCarrito && !cambiado) setEditando(false) }}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmar(); (e.target as HTMLInputElement).blur() } }}
+            onBlur={alSalir}
+            // Enter = salir de la casilla (alSalir confirma una sola vez)
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur() } }}
             inputMode="decimal"
             placeholder="0"
             disabled={!precio}
             className={`w-14 rounded-md border px-1.5 py-1.5 text-center text-sm font-bold ${enCarrito ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-300 text-gray-900"}`}
             aria-label="Cantidad"
           />
-          <label className="flex select-none items-center gap-1 text-[10px] text-gray-500">
+          <label onPointerDown={sinRobarFoco} onMouseDown={sinRobarFoco} className="flex select-none items-center gap-1 text-[10px] text-gray-500">
             <input type="checkbox" checked={bultos} onChange={(e) => { setEditando(true); setBultos(e.target.checked) }} className="h-3 w-3 accent-emerald-600" />
             bultos{bultos && ub > 1 && unidades > 0 ? ` (=${unidades} u)` : ""}
           </label>
         </div>
         {!enCarrito ? (
-          <button onClick={confirmar} disabled={unidades <= 0 || !precio} className="h-11 w-10 rounded-lg bg-emerald-600 text-xl font-bold leading-none text-white disabled:bg-gray-200 disabled:text-gray-400" aria-label="Agregar al pedido">+</button>
+          <button onPointerDown={sinRobarFoco} onMouseDown={sinRobarFoco} onClick={confirmar} disabled={unidades <= 0 || !precio} className="h-11 w-10 rounded-lg bg-emerald-600 text-xl font-bold leading-none text-white disabled:bg-gray-200 disabled:text-gray-400" aria-label="Agregar al pedido">+</button>
         ) : cambiado || editando ? (
-          <button onClick={confirmar} className="h-11 w-10 rounded-lg bg-emerald-600 text-lg font-bold leading-none text-white" aria-label={unidades <= 0 ? "Quitar del pedido" : "Confirmar cantidad"}>✓</button>
+          <button onPointerDown={sinRobarFoco} onMouseDown={sinRobarFoco} onClick={confirmar} className="h-11 w-10 rounded-lg bg-emerald-600 text-lg font-bold leading-none text-white" aria-label={unidades <= 0 ? "Quitar del pedido" : "Confirmar cantidad"}>✓</button>
         ) : (
-          <button onClick={onQuitar} className="h-11 w-10 rounded-lg border border-red-200 bg-white text-lg leading-none text-red-600" aria-label="Quitar del pedido">🗑</button>
+          <button onPointerDown={sinRobarFoco} onMouseDown={sinRobarFoco} onClick={onQuitar} className="h-11 w-10 rounded-lg border border-red-200 bg-white text-lg leading-none text-red-600" aria-label="Quitar del pedido">🗑</button>
         )}
       </div>
     </div>

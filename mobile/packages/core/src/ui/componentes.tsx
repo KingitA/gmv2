@@ -179,7 +179,8 @@ export function Boton({ children, variante = "primario", className = "", ...p }:
 export function Hoja({ abierta, onCerrar, titulo, children }: { abierta: boolean; onCerrar: () => void; titulo: string; children: ReactNode }) {
   if (!abierta) return null
   return (
-    <div className="fixed inset-0 z-40 flex flex-col justify-end bg-black/40" onClick={onCerrar}>
+    // Con el teclado abierto la hoja sube por encima (--gm-teclado, ui/teclado.ts)
+    <div className="fixed inset-0 z-40 flex flex-col justify-end bg-black/40" style={{ paddingBottom: "var(--gm-teclado, 0px)" }} onClick={onCerrar}>
       <div className="max-h-[85vh] overflow-auto rounded-t-2xl bg-white p-4 pb-8" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center">
           <h2 className="flex-1 text-lg font-semibold">{titulo}</h2>

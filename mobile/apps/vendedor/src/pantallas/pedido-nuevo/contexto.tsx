@@ -77,6 +77,7 @@ export function usePedidoEnCurso(): PedidoEnCurso {
 }
 
 const CLAVE_ORDEN = "gm.vendedor.orden"
+const PREFIJO_ARBOL = "gm.vendedor.arbol:"
 const SIN_COMBOS: Array<{ lista_id: string; metodo: string }> = []
 
 /** Cliente "de mentira" de una venta a cliente nuevo (hasta que se cargan los datos). */
@@ -89,7 +90,23 @@ function clienteProspecto(id: string): Cliente {
   }
 }
 
+/**
+ * P2-13 (29/10): cada pedido arranca con el catálogo LIMPIO (rubros, categorías y subcategorías
+ * cerrados, también en Novedades, Ofertas, Habituales y Proveedor). Lo abierto se recuerda solo
+ * mientras dura ese pedido (sessionStorage `gm.vendedor.arbol:*`).
+ */
+export function limpiarArbolesCatalogo(almacen: Pick<Storage, "length" | "key" | "removeItem"> = sessionStorage) {
+  const claves: string[] = []
+  for (let i = 0; i < almacen.length; i++) {
+    const k = almacen.key(i)
+    if (k?.startsWith(PREFIJO_ARBOL)) claves.push(k)
+  }
+  for (const k of claves) almacen.removeItem(k)
+}
+
 export function ProveedorPedido({ clienteId, children }: { clienteId: string; children: ReactNode }) {
+  // Antes de que el catálogo lea lo abierto (inicializador, no efecto)
+  useState(() => { try { limpiarArbolesCatalogo() } catch { /* sin storage */ } return true })
   const { cliente: clienteCartera, cargando: cargandoCliente } = useCliente(clienteId)
   const { borrador, cambiar, descartar } = useBorrador(clienteId, clienteCartera?.nombre || "Cliente nuevo")
   // Venta a cliente nuevo: el cliente todavía no existe (ni en la cartera ni encolado)
@@ -211,7 +228,7 @@ export function useVer() {
 
 /** Estado de un acordeón que sobrevive a ir al carrito y volver (en la web el carrito era un overlay y el árbol no se desmontaba). */
 export function useAbiertos(clave: string, inicial: string[] = []): [Set<string>, (id: string) => void] {
-  const k = `gm.vendedor.arbol:${clave}`
+  const k = `${PREFIJO_ARBOL}${clave}`
   const [set, setSet] = useState<Set<string>>(() => {
     try {
       const v = sessionStorage.getItem(k)

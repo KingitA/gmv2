@@ -292,7 +292,8 @@ function ArbolDeLista({ titulo, lista, clave, vacio }: { titulo: string; lista: 
             articulosDe={(catId) => arbol.artsPorCat.get(catId) || []}
             renderArticulo={filaDe}
             ordenar={p.ordenar}
-            abiertoInicial={arbol.rubros.map((r) => r.id)}
+            // P2-13: cerrado de entrada; abierto solo con búsqueda (pocos resultados, a la vista)
+            abiertoInicial={q.trim() ? arbol.rubros.map((r) => r.id) : []}
             tinte={tinteArbol}
           />
         )}
@@ -633,9 +634,10 @@ export function PedidoListo() {
               : "Quedó guardado en el equipo y se envía solo apenas haya señal. Mientras tanto lo ves en Mis pedidos como “pendiente de enviar” y lo podés editar."}
           </p>
           <div className="grid grid-cols-1 gap-3 pt-2">
-            <button onClick={() => navigate(`/pedido/nuevo/${p.clienteId}`, { replace: true })} className="rounded-xl bg-emerald-600 px-6 py-4 text-lg font-bold text-white">Nuevo pedido para {p.cliente?.nombre}</button>
+            {/* P2-11 (29/10): lo que más se usa primero */}
+            <button onClick={() => navigate("/", { replace: true })} className="rounded-xl bg-emerald-600 px-6 py-4 text-lg font-bold text-white">Volver al inicio</button>
             <button onClick={() => navigate("/pedidos", { replace: true })} className="rounded-xl border border-gray-300 bg-white px-6 py-3 font-medium text-gray-700">Ver mis pedidos</button>
-            <button onClick={() => navigate("/", { replace: true })} className="min-h-11 py-2 text-gray-500">Volver al inicio</button>
+            <button onClick={() => navigate(`/pedido/nuevo/${p.clienteId}`, { replace: true })} className="min-h-11 py-2 text-sm text-gray-500">Nuevo pedido para {p.cliente?.nombre}</button>
           </div>
         </div>
       </div>

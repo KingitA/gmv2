@@ -25,6 +25,7 @@ import { usePdfComprobantes } from "../../datos/comprobantes-pdf"
 import { ResumenCuenta } from "./comprobantes-ui"
 import { fecha, normalizarCuit } from "@gm/formato"
 import { AvisosBcra, CuitInput, FechaInput, MontoInput, Pantalla, Rechazos, dejarAviso, dejarAvisoSinCuit, formatCurrency, round2, useToast } from "../../ui"
+import { saldoVisible } from "../../datos/saldo"
 
 // Port de app/vendedor/clientes/[id]/cobrar/page.tsx — espejo del patrón de /caja (Caja del Día):
 //  · "¿Qué paga?": pedidos con estado; tilde directa, monto editable inline que se confirma
@@ -499,7 +500,7 @@ export function Cobrar() {
     }
   }
 
-  const proyectado = cliente.saldo_proyectado ?? cliente.saldo_actual
+  const proyectado = saldoVisible(cliente.saldo_actual, cliente.saldo_proyectado)
   const proyectadoCero = Math.abs(proyectado) < 0.01
 
   // Función de render (no componente): un sub-componente definido acá adentro se remontaría
@@ -552,15 +553,22 @@ export function Cobrar() {
         /* ══ Resumen fijo ══ */
         <div className="border-t border-gray-200 bg-white p-4">
           <div className="mx-auto max-w-2xl space-y-2">
-            <div className="flex justify-between gap-2 text-sm text-gray-500">
-              <span>
-                Seleccionado {formatCurrency(totalAsignado)}
-                {bonificacionEstimada > 0 ? ` − NC ${formatCurrency(bonificacionEstimada)}` : ""}
-                {totalDevoluciones > 0 ? ` − dev. ${formatCurrency(totalDevoluciones)}` : ""}
-                {totalCreditos > 0.005 ? ` − créditos ${formatCurrency(totalCreditos)}` : ""}
-                {totalCreditos <= 0.005 && totalAFavor > 0.005 ? ` · tiene ${formatCurrency(totalAFavor)} a favor` : ""}
-              </span>
-              <span className="shrink-0">Entregado {formatCurrency(totalMetodos)}</span>
+            {/* P2-42 (29/10): el 10 % contado es parte de la cuenta de lo que se paga, nunca un saldo
+                "a favor". Debía $100 con contado → "A pagar $90". */}
+            <div className="flex items-end justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-gray-800">A pagar {formatCurrency(Math.max(0, totalAsignado - bonificacionEstimada - totalDevoluciones - totalCreditos))}</p>
+                {(bonificacionEstimada > 0 || totalDevoluciones > 0 || totalCreditos > 0.005) && (
+                  <p className="text-xs text-gray-500">
+                    {formatCurrency(totalAsignado)}
+                    {bonificacionEstimada > 0 ? ` − 10 % contado ${formatCurrency(bonificacionEstimada)}` : ""}
+                    {totalDevoluciones > 0 ? ` − dev. ${formatCurrency(totalDevoluciones)}` : ""}
+                    {totalCreditos > 0.005 ? ` − créditos ${formatCurrency(totalCreditos)}` : ""}
+                  </p>
+                )}
+                {totalCreditos <= 0.005 && totalAFavor > 0.005 && <p className="text-xs text-gray-500">tiene {formatCurrency(totalAFavor)} a favor</p>}
+              </div>
+              <span className="shrink-0 text-sm text-gray-500">Entregado {formatCurrency(totalMetodos)}</span>
             </div>
             {Math.abs(falta) < 0.01 && totalAsignado > 0 && <p className="rounded-lg bg-green-50 py-1.5 text-center text-sm font-bold text-green-700">✓ Cuadra</p>}
             {sobrante > 0.01 && <p className="rounded-lg bg-emerald-50 py-1.5 text-center text-sm font-bold text-emerald-700">Sobran {formatCurrency(sobrante)} → quedan a cuenta</p>}

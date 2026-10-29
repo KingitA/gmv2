@@ -6,6 +6,7 @@ import { localMatch } from "@gm/vendedor"
 import { DS, type Cliente } from "../../datasets"
 import { useClientes } from "../../datos/hooks"
 import { Pantalla, SinDescargar, SinEnviar, formatCurrency, useAvisoEntrante, useToast, useBusqueda } from "../../ui"
+import { saldoVisible } from "../../datos/saldo"
 
 // Port de app/vendedor/clientes/page.tsx y app/vendedor/pago/page.tsx.
 // El filtro que la web resolvía en GET /api/vendedor/clientes se resuelve LOCAL sobre
@@ -120,7 +121,7 @@ export function Clientes() {
                     <p className="truncate text-sm text-gray-500">{[c.direccion, c.localidad, c.condicion_pago].filter(Boolean).join(" · ") || "—"}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className={`font-bold ${(c.saldo_proyectado ?? c.saldo_actual) > 0 ? "text-red-600" : "text-green-600"}`}>{formatCurrency(c.saldo_proyectado ?? c.saldo_actual)}</p>
+                    <p className={`font-bold ${saldoVisible(c.saldo_actual, c.saldo_proyectado) > 0 ? "text-red-600" : "text-green-600"}`}>{formatCurrency(saldoVisible(c.saldo_actual, c.saldo_proyectado))}</p>
                     {Math.abs(c.saldo_actual - (c.saldo_proyectado ?? c.saldo_actual)) > 0.01 && <p className="text-[10px] text-gray-400">real {formatCurrency(c.saldo_actual)}</p>}
                     {c.pagos_sin_rendir > 0 && (
                       <span className="mt-1 inline-block rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-bold text-yellow-700">🟡 {c.pagos_sin_rendir} sin rendir</span>
@@ -182,7 +183,7 @@ export function Pago() {
           alto={92}
           clave={(c) => c.id}
           render={(c) => {
-            const proy = c.saldo_proyectado ?? c.saldo_actual
+            const proy = saldoVisible(c.saldo_actual, c.saldo_proyectado)
             return (
               <div className="mx-auto h-full w-full max-w-2xl px-4 pt-2">
                 <button
