@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { ItemOutbox } from "../src/db/idb"
 import { cierreDeParadaPorCobro } from "@gm/cobro"
-import { billeteraVisible, cierreAConservar, clienteDesdeParada, clienteVisible, estadoDescarga, idLocal, paradasSinResolver, viajeVisible } from "../../../apps/chofer/src/datos/overlay"
+import { billeteraVisible, clienteDesdeParada, clienteVisible, estadoDescarga, idLocal, paradasSinResolver, viajeVisible } from "../../../apps/chofer/src/datos/overlay"
 import { buscarArticulos, buscarClientes } from "../../../apps/chofer/src/datos/hooks"
 import type { BilleteraData, ClienteViajeRow, OpCobrar, ParadaHoja, ViajeDetalle } from "../../../apps/chofer/src/datasets"
 
@@ -226,9 +226,10 @@ describe("Chofer · billetera y descarga", () => {
   })
 })
 
-// Regla del dueño (29/09/2026): registrar un cobro CIERRA la parada. "Cerrar parada" queda
-// para cuando no hubo cobro. Misma función pura en el servidor (route del cobro) y en la app.
-describe("Chofer · cobrar cierra la parada", () => {
+// Regla del dueño (29/09/2026): registrar un cobro cerraba la parada. P2-33 (Juan 28/10): la app ya
+// NO la cierra al cobrar — la entrega la confirma el chofer. La regla pura (@gm/cobro) la sigue
+// usando el servidor hasta que se cambie allá.
+describe("Chofer · cobrar NO cierra la parada (P2-33)", () => {
   it("regla: parada pendiente con mercadería ⇒ entregado con todos sus bultos", () => {
     expect(cierreDeParadaPorCobro({ estado: "pendiente", bultos: 3, tienePedidos: true, minimoExigido: 0, cobrado: 7000 })).toEqual({ estado: "entregado", bultos_entregados: 3, motivo_no_cobro: null })
   })
@@ -248,11 +249,11 @@ describe("Chofer · cobrar cierra la parada", () => {
     expect(cierreDeParadaPorCobro({ estado: "pendiente", bultos: 3, tienePedidos: true, minimoExigido: 5000, cobrado: 5000 })!.motivo_no_cobro).toBeNull()
   })
 
-  it("un cobro sin señal deja la parada entregada al instante; las demás siguen pendientes", () => {
+  it("un cobro sin señal NO cierra la parada: queda pendiente con lo cobrado, para que el chofer confirme la entrega", () => {
     const v = viajeVisible(viaje(), [op("viaje.cobrar", cobro(C1, 7000))])
-    expect(v.paradas[0]).toMatchObject({ estado: "entregado", bultos_entregados: 3, resultadoSinEnviar: true })
-    expect(v.paradas[1]!.estado).toBe("pendiente")
-    expect(paradasSinResolver(v).map((p) => p.id)).toEqual(["p2"])
+    expect(v.paradas[0]).toMatchObject({ estado: "pendiente", cobrado: 7000, bultos_entregados: null })
+    expect(v.paradas[0]!.resultadoSinEnviar).toBeFalsy()
+    expect(paradasSinResolver(v).map((p) => p.id)).toEqual(["p1", "p2"])
   })
 
   it("un cobro RECHAZADO no cierra la parada", () => {
@@ -262,7 +263,7 @@ describe("Chofer · cobrar cierra la parada", () => {
 
   it("el cliente extra de un cobro conjunto NO cierra su parada (el chofer no estuvo ahí)", () => {
     const v = viajeVisible(viaje(), [op("viaje.cobrar", cobro(C1, 1000, { cobros_extra: [{ cliente_id: C2, metodos: [{ tipo: "efectivo", monto: 500 }], imputaciones: [] }] }))])
-    expect(v.paradas[0]!.estado).toBe("entregado")
+    expect(v.paradas[0]!.estado).toBe("pendiente")
     expect(v.paradas[1]!.estado).toBe("pendiente")
   })
 
@@ -274,7 +275,7 @@ describe("Chofer · cobrar cierra la parada", () => {
     expect(v.paradas[0]).toMatchObject({ estado: "no_entregado", bultos_entregados: 0 })
   })
 
-  it("reabrir DESPUÉS del cobro manda (queda pendiente para corregir); reabrir ANTES y cobrar la cierra", () => {
+  it("reabrir y cobrar, en cualquier orden: queda pendiente", () => {
     const despues = viajeVisible(viaje(), [
       op("viaje.cobrar", cobro(C1, 7000)),
       op("viaje.parada", { viaje_id: V, parada_id: "p1", cliente_id: C1, estado: "pendiente" }),
@@ -284,7 +285,7 @@ describe("Chofer · cobrar cierra la parada", () => {
       op("viaje.parada", { viaje_id: V, parada_id: "p1", cliente_id: C1, estado: "pendiente" }),
       op("viaje.cobrar", cobro(C1, 7000)),
     ])
-    expect(antes.paradas[0]!.estado).toBe("entregado")
+    expect(antes.paradas[0]!.estado).toBe("pendiente")
   })
 
   it("parcial cargado después del cobro: manda el parcial", () => {
@@ -304,35 +305,8 @@ describe("Chofer · anular un cobro no reabre la entrega", () => {
     expect(v.paradas[0]).toMatchObject({ estado: "entregado", bultos_entregados: 3, cobrado: 0 })
   })
 
-  it("descartar un cobro que nunca salió del equipo: el cierre se conserva como resultado de parada", () => {
-    const cobroOp = op("viaje.cobrar", cobro(C1, 7000))
-    const antes = viajeVisible(viaje(), [cobroOp])
-    expect(antes.paradas[0]!.cerradaPorCobro).toBe(cobroOp.key)
-    const conservar = cierreAConservar(antes, C1, idLocal(cobroOp.key))
-    expect(conservar).toEqual({ viaje_id: V, parada_id: "p1", cliente_id: C1, estado: "entregado" })
-    // El cobro se retira de la cola y queda el resultado de parada
-    const despues = viajeVisible(viaje(), [op("viaje.parada", conservar)])
-    expect(despues.paradas[0]).toMatchObject({ estado: "entregado", bultos_entregados: 3, cobrado: 0 })
-    expect(despues.dinero!.efectivo_en_mano).toBe(50000)
-  })
-
-  it("con 'cobrar sí o sí', el cierre conservado lleva el motivo que pide el servidor", () => {
-    const cobroOp = op("viaje.cobrar", cobro(C2, 5000))
-    const conservar = cierreAConservar(viajeVisible(viaje(), [cobroOp]), C2, idLocal(cobroOp.key))!
-    expect(conservar.estado).toBe("entregado")
-    expect(conservar.motivo_no_cobro).toContain("$0,00 de $5.000,00")
-  })
-
-  it("no hay nada que conservar si la parada la cerró el chofer o el cobro es del servidor", () => {
-    const cobroOp = op("viaje.cobrar", cobro(C1, 7000))
-    const cerradaAMano = viajeVisible(viaje({}, [parada(1, C1, { estado: "entregado_parcial", bultos_entregados: 2 })]), [cobroOp])
-    expect(cierreAConservar(cerradaAMano, C1, idLocal(cobroOp.key))).toBeNull()
-    expect(cierreAConservar(viajeVisible(viaje(), [cobroOp]), C1, "pago-srv")).toBeNull()
-  })
-
-  it("cobro parcial (menos que lo exigido) cierra igual", () => {
+  it("cobro parcial (menos que lo exigido): la parada queda pendiente, sin cubrir lo exigido", () => {
     const v = viajeVisible(viaje(), [op("viaje.cobrar", cobro(C2, 1000))])
-    expect(v.paradas[1]).toMatchObject({ estado: "entregado", cobro_cumplido: false })
-    expect(v.paradas[1]!.motivo_no_cobro).toContain("$1.000,00 de $5.000,00")
+    expect(v.paradas[1]).toMatchObject({ estado: "pendiente", cobro_cumplido: false, cobrado: 1000 })
   })
 })

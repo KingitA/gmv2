@@ -195,9 +195,9 @@ describe("cobro conjunto · lo que ve el chofer sin señal", () => {
     expect(v.dinero!.cheques_cantidad).toBe(1)
   })
 
-  it("el cobro cierra la parada del cliente principal; la del cliente agregado queda como estaba", () => {
+  it("el cobro no cierra ninguna parada (P2-33): la del principal y la del agregado quedan pendientes", () => {
     const v = viajeVisible(viaje(), [op("viaje.cobrar", conjunto())])
-    expect(v.paradas[0]!.estado).toBe("entregado")
+    expect(v.paradas[0]!.estado).toBe("pendiente")
     expect(v.paradas[1]!.estado).toBe("pendiente")
   })
 

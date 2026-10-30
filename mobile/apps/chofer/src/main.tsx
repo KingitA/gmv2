@@ -2,6 +2,7 @@ import "./tema.css"
 import { montarApp } from "@gm/core"
 import { DATASETS, DS } from "./datasets"
 import { rutas } from "./rutas"
+import { mantenerAlDia } from "./datos/frescura"
 
 void montarApp({
   // Los datasets dependen del chofer logueado (sus viajes, su billetera): al ingresar otro
@@ -16,4 +17,6 @@ void montarApp({
   rt.outbox.onAplicado((item) => {
     if (item.tipo === "viaje.finalizar" || item.tipo === "viaje.iniciar") void rt.sync.dataset(DS.me).catch(() => {})
   })
+  // P2-47: al abrir o volver a la app, si lo que mira el chofer tiene más de unos minutos, se actualiza solo
+  mantenerAlDia(rt)
 })

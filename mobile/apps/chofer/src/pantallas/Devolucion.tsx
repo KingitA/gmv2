@@ -63,6 +63,26 @@ export function Devolucion() {
   const estadoViaje = viaje?.viaje.estado || data?.viaje_estado || ""
   const enCurso = esEnCurso(estadoViaje)
 
+  // P2-31 (URQUIZA, 28/10): lo que entra desde la ficha (deslizar → "Devolver") llega SIN comprobante
+  // de origen; sin origen no hay tope (C2) ni aviso de "sistema viejo" (C8). Se resuelve acá, igual
+  // que el botón "Devolver" de esta pantalla (una vez por artículo).
+  const resolviendo = useRef(new Set<string>())
+  useEffect(() => {
+    if (!data) return
+    const faltan = items.filter((x) => x.origen === "pedido" && !x.comprobante_venta_id && !x.origen_comp && !resolviendo.current.has(x.articulo_id))
+    for (const x of faltan) {
+      resolviendo.current.add(x.articulo_id)
+      const enPedido = data.pedido?.detalle.find((d) => d.articulo_id === x.articulo_id)
+      void resolverItem(x.articulo_id, enPedido).then(({ precio, origenComp, aviso }) => {
+        setBorrador((prev) => ({
+          items: prev.items.map((y) => (y.articulo_id === x.articulo_id && !y.origen_comp ? { ...y, precio_venta_original: precio > 0 ? precio : y.precio_venta_original, comprobante_venta_id: origenComp.comprobante_venta_id, origen_comp: origenComp } : y)),
+        }))
+        if (aviso) mostrar(aviso, "err")
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, data])
+
   const agregarArticulo = async (a: Articulo) => {
     setQ("")
     graciaTeclado.current = Date.now() + GRACIA_TECLADO_MS

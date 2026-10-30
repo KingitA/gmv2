@@ -263,7 +263,10 @@ export interface ClienteViajeRow {
   contexto_devolucion?: ContextoDevolucion | null
   /** #25: por (comprobante de origen, artículo) lo vendido y lo ya devuelto (= tope del servidor). Ausente = réplica vieja */
   devolvible?: Array<{ comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number; presupuesto?: boolean }> | null
+  /** P2-31: tipo y número de los comprobantes de origen de las devoluciones. Ausente = réplica vieja */
+  comprobantes_ref?: ComprobanteRef[] | null
 }
+export interface ComprobanteRef { id: string; tipo_comprobante: string; numero_comprobante: string }
 
 // ─── Billetera (= GET /api/chofer/billetera) ─────────────────────────────────
 

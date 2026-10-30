@@ -75,3 +75,39 @@ export function primerExceso(devolvible: FilaDevolvible[] | null | undefined, re
   }
   return null
 }
+
+// ─── P2-31 (29/10): después de registrar, decir cómo quedó repartida la devolución ──────────
+// URQUIZA: de 24 vendidas se devolvieron 36; el servidor ató 24 al PRES y 12 al respaldo
+// 0002-00000001 ("sistema viejo") y la pantalla no dijo nada.
+
+export interface RenglonRepartido { cantidad: number; comprobante_venta_id?: string | null; estado_renglon?: string | null; articulo_id?: string | null; articulos?: { descripcion?: string | null; sku?: string | null } | null }
+
+export const esRespaldo = (ref: { numero_comprobante?: string | null } | null | undefined) => !!ref && ref.numero_comprobante === NUMERO_RESPALDO
+
+/** Una línea por artículo que tiene parte en el respaldo: "ACEITE: 24 contra el PRES 0001-00000027; 12 de más van como …". */
+export function textoReparto(renglones: RenglonRepartido[] | null | undefined, refs: Array<{ id: string; tipo_comprobante: string; numero_comprobante: string }> | null | undefined): string[] {
+  const porId = new Map((refs ?? []).map((r) => [r.id, r]))
+  const vivos = (renglones ?? []).filter((r) => r.estado_renglon !== "rechazado")
+  const grupos = new Map<string, RenglonRepartido[]>()
+  for (const r of vivos) {
+    const k = r.articulo_id || r.articulos?.descripcion || r.articulos?.sku || "?"
+    grupos.set(k, [...(grupos.get(k) ?? []), r])
+  }
+  const out: string[] = []
+  for (const rs of grupos.values()) {
+    const resp = rs.filter((r) => esRespaldo(porId.get(r.comprobante_venta_id || "")))
+    if (!resp.length) continue
+    const deMas = resp.reduce((s, r) => s + (Number(r.cantidad) || 0), 0)
+    const contra = new Map<string, number>()
+    for (const r of rs) {
+      if (resp.includes(r)) continue
+      const ref = porId.get(r.comprobante_venta_id || "")
+      const k = ref ? `el ${ref.tipo_comprobante} ${ref.numero_comprobante}` : "lo comprado"
+      contra.set(k, (contra.get(k) ?? 0) + (Number(r.cantidad) || 0))
+    }
+    const nombre = rs[0]!.articulos?.descripcion || rs[0]!.articulos?.sku || "Artículo"
+    const partes = [...contra].map(([k, n]) => `${cant(n)} contra ${k}`)
+    out.push(`${nombre}: ${partes.length ? partes.join(", ") + "; " : ""}${cant(deMas)} de más ${deMas === 1 ? "va" : "van"} como devolución del sistema viejo, la revisa la oficina.`)
+  }
+  return out
+}
