@@ -47,6 +47,26 @@ CREATE INDEX IF NOT EXISTS idx_caja_ajustes_pago ON public.caja_ajustes (pago_id
 -- Solo la lee el servidor (API con permiso caja_ajustes, cliente admin)
 ALTER TABLE public.caja_ajustes ENABLE ROW LEVEL SECURITY;
 
+-- Lo que canceló cada ajuste de "deuda asumida" (decisión de Juan 31/10: al eliminar
+-- un cliente asumiendo la deuda, sus comprobantes pendientes pasan a PAGADOS en el
+-- mismo paso). Trazable desde la caja: renglón deuda_asumida → estos. No se usa
+-- imputaciones: exige un pago o una NC/REV de origen, y alimenta comisiones y la
+-- base del 10 %; esto no es plata ni un comprobante.
+--   comprobante_id: comprobante cerrado (débito o NC/REV); saldo_anterior con signo
+--   pago_id: entrega a cuenta que quedaba con disponible (solo traza: no tiene saldo
+--            propio; el cliente queda escondido y su libro en $0)
+CREATE TABLE IF NOT EXISTS public.caja_ajustes_cancelados (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ajuste_id      uuid NOT NULL REFERENCES public.caja_ajustes(id) ON DELETE CASCADE,
+  comprobante_id uuid REFERENCES public.comprobantes_venta(id) ON DELETE CASCADE,
+  pago_id        uuid REFERENCES public.pagos_clientes(id) ON DELETE CASCADE,
+  saldo_anterior numeric(14, 2) NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  CHECK (comprobante_id IS NOT NULL OR pago_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_caja_ajustes_cancelados_ajuste ON public.caja_ajustes_cancelados (ajuste_id);
+ALTER TABLE public.caja_ajustes_cancelados ENABLE ROW LEVEL SECURITY;
+
 -- ── 2. Del renglón del libro a la caja ───────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.caja_ajustes_registrar(p_libro public.cuenta_corriente_clientes)
 RETURNS void
@@ -122,8 +142,10 @@ END $$;
 -- Misma función de Cambios general (20261029c_cliente_eliminar.sql) con un
 -- parámetro más. Sin p_asumir_deuda hace exactamente lo de antes. Con él, si
 -- tiene saldo y ningún pedido en curso: asienta un ajuste que lo deja en $0
--- ("Deuda asumida al eliminar el cliente…", cae en la caja de ajustes) y sigue
--- como siempre (con historial queda escondido con el código libre).
+-- ("Deuda asumida al eliminar el cliente…", cae en la caja de ajustes), cierra
+-- sus comprobantes pendientes (pagados / aplicados, anotados en
+-- caja_ajustes_cancelados) y sigue como siempre (con historial queda escondido
+-- con el código libre).
 DROP FUNCTION IF EXISTS public.cliente_eliminar(uuid, uuid);
 CREATE OR REPLACE FUNCTION public.cliente_eliminar(p_cliente_id uuid, p_usuario_id uuid DEFAULT NULL::uuid, p_asumir_deuda boolean DEFAULT false)
  RETURNS jsonb
@@ -138,6 +160,10 @@ declare
   v_historial  boolean := false;
   v_con_cae    boolean;
   v_asumido    numeric := 0;
+  v_libro_id   uuid;
+  v_ajuste_id  uuid;
+  v_comp       record;
+  v_cerrados   integer := 0;
 begin
   select id, codigo_cliente, eliminado_at into v_cli from clientes where id = p_cliente_id for update;
   if not found then
@@ -163,7 +189,7 @@ begin
   -- Asumir la deuda (o el saldo a favor): el cliente queda en $0 y el ajuste cae
   -- en la caja de ajustes (disparador del libro)
   if abs(v_saldo) >= 0.01 then
-    perform cc_ajuste_manual(
+    v_libro_id := cc_ajuste_manual(
       p_cliente_id,
       case when v_saldo > 0 then 'credito' else 'debito' end,
       round(abs(v_saldo), 2),
@@ -172,6 +198,38 @@ begin
       p_usuario_id
     );
     v_asumido := round(v_saldo, 2);
+    select id into v_ajuste_id from caja_ajustes where libro_id = v_libro_id;
+
+    -- Decisión de Juan (31/10): en el mismo paso, lo pendiente queda CERRADO. Débitos
+    -- (FA/FB/FC/PRES/ND) con saldo → pagados; créditos (NC/REV) con saldo → aplicados.
+    -- Solo saldo_pendiente/estado_pago, igual que una imputación: nada de anular ni de
+    -- tocar importes, CAE u observaciones de un comprobante fiscal.
+    for v_comp in
+      select id, saldo_pendiente from comprobantes_venta
+       where cliente_id = p_cliente_id
+         and anulado_en is null
+         and coalesce(estado_pago, '') <> 'anulado'
+         and abs(coalesce(saldo_pendiente, 0)) >= 0.005
+    loop
+      update comprobantes_venta set saldo_pendiente = 0, estado_pago = 'pagado' where id = v_comp.id;
+      if v_ajuste_id is not null then
+        insert into caja_ajustes_cancelados (ajuste_id, comprobante_id, saldo_anterior)
+        values (v_ajuste_id, v_comp.id, round(v_comp.saldo_pendiente, 2));
+      end if;
+      v_cerrados := v_cerrados + 1;
+    end loop;
+
+    -- Entregas a cuenta que quedaban con disponible: no tienen saldo propio que
+    -- cerrar; quedan anotadas (el libro ya está en $0 y el cliente se esconde)
+    if v_ajuste_id is not null then
+      insert into caja_ajustes_cancelados (ajuste_id, pago_id, saldo_anterior)
+      select v_ajuste_id, p.id,
+             -round(p.monto - coalesce((select sum(i.monto_imputado) from imputaciones i where i.pago_id = p.id and i.estado <> 'anulado'), 0), 2)
+        from pagos_clientes p
+       where p.cliente_id = p_cliente_id
+         and p.estado = 'confirmado'
+         and p.monto - coalesce((select sum(i.monto_imputado) from imputaciones i where i.pago_id = p.id and i.estado <> 'anulado'), 0) >= 0.005;
+    end if;
   end if;
 
   v_con_cae := exists (select 1 from comprobantes_venta where cliente_id = p_cliente_id and cae is not null);
@@ -194,7 +252,7 @@ begin
 
   if not v_historial then
     delete from clientes where id = p_cliente_id;
-    return jsonb_build_object('resultado', 'borrado', 'codigo', v_cli.codigo_cliente);
+    return jsonb_build_object('resultado', 'borrado', 'codigo', v_cli.codigo_cliente, 'deuda_asumida', v_asumido);
   end if;
 
   delete from bonificaciones              where cliente_id = p_cliente_id;
@@ -213,7 +271,7 @@ begin
          codigo_cliente = null
    where id = p_cliente_id;
 
-  return jsonb_build_object('resultado', 'escondido', 'codigo', v_cli.codigo_cliente, 'con_cae', v_con_cae, 'deuda_asumida', v_asumido);
+  return jsonb_build_object('resultado', 'escondido', 'codigo', v_cli.codigo_cliente, 'con_cae', v_con_cae, 'deuda_asumida', v_asumido, 'comprobantes_cerrados', v_cerrados);
 end;
 $function$;
 

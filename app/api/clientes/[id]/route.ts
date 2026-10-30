@@ -30,10 +30,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     return NextResponse.json({ error: `No se pudo eliminar el cliente: ${error.message}` }, { status: 500 })
   }
 
-  const r = data as { resultado: string; saldo?: number; cantidad?: number; codigo?: string | null; con_cae?: boolean; deuda_asumida?: number }
+  const r = data as { resultado: string; saldo?: number; cantidad?: number; codigo?: string | null; con_cae?: boolean; deuda_asumida?: number; comprobantes_cerrados?: number }
   const asumida = Number(r?.deuda_asumida ?? 0)
+  const cerrados = Number(r?.comprobantes_cerrados ?? 0)
   const textoAsumida = Math.abs(asumida) >= 0.01
-    ? ` Se asumió ${asumida > 0 ? "la deuda" : "el saldo a favor"} de ${moneda(Math.abs(asumida))}: quedó en la caja de ajustes.`
+    ? ` Se asumió ${asumida > 0 ? "la deuda" : "el saldo a favor"} de ${moneda(Math.abs(asumida))}: quedó en la caja de ajustes${cerrados > 0 ? ` y ${cerrados} comprobante${cerrados === 1 ? "" : "s"} pendiente${cerrados === 1 ? " quedó cerrado" : "s quedaron cerrados"}` : ""}.`
     : ""
   switch (r?.resultado) {
     case "borrado":
