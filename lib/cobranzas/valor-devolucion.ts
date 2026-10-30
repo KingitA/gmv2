@@ -190,6 +190,39 @@ export function valorDevolucion({ renglones, aplica10 = false, conIva = false, a
   }
 }
 
+/**
+ * P2-41 (regla de Juan, 29/10): cuánto de la NC/REV de una devolución corresponde
+ * a CADA comprobante de origen — lo que vale lo devuelto de ese comprobante (neto +
+ * IVA de sus renglones + su parte de las percepciones, por neto). La NC/REV se
+ * imputa a cada origen solo por eso: lo que va al respaldo 0002-00000001 (sistema
+ * viejo) o sin origen queda A FAVOR y no baja ni la deuda ni la base del 10 %
+ * contado de otro comprobante (URQUIZA: la REV entera cayó en el PRES 0027 y su
+ * 10 % dio $25.061,52 en vez de $27.319,90). La suma da el total al centavo.
+ */
+export function importePorOrigen(
+  renglones: Array<{ origen_id: string | null; neto: number; iva: number }>,
+  percepciones: number,
+): Map<string | null, number> {
+  const netoTotal = renglones.reduce((s, r) => s + (Number(r.neto) || 0), 0)
+  const porOrigen = new Map<string | null, { neto: number; iva: number }>()
+  for (const r of renglones) {
+    const a = porOrigen.get(r.origen_id) || { neto: 0, iva: 0 }
+    a.neto += Number(r.neto) || 0
+    a.iva += Number(r.iva) || 0
+    porOrigen.set(r.origen_id, a)
+  }
+  const out = new Map<string | null, number>()
+  const claves = [...porOrigen.keys()]
+  let percRestante = centavos(percepciones)
+  claves.forEach((k, i) => {
+    const a = porOrigen.get(k)!
+    const perc = i === claves.length - 1 ? percRestante : netoTotal > 0 ? Math.round((centavos(percepciones) * a.neto) / netoTotal) : 0
+    percRestante -= perc
+    out.set(k, (centavos(r2(a.neto)) + centavos(r2(a.iva)) + perc) / 100)
+  })
+  return out
+}
+
 /** Neto a cobrar de un comprobante contado (10% sobre el total de factura). */
 export function netoContado(totalFactura: number): number {
   return r2((Number(totalFactura) || 0) * (1 - DTO_CONTADO))

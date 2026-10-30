@@ -11,10 +11,12 @@ import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
-import { TASA_PERCEPCION_IVA_DEVOLUCION, valorDevolucionConOrigen } from "@/lib/cobranzas/valor-devolucion"
+import { importePorOrigen, TASA_PERCEPCION_IVA_DEVOLUCION, valorDevolucionConOrigen } from "@/lib/cobranzas/valor-devolucion"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { cuitDigitos, cuitValido, ahoraISO } from "@/lib/formato"
 import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from "@/lib/comprobantes/numeracion"
+
+const r2 = (n: number) => Math.round(n * 100) / 100
 
 /** Corta la emisión con una respuesta de error (validaciones dentro de una parte). */
 class Corte extends Error {
@@ -550,15 +552,26 @@ export async function POST(request: Request) {
       }, `${tipoFinal} ${numeroComprobante}`)
       if (ccAviso) avisos.push(ccAviso)
 
-      // Imputación automática NC↔FA (Fase A3): aplicar el crédito contra los
-      // comprobantes de origen de ESTA parte hasta agotarlo. Sin origen, el
-      // crédito queda disponible para imputación manual (cc_imputar_credito).
+      // Imputación automática NC↔FA (Fase A3): a cada comprobante de origen de
+      // ESTA parte, SOLO lo que vale lo devuelto de ese comprobante (P2-41): la
+      // parte del respaldo 0002-00000001 (sistema viejo, en $0) o sin origen
+      // queda a favor del cliente y no cancela deuda ni baja la base del 10 %
+      // contado de otro comprobante. Antes se imputaba en orden hasta agotarla.
+      const topeDe = importePorOrigen(
+        parte.items.map((it: any, idx: number) => ({ origen_id: it.comprobante_venta_id ?? null, neto: netoRenglon[idx] ?? 0, iva: ivaRenglon[idx] ?? 0 })),
+        parte.fiscal ? r2(percIVA + percIIBB) : 0,
+      )
       try {
         for (const origenId of origenIds) {
+          const tope = topeDe.get(origenId) ?? 0
+          if (tope <= 0.005) continue
+          const { data: deb } = await supabase.from("comprobantes_venta").select("saldo_pendiente").eq("id", origenId).maybeSingle()
+          const monto = r2(Math.min(tope, Math.max(0, Number(deb?.saldo_pendiente ?? 0))))
+          if (monto <= 0.005) continue // el origen ya no debe (o es el respaldo en $0): queda a favor
           const { data: impRes, error: impErr } = await supabase.rpc("cc_imputar_credito", {
             p_credito_id: comprobante.id,
             p_debito_id: origenId,
-            p_monto: null,
+            p_monto: monto,
             p_usuario_id: auth.user.id,
           })
           if (impErr) {
