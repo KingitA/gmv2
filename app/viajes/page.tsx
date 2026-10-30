@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { CalendarRange, ChevronLeft, ChevronRight, Plus, Truck, User, Package } from "lucide-react"
 import { formatCurrency, formatDateAR, todayArgentina } from "@/lib/utils"
 import { ESTADO_VIAJE_LABEL, ESTADO_VIAJE_COLOR } from "@/lib/viajes/estados"
+import { textoCarga } from "@/lib/viajes/bultos"
 import { useUrlParams } from "@/lib/hooks/use-url-state"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { quienLleva, sumarDias, useViajesRango } from "@/lib/viajes/use-viajes-rango"
@@ -99,7 +100,7 @@ function ViajesCalendario() {
               <TableHead>Vehículo</TableHead>
               <TableHead className="text-right">Clientes</TableHead>
               <TableHead className="text-right">Pedidos</TableHead>
-              <TableHead className="text-right">Bultos</TableHead>
+              <TableHead className="text-right">Carga</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead>Estado</TableHead>
             </TableRow>
@@ -126,7 +127,7 @@ function ViajesCalendario() {
                   <TableCell>{v.vehiculos?.nombre || "—"}</TableCell>
                   <TableCell className="text-right">{v.clientes_count}</TableCell>
                   <TableCell className="text-right">{v.pedidos_count}</TableCell>
-                  <TableCell className="text-right"><span className="inline-flex items-center gap-1"><Package className="h-3 w-3 text-slate-400" />{v.bultos}</span></TableCell>
+                  <TableCell className="text-right"><span className="inline-flex items-center gap-1 whitespace-nowrap"><Package className="h-3 w-3 text-slate-400" />{textoCarga(v.bultos, v.pallets || 0, "—")}</span></TableCell>
                   <TableCell className="text-right">{formatCurrency(v.total)}</TableCell>
                   <TableCell>
                     <Badge className={`${ESTADO_VIAJE_COLOR[v.estado] || "bg-slate-400"} text-white`}>
