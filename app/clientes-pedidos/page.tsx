@@ -52,6 +52,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import { NuevoPedidoDialog } from "@/components/pedidos/NuevoPedidoDialog"
+import { FacturarVariosDialog } from "@/components/pedidos/FacturarVariosDialog"
 import { ReviewPedidoDialog } from "@/components/pedidos/ReviewPedidoDialog"
 import { useOrderQueue } from "@/hooks/use-order-queue"
 import type { QueueItem } from "@/hooks/use-order-queue"
@@ -1349,6 +1350,9 @@ export default function ClientesPedidosPage() {
     await cargarPedidos(true)
     cargarSueltos()
   }
+  // P2-22: facturar los tildados (foto de la selección al abrir: la lista se recarga sola)
+  const [aFacturar, setAFacturar] = useState<{ id: string; numero_pedido: string; estado: string; cliente: string }[] | null>(null)
+  const pedirFacturarSeleccion = () => setAFacturar(seleccionados.map(p => ({ id: p.id, numero_pedido: p.numero_pedido, estado: p.estado, cliente: p.clientes?.nombre_razon_social || "Sin cliente" })))
   const pedirEliminarSeleccion = () => {
     const elegibles = seleccionados.filter(p => puedeEliminarPedido(p.estado)).length
     setPropuesta({
@@ -1700,6 +1704,11 @@ export default function ClientesPedidosPage() {
           <Button size="sm" variant="secondary" className="h-9 bg-white text-azul-900 hover:bg-azul-50" onClick={crearViajeConSeleccion}>
             <Truck className="h-4 w-4" /> Crear viaje
           </Button>
+          <Button size="sm" variant="secondary" className="h-9 bg-white text-azul-900 hover:bg-azul-50" onClick={pedirFacturarSeleccion}
+            disabled={!seleccionados.some(p => p.estado === "pendiente_facturacion")}
+            title={seleccionados.some(p => p.estado === "pendiente_facturacion") ? "Factura los tildados que están en Pendiente Facturación" : "No se facturan: ninguno está preparado (Pendiente Facturación)"}>
+            <FileText className="h-4 w-4" /> Facturar
+          </Button>
           <Select value="" onValueChange={(v) => cambiarPrioridadVarios(seleccionados.map(p => p.id), Number(v) as 1 | 2 | 3)}>
             <SelectTrigger className="h-9 w-auto min-w-36 border-white/20 bg-white/10 text-white data-[placeholder]:text-white [&_svg:not([class*='text-'])]:text-white">
               <SelectValue placeholder="Prioridad…" />
@@ -1733,6 +1742,13 @@ export default function ClientesPedidosPage() {
           else recargarViajesCal(true)
           cargarViajes()
         }}
+      />
+
+      <FacturarVariosDialog
+        pedidos={aFacturar || []}
+        open={!!aFacturar}
+        onOpenChange={(o) => { if (!o) setAFacturar(null) }}
+        onTerminado={async () => { setSeleccion(new Set()); await Promise.all([cargarPedidos(true), cargarComprobantesExistentes()]) }}
       />
 
       <AlertDialog open={!!propuesta} onOpenChange={(o) => { if (!o) setPropuesta(null) }}>

@@ -24,6 +24,8 @@ type InfoCodigo = { sugerido: string; codigo: string | null; disponible: boolean
 import { InputMonto } from "@/components/ui/input-monto"
 import { InputCUIT } from "@/components/ui/input-cuit"
 import { CuentaEmpleadoFicha } from "@/components/personal/cuenta-empleado-ficha"
+import { limpiarNombreCliente } from "@/lib/clientes/nombre-cliente"
+import { RetenerEntregas } from "@/components/clientes/retener-entregas"
 
 function normalizeEnum(v: string | null | undefined, map: Record<string, string>, fallback: string): string {
   if (!v) return fallback
@@ -97,6 +99,8 @@ export default function ClienteDetailPage() {
   const [ccBalance, setCcBalance] = useState<number | null>(null)
   const [ccProyectado, setCcProyectado] = useState<number | null>(null)
   const [pedidosCliente, setPedidosCliente] = useState<any[]>([])
+  // P2-08: retener entregas (va por su ruta, no por el Guardar de la ficha)
+  const [retencion, setRetencion] = useState<{ retenido: boolean; motivo: string | null } | null>(null)
   // Segmentación por proveedor / marca (lista/facturación/descuentos propios → comprobante aparte)
   const [segmentacion, setSegmentacion] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
   const [savingSeg, setSavingSeg] = useState(false)
@@ -127,6 +131,7 @@ export default function ClienteDetailPage() {
     tipo_canal: "Minorista",
     vendedor_id: "",
     condicion_entrega: "entregamos_nosotros",
+    flete_pago: "", // P2-07: con transporte, "origen" o "destino"
     lista_precio_id: "",
     lista_limpieza_id: "",
     metodo_limpieza: "",
@@ -204,6 +209,7 @@ export default function ClienteDetailPage() {
 
     if (clienteRes.data) {
       const c = clienteRes.data as any
+      setRetencion({ retenido: !!c.retener_entregas, motivo: c.retener_motivo ?? null })
       setFormData({
         codigo_cliente: c.codigo_cliente || "",
         nombre: c.nombre || "",
@@ -225,6 +231,7 @@ export default function ClienteDetailPage() {
         tipo_canal: normalizeEnum(c.tipo_canal, CANAL_MAP, "Minorista"),
         vendedor_id: c.vendedor_id || "",
         condicion_entrega: normalizeEnum(c.condicion_entrega, ENTREGA_MAP, "entregamos_nosotros"),
+        flete_pago: c.flete_pago || "",
         lista_precio_id: c.lista_precio_id || "",
         lista_limpieza_id: c.lista_limpieza_id || "",
         metodo_limpieza: normalizeEnum(c.metodo_limpieza, FACTURACION_MAP, ""),
@@ -379,17 +386,23 @@ export default function ClienteDetailPage() {
       return
     }
     setSaving(true)
+    // P2-10: sin espacios en los costados; el alta además en mayúsculas, como el resto de la cartera
+    const limpiar = (v: string) => (esNuevo ? limpiarNombreCliente(v) : v.replace(/s+/g, " ").trim())
+    const razonLimpia = limpiar(formData.nombre_razon_social)
     const dataToSave = {
       ...formData,
+      nombre_razon_social: razonLimpia,
       // Vacío = la base asigna el primer número libre (trigger de 20261014_codigos_unicos)
       codigo_cliente: codigo,
       cuit: normalizarCuit(formData.cuit),
       // Antes los dos campos se pisaban con la razón social y se perdía el nombre
       // de fantasía que carga el vendedor ("Súper Eco 17"). Vacío = igual a la razón social.
-      nombre: formData.nombre.trim() || formData.nombre_razon_social,
-      razon_social: formData.nombre_razon_social,
+      nombre: limpiar(formData.nombre) || razonLimpia,
+      razon_social: razonLimpia,
       vendedor_id: formData.vendedor_id && formData.vendedor_id !== "none" ? formData.vendedor_id : null,
       localidad_id: formData.localidad_id || null,
+      // P2-07: el flete en origen/destino solo vale con transporte
+      flete_pago: formData.condicion_entrega === "transporte" ? formData.flete_pago || null : null,
     }
     // Lista/método/descuentos no van en este update: se guardan con los toggles
     // General / Por segmento por el camino único (guardarFichaComercial).
@@ -637,6 +650,23 @@ export default function ClienteDetailPage() {
                 </SelectContent>
               </Select>
             </Campo>
+            {formData.condicion_entrega === "transporte" && (
+              <Campo label="Flete">
+                <Select value={formData.flete_pago || "none"} onValueChange={(v) => set("flete_pago", v === "none" ? "" : v)}>
+                  <SelectTrigger><SelectValue placeholder="Elegí quién lo paga" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin definir</SelectItem>
+                    <SelectItem value="origen">En origen (lo pagamos nosotros)</SelectItem>
+                    <SelectItem value="destino">En destino (lo paga el cliente)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Campo>
+            )}
+            {!esNuevo && retencion && (
+              <Campo label="Retener entregas" ancho={2}>
+                <RetenerEntregas clienteId={id} retenido={retencion.retenido} motivo={retencion.motivo} />
+              </Campo>
+            )}
             <Campo label="Condición de pago" nota="obligatorio">
               <Select value={formData.condicion_pago} onValueChange={(v) => set("condicion_pago", v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -832,7 +862,8 @@ export default function ClienteDetailPage() {
                   <p className="text-xs font-medium text-neutro-500">{ccBalance > 0 ? "Nos debe" : ccBalance < 0 ? "A favor del cliente" : "Al día"}</p>
                   {ccProyectado !== null && Math.abs(ccProyectado - ccBalance) > 0.009 && (
                     <p className="mt-2 text-xs text-neutro-600">
-                      Proyectado: <b className="tabular-nums">{ccProyectado < 0 ? "a favor " : ""}{moneda(Math.abs(ccProyectado), 0)}</b>
+                      {/* P2-23: con deuda real, un proyectado negativo (el 10 % contado) no es "a favor": se ve $0 */}
+                      Proyectado: <b className="tabular-nums">{ccProyectado < 0 && ccBalance <= 0 ? "a favor " : ""}{moneda(ccProyectado < 0 && ccBalance > 0 ? 0 : Math.abs(ccProyectado), 0)}</b>
                       <span className="block text-neutro-400">si se confirma lo pendiente (cobros y devoluciones)</span>
                     </p>
                   )}
