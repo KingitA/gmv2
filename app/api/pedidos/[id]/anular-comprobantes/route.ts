@@ -3,9 +3,11 @@ import { NextResponse } from "next/server"
 import { requirePermiso } from "@/lib/auth"
 import { evaluarAnulacionPedido } from "@/lib/pedidos/anulacion-pedido"
 import { anularComprobantesPedido, CorteAnulacionPedido } from "@/lib/pedidos/anular-comprobantes-pedido"
+import { devolucionesAcreditadasDelPedido } from "@/lib/pedidos/ajuste-devoluciones-refacturado"
 
 // Anular comprobantes del pedido para refacturarlo (#19/#20).
-//  GET  → qué se anularía (para el modal): { puede, motivo, aAnular, estado }.
+//  GET  → qué se anularía (para el modal): { puede, motivo, aAnular, estado,
+//         devoluciones } (devoluciones ya acreditadas: se recalculan al refacturar, P2-43).
 //  POST → anula todo junto, en orden; el pedido vuelve a Pendiente Facturación.
 //         Responde { anulados, a_favor, estado_pedido, advertencias }. Si se
 //         corta a la mitad: { error, error_code, anulados, pendientes } y
@@ -17,7 +19,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (auth.error) return auth.error
   try {
     const { id } = await params
-    return NextResponse.json(await evaluarAnulacionPedido(createAdminClient(), id))
+    const supabase = createAdminClient()
+    const [evaluacion, devoluciones] = await Promise.all([evaluarAnulacionPedido(supabase, id), devolucionesAcreditadasDelPedido(supabase as any, id)])
+    return NextResponse.json({ ...evaluacion, devoluciones })
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Error evaluando el pedido" }, { status: 500 })
   }

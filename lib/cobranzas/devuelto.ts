@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { devolucionEnAnulaciones } from "@/lib/pedidos/devolucion-en-anulaciones"
 
 /**
  * Cuánto de cada comprobante ya se DEVOLVIÓ con una NC o REV de devolución
@@ -9,6 +10,16 @@ import type { SupabaseClient } from "@supabase/supabase-js"
  * apps al cobrar (V2 vendedor, C3 chofer). Map comprobante_id → monto devuelto.
  */
 export async function devueltoPorComprobante(supabase: SupabaseClient, comprobanteIds: string[]): Promise<Map<string, number>> {
+  const out = await devueltoEtiquetado(supabase, comprobanteIds)
+  // P2-43: comprobante refacturado — lo devuelto llega dentro de la NC/REV de
+  // anulación del comprobante anterior (lib/pedidos/devolucion-en-anulaciones.ts)
+  const enAnulacion = await devolucionEnAnulaciones(supabase, comprobanteIds, devueltoEtiquetado)
+  for (const [id, monto] of enAnulacion) out.set(id, Math.round(((out.get(id) ?? 0) + monto) * 100) / 100)
+  return out
+}
+
+/** Solo las NC/REV "Devolución …" imputadas a cada comprobante */
+export async function devueltoEtiquetado(supabase: SupabaseClient, comprobanteIds: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>()
   const ids = [...new Set(comprobanteIds)].filter(Boolean)
   if (!ids.length) return out

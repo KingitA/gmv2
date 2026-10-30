@@ -28,6 +28,7 @@ import { recalcularBonificadosPedido, cuposMercaderiaPedido, etiquetasCupos } fr
 import { leerCondicionesCliente } from "@/lib/pedidos/condiciones-pedido"
 import { estadoAlFacturar } from "@/lib/pedidos/estados"
 import { aplicarPagosDelPedidoRefacturado } from "@/lib/pedidos/refacturar"
+import { ajustarDevolucionesRefacturadas, type ResultadoAjusteDevoluciones } from "@/lib/pedidos/ajuste-devoluciones-refacturado"
 import { cuitDigitos, cuitValido, normalizarCuit } from "@/lib/formato"
 import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from "@/lib/comprobantes/numeracion"
 
@@ -661,6 +662,7 @@ async function generarPedido(body: any, auth: { user: { id: string } }) {
     // Refacturado (#19/#20, regla del dueño 27/10): si el pedido ya estaba más
     // adelante (listo, en viaje, entregado) se queda donde estaba (estadoAlFacturar).
     let pagosRefacturado: Awaited<ReturnType<typeof aplicarPagosDelPedidoRefacturado>> | null = null
+    let ajusteDevoluciones: ResultadoAjusteDevoluciones | null = null
     if (comprobantesGenerados.length > 0) {
       const { error: estadoErr } = await supabase
         .from("pedidos").update({ estado: estadoAlFacturar((pedido as any).estado) }).eq("id", pedido_id)
@@ -669,12 +671,31 @@ async function generarPedido(body: any, auth: { user: { id: string } }) {
       // Lo que el cliente había pagado contra los comprobantes anulados de ESTE
       // pedido pasa a los nuevos (respeta lo que eligió quien cobró). Lo que estaba
       // a cuenta sigue a cuenta. Best-effort: si falla, queda el aviso.
+      const nuevosIds = comprobantesGenerados.map((c: any) => c.id).filter(Boolean)
+      // P2-43 (Juan 31/10): las devoluciones ya acreditadas al precio del
+      // comprobante anulado se recalculan al precio del nuevo; sale la diferencia.
+      // Después del 10 % contado (paso 7): se valúan con el contado como cualquier
+      // devolución de un comprobante bonificado.
+      try {
+        ajusteDevoluciones = await ajustarDevolucionesRefacturadas(supabase, pedido_id, nuevosIds, auth.user.id)
+      } catch (e: any) {
+        ajusteDevoluciones = { emitidos: [], debitosIds: [], textos: [], advertencias: [`No se pudieron recalcular las devoluciones del pedido anterior: ${e?.message || e}. Revisalas a mano.`] }
+      }
       try {
         pagosRefacturado = await aplicarPagosDelPedidoRefacturado(
-          supabase, pedido_id, comprobantesGenerados.map((c: any) => c.id).filter(Boolean), auth.user.id,
+          supabase, pedido_id, nuevosIds, auth.user.id, ajusteDevoluciones.debitosIds,
         )
       } catch (e: any) {
         pagosRefacturado = { aplicados: [], advertencias: [`No se pudo aplicar lo pagado del pedido anterior: ${e?.message || e}. Imputalo a mano desde la cuenta corriente.`] }
+      }
+      // Comisión neta de devoluciones (si refacturar.ts no la recalculó ya)
+      if (ajusteDevoluciones.emitidos.length && !pagosRefacturado.aplicados.length) {
+        try {
+          const { liquidarComisiones } = await import("@/lib/comisiones/liquidar")
+          await liquidarComisiones(supabase, nuevosIds, auth.user.id)
+        } catch (e: any) {
+          ajusteDevoluciones.advertencias.push(`Comisión sin recalcular (${e?.message || e}).`)
+        }
       }
     }
 
@@ -788,6 +809,8 @@ async function generarPedido(body: any, auth: { user: { id: string } }) {
       ...(advertenciasLibro.length ? { advertencias_libro_mayor: advertenciasLibro } : {}),
       ...(pagosRefacturado?.aplicados.length ? { pagos_refacturado: pagosRefacturado.aplicados } : {}),
       ...(pagosRefacturado?.advertencias.length ? { pagos_refacturado_error: pagosRefacturado.advertencias.join(" ") } : {}),
+      ...(ajusteDevoluciones?.textos.length || ajusteDevoluciones?.emitidos.length ? { ajustes_devoluciones: { textos: ajusteDevoluciones.textos, emitidos: ajusteDevoluciones.emitidos } } : {}),
+      ...(ajusteDevoluciones?.advertencias.length ? { ajustes_devoluciones_error: ajusteDevoluciones.advertencias.join(" ") } : {}),
     })
   } catch (error: any) {
     console.error("[Generar Comprobantes] Error:", error)

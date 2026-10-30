@@ -11,7 +11,7 @@ import { Loader2, AlertTriangle, CheckCircle2 } from "lucide-react"
 import { moneda } from "@/lib/formato"
 
 type Anulable = { id: string; tipo_comprobante: string; numero_comprobante: string; total_factura: number }
-type Evaluacion = { puede: boolean; motivo: string | null; aAnular: Anulable[] }
+type Evaluacion = { puede: boolean; motivo: string | null; aAnular: Anulable[]; devoluciones?: Array<{ numero: string }> }
 type Resultado = { a_favor: number; anulados: unknown[]; estado_pedido?: string | null; advertencias?: string[] }
 
 const FISCALES = new Set(["FA", "FB", "FC", "NCA", "NCB", "NCC", "NDA", "NDB", "NDC"])
@@ -108,6 +108,11 @@ export function AnularComprobantesDialog({
             )}
             {evaluacion && !evaluacion.puede && evaluacion.motivo && (
               <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-700">{evaluacion.motivo}</p>
+            )}
+            {evaluacion?.puede && !!evaluacion.devoluciones?.length && (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-700">
+                Tiene {evaluacion.devoluciones.length === 1 ? "la devolución" : "las devoluciones"} <strong>{evaluacion.devoluciones.map((d) => d.numero).join(", ")}</strong> ya acreditada{evaluacion.devoluciones.length === 1 ? "" : "s"}. Al volver a generar se recalcula{evaluacion.devoluciones.length === 1 ? "" : "n"} al precio del comprobante nuevo y sale la diferencia: crédito (REV o NC) si el precio sube, débito (PRES o ND) si baja. Antes de generar te muestro el importe.
+              </p>
             )}
             {evaluacion?.puede && hayFiscal && (
               <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
