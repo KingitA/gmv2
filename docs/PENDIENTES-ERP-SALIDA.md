@@ -489,6 +489,15 @@ Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 - **Cuándo:** después de la prueba y antes del pase. Durante la prueba, la sesión de la prueba lista los ajustes a mano desde la base.
 - [x] OK de Juan a la idea (27/10). Falta redondearla después de la prueba.
 
+
+**HECHO 31/10 (cuentas corrientes, rama `cc-p2d`, sin merge) — migración `supabase/migrations/20261031_caja_ajustes.sql`, NO APLICADA:**
+- **Base:** tabla `caja_ajustes` (fecha, origen, cliente, monto, motivo, quién, cobro y comprobante), atada a su renglón del libro (la puesta a cero se los lleva). **Un disparador sobre el libro** la llena con cada renglón `ajuste` — todos pasan por `cc_ajuste_manual`, así que entran los de **cualquier lugar donde se cargue un pago**: redondeos ([AJUSTE:x] de app chofer, app vendedor, /caja, /pagos-clientes, mostrador), sobrantes ajustados, "Ajustar saldo" (y su eliminación) y la deuda asumida al eliminar un cliente. **No entran:** la apertura (APERTURA GM AJUSTE), el 10 % en contra de un crédito de mercadería, los ajustes de cajas y bancos, las diferencias de rendición ni el saldo a favor. Signo: **+ a favor de la empresa, − en contra**; el saldo es la suma. Relleno idempotente: arranca con los 3 redondeos de la 2ª prueba (−47,56, −438,32, −53,68 = **−$539,56**), simulado contra la base.
+- **API:** `GET /api/finanzas/caja-ajustes?mes=aaaa-mm&origen=&usuario_id=` (detalle filtrable) y `?solo_saldo=1`. Permiso nuevo `caja_ajustes` (solo admin, como Finanzas); la tabla tiene RLS sin políticas (solo el servidor la lee).
+- **Pantalla:** en Finanzas, debajo de las cajas, un botón chico **"Ajustes $X · Ver"** (no suma al disponible); abre el detalle (`components/finanzas/caja-ajustes-dialog.tsx`) con filtros por mes, tipo y usuario. Sin la migración aplicada no se muestra (no rompe Finanzas).
+- **Asumir deuda (P2-02):** `cliente_eliminar` tiene un parámetro más, `p_asumir_deuda` (sin él hace exactamente lo de antes). Con él, si tiene saldo y ningún pedido en curso, un ajuste lo deja en $0 ("Deuda asumida al eliminar el cliente …", cae en la caja) y se elimina/esconde como siempre. `DELETE /api/clientes/[id]?asumir_deuda=1`; /clientes pregunta "¿Asumir deuda y eliminarlo de todas formas?" cuando el servidor responde `CLIENTE_CON_SALDO`.
+- **Para la puesta a cero:** las filas de prueba de la caja se van solas con el libro (ON DELETE CASCADE).
+- **Ojo:** al asumir la deuda, los comprobantes del cliente quedan con su `saldo_pendiente` (el libro queda en $0 y el cliente escondido). Si se quiere, se pueden pasar a pagados en el mismo paso: decidir con Juan.
+
 ### P2-06 — Listado de pedidos: mostrar la dirección del cliente · Dueño: Frontend
 
 **Pedido de Juan (28/10):** en `/clientes-pedidos`, en el listado, al lado (o debajo) del nombre del cliente tiene que verse la **dirección** (calle y número). Hoy se ve solo "BAHIA BLANCA · LAUMANN KARINA" (localidad · vendedor).
@@ -622,6 +631,9 @@ PRUEBA 4 pagó con UN cheque (Provincia n.º 126, $657.726,52) que cubre tambié
 ### P2-37 — El ajuste por redondeo no se confirma en la rendición · Dueño: Cuentas corrientes (va con P2-03)
 
 PRUEBA 2 pagó $11.600 de $11.647,56 y el chofer eligió "Ajuste por redondeo — oficina lo confirma al rendir". Al aceptar la rendición **nadie preguntó nada**: el ajuste de $47,56 entró solo (el PRES quedó saldado). Juan: está bien que sea automático si es menos del 1 %, pero tiene que caer en la **caja de ajustes** (P2-03) y verse en la rendición.
+
+
+**HECHO 31/10 (cuentas corrientes, rama `cc-p2d`, sin merge):** en la rendición de /caja (`components/caja/controlar-rendicion.tsx`), cada cobro con ajuste muestra **"Ajuste por redondeo $X — va a la caja de ajustes"** (o "(sobrante)"), y abajo el total de ajustes de la rendición. Sale de la marca [AJUSTE:x] del cobro (se asienta solo al aceptar, ≤ 1 %, como pidió Juan); al aceptarse, cae en la caja de ajustes (P2-03, misma migración).
 
 ### P2-38 — Movimientos de billetera del chofer que no suman cero · Dueño: Cuentas corrientes · baja
 

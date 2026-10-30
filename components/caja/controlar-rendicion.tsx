@@ -14,6 +14,7 @@ import { CargaProgreso } from "@/components/ui/carga-progreso"
 import type { CuentaFondos } from "./registrar-cobro"
 import { InputMonto } from "@/components/ui/input-monto"
 import { fecha, moneda, redondear } from "@/lib/formato"
+import { parsearMarcaAjuste } from "@/lib/cobranzas/ajuste"
 import { GastosRendicion } from "./gastos-rendicion"
 import type { DecisionGasto } from "@/lib/viajes/gastos-rendicion"
 
@@ -57,7 +58,7 @@ export function ControlarRendicion({
   const [cajaDestino, setCajaDestino] = useState("")
   const [requiereForzar, setRequiereForzar] = useState(false)
   // Pagos declarados (para rechazar uno que no llegó / está mal / era prueba)
-  const [pagosDeclarados, setPagosDeclarados] = useState<{ id: string; cliente: string; monto: number; medios: string }[]>([])
+  const [pagosDeclarados, setPagosDeclarados] = useState<{ id: string; cliente: string; monto: number; medios: string; ajuste: number }[]>([])
   const [rechazando, setRechazando] = useState<string | null>(null)
   // Detalle uno por uno (gastos, fondos, retiros de comisión): misma fuente que
   // el historial de Cobros (rendiciones-resumen) — informativo, no bloquea.
@@ -82,7 +83,7 @@ export function ControlarRendicion({
         const pagoIds = (rend.rendicion_items || []).map((i: any) => i.pago_id)
         const { data: pagosAll, error: pagErr } = await supabase
           .from("pagos_clientes")
-          .select("id, monto, estado, cliente_id, clientes(nombre), pagos_detalle(*)")
+          .select("id, monto, estado, cliente_id, observaciones, clientes(nombre), pagos_detalle(*)")
           .in("id", pagoIds.length ? pagoIds : ["00000000-0000-0000-0000-000000000000"])
         if (pagErr) throw pagErr
         // Un pago ya rechazado/anulado no forma parte de lo que se rinde
@@ -125,7 +126,7 @@ export function ControlarRendicion({
         const digs: { desc: string; monto: number }[] = []
         const digPagos: string[] = []
         const sinColor: { pago_id: string; cliente: string }[] = []
-        const declarados: { id: string; cliente: string; monto: number; medios: string }[] = []
+        const declarados: { id: string; cliente: string; monto: number; medios: string; ajuste: number }[] = []
         for (const p of pagos || []) {
           const cliente = (p as any).clientes?.nombre ?? "Cliente"
           declarados.push({
@@ -133,6 +134,9 @@ export function ControlarRendicion({
             cliente,
             monto: Number(p.monto),
             medios: ((p as any).pagos_detalle || []).map((d: any) => `${d.tipo_pago} ${moneda(Number(d.monto))}`).join(" + "),
+            // P2-37: ajuste por redondeo del cobro ([AJUSTE:x], + faltó / − sobró). Se asienta
+            // solo al aceptar la rendición (≤ 1 %) y cae en la caja de ajustes: acá se muestra.
+            ajuste: parsearMarcaAjuste((p as any).observaciones),
           })
           let soloDigital = true
           for (const d of (p as any).pagos_detalle || []) {
@@ -419,6 +423,14 @@ export function ControlarRendicion({
                       <span className="flex-1 min-w-0 truncate">
                         {p.cliente} <span className="text-xs text-slate-400">· {p.medios || "sin detalle"}</span>
                       </span>
+                      {Math.abs(p.ajuste) > 0.005 && (
+                        <span
+                          className="shrink-0 rounded-full bg-ambar-50 px-2 py-0.5 text-[11px] font-semibold text-ambar-800"
+                          title={p.ajuste > 0 ? "Faltó plata: se le perdona al cliente (en contra de la empresa)" : "Sobró plata: no le queda a favor al cliente"}
+                        >
+                          Ajuste por redondeo {p.ajuste > 0 ? "" : "(sobrante) "}<span style={NUM}>{moneda(Math.abs(p.ajuste))}</span> — va a la caja de ajustes
+                        </span>
+                      )}
                       <span className="font-semibold" style={NUM}>{moneda(p.monto)}</span>
                       <button
                         type="button"
@@ -432,6 +444,13 @@ export function ControlarRendicion({
                     </div>
                   ))}
                 </div>
+                {pagosDeclarados.some((p) => Math.abs(p.ajuste) > 0.005) && (
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    Ajustes por redondeo de esta rendición:{" "}
+                    <b style={NUM}>{moneda(redondear(pagosDeclarados.reduce((s, p) => s + Math.abs(p.ajuste), 0)))}</b>. Se asientan al aceptar la rendición
+                    (hasta el 1 % de cada cobro) y quedan en la caja de ajustes de Finanzas.
+                  </p>
+                )}
               </div>
             )}
 
