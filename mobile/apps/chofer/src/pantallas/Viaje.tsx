@@ -5,7 +5,7 @@ import { fechaHoraCorta, Hoja } from "@gm/core/ui"
 import { DS, esEnCurso, type OpFinalizar, type OpIniciar } from "../datasets"
 import { paradasSinResolver, type ParadaVista } from "../datos/overlay"
 import { rechazosDe, useDescargaViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
-import { AvisosAnulacion, AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, Linea, MontoInput, Pantalla, Rechazos, SinDescargar, SinEnviar, useAvisoEntrante, useToast } from "../ui"
+import { AvisosAnulacion, AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, Linea, MontoInput, Pantalla, Rechazos, round2, SinDescargar, SinEnviar, useAvisoEntrante, useToast } from "../ui"
 import { GastoHoja } from "./GastoHoja"
 import { textoBultos, useResultadoParada } from "./ResultadoParada"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
@@ -114,6 +114,9 @@ export function Viaje() {
     const sinEnviar = p.resultadoSinEnviar || p.pagos.some((x) => x.local)
     // P2-35: "COBRAR SÍ O SÍ" solo mientras falte cubrir lo exigido
     const cobrarSiOSi = !resuelta && p.minimo_exigido > 0 && !p.cobro_cumplido
+    // Pedido de Juan (30/10): si tiene algo para cobrar (saldo anterior y/o este viaje), el monto con un
+    // ícono de atención ROJO; el porqué está adentro del cliente.
+    const aCobrar = Math.max(0, round2(p.total_a_cobrar - p.cobrado))
     if (resuelta)
       return (
         <div key={p.id} id={`parada-${p.cliente_id}`} className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-gray-100 p-3">
@@ -142,6 +145,12 @@ export function Viaje() {
             <span className="block text-xl font-bold leading-tight text-gray-900">{p.cliente_nombre}</span>
             <span className="mt-1 block text-base text-gray-600">{[p.direccion, p.localidad].filter(Boolean).join(", ") || "Sin dirección"}</span>
             {p.pedidos.length > 0 && <span className="mt-1 block text-lg font-semibold text-gray-800">📦 {textoBultos(p.bultos, p.pallets)}</span>}
+            {aCobrar > 0.005 && (
+              <span className="mt-1 flex items-center gap-2 text-lg font-bold text-gray-900">
+                <span aria-label="Hay que cobrar" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-600 text-lg font-extrabold leading-none text-white">!</span>
+                A cobrar {formatCurrency(aCobrar)}
+              </span>
+            )}
             {p.cobrado > 0.005 && <span className="mt-1 block text-base font-semibold text-green-700">Cobrado {formatCurrency(p.cobrado)}</span>}
             {sinEnviar && <span className="mt-1 block"><SinEnviar /></span>}
           </span>

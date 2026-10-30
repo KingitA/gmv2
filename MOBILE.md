@@ -1670,6 +1670,13 @@ Detalle en `docs/PENDIENTES-APPS-SALIDA.md`, sección "Segunda prueba integral (
 - **Datos al día (P2-47/P2-32)**: `datos/frescura.ts` (`mantenerAlDia`, 5 min); cartel solo si el dato tiene más de 15 min.
 - Mock: el cobro no cierra la parada, PRES de respaldo 0002-00000001, reparto de lo devuelto de más y `comprobantes_ref`.
 
+### v0.3.8 (30/10/2026): P2-30 + ícono de "a cobrar"
+
+- **Monto con miles mientras se escribe (P2-30)**: el `MontoInput` de la app usa `CampoMonto` de `@gm/core/ui`.
+- **Lista del viaje**: "A cobrar $…" (total_a_cobrar − cobrado) con un ícono de atención rojo si es mayor a cero.
+- Teclado: lo maneja el core (`instalarTeclado`, `--gm-teclado`); la app no tiene arreglos propios
+  aparte de "Enter cierra el teclado" (`useEnterCierraTeclado`), que el core no hace.
+
 ### Probar sin backend
 `cd mobile && node scripts/fixture-vendedor.mjs` (una vez; solo lectura; el JSON tiene datos reales
 de clientes y está en `.gitignore`) → `node scripts/mock-vendedor.mjs` (3998) →

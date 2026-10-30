@@ -374,8 +374,10 @@ CHEN: devolución DEV-00001 de 2 "ACEITE BABY" ($8.105,08), artículo del pedido
 
 > **Hecho (29/10/2026, rama `chofer-p2`, affd7be + 3ec4491) — App Chofer v0.3.7.** En el cobro, una devolución resta solo si están seleccionados **todos** sus comprobantes de origen que se cobran ahí (`devolucionAplica`, `datos/cuenta-cobro.ts`). Los que ya están pagados y el respaldo 0002-00000001 no la frenan. Cada devolución dice "Va contra PRES 0001-00000028" y, si no se descuenta, "seleccioná ese comprobante para descontarla". **Servidor (no tocado):** `POST /api/chofer/viaje/[id]/cobro` acepta cualquier `devolucion_ids` del cliente; convendría que valide lo mismo (Cuentas corrientes).
 
-### P2-30 — Monto con separador de miles mientras se escribe · **pendiente: espera el campo de core (App Vendedor)**
+### ~~P2-30 — Monto con separador de miles mientras se escribe~~
 Al cargar un cobro, el monto tiene que ir mostrando puntos de miles y coma de centavos **mientras se tipea** (como `InputMonto` del ERP). Hoy se escribe "3784286" y en la calle es un lío.
+
+> **Hecho (30/10/2026, rama `chofer-p2`) — App Chofer v0.3.8.** El `MontoInput` de la app usa `CampoMonto` de `@gm/core/ui` (igual que vendedor): al tipear se ve "3.784.286", con coma "3.784.286,5" y al salir "3.784.286,50". Vale para cobro, cliente agregado, gasto, rendición y precio de la devolución. Probado en el mock.
 
 ### ~~P2-31 — Devolución de más en un PRES: la pantalla no avisa~~
 URQUIZA: del artículo con 24 unidades se devolvieron **36**. La base lo hizo bien (24 contra el PRES 0001-00000027 y 12 al respaldo **0002-00000001** como sistema viejo, C8), pero la pantalla **no dijo nada**. Tiene que avisar: "24 contra el PRES …; 12 de más van como devolución del sistema viejo, la revisa la oficina".
@@ -400,7 +402,7 @@ PRUEBA 4 pagó con un cheque que también cubría a PRUEBA 5. Al agregar PRUEBA 
 ### ~~P2-35 — Pantalla del viaje: simple, sin ruido · Alta~~
 Pedido de Juan (28/10): la pantalla del viaje es confusa: carteles grandes, poco claros, mucho dato. El chofer va manejando y quiere saber **a qué cliente va ahora, si tiene que cobrar y cuántos bultos baja**. Cada parada en la lista: **cliente, dirección, bultos, "cobrar sí o sí $…" (si corresponde) y un botón "Confirmar parada"**. Todo lo demás (devolver, registrar pago, detalle de comprobantes, saldos) adentro del cliente.
 
-> **Hecho (29/10/2026, rama `chofer-p2`, 5041606) — App Chofer v0.3.7.** Arriba: "N paradas faltan" y "plata en mano". Cada parada muestra el cliente, la dirección, "📦 12 bultos + 1 pallet", "COBRAR SÍ O SÍ $…" (solo si falta cubrir lo exigido; 🔒 con candado) y "✔ Confirmar parada". Las confirmadas aparecen grises, con su estado y "Reabrir". Gasto y Rendir quedaron en el pie. La nota de oficina, los remitos, los saldos, el cobro y la devolución están en la ficha del cliente. Hoja compartida: `pantallas/ResultadoParada.tsx`.
+> **Hecho (29/10/2026, rama `chofer-p2`, 5041606) — App Chofer v0.3.7.** Arriba: "N paradas faltan" y "plata en mano". Cada parada muestra el cliente, la dirección, "📦 12 bultos + 1 pallet", "COBRAR SÍ O SÍ $…" (solo si falta cubrir lo exigido; 🔒 con candado) y "✔ Confirmar parada". Las confirmadas aparecen grises, con su estado y "Reabrir". **30/10 (v0.3.8, pedido de Juan):** si la parada tiene algo para cobrar (saldo anterior y/o este viaje), muestra "A cobrar $…" con un ícono de atención ROJO; el porqué está en la ficha. Gasto y Rendir quedaron en el pie. La nota de oficina, los remitos, los saldos, el cobro y la devolución están en la ficha del cliente. Hoja compartida: `pantallas/ResultadoParada.tsx`.
 
 ### ~~P2-47 — La app chofer no se actualiza sola: mostraba datos de hace 21 horas~~
 29/10 11:20: la billetera decía "Datos al 28/10 14:38 (hace 21 h)", "Debés $94.066,93" y "$245.000 camino a oficina", cuando la rendición ya estaba aceptada desde el día anterior y la cuenta real era $80.125,07 (la app vendedor, al mismo tiempo, mostraba bien $80.125,07). Al abrir la app o volver a ella, tiene que actualizar sola si los datos tienen más de unos minutos (y ahí sí mostrar el cartel de "desactualizado", P2-32).
