@@ -110,14 +110,3 @@ export async function leerCajaAjustes(
   }
 }
 
-/**
- * P2-37: ajustes de un conjunto de pagos (para mostrarlos en la rendición). Los de
- * pagos todavía sin confirmar viven como marca [AJUSTE:x] en el pago; los ya
- * asentados, en la caja.
- */
-export async function ajustesDePagos(supabase: SupabaseClient, pagoIds: string[]): Promise<Map<string, number>> {
-  const out = new Map<string, number>()
-  const filas = await fetchByIds<any>((ch) => supabase.from("caja_ajustes").select("pago_id, monto").in("pago_id", ch), [...new Set(pagoIds.filter(Boolean))])
-  for (const f of filas) out.set(f.pago_id, r2((out.get(f.pago_id) ?? 0) + Number(f.monto || 0)))
-  return out
-}
