@@ -371,6 +371,8 @@ La lista del viaje muestra el total bruto de los dos PRES de CHEN (40.570,50 + 3
 ### P2-29 — La devolución se descuenta del comprobante equivocado al cobrar · Alta (con Cuentas corrientes)
 CHEN: devolución DEV-00001 de 2 "ACEITE BABY" ($8.105,08), artículo del pedido 002017 → la base la ata, bien, al **PRES 0001-00000028**. Después, al cobrar **solo el PRES 0001-00000026** (002016), la app restó la devolución de ese PRES: pidió $28.408,37 (36.513,45 − 8.105,08) y se cobró eso con cheque. Resultado: el 0026 queda debiendo $8.105,08 y al volver a entrar la app dice "debe saldo 8.105,08". La devolución tiene que restar **solo** del comprobante al que pertenece (o la pantalla tiene que decir contra cuál va).
 
+> **Servidor (cuentas corrientes, 30/10, rama `cc-p2`, sin merge):** `POST /api/chofer/viaje/[id]/cobro` rechaza (**422**, `codigo: "DEVOLUCION_OTRO_COMPROBANTE"`, `reintentable: false`) una devolución cuyo comprobante de origen no está entre las imputaciones del cobro, con el texto "DEV-00001 es de PRES 0001-00000028: cobrá ese comprobante o sacá la devolución de este cobro". Renglones sin origen, al respaldo 0002-00000001 o rechazados no atan la devolución. La regla es pura y está en `@gm/cobro`: `devolucionesFueraDelCobro(renglones, comprobantesCobrados)` — la app puede usar la misma para no ofrecerla. El cobro del vendedor (`/api/viajante/cobro`) todavía no tiene este control.
+
 ### P2-30 — Monto con separador de miles mientras se escribe
 Al cargar un cobro, el monto tiene que ir mostrando puntos de miles y coma de centavos **mientras se tipea** (como `InputMonto` del ERP). Hoy se escribe "3784286" y en la calle es un lío.
 
