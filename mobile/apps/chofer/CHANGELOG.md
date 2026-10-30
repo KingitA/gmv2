@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.8 (versionCode 14) — 2026-10-30
+
+- P2-30 monto con miles al tipear (CampoMonto de core) + ícono rojo de a cobrar en la lista del viaje; sobre main con el core nuevo (teclado, freno de sync)
+
 ## v0.3.7 (versionCode 13) — 2026-10-29
 
 - 2da prueba de salida: pantalla del viaje simple (P2-35), cobrar no cierra la parada y Anular a la vista (P2-33), devolución contra su comprobante (P2-29), aviso de lo devuelto de más (P2-31), cliente agregado no se borra (P2-34), datos al día (P2-47/P2-32)
