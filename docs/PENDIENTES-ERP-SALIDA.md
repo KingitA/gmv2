@@ -573,6 +573,8 @@ Al editar un pedido (ej. cambiar la lista) y apretar "Guardar pedido", la pantal
 
 Con el 10 % contado tildado al vender (`bonif_pedido.contado_todo`), al generar sale el PRES y **en el mismo momento** la REV del 10 % imputada a ese PRES (diseño #13: si no paga de contado, se anula la REV). En "Comprobantes emitidos" el PRES 0001-00000026 de CHEN figura **"parcial"** (saldo $36.513,45) y la REV 0001-00000025 **"pagado"**. Para Juan se lee mal: el cliente no pagó nada. Mostrarlo como "Pendiente · con 10 % contado" y la REV como "Aplicada al PRES …".
 
+**Hecho (30/10, rama `frontend-p2`, 8354b6e) — solo pantalla, la base no se toca:** `lib/comprobantes/estado-pago-vista.ts`. En Comprobantes emitidos, un PRES/FA con 10 % contado y sin pagos reales se ve **"Pendiente · con 10 % contado"** (saldo = lo que falta pagar, ya neto del 10 %); con pagos, "Parcial · con 10 % contado"; la REV/NC del contado se ve **"Aplicada a PRES …"** (no "Pagado"). El filtro de estado usa lo mismo (más "Aplicada"). Ficha del cliente: con deuda real, un proyectado negativo se ve $0 y no "a favor" (misma regla que la app vendedor en P2-42). La cuenta corriente (`/clientes/[id]/cuenta-corriente`, `lib/cuenta-corriente`) es de Cuentas corrientes: no la toqué.
+
 ### P2-24 — Anular comprobantes de un pedido "facturado" tiene que volverlo a "pendiente de facturación" · Dueño: Listas de precios y descuentos (dirige #19/#20) + Cuentas corrientes
 
 **Qué pasó (28/10 12:28):** se anuló el PRES 0001-00000030 del pedido 002022 (sale REV 0001-00000026, todo bien en la cuenta) y el pedido **siguió "facturado"**. Se pudo volver a generar (PRES 0001-00000033), pero el estado engaña.
@@ -606,6 +608,8 @@ Pedido 002016 con 10 % contado: al generar salió la REV 0001-00000025 por $4.05
 ### P2-36 — /caja: el cheque compartido se ve como dos cheques · Dueño: Frontend (con Cuentas corrientes)
 
 PRUEBA 4 pagó con UN cheque (Provincia n.º 126, $657.726,52) que cubre también a PRUEBA 5. En la base está bien: **un solo papel** (`cheques` "Cheque compartido entre varios clientes"). Pero en la rendición de `/caja` se ven **dos cheques iguales** con montos distintos ($66.209,52 y $591.517). Mostrarlo como un cheque de $657.726,52 repartido entre los dos clientes. Además ese cheque quedó con color **"PENDIENTE"** en la base (los otros dos, NEGRO): ver por qué no tomó color al confirmar.
+
+**Pantalla hecha (30/10, rama `frontend-p2`, 8354b6e):** en Controlar rendición (`components/caja/controlar-rendicion.tsx`) los cheques se agrupan por papel (`pagos_detalle.cheque_id`): el compartido es una fila de $657.726,52 con "Compartido: PRUEBA 4 $… · PRUEBA 5 $…" y un solo tilde (tilda los dos cobros). **Falta (Cuentas corrientes):** el color: los dos `pagos_detalle` quedaron NEGRO pero `cheques.color` del papel quedó PENDIENTE (lo escribe la confirmación del cobro en el servidor).
 
 ### P2-37 — El ajuste por redondeo no se confirma en la rendición · Dueño: Cuentas corrientes (va con P2-03)
 
@@ -663,6 +667,8 @@ PRUEBA 1 (002020, cobrado completo): el botón **no** aparece deshabilitado con 
 
 Pedido de Juan (29/10, le molesta mucho): en la revisión de un pedido importado por archivo (Excel o .eml), cuando un artículo aparece con coincidencia **LOW**, tiene que haber una **cruz a la derecha del renglón** para borrarlo del pedido. Ver `/imports` y `/clientes-pedidos/import-review` (tablas `imports` / `import_items`).
 
+**Hecho (30/10, rama `frontend-p2`, 8354b6e):** cruz a la derecha de cada renglón en la revisión del pedido importado (`components/pedidos/ImportOrderDialog.tsx` y `ReviewPedidoDialog.tsx`, la del "Revisar" de la cola de /clientes-pedidos). `/clientes-pedidos/import-review` ya tenía el tacho por renglón y `/imports/[id]` tiene "Rechazar / No vincular".
+
 ### P2-46 — La sesión del ERP se cierra cada ~10 minutos · Dueño: Cambios general · URGENTE para la oficina
 
 Pedido de Juan (29/10, le molesta mucho): trabajando 4 personas, el ERP les pide volver a iniciar sesión **cada 10 minutos**. Revisar la renovación de la sesión de Supabase (`middleware.ts`, `lib/supabase/server.ts` / `client.ts`: que el middleware refresque el token y escriba las cookies nuevas en la respuesta), la duración del JWT y del "refresh token" en la configuración de Auth de Supabase, y si hay algún cierre por inactividad. La sesión tiene que durar la jornada.
@@ -699,3 +705,5 @@ Pedido de Juan (29/10, le molesta mucho): trabajando 4 personas, el ERP les pide
 - `/api/mobile/sync/[dataset]`: con la base saturada responde **503 + Retry-After** (60-180 s al azar) en vez de 500.
 - Middleware: roles en una cookie firmada (`gm-roles`, HMAC, 5 min, atada al usuario); un cambio de roles tarda hasta 5 min en aplicarse. El id del usuario se lee del token: se terminaron los avisos "Using the user object as returned from supabase.auth.getSession()". Clave: `ROLES_COOKIE_SECRET` en Vercel (si no está, usa la service role key).
 - **Pendiente app vendedor (agente de la app):** respetar 503/Retry-After; esperar a que `cambios_seq` quede quieto (~60 s + azar) antes de resincronizar, en vez de a los 15 s de cada cambio; espera creciente entre fallos de sync. Respuesta del snapshot por partes = cambio de protocolo app + servidor, para más adelante.
+
+**Frontend (30/10, rama `frontend-p2`, 8354b6e):** `app/ordenes-compra/page.tsx` ya no hace `select *` de `articulos` (traía los vectores: ~10 MB, 9,6 s): pide solo `id, descripcion, sku, ean13, unidades_por_bulto, precio_compra, descuento1..4` (al elegir proveedor y al abrir una orden).
