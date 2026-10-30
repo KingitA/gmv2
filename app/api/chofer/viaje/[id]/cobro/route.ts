@@ -2,8 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { marcaAjuste } from "@/lib/cobranzas/ajuste"
-import { baseTopeAjuste, cierreDeParadaPorCobro, normalizarAnticipos, pedidosContadoValidos, resolverAjuste } from "@/lib/cobranzas/reglas-cobro"
-import { armarHojaRuta } from "@/lib/viajes/hoja-ruta"
+import { baseTopeAjuste, normalizarAnticipos, pedidosContadoValidos, resolverAjuste } from "@/lib/cobranzas/reglas-cobro"
 import { asentarCobroEnBilletera } from "@/lib/cobranzas/billetera-chofer"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { esTripulante } from "@/lib/viajes/chofer"
@@ -496,47 +495,10 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
     const fisica = partes.find((pt) => !pt.digital)
     if (fisica) await asentarCobroEnBilletera(supabase, { titularId: viaje.chofer_id, pagoId: fisica.pago_id, monto: fisica.monto, metodos: fisica.detalles.map((d) => ({ tipo: d.tipo_pago })), usuarioId: auth.user.id, fecha: nowArgentina() })
 
-    // ── Cobrar CIERRA la parada (lib/cobranzas/reglas-cobro.ts) ──
-    // Si la parada del cliente estaba pendiente queda "entregado" (o "solo cobro" si no llevaba
-    // mercadería). Nunca pisa un resultado ya cargado y nunca hace fallar el cobro: la plata ya
-    // está registrada; si esto falla la parada queda en "Visitados · falta cerrar la parada".
-    let paradaCerrada: string | null = null
-    if (!interno.esClienteAgregado && ["despachado", "en_curso"].includes(viaje.estado)) {
-      try {
-        const { data: fila } = await supabase
-          .from("viajes_paradas")
-          .select("id, estado")
-          .eq("viaje_id", viajeId)
-          .eq("cliente_id", cliente_id)
-          .maybeSingle()
-        if (fila?.estado === "pendiente") {
-          const hoja = await armarHojaRuta(supabase, viajeId)
-          const par = hoja?.paradas.find((p) => p.id === fila.id)
-          const cierre = par
-            ? cierreDeParadaPorCobro({ estado: par.estado, bultos: par.bultos, tienePedidos: par.pedidos.length > 0, minimoExigido: par.minimo_exigido, cobrado: par.cobrado, descuentos: par.descuentos_cobro, bloqueada: par.bloquear_entrega })
-            : null
-          if (cierre) {
-            const { error: cierreErr } = await supabase
-              .from("viajes_paradas")
-              .update({
-                estado: cierre.estado,
-                bultos_entregados: cierre.bultos_entregados,
-                motivo_no_entrega: null,
-                motivo_no_cobro: cierre.motivo_no_cobro,
-                resuelto_at: new Date().toISOString(),
-                resuelto_por: auth.user.id,
-              })
-              .eq("id", fila.id)
-              .eq("viaje_id", viajeId)
-              .eq("estado", "pendiente")
-            if (cierreErr) throw cierreErr
-            paradaCerrada = cierre.estado
-          }
-        }
-      } catch (cierreError: any) {
-        console.error("[chofer/cobro] no se pudo cerrar la parada:", cierreError?.message)
-      }
-    }
+    // Cobrar NO cierra la parada (regla de Juan, 2ª prueba P2, reemplaza la del
+    // 29/09): la entrega la confirma el chofer con "Confirmar parada"
+    // (PATCH /api/chofer/viaje/[id]/parada). Anular un cobro sigue reabriendo una
+    // parada "NO ENTREGAR SIN COBRAR" que ya no cumple (R4, cobro/[pagoId]).
 
     return NextResponse.json({
       success: true,
@@ -545,7 +507,7 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
       mensaje: "Cobro registrado. Se imputará al confirmar la rendición del viaje.",
       aviso_contado: avisoContado,
       aviso_ajuste: ajusteResuelto.aviso,
-      parada_cerrada: paradaCerrada,
+      parada_cerrada: null, // compatibilidad: apps viejas leen el campo
     })
   } catch (error: any) {
     console.error("[chofer] Error en POST cobro:", error)

@@ -382,6 +382,8 @@ Que aparezca solo cuando los datos están desactualizados, como en la app vended
 ### P2-33 — No se encontró cómo anular un cobro; cobrar cerró la parada sola
 FITTERER (candado + cobrar lo anterior): al cobrar el cheque de $3.784.286, la parada **se cerró sola como entregada** (sin confirmar la entrega, bultos 0). Después Juan **no encontró dónde anular el cobro** (el botón "Anular" de "Cobros registrados" depende de `puedeCobrar`; con la parada cerrada no aparece). R4/C7 quedó sin probar: se repite en el segundo viaje. Revisar: (a) que cobrar no cierre la parada sin que el chofer confirme la entrega; (b) que "Anular" se vea mientras el viaje esté en curso, también con la parada cerrada (el servidor ya reabre la parada, R4).
 
+> **Servidor (cuentas corrientes, 30/10, rama `cc-p2`, sin merge):** `POST /api/chofer/viaje/[id]/cobro` **ya no cierra la parada** (regla de Juan, reemplaza la del 29/09): la entrega la confirma el chofer con "Confirmar parada". La respuesta sigue trayendo `parada_cerrada`, siempre `null`. R4 sin cambios: anular un cobro de una parada "NO ENTREGAR SIN COBRAR" que ya no cumple la vuelve a pendiente (mira el estado, no quién la cerró). El overlay de la app no tiene que llamar más a `cierreDeParadaPorCobro` (queda en `@gm/cobro` sin uso del servidor).
+
 ### P2-34 — "Agregar cliente para cobrar": se borran los datos del cliente agregado
 PRUEBA 4 pagó con un cheque que también cubría a PRUEBA 5. Al agregar PRUEBA 5 se cargaron sus datos y **se borraron**; hubo que sacarlo y volver a buscarlo. Después anduvo (los dos cobros quedaron bien en la base: $66.209,52 y $591.517 con cheque).
 
