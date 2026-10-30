@@ -565,7 +565,9 @@ Al editar un pedido (ej. cambiar la lista) y apretar "Guardar pedido", la pantal
 
 Con el 10 % contado tildado al vender (`bonif_pedido.contado_todo`), al generar sale el PRES y **en el mismo momento** la REV del 10 % imputada a ese PRES (diseño #13: si no paga de contado, se anula la REV). En "Comprobantes emitidos" el PRES 0001-00000026 de CHEN figura **"parcial"** (saldo $36.513,45) y la REV 0001-00000025 **"pagado"**. Para Juan se lee mal: el cliente no pagó nada. Mostrarlo como "Pendiente · con 10 % contado" y la REV como "Aplicada al PRES …".
 
-### P2-24 — Anular comprobantes de un pedido "facturado" tiene que volverlo a "pendiente de facturación" · Dueño: Listas de precios y descuentos (dirige #19/#20) + Cuentas corrientes
+### ~~P2-24 — Anular comprobantes de un pedido "facturado" tiene que volverlo a "pendiente de facturación"~~ · Dueño: Listas de precios y descuentos (dirige #19/#20) + Cuentas corrientes
+
+**HECHO 30/10 (listas de precios, rama `listas-p2`, sin merge, sin migración):** nueva regla pura `estadoTrasAnular` en `lib/pedidos/estados.ts`: "facturado" → "pendiente_facturacion"; listo para enviar/retirar, en viaje, entregado y rechazado **se quedan** (regla 27/10). La aplica el paso 5 de `lib/pedidos/anular-comprobantes-pedido.ts` cuando no queda ningún débito vivo, en el mismo update que saca el 10 % contado y con `actualizado_por` = quien anuló, así el trigger de `pedidos_estados_historial` anota el cambio con el usuario (la ruta usa el cliente admin, sin `auth.uid()`). La respuesta trae `estado_pedido` ya actualizado y el diálogo dice "El pedido volvió a Pendiente de facturación". Al volver a generar, `estadoAlFacturar` lo pasa otra vez a "facturado". Probado: typecheck:movil OK (64/64) y la regla con un script fuera del repo (sin tocar mobile/ ni la base).
 
 **Qué pasó (28/10 12:28):** se anuló el PRES 0001-00000030 del pedido 002022 (sale REV 0001-00000026, todo bien en la cuenta) y el pedido **siguió "facturado"**. Se pudo volver a generar (PRES 0001-00000033), pero el estado engaña.
 
