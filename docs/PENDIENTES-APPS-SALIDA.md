@@ -345,7 +345,7 @@ Si se toca la cantidad de un artículo que está de la mitad de la pantalla para
 ## Segunda prueba integral (28/10) — App Depósito
 
 ### ~~P2-16 — "Cantidad que separaste" tiene que arrancar vacía~~
-**Hecho 29/10/2026, commit 417986f (rama `deposito-p2`, APK v0.4.0).** Arranca vacía; Confirmar (y el segundo escaneo) recién con una cantidad escrita; 0 = faltante. No hay otro atajo que cargue lo pedido.
+**Hecho 29/10/2026, commit 417986f (rama `deposito-p2`, APK v0.4.0).** Arranca vacía; Confirmar (y el segundo escaneo) recién con una cantidad escrita; 0 = faltante. No hay otro atajo que cargue lo pedido. **Recepción igual (pedido de Juan, 30/10, rama `deposito-p2b`, APK v0.4.1):** la cantidad recibida arranca vacía aunque el artículo esté en la OC; 0 = no llegó (faltante). Además la app usa el detector de teclado de core (`useTecladoAbiertoCore`) y el marco descuenta `--gm-teclado`: P2-17 convive con `instalarTeclado` sin duplicarse.
 Al escanear un artículo, la pantalla muestra la cantidad pedida y la separada **ya completa con lo pedido**. Así el operario aprieta Aceptar sin contar. La separada tiene que arrancar **vacía** y el operario escribe lo que juntó.
 
 ### ~~P2-17 — El teclado tapa Aceptar / Rechazar~~

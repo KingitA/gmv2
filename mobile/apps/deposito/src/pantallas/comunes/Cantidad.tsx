@@ -12,9 +12,9 @@ import { C, useCampoSinRafaga, useTecladoAbierto } from "../../ui"
  * del mismo artículo confirma la cantidad que está en el campo. Escanear otro
  * artículo acá no hace nada (beep de error): primero hay que resolver este.
  *
- * `exigirCantidad` (picking, P2-16): el campo arranca vacío y no se confirma nada
+ * `exigirCantidad` (picking P2-16; recepción desde el 30/10): el campo arranca vacío y no se confirma nada
  * hasta que el operario escribe lo que contó. Ni el botón ni el segundo escaneo
- * cargan lo pedido solos: así nadie aprieta Confirmar sin contar.
+ * cargan lo pedido (o lo de la OC) solos: así nadie aprieta Confirmar sin contar.
  *
  * Con el teclado abierto (P2-17) la pantalla queda a la mitad: se esconden la
  * cabecera grande y "Volver al scanner" (queda `resumenTeclado`, una línea) para
@@ -57,7 +57,7 @@ export function PanelCantidad({ articulo, titulo, cabecera, resumenTeclado, etiq
   const cantidadValida = (txt: string): number | null => {
     const n = leerCantidad(txt, exigirCantidad)
     if (n === "vacia") {
-      mostrar("Escribí cuántas separaste antes de confirmar", "err")
+      mostrar("Escribí la cantidad que contaste antes de confirmar", "err")
       return null
     }
     if (n === "invalida") {

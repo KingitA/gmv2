@@ -899,7 +899,10 @@ recorrido Anterior/Siguiente de Modificación de artículos (calculado sobre la 
 - **Cantidad que separaste arranca VACÍA** (29/10, P2-16): `PanelCantidad` con
   `exigirCantidad` no confirma nada (ni el botón ni el segundo escaneo) hasta que el
   operario escribe lo que contó; escribir 0 = faltante (`datos/cantidad.ts`). Nunca volver
-  a precargar lo pedido: así se confirmaba sin contar. Recepción sigue precargando la OC.
+  a precargar lo pedido: así se confirmaba sin contar. Recepción igual desde el 30/10 (v0.4.1):
+  arranca vacía aunque el artículo esté en la OC; 0 = no llegó (el servidor lo deja faltante).
+- **Teclado**: un solo detector, el de core (`useTecladoAbierto` = `useTecladoAbiertoCore`,
+  `ui/teclado.ts`); `Marco` descuenta `--gm-teclado` (0px cuando el WebView ya se achicó).
 - **Reiniciar / Soltar** (29/10, P2-18): botón "⋯ Opciones" en la cabecera del pedido.
   `picking.reiniciar` → `reiniciarPreparacion` (todo a 0 y sin dueño, la sesión sigue) y
   `picking.soltar` → `soltarPedido` (todo a 0, TODAS las sesiones terminadas, el pedido
