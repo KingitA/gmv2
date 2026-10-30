@@ -455,6 +455,10 @@ Roadmap: [`PRUEBA-INTEGRAL-SALIDA-2.md`](PRUEBA-INTEGRAL-SALIDA-2.md). Mientras 
 
 Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 
+**Hecho (30/10, rama `cambios-general-b`) — falta aplicar la migración:**
+- `supabase/migrations/20261029b_codigo_cliente_siguiente.sql` (**sin aplicar**): `siguiente_codigo_cliente()` y el disparador dan **el más alto + 1** (hoy 90035); los códigos no numéricos no cuentan. Proveedores sin cambio (primer libre).
+- `lib/codigos.ts`: `siguienteAlMayor` para clientes (lo usan `/api/codigos` y el alta de la app vendedor por el servidor: la app no necesita cambios). Textos del alta: "siguiente" en vez de "primero libre".
+
 ### P2-02 — "Eliminar" un cliente lo desactiva en vez de eliminarlo · Dueño: Cambios general
 
 **Qué pasa hoy:** el tacho de `/clientes` (`app/clientes/page.tsx:219-226`) pregunta "¿Está seguro de eliminar este cliente?" y hace `update({ activo: false })`: el cliente sigue en la base, con su código ocupado, sus pedidos, comprobantes y saldo, y aparece en "Inactivos". Visto con el cliente 3 "TEST-R1 REFACTURAR" (desactivado por Juan el 27/10 con deuda de $26.500).
@@ -465,6 +469,11 @@ Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 1. **Cliente con comprobantes con CAE:** se borra todo lo demás, pero el cliente queda **escondido** solo para que esas facturas/notas tengan dueño: no aparece en ninguna lista (ni en "Inactivos") ni en búsquedas, y **su código queda libre**.
 2. **"Asumir deuda":** la deuda que se asume va a la **caja de ajustes** (P2-03). Hasta que exista, no programar el cartel con un movimiento provisorio: coordinar con P2-03.
 3. **Cliente sin deuda pero con pedidos, comprobantes o cobros:** se **conservan** sus pedidos y comprobantes (historial de ventas y comisiones); el cliente desaparece de las listas y de las búsquedas.
+
+**Hecho (30/10, rama `cambios-general-b`) — falta aplicar la migración:**
+- `supabase/migrations/20261029c_cliente_eliminar.sql` (**sin aplicar**) + `DELETE /api/clientes/[id]` (solo admin, permiso `eliminar_clientes`); el tacho de `/clientes` llama al servidor.
+- Con saldo (deuda o a favor) → no se elimina: "Tiene deuda de $X: primero hay que saldarla" (asumir deuda espera a la caja de ajustes, P2-03). Con pedidos en curso → no se elimina.
+- Sin ningún movimiento → se borra. Con historial (comprobantes con o sin CAE, pedidos, cobros, cuenta corriente…) → se conserva el historial, se borra la configuración (bonificaciones, condiciones, zonas, precios calculados) y el cliente queda **escondido** (`clientes.eliminado_at`): fuera de `/clientes` (también de "Inactivos"), de la búsqueda y del aviso de mismo CUIT; **código libre** (queda en `codigo_cliente_eliminado`).
 
 ### P2-03 — Caja de ajustes · Dueño: Cambios general · PROPUESTA, espera el OK de Juan
 
@@ -490,6 +499,10 @@ Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 
 **Pedido de Juan (28/10):** cuando la condición de entrega del cliente es "Envío por Transporte", tiene que poder elegirse si el flete se paga **en origen** (lo pagamos nosotros al despachar) o **en destino** (lo paga el cliente al recibir). Hoy el alta/ficha del cliente no tiene ese dato. Ver dónde se usa (`condicion_entrega = 'transporte'`, tabla `transportes`) y si tiene que llegar también al pedido, al remito y a la hoja de ruta.
 
+**Hecho (30/10, rama `cambios-general-b`) — falta aplicar la migración:**
+- Base (en `20261029d_condicion_entrega.sql`): `clientes.flete_pago` y `pedidos.flete_pago` = `origen` / `destino`, solo con "transporte" (si no, vacío); el pedido nuevo lo copia del cliente. `PATCH /api/clientes/[id]` y `/api/vendedor/cliente/[id]` lo aceptan.
+- **Falta (Frontend):** en la ficha / alta del cliente (`app/clientes/[id]/page.tsx`), cuando la forma de entrega es "Envío por transporte", un selector "Flete: en origen (lo pagamos nosotros) / en destino (lo paga el cliente)" que guarde `flete_pago`. Si se quiere en el remito o la hoja de ruta, va aparte.
+
 ### P2-08 — Retener entregas desde la ficha del cliente · Dueño: Frontend
 
 **Visto por Juan (28/10):** "retener entregas" (`clientes.retener_entregas`, `retener_motivo`) solo se puede marcar desde Viajes o desde Jarvis; en el alta y en la ficha del cliente no está. Tiene que poder marcarse y desmarcarse desde la ficha (con el motivo), con el mismo efecto que hoy (`lib/viajes/retencion.ts`).
@@ -497,6 +510,9 @@ Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 ### P2-09 — Dos campos distintos para "retira en el depósito" · Dueño: Cambios general · a verificar
 
 En el alta, "Retira en Mostrador" guarda `condicion_entrega = 'retira_mostrador'` pero deja `retira_en_deposito = false`. Viajes y mostrador miran `condicion_entrega`; el cálculo de precios manual (`lib/pricing.ts`, `app/api/pedidos/route.ts:117`) mira `retira_en_deposito` para **no cobrar flete**. Resultado posible: a un cliente que retira se le suma el flete de su zona. Unificar en un solo dato (o mantener los dos sincronizados). Visto con PRUEBA 5 (90033).
+
+**Hecho (30/10, rama `cambios-general-b`) — falta aplicar la migración:**
+- En `20261029d_condicion_entrega.sql`: disparador que mantiene **siempre iguales** `condicion_entrega = retira_mostrador` ↔ `retira_en_deposito = true` (cambiar uno cambia el otro) y sincroniza los clientes existentes (hoy 8 que retiran pasan a `retira_en_deposito = true`: el precio manual deja de sumarles el flete de su zona).
 
 ### P2-10 — El alta de cliente no limpia el nombre · Dueño: Frontend · baja
 
@@ -509,6 +525,10 @@ El primer pedido de un cliente nuevo tomado en la app vendedor nace **en revisi�
 ### P2-20 — Cambios de estado de un pedido sin registro de quién · Dueño: Cambios general
 
 Entre el 27/10 15:19 y el 28/10 11:40, los pedidos reales **001945, 001956 y 001972** (del 26/10) pasaron de "sistema viejo" a "impreso", y `pedidos.actualizado_por` quedó vacío: no hay forma de saber quién ni cuándo. El cambio manual de estado (`cambiarEstadoPedidoManual`) y cualquier otro cambio de estado tienen que dejar quién y cuándo (y, si existe, una entrada en un historial del pedido).
+
+**Hecho (30/10, rama `cambios-general-b`) — falta aplicar la migración:**
+- **Causa encontrada:** reimprimir un pedido lo pasaba a "impreso" en **cualquier** estado (`marcarPedidoImpreso`): así volvieron de "sistema viejo" 001945, 001956 y 001972. Ahora solo pasa a impreso si estaba pendiente o en venta (imprimir un facturado o del sistema viejo no le cambia el estado).
+- `supabase/migrations/20261029f_pedidos_historial_estados.sql` (**sin aplicar**): tabla `pedidos_estados_historial` + disparador: cada alta o cambio de estado (lo haga quien lo haga) deja estado anterior, nuevo, usuario, por dónde (sesión / servidor) y cuándo. `pedidos.actualizado_por` pasa a ser siempre el último que cambió el estado. El cambio manual, la impresión y la entrega en mostrador anotan el usuario.
 
 ### P2-22 — DOS COMPROBANTES CON EL MISMO NÚMERO · GRAVÍSIMO · Dueño: Cambios general (consultar a Cuentas corrientes)
 
@@ -577,9 +597,17 @@ Después de aceptar la rendición, la billetera del chofer da **$0** en `saldos_
 
 PRUEBA 5 (90033) es "Retira en Mostrador", pero su pedido 002024 (tomado en la app vendedor) quedó con `pedidos.condicion_entrega = NULL`. Por eso **no aparece en `/mostrador` → "Para retirar"** (`app/api/mostrador/para-retirar` filtra por la condición del pedido) y podría subirse a un viaje (`app/api/viajes/[id]/pedidos` solo excluye los que dicen retira_mostrador). Desde el 01/10, 358 pedidos tienen la condición vacía y solo 3 la tienen cargada. El alta del pedido (app vendedor → `lib/mobile/outbox/vendedor.ts` / `createPedido`, y el alta desde el ERP) tiene que copiar la condición de entrega del cliente; y las pantallas, si el pedido no la tiene, usar la del cliente. Además, Juan no sabía que existe `/mostrador`: revisar que se llegue fácil (hoy hay un botón "Mostrador" arriba en Pedidos y viajes).
 
+**Hecho (30/10, rama `cambios-general-b`) — falta aplicar la migración:**
+- En `20261029d_condicion_entrega.sql`: al crearse un pedido sin forma de entrega copia la del cliente (todas las altas: app vendedor, ERP, mails, importación, mostrador; la app no necesita cambios). Los pedidos existentes no se tocan.
+- `/api/mostrador/para-retirar` y `/api/viajes/[id]/pedidos`: un pedido sin forma de entrega usa la del cliente (un pedido viejo de un cliente que retira aparece en "Para retirar" y no se ofrece para un viaje).
+
 ### P2-40 — Mostrador "Para retirar": un pedido ya pagado no se puede entregar · Dueño: Frontend (con Cambios general)
 
 En `/mostrador` → "Para retirar", el pedido 002024 de PRUEBA 5 (ya pagado con el cheque de PRUEBA 4, saldo $0) aparece, pero el único botón es **"Cobrar efectivo y entregar"**, que con saldo $0 queda deshabilitado ("Sin saldo"): **no hay forma de entregarlo**. Además: (a) solo cobra en **efectivo** (no transferencia, cheque ni mixto); (b) la entrega se hace con un `update` directo desde el navegador (`app/mostrador/page.tsx:230`), sin registro de quién. Agregar "Entregar" para los pagados (y cobro con los mismos medios que /caja). Ojo: el botón "Mostrador" de arriba en Pedidos y viajes lleva a cargar un pedido nuevo (`/clientes-pedidos/nuevo`), no a `/mostrador`.
+
+**Hecho (30/10, rama `cambios-general-b`):**
+- `POST /api/mostrador/entregar` (permiso `cargar_cobros`): pagado → **Entregar**; con saldo → **Cobrar y entregar** con los mismos medios que /caja (efectivo, transferencia, cheque, depósito o varios = mixto, con `MetodoPagoForm`), por el circuito de siempre (`/api/pagos-clientes`, imputado a los comprobantes del pedido). Se entrega solo si el saldo quedó en $0: una transferencia queda pendiente hasta confirmarla en Caja.
+- La entrega la hace el servidor y queda quién (`actualizado_por`) y cuándo (historial de P2-20); se sacó el `update` directo desde el navegador. La venta directa de mostrador también anota quién entregó.
 
 ### P2-41 — Base del 10 % contado: resta también lo devuelto que fue al respaldo del sistema viejo · Dueño: Cuentas corrientes · decide Juan
 

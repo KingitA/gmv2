@@ -31,7 +31,7 @@ export async function GET(
 
     const SELECT_PEDIDO = `
       id, numero_pedido, fecha, estado, total, bultos, cliente_id, vendedor_id, condicion_entrega,
-      clientes(nombre_razon_social, razon_social, nombre, direccion, localidad_id, localidades(nombre, zona_id)),
+      clientes(nombre_razon_social, razon_social, nombre, direccion, localidad_id, condicion_entrega, localidades(nombre, zona_id)),
       vendedores(nombre)
     `
     const forma = (p: any) => ({
@@ -46,7 +46,8 @@ export async function GET(
       localidad: p.clientes?.localidades?.nombre || "",
       zona_id: p.clientes?.localidades?.zona_id || null,
       vendedor: p.vendedores?.nombre || "",
-      condicion_entrega: p.condicion_entrega,
+      // P2-39: pedido sin condición (los viejos) → la del cliente
+      condicion_entrega: p.condicion_entrega ?? p.clientes?.condicion_entrega ?? null,
     })
 
     const { data: asignados, error: aErr } = await supabase
@@ -107,6 +108,8 @@ export async function GET(
 
     // Candidatos ordenados por NÚMERO de pedido (salían por fecha y, dentro del día, mezclados:
     // #205, 211, 209, 224…). La consulta sigue pidiendo los más viejos primero por el tope de 500.
+    // P2-39: un pedido sin condición de un cliente que retira en mostrador tampoco va a un viaje
+    candidatos = candidatos.filter((p: any) => p.condicion_entrega || p.clientes?.condicion_entrega !== "retira_mostrador")
     candidatos.sort((a, b) => String(a.numero_pedido).localeCompare(String(b.numero_pedido), "es", { numeric: true }))
 
     // #22: bultos y pallets se cargan acá hasta finalizar el viaje

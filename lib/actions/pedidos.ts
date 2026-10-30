@@ -1168,14 +1168,22 @@ export async function updatePedidoStatus(pedidoId: string, status: string) {
   return { success: true }
 }
 
-export async function marcarPedidoImpreso(pedidoId: string) {
+// P2-20: imprimir pasa a "impreso" SOLO un pedido pendiente / en venta. Antes lo
+// hacía en cualquier estado: 001945, 001956 y 001972 volvieron de "sistema viejo"
+// a "impreso" al reimprimirlos. Devuelve el estado con que quedó el pedido.
+export async function marcarPedidoImpreso(pedidoId: string): Promise<{ success: true; estado: string | null }> {
+  const { data: { user } } = await (await createClient()).auth.getUser()
   const admin = createAdminClient()
-  const { error } = await admin
+  const { data, error } = await admin
     .from("pedidos")
-    .update({ estado: "impreso" })
+    .update({ estado: "impreso", ...(user ? { actualizado_por: user.id } : {}) })
     .eq("id", pedidoId)
+    .in("estado", ["en_venta", "pendiente"])
+    .select("estado")
   if (error) throw new Error(error.message)
-  return { success: true }
+  if (data?.length) return { success: true, estado: "impreso" }
+  const { data: actual } = await admin.from("pedidos").select("estado").eq("id", pedidoId).maybeSingle()
+  return { success: true, estado: actual?.estado ?? null }
 }
 
 export async function softDeletePedido(pedidoId: string) {
@@ -1251,8 +1259,9 @@ export async function cambiarEstadoPedidoManual(pedidoId: string, nuevoEstado: s
       `No se puede pasar un pedido de "${ESTADO_LABEL[pedido.estado] || pedido.estado}" a "${ESTADO_LABEL[nuevoEstado] || nuevoEstado}".`
     )
   }
+  const { data: { user } } = await supabase.auth.getUser()
   const { error: upErr } = await supabase
-    .from("pedidos").update({ estado: nuevoEstado }).eq("id", pedidoId)
+    .from("pedidos").update({ estado: nuevoEstado, ...(user ? { actualizado_por: user.id } : {}) }).eq("id", pedidoId)
   if (upErr) throw new Error(upErr.message)
   revalidatePath("/clientes-pedidos")
   return { success: true, estado: nuevoEstado }

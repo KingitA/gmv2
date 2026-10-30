@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
             .from("clientes")
             .select(SELECT)
             .in("id", ids)
+            .is("eliminado_at", null) // P2-02: los eliminados no aparecen ni con "inactivos"
 
         if (error) {
             console.error("[clientes/buscar] Supabase error:", error)
