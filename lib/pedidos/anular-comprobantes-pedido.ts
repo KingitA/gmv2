@@ -13,9 +13,10 @@
 //     queda a la NC/REV de la anulación. Al volver a generar, pasa al comprobante
 //     nuevo de este pedido (lib/pedidos/refacturar.ts, regla del dueño 27/10:
 //     respeta lo que eligió quien cobró). Lo que estaba a cuenta sigue a cuenta.
-//  5. Sin comprobantes vivos: el pedido QUEDA EN SU ESTADO (27/10), se le
-//     saca el 10 % contado y se resincroniza el kardex (las líneas dejan de
-//     estar vinculadas a un comprobante vivo).
+//  5. Sin comprobantes vivos: "facturado" vuelve a "pendiente_facturacion"
+//     (P2-24, 28/10); si ya salió a la logística QUEDA EN SU ESTADO (27/10).
+//     Se le saca el 10 % contado y se resincroniza el kardex (las líneas dejan
+//     de estar vinculadas a un comprobante vivo).
 //
 // Reintentable: si se corta a la mitad (ARCA rechaza una NC, por ejemplo), lo ya
 // anulado queda anulado y al volver a llamar `aAnular` trae solo lo que sigue vivo.
@@ -25,6 +26,7 @@ import { comprobantesDePedidos } from "@/lib/comprobantes/comprobantes-de-pedido
 import { sincronizarKardexPedido } from "@/lib/kardex/sincronizar-pedido"
 import { anularParteContado } from "./anular-parte-contado"
 import { evaluarAnulacionPedido } from "./anulacion-pedido"
+import { estadoTrasAnular } from "./estados"
 
 const CREDITOS = new Set(["NC", "NCA", "NCB", "NCC", "REV"])
 const DEBITOS_VENTA = new Set(["FA", "FB", "FC", "PRES", "ND", "NDA", "NDB", "NDC"])
@@ -194,17 +196,25 @@ async function anularConCandado(supabase: any, pedidoId: string, usuarioId: stri
       .reduce((s: number, c: any) => s + Math.max(0, -Number(c.saldo_pendiente || 0)), 0),
   )
 
-  // ── 5. Sin comprobantes vivos: el pedido sigue en su estado, kardex al día ──
+  // ── 5. Sin comprobantes vivos: estado (P2-24), kardex al día ──
   const quedan = (await comprobantesDePedidos(supabase, [pedidoId])).filter(
     (c) => c.pedido_id === pedidoId && !c.anulado_en && DEBITOS_VENTA.has(c.tipo_comprobante),
   )
-  const estado = ev.estado
+  let estado = ev.estado
   if (!quedan.length) {
-    // El pedido QUEDA EN SU ESTADO (regla del dueño 27/10): refacturar solo cambia
+    // "facturado" (en la oficina) vuelve a pendiente de facturación (P2-24, 28/10).
+    // Si ya salió a la logística QUEDA EN SU ESTADO (27/10): refacturar solo cambia
     // los comprobantes. Sin débitos vivos, sus condiciones ya son editables
-    // (puedeEditarCondiciones) y Generar lo vuelve a facturar sin tocar el estado.
-    const { error } = await supabase.from("pedidos").update({ pago_contado_10: false }).eq("id", pedidoId)
-    if (error) advertencias.push(`No se pudo sacar la marca de 10 % contado del pedido (${error.message}).`)
+    // (puedeEditarCondiciones) y Generar lo vuelve a facturar (estadoAlFacturar).
+    // actualizado_por: el trigger del historial de estados anota quién lo cambió.
+    const nuevoEstado = estadoTrasAnular(estado)
+    const cambia = !!nuevoEstado && nuevoEstado !== estado
+    const { error } = await supabase
+      .from("pedidos")
+      .update({ pago_contado_10: false, ...(cambia ? { estado: nuevoEstado, actualizado_por: usuarioId } : {}) })
+      .eq("id", pedidoId)
+    if (error) advertencias.push(`No se pudo actualizar el pedido (10 % contado${cambia ? " y estado" : ""}): ${error.message}.`)
+    else if (cambia) estado = nuevoEstado
     try {
       await sincronizarKardexPedido(supabase, pedidoId, { operadorId: usuarioId })
     } catch (e: any) {

@@ -8,8 +8,10 @@
 //  - Se anula TODO: los comprobantes del pedido y las NC/REV del 10 % contado
 //    que les quedaron imputadas. Las NC/REV de DEVOLUCIONES no se tocan (son
 //    mercadería que volvió físicamente, con su propio stock).
-//  - El pedido QUEDA EN SU ESTADO (entregado sigue entregado, en viaje sigue en
-//    viaje): refacturar solo cambia los comprobantes. Sin débitos vivos las
+//  - Si ya salió a la logística el pedido QUEDA EN SU ESTADO (entregado sigue
+//    entregado, en viaje sigue en viaje): refacturar solo cambia los
+//    comprobantes. "facturado" (todavía en la oficina) vuelve a
+//    "pendiente_facturacion" (P2-24, 28/10; estadoTrasAnular). Sin débitos vivos las
 //    condiciones son editables (#16, puedeEditarCondiciones con tieneFacturaViva)
 //    y Generar vuelve a emitir con las cantidades preparadas sin tocar el estado
 //    (estadoAlFacturar).

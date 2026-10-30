@@ -12,7 +12,7 @@ import { moneda } from "@/lib/formato"
 
 type Anulable = { id: string; tipo_comprobante: string; numero_comprobante: string; total_factura: number }
 type Evaluacion = { puede: boolean; motivo: string | null; aAnular: Anulable[] }
-type Resultado = { a_favor: number; anulados: unknown[]; advertencias?: string[] }
+type Resultado = { a_favor: number; anulados: unknown[]; estado_pedido?: string | null; advertencias?: string[] }
 
 const FISCALES = new Set(["FA", "FB", "FC", "NCA", "NCB", "NCC", "NDA", "NDB", "NDC"])
 
@@ -81,7 +81,7 @@ export function AnularComprobantesDialog({
             <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-800">
               <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
               <p>
-                <strong>Comprobantes anulados.</strong> El pedido sigue en su estado: cambiá las condiciones (Editar pedido) o Repreciar, y volvé a Generar.
+                <strong>Comprobantes anulados.</strong> {resultado.estado_pedido === "pendiente_facturacion" ? "El pedido volvió a Pendiente de facturación" : "El pedido sigue en su estado"}: cambiá las condiciones (Editar pedido) o Repreciar, y volvé a Generar.
               </p>
             </div>
             {resultado.a_favor > 0 && (

@@ -2185,7 +2185,7 @@ export default function ClientesPedidosPage() {
           open={anularAbierto}
           onOpenChange={setAnularAbierto}
           onAnulado={async () => {
-            // R1: anular no cambia el estado del pedido (entregado, en viaje…)
+            // R1/P2-24: "facturado" vuelve a pendiente de facturación; en la logística no cambia
             await Promise.all([cargarPedidos(true), cargarComprobantesExistentes()])
           }}
         />

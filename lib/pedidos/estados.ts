@@ -81,6 +81,16 @@ export function estadoAlFacturar(estadoActual: string | null | undefined): strin
   return despues.includes(estadoActual || "") ? (estadoActual as string) : "facturado"
 }
 
+/**
+ * Estado del pedido después de anular TODOS sus comprobantes (P2-24, regla del
+ * dueño 28/10/2026). "facturado" (todavía en la oficina) vuelve a
+ * "pendiente_facturacion"; si ya salió a la logística (listo, en viaje,
+ * entregado, rechazado) se queda donde está (regla del 27/10, #19/#20).
+ */
+export function estadoTrasAnular(estadoActual: string | null | undefined): string | null {
+  return estadoActual === "facturado" ? "pendiente_facturacion" : (estadoActual ?? null)
+}
+
 /** Eliminar (baja lógica) sigue la misma regla que editar. */
 export function puedeEliminarPedido(estado: string | null | undefined): boolean {
   return esPedidoEditable(estado)
