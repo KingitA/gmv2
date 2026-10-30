@@ -3,7 +3,7 @@
 // queda a cuenta. 27/10: el pedido QUEDA EN SU ESTADO; lo pagado contra el pedido pasa al comprobante nuevo.
 import { describe, expect, it } from "vitest"
 import { reglaAnulacionPedido, type ComprobanteAnulable } from "../../../../lib/pedidos/anulacion-pedido"
-import { estadoAlFacturar, motivoBloqueo, puedeEditarCondiciones } from "../../../../lib/pedidos/estados"
+import { estadoAlFacturar, estadoTrasAnular, motivoBloqueo, puedeEditarCondiciones } from "../../../../lib/pedidos/estados"
 
 const comp = (o: Partial<ComprobanteAnulable>): ComprobanteAnulable => ({
   id: "x", tipo_comprobante: "PRES", numero_comprobante: "0001-00000001", total_factura: 1000,
@@ -79,5 +79,12 @@ describe("anular comprobantes de un pedido para refacturar (#19/#20)", () => {
     expect(estadoAlFacturar("entregado")).toBe("entregado")
     expect(estadoAlFacturar("en_viaje")).toBe("en_viaje")
     expect(estadoAlFacturar("listo_para_retirar")).toBe("listo_para_retirar")
+  })
+
+  it("P2-24: al anular, facturado vuelve a pendiente; en la logística se queda", () => {
+    expect(estadoTrasAnular("facturado")).toBe("pendiente_facturacion")
+    for (const e of ["listo_para_enviar", "listo_para_retirar", "en_viaje", "entregado", "rechazado"]) expect(estadoTrasAnular(e)).toBe(e)
+    expect(estadoAlFacturar(estadoTrasAnular("facturado"))).toBe("facturado")
+    expect(estadoAlFacturar(estadoTrasAnular("entregado"))).toBe("entregado")
   })
 })
