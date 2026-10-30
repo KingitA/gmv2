@@ -260,7 +260,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 ## Antes de terminar la prueba (Juan 27/10)
 
 - [ ] P2-04: CUITs distintos (830, 1249, 1470, 1501), YOU JUNJUN con dos códigos (249 y 766), y los 4 clientes con error (56, 765, 766, 1381). Una vez arreglados, volver a subir el reporte (lo cargado no se duplica).
-- [ ] P2-05: REV viejas en 0001.
+- [x] P2-05: REV viejas en 0001. **Hecho (30/10, rama `cambios-general-c`) — falta aplicar `20261030_rev_sistema_viejo_pv2.sql`:** Juan decidió pasarlas a 0002 como los PRES; la importación ya las carga en 0002 y la migración renumera las 65 ya cargadas (comprobante, cuenta corriente y kardex; sin CAE y las REV de gmv2 no se tocan).
 
 ## Cada mañana mientras dure la prueba
 
@@ -285,7 +285,7 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-01 | Auditoría | Alta de cliente toma el primer número libre (así el de prueba agarró el 3). **Regla de Juan:** el siguiente al más alto (hoy 90029), en el ERP, en la app vendedor y en la base. | Media (para el pase) | Cambios general | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
 | P2-02 | 0 (D2) | El tacho de `/clientes` **desactiva** el cliente en vez de eliminarlo; sigue con su código, pedidos, comprobantes y deuda. **Regla de Juan:** eliminar de verdad; si tiene deuda, cartel "¿Asumir deuda y eliminarlo de todas formas?". Decisiones de Juan 27/10: con CAE queda escondido y código libre; deuda asumida → caja de ajustes (P2-03); sin deuda se conservan pedidos y comprobantes. | Media | Cambios general | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
 | P2-04 | 2 | Apertura, datos de la oficina: (a) CUIT distinto entre el sistema viejo y gmv2 en 830, 1249, 1470 y 1501 (830 y 1470 parecen errores de tipeo; **1249 GIMENO ADRIANA y 1501 XUE GUIPING tienen CUITs totalmente distintos**: revisar que sea el mismo cliente antes del pase). (b) **YOU JUNJUN** figura en el sistema viejo con dos códigos (249 y 766); en gmv2 solo está el 249. (c) 56, 1381, 765, 766 siguen pendientes (oficina #9). | Media (antes del pase) | Oficina (Juan) | abierto |
-| P2-05 | 2 | La apertura pasó los PRES viejos a 0002 (#18) pero las **REV viejas quedaron en 0001** (0001-00067473 a 0001-00120976), el mismo punto de venta que usan las REV nuevas (van por 0001-00000025). No chocan por años, pero confunde. ¿Pasarlas también a 0002? | Baja | Cuentas corrientes (pregunta a Juan) | abierto |
+| P2-05 | 2 | La apertura pasó los PRES viejos a 0002 (#18) pero las **REV viejas quedaron en 0001** (0001-00067473 a 0001-00120976), el mismo punto de venta que usan las REV nuevas (van por 0001-00000025). No chocan por años, pero confunde. ¿Pasarlas también a 0002? | Baja | Cambios general (Juan: sí, a 0002) | Hecho 30/10 rama `cambios-general-c`, migración sin aplicar |
 | P2-06 | 3 | Listado de `/clientes-pedidos`: falta la dirección del cliente al lado del nombre (pedido de Juan). | Baja | Frontend | traspaso escrito (PENDIENTES-ERP-SALIDA §8) |
 | P2-07 | 3 | Entrega por transporte: falta elegir flete en origen o en destino. | Media | Cambios general | traspaso escrito |
 | P2-08 | 3 | "Retener entregas" no se puede marcar desde la ficha del cliente, solo desde Viajes o Jarvis. PRUEBA 6 se retiene desde Viajes en la Fase 5. | Media | Frontend | traspaso escrito |
