@@ -123,7 +123,7 @@ describe("Vendedor · overlay de clientes y cuenta corriente", () => {
   it("alta de cliente sin señal: aparece en la cartera marcado sin enviar y ya se le puede levantar pedido", () => {
     const v = clientesVisibles([cliente("c1")], [op("cliente.crear", { id: "nuevo", nombre: "Kiosco Nuevo", metodo_facturacion: "Final", lista_precio_id: "L-neco" })])
     const n = v.find((c) => c.id === "nuevo")!
-    expect([n.nombre, n.sinEnviar, n.metodo_facturacion, n.saldo_actual]).toEqual(["Kiosco Nuevo", true, "Final", 0])
+    expect([n.nombre, n.sinEnviar, n.metodo_facturacion, n.saldo_actual]).toEqual(["KIOSCO NUEVO", true, "Final", 0]) // P2-10: como lo guarda el servidor
   })
   it("edición de ficha y bonificaciones pendientes se ven al instante; un rechazo no", () => {
     const ops = [

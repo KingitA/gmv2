@@ -22,6 +22,11 @@ export function altoTeclado(altoVentana: number, altoVisible: number, desdeArrib
   return tapado > 80 ? Math.round(tapado) : 0
 }
 
+/** Alto de referencia sin teclado: el mayor entre lo visible, la ventana y la pantalla del equipo. */
+export function altoReferencia(visible: number, ventana: number, pantalla?: number | null): number {
+  return Math.max(visible || 0, ventana || 0, Number(pantalla) || 0)
+}
+
 /** ¿El elemento quedó fuera de la parte visible (abajo, tapado por el teclado, o arriba)? */
 export function quedoTapado(rect: { top: number; bottom: number }, visibleArriba: number, visibleAlto: number, margen = 12): boolean {
   return rect.bottom > visibleArriba + visibleAlto - margen || rect.top < visibleArriba
@@ -50,7 +55,9 @@ export function instalarTeclado(): () => void {
 
   const vv = window.visualViewport
   const raiz = document.documentElement
-  let maxAlto = vv?.height ?? window.innerHeight
+  // Alto SIN teclado: también el de la pantalla del equipo, por si la app arranca con el
+  // teclado ya abierto (si no, ese alto chico pasaba por "normal" hasta otro cambio de tamaño)
+  let maxAlto = altoReferencia(vv?.height ?? window.innerHeight, window.innerHeight, window.screen?.availHeight)
   let abierto = false
   const medir = () => {
     const alto = vv ? altoTeclado(window.innerHeight, vv.height, vv.offsetTop) : 0

@@ -92,7 +92,11 @@ function filaCC(id) {
     id, cliente: { ...c, pendiente_verificacion: 0, devoluciones_en_proceso: 0, actualizado_at: c.actualizado_at || null, actualizado_por_nombre: c.actualizado_por_nombre || null },
     comprobantes: k.comprobantes.filter((x) => x.saldo_pendiente > 0), creditos: [], a_cuenta: [], total_a_favor: 0,
     ajustes_apertura: id === "0eb72473-7d21-40db-bbe6-70059dd3d813" ? [{ id: "aj-1", fecha: "2026-10-01", concepto: "CHEQUE RECH (YASH)", numero: "0002-00000001", monto: 58000 }] : [], pedidos_cobrables: [], pedidos_cobro: pedidosCobro,
-    devoluciones_pendientes: k.devoluciones.map((d) => ({ ...d, descontado: r2(d.monto_total - d.restante) })),
+    // P2-29: cada devolución va contra el primer comprobante que se debe (= ficha del servidor: origenes)
+    devoluciones_pendientes: k.devoluciones.map((d) => {
+      const cp = k.comprobantes.find((x) => x.saldo_pendiente > 0)
+      return { ...d, descontado: r2(d.monto_total - d.restante), origenes: cp ? [{ comprobante_venta_id: cp.id, comprobante: `${cp.tipo_comprobante} ${cp.numero_comprobante}`, ata: true }] : [] }
+    }),
     pagos_recientes: k.pagos.slice(0, 10), comprados: k.comprados, habituales: k.habituales,
     movimientos: [
       ...k.comprobantes.map((x) => ({ id: `m-${x.id}`, fecha: x.fecha, tipo_movimiento: x.tipo_comprobante === "PRES" ? "presupuesto" : "factura", debe: x.total_factura, haber: 0, numero_comprobante: x.numero_comprobante, observaciones: null, referencia_tipo: "comprobante_venta", referencia_id: x.id, comprobante_tipo: x.tipo_comprobante })),

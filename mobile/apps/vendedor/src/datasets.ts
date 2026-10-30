@@ -148,7 +148,11 @@ export interface ComprobanteCC {
   nc_contado?: number
 }
 export interface PedidoCobro { id: string; numero_pedido: string; fecha: string; estado: string; total: number; pago_contado_10: boolean; anticipo_pago_id: string | null; facturado: boolean; cobrable: boolean }
-export interface DevolucionPendiente { id: string; numero_devolucion: string; pedido_id: string | null; monto_total: number; created_at?: string; descontado?: number; restante: number }
+export interface DevolucionPendiente {
+  id: string; numero_devolucion: string; pedido_id: string | null; monto_total: number; created_at?: string; descontado?: number; restante: number
+  /** P2-29: comprobantes de origen (ata = se debe: solo descuenta si se cobra). Ausente = ficha vieja */
+  origenes?: OrigenDevolucionCobro[]
+}
 export interface CreditoCC { id: string; tipo_comprobante: string; numero_comprobante: string; fecha?: string; saldo_pendiente: number }
 export interface ACuenta { pago_id: string; fecha: string; estado: string; monto: number; mia: boolean; disponible: number }
 export interface PagoReciente { id: string; fecha_pago: string; monto: number; estado: string; forma_pago: string | null; verificado: boolean; eliminable: boolean }
@@ -167,7 +171,7 @@ export interface Comprado {
 
 /** = GET /api/vendedor/cliente/[id] + comprados + habituales. id = cliente.id */
 export type { MovimientoCC } from "@gm/vendedor"
-import type { MovimientoCC, ContextoDevolucion } from "@gm/vendedor"
+import type { MovimientoCC, ContextoDevolucion, OrigenDevolucionCobro } from "@gm/vendedor"
 
 export interface CuentaCliente {
   id: string

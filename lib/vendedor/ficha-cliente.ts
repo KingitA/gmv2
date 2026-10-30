@@ -12,6 +12,8 @@ import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { hoyISO, sumarDiasISO } from "@/lib/formato"
 import { sinPedidosVacios } from "@/lib/pedidos/sin-mercaderia"
+import { NUMERO_RESPALDO_DEVOLUCION } from "@/lib/cobranzas/respaldo-devolucion"
+import { origenDeRenglon, type OrigenDevolucionCobro } from "@/lib/vendedor/devolucion-cobro"
 
 export interface SesionFicha {
   vendedorIds: string[]
@@ -173,6 +175,22 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
   // factura original fue contado): es lo que descuenta la pantalla y lo que
   // va a acreditar la NC futura, al centavo.
   const valoresDev = await valorarDevoluciones(supabase, { clienteId: id, devolucionIds: devIds })
+  // P2-29: de qué comprobante es cada devolución (la app y la web solo la descuentan si ese
+  // comprobante se cobra; el servidor del cobro valida lo mismo)
+  const origenesDev = new Map<string, OrigenDevolucionCobro[]>()
+  if (devIds.length) {
+    const { data: renglones } = await supabase
+      .from("devoluciones_detalle")
+      .select("devolucion_id, comprobante_venta_id, estado_renglon, comprobante:comprobantes_venta!devoluciones_detalle_comprobante_venta_id_fkey(tipo_comprobante, numero_comprobante, saldo_pendiente, anulado_en)")
+      .in("devolucion_id", devIds)
+    for (const r of (renglones || []) as any[]) {
+      const o = origenDeRenglon({ ...r, comprobante: Array.isArray(r.comprobante) ? r.comprobante[0] : r.comprobante }, NUMERO_RESPALDO_DEVOLUCION)
+      if (!o) continue
+      const l = origenesDev.get(r.devolucion_id) || []
+      if (!l.some((x) => x.comprobante_venta_id === o.comprobante_venta_id)) l.push(o)
+      origenesDev.set(r.devolucion_id, l)
+    }
+  }
   const devolucionesConRestante = (devolucionesPendientes || []).map((d: any) => {
     const descontado = Math.round((descontadoPorDev.get(d.id) || 0) * 100) / 100
     const v = valoresDev.get(d.id)
@@ -185,6 +203,7 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
       aplica_10: v?.aplica_10 ?? false,
       valor_total: valorTotal,
       valor_cobro: Math.max(0, Math.round((valorTotal - descontado) * 100) / 100),
+      origenes: origenesDev.get(d.id) ?? [],
     }
   })
 
