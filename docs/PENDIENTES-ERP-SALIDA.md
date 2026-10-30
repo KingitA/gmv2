@@ -571,15 +571,21 @@ Con el 10 % contado tildado al vender (`bonif_pedido.contado_todo`), al generar 
 
 **Regla de Juan (28/10):** si se anulan los comprobantes, el pedido vuelve a **pendiente de facturación**. Se combina con la regla del 27/10 (#19/#20): si el pedido ya está en la logística (listo para enviar/retirar, en viaje, entregado, rechazado) **se queda donde está**; si está "facturado" (todavía en la oficina), vuelve a "pendiente de facturación". Ver `lib/pedidos/anular-comprobantes-pedido.ts` y `estadoAlFacturar` en `lib/pedidos/estados.ts`.
 
-### P2-25 — "Subir a un viaje" no ofrece el viaje ya creado · Dueño: Hojas de ruta/viajes
+### ~~P2-25 — "Subir a un viaje" no ofrece el viaje ya creado~~ · Dueño: Hojas de ruta/viajes
+
+**HECHO 30/10 (hojas de ruta/viajes, rama `viajes-p2`, 39837fe, sin migración):** la consulta de `/clientes-pedidos` pedía `viajes` con `zonas (nombre)`; desde que hay `viaje_zonas` esa relación es ambigua (PostgREST PGRST201) y la lista llegaba **siempre vacía**, no solo con PRUEBA2. Se pide sin embed (no se usaba) y se vuelve a pedir al abrir la barra de selección (un viaje creado después de entrar a la pantalla aparece). Lista los viajes de reparto **programados** (los únicos a los que se puede subir; mismo criterio que `viajeEditable`).
 
 En `/clientes-pedidos`, al tildar pedidos se abre abajo "subir a un viaje", pero **no aparece ningún viaje** aunque el viaje PRUEBA2 ya estaba creado (28/10 ~12:40). Tiene que listar los viajes abiertos (no despachados) a los que se puede subir.
 
-### P2-26 — "Pedidos del viaje": unificar con la lista de arriba · Dueño: Hojas de ruta/viajes
+### ~~P2-26 — "Pedidos del viaje": unificar con la lista de arriba~~ · Dueño: Hojas de ruta/viajes
+
+**HECHO 30/10 (hojas de ruta/viajes, rama `viajes-p2`, 39837fe, sin migración):** la hoja de ruta del viaje (`components/viajes/viaje-hoja.tsx`) es la **única lista**: cada pedido tiene su **cruz roja** para sacarlo del viaje (con el viaje programado; pide confirmación) y la columna **Carga** es editable ahí mismo: `[ ] bultos + [ ] pallets`, campos **vacíos** si no hay nada (`components/viajes/campo-carga.tsx`), se guarda al salir del campo; se puede hasta finalizar el viaje y, antes de despachar, rehace el remito (R12). Una parada con varios pedidos carga por pedido en el detalle de la fila. "Pedidos del viaje" pasó a **"Subir pedidos al viaje"**: solo los candidatos, y solo con el viaje programado.
 
 Dentro del viaje, la sección "Pedidos del viaje" repite la lista de arriba; lo único distinto es sacar pedidos y cargar bultos. Pedido de Juan: **una sola lista**, con la **cruz roja** para sacar el pedido del viaje y la **columna de bultos editable** ahí mismo. El campo de bultos tiene que aparecer **vacío** (no "0"): con 0, al tipear 36 queda "036".
 
-### P2-27 — Bultos + pallets: que se entienda · Dueño: Hojas de ruta/viajes
+### ~~P2-27 — Bultos + pallets: que se entienda~~ · Dueño: Hojas de ruta/viajes
+
+**HECHO 30/10 (hojas de ruta/viajes, rama `viajes-p2`, 39837fe):** un solo texto, `textoCarga` (`lib/viajes/bultos.ts`): "2 bultos + 1 pallet", "132 bultos + 1 pallet", "1 pallet". Se usa en la hoja de ruta en pantalla (columna Carga y detalle por pedido), los KPIs del viaje, el botón de "Subir pedidos", el **PDF de la hoja de ruta** (cuadro "A bajar", encabezado, pedido por pedido, columna CARGA y totales; en la columna va en dos renglones "2 bultos / + 1 pallet") y la pantalla web del chofer. **No tocado:** la app chofer (`mobile/`, fuera de mi alcance: si muestra pallets, que use el mismo texto), el listado y el calendario de viajes (muestran solo bultos, sin pallets).
 
 En la hoja de ruta, un pedido con bultos y pallets se ve "2" grande y abajo "1 pal.": no se sabe si es 1 pallet con 2 bultos o 1 pallet + 2 bultos. Mostrarlo escrito: "2 bultos + 1 pallet" (y en el total "132 bultos + 1 pallet").
 

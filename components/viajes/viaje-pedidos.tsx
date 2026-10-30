@@ -6,17 +6,18 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { X } from "lucide-react"
 import { toast } from "sonner"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { ESTADO_LABEL } from "@/lib/pedidos/estados"
+import { textoCarga } from "@/lib/viajes/bultos"
 import { localMatch } from "@/lib/search/local-match"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
-import { InputMonto } from "@/components/ui/input-monto"
 
-// Pedidos del viaje + candidatos para subir en lote. Los candidatos son pedidos
-// sin viaje, en cualquier estado previo a salir, de clientes de las zonas del
-// viaje (o de cualquier zona con "Ver todas").
+// Pedidos para SUBIR al viaje, en lote. Los candidatos son pedidos sin viaje, en
+// cualquier estado previo a salir, de clientes de las zonas del viaje (o de
+// cualquier zona con "Ver todas"). P2-26: los pedidos que YA están en el viaje
+// se ven, se quitan (cruz roja) y se les cargan bultos/pallets en la hoja de ruta
+// (components/viajes/viaje-hoja.tsx), no acá.
 
 type Ped = {
   id: string; numero: string; fecha: string; estado: string; total: number; bultos: number; pallets?: number
@@ -24,10 +25,8 @@ type Ped = {
 }
 
 export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio: () => void }) {
-  const [asignados, setAsignados] = useState<Ped[]>([])
   const [candidatos, setCandidatos] = useState<Ped[]>([])
   const [editable, setEditable] = useState(false)
-  const [cargaEditable, setCargaEditable] = useState(false)
   const [todas, setTodas] = useState(false)
   const [seleccion, setSeleccion] = useState<string[]>([])
   const [filtro, setFiltro] = useState("")
@@ -40,10 +39,8 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
       const res = await fetch(`/api/viajes/${viajeId}/pedidos${todas ? "?todas=1" : ""}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setAsignados(data.pedidos || [])
       setCandidatos(data.candidatos || [])
       setEditable(Boolean(data.editable))
-      setCargaEditable(Boolean(data.carga_editable))
       setSeleccion([])
     } catch (e: any) {
       toast.error(e?.message || "No se pudieron cargar los pedidos")
@@ -54,7 +51,7 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
 
   useEffect(() => { cargar() }, [viajeId, todas])
 
-  const mandar = async (body: { agregar?: string[]; quitar?: string[] }) => {
+  const mandar = async (body: { agregar: string[] }) => {
     setOcupado(true)
     try {
       const res = await fetch(`/api/viajes/${viajeId}/pedidos`, {
@@ -65,7 +62,7 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       if (data.rechazados?.length) toast.warning(`${data.rechazados.length} pedido(s) no se pudieron subir: ${data.rechazados[0].motivo}`)
-      else toast.success(body.agregar ? `${data.agregados} pedido(s) subidos al viaje` : "Pedido quitado del viaje")
+      else toast.success(`${data.agregados} pedido(s) subidos al viaje`)
       await cargar()
       onCambio()
     } catch (e: any) {
@@ -75,57 +72,17 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
     }
   }
 
-  // #22: bultos / pallets por pedido (se guardan al salir del campo; no bloquean el despacho)
-  const guardarCarga = async (p: Ped, campo: "bultos" | "pallets", valor: number) => {
-    if ((p[campo] || 0) === valor) return
-    setAsignados((prev) => prev.map((x) => (x.id === p.id ? { ...x, [campo]: valor } : x)))
-    try {
-      const res = await fetch(`/api/viajes/${viajeId}/pedidos`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pedido_id: p.id, [campo]: valor }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      onCambio()
-    } catch (e: any) {
-      toast.error(e?.message || "No se pudo guardar")
-      cargar()
-    }
-  }
-
   const visibles = useMemo(
     () => candidatos.filter((p) => !filtro.trim() || localMatch(filtro, p.cliente_nombre, p.localidad, p.numero, p.vendedor)),
     [candidatos, filtro],
   )
   const sel = candidatos.filter((p) => seleccion.includes(p.id))
+  const cargaSel = textoCarga(sel.reduce((s, p) => s + p.bultos, 0), sel.reduce((s, p) => s + (p.pallets || 0), 0))
 
   if (cargando) return <CargaProgreso compacto mensajes={MENSAJES.pedidos} className="mx-auto max-w-sm py-8" />
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="mb-2 font-semibold">
-          En el viaje ({asignados.length}) · {asignados.reduce((s, p) => s + p.bultos, 0)} bultos ·{" "}
-          {asignados.some((p) => (p.pallets || 0) > 0) && <>{asignados.reduce((s, p) => s + (p.pallets || 0), 0)} pallets ·{" "}</>}
-          {formatCurrency(asignados.reduce((s, p) => s + p.total, 0))}
-        </h3>
-        {cargaEditable && (
-          <p className="mb-2 text-xs text-muted-foreground">Cargá los bultos o pallets de cada pedido (se puede hasta finalizar el viaje; un pedido sin bultos sale igual).</p>
-        )}
-        <TablaPedidos
-          pedidos={asignados}
-          vacio="Todavía no hay pedidos en este viaje"
-          conPallets
-          onCarga={cargaEditable ? guardarCarga : undefined}
-          accion={editable ? (p) => (
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" disabled={ocupado} onClick={() => mandar({ quitar: [p.id] })}>
-              <X className="h-4 w-4" />
-            </Button>
-          ) : undefined}
-        />
-      </div>
-
+    <div>
       {editable ? (
         <div>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -138,7 +95,7 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
               <Input className="h-8 w-56" placeholder="Filtrar…" value={filtro} onChange={(e) => setFiltro(e.target.value)} />
               <Button size="sm" disabled={!seleccion.length || ocupado} onClick={() => mandar({ agregar: seleccion })}>
                 Subir {seleccion.length || ""} al viaje
-                {sel.length > 0 && ` · ${sel.reduce((s, p) => s + p.bultos, 0)} bu`}
+                {cargaSel && ` · ${cargaSel}`}
               </Button>
             </div>
           </div>
@@ -151,7 +108,7 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
         </div>
       ) : (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          El viaje ya fue despachado: no se agregan ni quitan pedidos.
+          El viaje ya fue despachado: no se agregan ni quitan pedidos. Los bultos y pallets se siguen cargando en la hoja de ruta hasta finalizar el viaje.
         </p>
       )}
     </div>
@@ -159,22 +116,13 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
 }
 
 function TablaPedidos({
-  pedidos, vacio, accion, seleccion, onSeleccion, conPallets, onCarga,
+  pedidos, vacio, seleccion, onSeleccion,
 }: {
   pedidos: Ped[]
   vacio: string
-  accion?: (p: Ped) => React.ReactNode
   seleccion?: string[]
   onSeleccion?: (ids: string[]) => void
-  conPallets?: boolean
-  onCarga?: (p: Ped, campo: "bultos" | "pallets", valor: number) => void
 }) {
-  const celdaCarga = (p: Ped, campo: "bultos" | "pallets") =>
-    onCarga ? (
-      <CampoCarga valor={p[campo] || 0} onGuardar={(n) => onCarga(p, campo, n)} etiqueta={`${campo === "bultos" ? "Bultos" : "Pallets"} del pedido #${p.numero}`} />
-    ) : (
-      p[campo] || 0
-    )
   const todos = !!seleccion && pedidos.length > 0 && pedidos.every((p) => seleccion.includes(p.id))
   return (
     <div className="max-h-[28rem] overflow-y-auto rounded-md border bg-white">
@@ -192,9 +140,7 @@ function TablaPedidos({
             <TableHead>Vendedor</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead className="text-right">Bultos</TableHead>
-            {conPallets && <TableHead className="text-right">Pallets</TableHead>}
             <TableHead className="text-right">Total</TableHead>
-            {accion && <TableHead className="w-8" />}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -219,34 +165,13 @@ function TablaPedidos({
                 <TableCell>{p.localidad}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">{p.vendedor}</TableCell>
                 <TableCell><Badge variant="secondary">{ESTADO_LABEL[p.estado] || p.estado}</Badge></TableCell>
-                <TableCell className="text-right">{celdaCarga(p, "bultos")}</TableCell>
-                {conPallets && <TableCell className="text-right">{celdaCarga(p, "pallets")}</TableCell>}
+                <TableCell className="whitespace-nowrap text-right">{textoCarga(p.bultos, p.pallets || 0, "—")}</TableCell>
                 <TableCell className="text-right">{formatCurrency(p.total)}</TableCell>
-                {accion && <TableCell>{accion(p)}</TableCell>}
               </TableRow>
             ))
           )}
         </TableBody>
       </Table>
     </div>
-  )
-}
-
-/** Entero ≥ 0 que se guarda al salir del campo (o con Enter). */
-function CampoCarga({ valor, onGuardar, etiqueta }: { valor: number; onGuardar: (n: number) => void; etiqueta: string }) {
-  const [texto, setTexto] = useState<number | null>(valor)
-  useEffect(() => { setTexto(valor) }, [valor])
-  const guardar = () => onGuardar(Math.max(0, Math.trunc(texto ?? 0)))
-  return (
-    <InputMonto
-      decimales={0}
-      soloPositivos
-      value={texto}
-      onChange={setTexto}
-      onBlur={guardar}
-      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur() }}
-      aria-label={etiqueta}
-      className="ml-auto h-7 w-16 text-right"
-    />
   )
 }

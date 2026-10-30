@@ -10,6 +10,7 @@ import { GastoSheet } from "@/components/chofer/gasto-sheet"
 import { fecha } from "@/lib/formato"
 import { InputMonto } from "@/components/ui/input-monto"
 import { TEXTO_ENTREGA_BLOQUEADA } from "@/lib/cobranzas/reglas-cobro"
+import { textoCarga } from "@/lib/viajes/bultos"
 
 // Hoja de ruta del chofer (titular o acompañante): paradas en el orden que
 // armó oficina, con su instrucción (cobrar sí o sí / NO ENTREGAR SIN COBRAR /
@@ -190,8 +191,8 @@ export default function ViajeDashboardPage() {
 
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           <div className="rounded-lg bg-gray-50 py-2">
-            <p className="text-xs text-gray-400">Bultos</p>
-            <p className="font-bold text-gray-800">{p.bultos}</p>
+            <p className="text-xs text-gray-400">Carga</p>
+            <p className="text-sm font-bold text-gray-800">{textoCarga(p.bultos, p.pallets, "—")}</p>
           </div>
           <div className="rounded-lg bg-gray-50 py-2">
             <p className="text-xs text-gray-400">Este viaje</p>
@@ -396,7 +397,7 @@ export default function ViajeDashboardPage() {
                   {(paradaSel.pedidos.length
                     ? paradaSel.entrega_bloqueada
                       ? [["no_entregado", "✕ No entregué"]]
-                      : [["entregado", `✔ Entregué todo (${paradaSel.bultos} bultos)`], ["entregado_parcial", "◐ Entregué una parte"], ["no_entregado", "✕ No entregué"]]
+                      : [["entregado", `✔ Entregué todo (${textoCarga(paradaSel.bultos, paradaSel.pallets, "sin bultos")})`], ["entregado_parcial", "◐ Entregué una parte"], ["no_entregado", "✕ No entregué"]]
                     : [["solo_cobro", "✔ Pasé a cobrar"], ["no_entregado", "✕ No pude pasar / no estaba"]]
                   ).map(([valor, texto]) => (
                     <button
