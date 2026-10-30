@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { NUMERO_RESPALDO_DEVOLUCION } from "../cobranzas/respaldo-devolucion"
-import { agruparPorCliente, ES_DEBITO, pareceComprobanteNoReconocido, PREFIJO_AJUSTE_APERTURA, type ClienteApertura, type RenglonApertura, type TipoApertura } from "./parsear-chr"
+import { agruparPorCliente, ES_DEBITO, pareceComprobanteNoReconocido, PREFIJO_AJUSTE_APERTURA, TIPOS_AL_PV_SISTEMA_VIEJO, type ClienteApertura, type RenglonApertura, type TipoApertura } from "./parsear-chr"
 
 /**
  * APERTURA de cuentas corrientes desde el sistema viejo (regla del dueño
@@ -156,11 +156,11 @@ export async function previsualizarApertura(supabase: SupabaseClient, renglones:
       if (!Number.isFinite(r.pendiente) || !Number.isFinite(r.importe)) errores.push(`${r.numero}: importe inválido`)
       if (r.tipo && r.tipo !== "AJUSTE" && ES_DEBITO.has(r.tipo) && r.pendiente < 0) errores.push(`${r.numero}: ${r.descripcion} con pendiente negativo`)
       if (r.tipo && r.tipo !== "AJUSTE" && !ES_DEBITO.has(r.tipo) && r.pendiente > 0) errores.push(`${r.numero}: ${r.descripcion} con pendiente positivo`)
-      // R9 (#18): los PRES viejos entran con PV 0002. Solo está previsto el PV 0001
-      // del sistema viejo (otro PV chocaría con sus mismos números) y ninguno puede
-      // caer en el número del respaldo de devoluciones (#28).
-      if (r.tipo === "PRES" && r.numero_original.split("-")[0] !== "0001")
-        errores.push(`${r.numero_original}: PRES de un punto de venta del sistema viejo que no es el 0001. Entraría como ${r.numero} y podría chocar con otro: avisá antes de cargarlo.`)
+      // R9 (#18) y P2-05: los PRES y las REV viejas entran con PV 0002. Solo está
+      // previsto el PV 0001 del sistema viejo (otro PV chocaría con sus mismos
+      // números) y ningún PRES puede caer en el número del respaldo de devoluciones (#28).
+      if (r.tipo && TIPOS_AL_PV_SISTEMA_VIEJO.has(r.tipo) && r.numero_original.split("-")[0] !== "0001")
+        errores.push(`${r.numero_original}: ${r.tipo} de un punto de venta del sistema viejo que no es el 0001. Entraría como ${r.numero} y podría chocar con otro: avisá antes de cargarlo.`)
       if (r.tipo === "PRES" && r.numero === NUMERO_RESPALDO_DEVOLUCION)
         errores.push(`${r.numero_original}: entraría como ${r.numero}, el mismo número del comprobante de respaldo de devoluciones. Avisá antes de cargarlo.`)
     }

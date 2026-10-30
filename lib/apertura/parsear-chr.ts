@@ -18,6 +18,8 @@
  *    como concepto y el signo del pendiente (igual que "Ajustar saldo").
  *  - Los PRES del sistema viejo pasan al punto de venta 2 ("0001-00117929" →
  *    "0002-00117929") para no mezclarse con los PRES de gmv2 (PV 1).
+ *  - Las REVERSAS del sistema viejo también (P2-05, 30/10): "0001-00067473" →
+ *    "0002-00067473", para no mezclarse con las REV de gmv2 (PV 1).
  *
  * Módulo PURO (sin base de datos): lo usan la pantalla de apertura y los tests.
  */
@@ -31,13 +33,21 @@ export type TipoApertura =
 /** Prefijo de los ajustes de apertura en el libro mayor (texto libre, #6): lo usan la importación, la cuenta corriente y los controles de descuadre */
 export const PREFIJO_AJUSTE_APERTURA = "APERTURA GM AJUSTE"
 
-/** Punto de venta con el que entran los PRES del sistema viejo */
+/** Punto de venta con el que entran los PRES y las REV del sistema viejo */
 export const PV_PRES_SISTEMA_VIEJO = "0002"
 
-/** "0001-00117929" → "0002-00117929" (solo PRES) */
+/** Tipos que gmv2 también numera en el PV 1: los del sistema viejo pasan al PV 2 (#18, P2-05) */
+export const TIPOS_AL_PV_SISTEMA_VIEJO = new Set<TipoApertura>(["PRES", "REV"])
+
+/** "0001-00117929" → "0002-00117929" */
 export function numeroPresSistemaViejo(numero: string): string {
   const m = numero.trim().match(/^(\d{4})-(\d+)$/)
   return m ? `${PV_PRES_SISTEMA_VIEJO}-${m[2]}` : numero
+}
+
+/** Número con el que se graba un comprobante del sistema viejo: PRES y REV al PV 2, el resto como viene */
+export function numeroSistemaViejo(tipo: TipoApertura | null, numero: string): string {
+  return tipo && TIPOS_AL_PV_SISTEMA_VIEJO.has(tipo) ? numeroPresSistemaViejo(numero) : numero
 }
 
 export interface RenglonApertura {
@@ -46,7 +56,7 @@ export interface RenglonApertura {
   codigo_cliente: string          // sin ceros a la izquierda ("00207" → "207")
   nombre: string
   cuit: string
-  numero: string                  // como se graba ("0002-00119733" para un PRES viejo)
+  numero: string                  // como se graba ("0002-00119733" para un PRES o una REV vieja)
   numero_original: string         // como viene en el reporte ("0001-00119733")
   descripcion: string             // "Presupuesto", "Fact.A Electronica", … o el texto libre
   tipo: TipoApertura | null       // AJUSTE = texto libre; null solo en datos viejos
@@ -139,7 +149,7 @@ export function leerReporteImpagos(texto: string): ResultadoLectura {
       codigo_cliente: codigo(c[20]),
       nombre: c[21],
       cuit: c[22],
-      numero: tipo === "PRES" ? numeroPresSistemaViejo(c[24]) : c[24],
+      numero: numeroSistemaViejo(tipo, c[24]),
       numero_original: c[24],
       descripcion,
       tipo,
