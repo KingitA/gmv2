@@ -18,6 +18,7 @@ import { ViajeDatos } from "@/components/viajes/viaje-datos"
 import { EntregarDinero } from "@/components/viajes/entregar-dinero"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { ESTADOS_CARGA_BULTOS, textoCarga } from "@/lib/viajes/bultos"
 
 // Detalle del viaje = la hoja de ruta, en una sola pantalla: KPIs arriba,
 // paradas en vivo (qué se entregó, cuánto y cómo se cobró), pedidos y el
@@ -184,8 +185,7 @@ export default function ViajeDetallePage() {
           <div className="flex flex-wrap justify-end gap-x-4 gap-y-0.5 text-sm text-muted-foreground">
             <span><b className="text-foreground">{t.paradas}</b> clientes</span>
             <span><b className="text-foreground">{t.pedidos}</b> pedidos</span>
-            <span><b className="text-foreground">{t.bultos}</b> bultos</span>
-            {t.pallets > 0 && <span><b className="text-foreground">{t.pallets}</b> pallets</span>}
+            <span><b className="text-foreground">{textoCarga(t.bultos, t.pallets, "sin bultos cargados")}</b></span>
             {!porTransporte && <span>este viaje <b className="text-foreground">{formatCurrency(t.total_viaje)}</b></span>}
             {!porTransporte && t.minimo_exigido > 0 && <span className="text-red-700">cobrar sí o sí <b>{formatCurrency(t.minimo_exigido)}</b></span>}
           </div>
@@ -203,18 +203,21 @@ export default function ViajeDetallePage() {
         hoja={hoja}
         ordenEditable={editable}
         instruccionesEditables={puedeEditarInstrucciones(v.estado)}
+        cargaEditable={(ESTADOS_CARGA_BULTOS as readonly string[]).includes(v.estado)}
         conCobranza={!porTransporte}
         onCambio={cargar}
       />
 
-      {/* Pedidos del viaje (subir / quitar) */}
-      <div className="rounded-lg border bg-white">
-        <button className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold" onClick={() => setVerPedidos((x) => !x)}>
-          <span>Pedidos del viaje ({t.pedidos}){editable && " · subir o quitar pedidos"}</span>
-          <ChevronDown className={`h-4 w-4 transition-transform ${verPedidos ? "rotate-180" : ""}`} />
-        </button>
-        {verPedidos && <div className="border-t p-3"><ViajePedidos viajeId={id} onCambio={cargar} /></div>}
-      </div>
+      {/* P2-26: subir pedidos. Los que ya están se sacan y se les cargan bultos en la hoja de arriba. */}
+      {editable && (
+        <div className="rounded-lg border bg-white">
+          <button className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold" onClick={() => setVerPedidos((x) => !x)}>
+            <span>Subir pedidos al viaje</span>
+            <ChevronDown className={`h-4 w-4 transition-transform ${verPedidos ? "rotate-180" : ""}`} />
+          </button>
+          {verPedidos && <div className="border-t p-3"><ViajePedidos key={t.pedidos} viajeId={id} onCambio={cargar} /></div>}
+        </div>
+      )}
 
       {/* Historial: quién creó, movió, despachó, canceló */}
       <div className="rounded-lg border bg-white">

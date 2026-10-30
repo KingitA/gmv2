@@ -536,7 +536,9 @@ export default function ClientesPedidosPage() {
     try {
       const { data, error } = await supabase
         .from("viajes")
-        .select("*, zonas (nombre)")
+        // P2-25: sin embed de zonas — viajes→zonas es ambiguo (zona_id y viaje_zonas),
+        // PostgREST devolvía error y la lista quedaba vacía.
+        .select("id, nombre, fecha, estado, zona_id")
         .eq("tipo", "reparto")
         .eq("estado", "programado")
         .order("fecha", { ascending: true })
@@ -1120,6 +1122,9 @@ export default function ClientesPedidosPage() {
   const toggleTodos = () => setSeleccion(prev => pedidosLista.every(p => prev.has(p.id)) ? new Set() : new Set(pedidosLista.map(p => p.id)))
   // Solo cuenta lo que está a la vista (si un filtro oculta algo seleccionado, no se suma)
   const seleccionados = pedidosLista.filter(p => seleccion.has(p.id))
+  // P2-25: al abrir la barra de selección se traen los viajes creados mientras tanto
+  const haySeleccion = seleccion.size > 0
+  useEffect(() => { if (haySeleccion) cargarViajes() }, [haySeleccion]) // eslint-disable-line react-hooks/exhaustive-deps
   const totalSel = seleccionados.reduce((s, p) => s + (p.total || 0), 0)
   const bultosSel = seleccionados.reduce((s, p) => s + (p.bultos || 0), 0)
   const totalLista = pedidosLista.reduce((s, p) => s + (p.total || 0), 0)

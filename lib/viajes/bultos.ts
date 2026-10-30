@@ -23,10 +23,15 @@ export async function palletsDePedidos(supabase: SupabaseClient, pedidoIds: stri
 /** Viaje en el que todavía se pueden cargar bultos/pallets (antes de finalizarlo). */
 export const ESTADOS_CARGA_BULTOS = ["programado", "despachado", "en_curso"] as const
 
-/** "12 bultos · 1 pallet" (vacío si no hay nada cargado). */
-export function textoCarga(bultos: number, pallets: number): string {
+/**
+ * P2-27: la carga escrita entera, igual en todas las pantallas y en el PDF:
+ * "2 bultos + 1 pallet", "132 bultos", "1 pallet". Sin nada cargado: `vacio`.
+ */
+export function textoCarga(bultos: number, pallets: number, vacio = ""): string {
+  const b = Number(bultos) || 0
+  const p = Number(pallets) || 0
   const partes: string[] = []
-  if (bultos > 0) partes.push(`${bultos} ${bultos === 1 ? "bulto" : "bultos"}`)
-  if (pallets > 0) partes.push(`${pallets} ${pallets === 1 ? "pallet" : "pallets"}`)
-  return partes.join(" · ")
+  if (b > 0) partes.push(`${b} ${b === 1 ? "bulto" : "bultos"}`)
+  if (p > 0) partes.push(`${p} ${p === 1 ? "pallet" : "pallets"}`)
+  return partes.join(" + ") || vacio
 }

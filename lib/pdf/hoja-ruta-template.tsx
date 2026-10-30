@@ -10,6 +10,10 @@
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
 import { fecha as fechaAR, moneda, numero } from '@/lib/formato'
 import type { HojaRuta } from '@/lib/viajes/hoja-ruta'
+import { textoCarga } from '@/lib/viajes/bultos'
+
+/** P2-27: "2 bultos" / "+ 1 pallet" en dos renglones (la columna es angosta). */
+const cargaCelda = (bultos: number, pallets: number) => textoCarga(bultos, pallets, '—').replace(' + ', '\n+ ')
 
 const fmt = (n: number) => numero(n)
 // "AAAA-MM-DD" o instante → dd/mm/aaaa en hora argentina (lib/formato)
@@ -35,8 +39,8 @@ const s = StyleSheet.create({
 
   cN:      { width: 18 },
   cCli:    { width: 190, paddingRight: 5 },
-  cPed:    { width: 150, paddingRight: 5 },
-  cBu:     { width: 34, textAlign: 'right' },
+  cPed:    { width: 128, paddingRight: 5 },
+  cBu:     { width: 56, textAlign: 'right' },
   cImp:    { width: 68, textAlign: 'right' },
   cInst:   { flex: 1, paddingLeft: 8, paddingRight: 4 },
   cMano:   { width: 78, borderLeft: '0.5 solid #bbb', paddingLeft: 4 },
@@ -81,12 +85,12 @@ export function HojaRutaPDF({ data }: { data: HojaRuta }) {
           </View>
           <View style={s.encDer}>
             <Text style={s.doc}>{porTransporte ? 'DESPACHO POR TRANSPORTE' : 'REPARTO'}</Text>
-            <Text style={s.sub}>{t.paradas} clientes · {t.pedidos} pedidos · {t.bultos} bultos{t.pallets > 0 ? ` · ${t.pallets} pallets` : ''}</Text>
+            <Text style={s.sub}>{t.paradas} clientes · {t.pedidos} pedidos · {textoCarga(t.bultos, t.pallets, 'sin bultos cargados')}</Text>
           </View>
         </View>
 
         <View style={s.resumen}>
-          <View style={s.caja}><Text style={s.cajaLbl}>Bultos a bajar</Text><Text style={s.cajaVal}>{t.bultos}{t.pallets > 0 ? ` + ${t.pallets} pal.` : ''}</Text></View>
+          <View style={s.caja}><Text style={s.cajaLbl}>A bajar</Text><Text style={s.cajaVal}>{textoCarga(t.bultos, t.pallets, '—')}</Text></View>
           <View style={s.caja}><Text style={s.cajaLbl}>Importe de este viaje</Text><Text style={s.cajaVal}>{moneda(t.total_viaje)}</Text></View>
           {!porTransporte && <View style={s.caja}><Text style={s.cajaLbl}>Saldos anteriores</Text><Text style={s.cajaVal}>{moneda(t.saldo_anterior)}</Text></View>}
           {!porTransporte && <View style={s.caja}><Text style={s.cajaLbl}>Cobrar sí o sí</Text><Text style={s.cajaVal}>{moneda(t.minimo_exigido)}</Text></View>}
@@ -97,7 +101,7 @@ export function HojaRutaPDF({ data }: { data: HojaRuta }) {
           <Text style={[s.thT, s.cN]}>#</Text>
           <Text style={[s.thT, s.cCli]}>CLIENTE</Text>
           <Text style={[s.thT, s.cPed]}>PEDIDOS / COMPROBANTES</Text>
-          <Text style={[s.thT, s.cBu]}>BULTOS</Text>
+          <Text style={[s.thT, s.cBu]}>CARGA</Text>
           <Text style={[s.thT, s.cImp]}>ESTE VIAJE</Text>
           {!porTransporte && <Text style={[s.thT, s.cImp]}>SALDO ANT.</Text>}
           {!porTransporte && <Text style={[s.thT, s.cImp]}>TOTAL</Text>}
@@ -122,13 +126,13 @@ export function HojaRutaPDF({ data }: { data: HojaRuta }) {
               {p.pedidos.length === 0 && <Text style={s.gris}>Sin mercadería — solo cobro</Text>}
               {p.pedidos.map((ped) => (
                 <Text key={ped.id} style={s.gris}>
-                  Ped {ped.numero} ({ped.bultos} bu{ped.pallets > 0 ? ` + ${ped.pallets} pal.` : ''})
+                  Ped {ped.numero} ({textoCarga(ped.bultos, ped.pallets, 'sin bultos')})
                   {ped.comprobantes.map((c) => ` · ${c.tipo} ${c.numero}`).join('')}
                   {ped.remitos.map((r) => ` · R ${r.numero_remito}`).join('')}
                 </Text>
               ))}
             </View>
-            <Text style={[s.numB, s.cBu]}>{p.bultos}{p.pallets > 0 ? `\n${p.pallets} pal.` : ''}</Text>
+            <Text style={[s.num, s.cBu]}>{cargaCelda(p.bultos, p.pallets)}</Text>
             <Text style={[s.num, s.cImp]}>{fmt(p.total_viaje)}</Text>
             {!porTransporte && <Text style={[s.num, s.cImp]}>{fmt(p.saldo_anterior)}</Text>}
             {!porTransporte && <Text style={[s.numB, s.cImp]}>{fmt(p.total_a_cobrar)}</Text>}
@@ -155,7 +159,7 @@ export function HojaRutaPDF({ data }: { data: HojaRuta }) {
           <Text style={[s.numB, s.cN]} />
           <Text style={[s.numB, s.cCli]}>TOTALES</Text>
           <Text style={[s.numB, s.cPed]}>{t.pedidos} pedidos</Text>
-          <Text style={[s.numB, s.cBu]}>{t.bultos}{t.pallets > 0 ? `\n${t.pallets} pal.` : ''}</Text>
+          <Text style={[s.numB, s.cBu]}>{cargaCelda(t.bultos, t.pallets)}</Text>
           <Text style={[s.numB, s.cImp]}>{fmt(t.total_viaje)}</Text>
           {!porTransporte && <Text style={[s.numB, s.cImp]}>{fmt(t.saldo_anterior)}</Text>}
           {!porTransporte && <Text style={[s.numB, s.cImp]}>{fmt(t.total_a_cobrar)}</Text>}
