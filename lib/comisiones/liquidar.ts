@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { nowArgentina } from "@/lib/utils"
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { moneda } from "@/lib/formato"
+import { devueltoEtiquetado } from "@/lib/cobranzas/devuelto"
+import { devolucionEnAnulaciones } from "@/lib/pedidos/devolucion-en-anulaciones"
 
 /**
  * COMISIÓN GANADA → cuenta personal del vendedor (reglas del dueño 16-19/10/2026).
@@ -94,6 +96,10 @@ export async function liquidarComisiones(
       if (cr?.motivo_ajuste !== "Anulación" || !cr.pedido_id || cr.pedido_id !== pedidoDe.get(i.comprobante_id)) continue
       plataDe.set(i.comprobante_id, (plataDe.get(i.comprobante_id) || 0) + (Number(i.monto_imputado) || 0))
     }
+    // P2-43: ese crédito trae también lo DEVUELTO del comprobante anulado, que no
+    // es plata: la comisión es sobre lo neto de devoluciones
+    const devEnAnulacion = await devolucionEnAnulaciones(supabase, [...pedidoDe.keys()], devueltoEtiquetado)
+    for (const [id, dev] of devEnAnulacion) plataDe.set(id, Math.max(0, (plataDe.get(id) || 0) - dev))
   }
   const posteadoDe = new Map<string, Map<string, number>>()
   for (const p of posteados || []) {
