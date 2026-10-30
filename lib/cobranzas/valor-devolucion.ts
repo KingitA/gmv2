@@ -25,6 +25,13 @@
  *  (c) $100 neto + 21% IVA + 3% perc. IVA + 3% IIBB, contado: 10 unidades
  *      valen 900 + 189 + 27 + 27 = $1.143.
  *
+ * P2-48 (regla de Juan, 29/10): lo devuelto de una factura SIN detalle (sistema
+ * viejo / apertura, o artículo nunca facturado en gmv2) no se valúa "tal cual
+ * facturado" porque no hay renglón: el precio es el FINAL y la NC sale por ese
+ * precio JUSTO, con todo adentro (neto + IVA + percepción IVA + IIBB). Se abre
+ * hacia atrás, al centavo (ARCA: ImpTotal = ImpNeto + ImpIva + ImpTrib).
+ *  (d) precio final $100, IIBB 3 %, sin perc. IVA: neto 80,65 + IVA 16,94 + IIBB 2,41 = $100.
+ *
  * La plata a cuenta NUNCA lleva 10% (eso ya lo maneja el circuito de créditos).
  */
 
@@ -47,6 +54,11 @@ export interface RenglonDevolucionValor {
   percepcionIva?: boolean
   /** IVA por unidad del renglón facturado; null/undefined = 21% del neto. */
   ivaUnitario?: number | null
+  /**
+   * P2-48: `subtotal` es el precio FINAL (todo adentro): factura del sistema viejo
+   * o sin detalle. Solo en renglones fiscales; se abre hacia atrás al centavo.
+   */
+  precioFinal?: boolean
 }
 
 export interface ValorDevolucionInput {
@@ -77,6 +89,37 @@ export interface ValorDevolucionResult {
 
 const centavos = (n: number) => Math.round(n * 100)
 
+/**
+ * P2-48: abre un precio FINAL en neto + IVA 21 % + percepción IVA (3 %, si va) +
+ * IIBB, de modo que la suma dé el final EXACTO al centavo. Busca el neto alrededor
+ * de final / (1 + tasas); si ningún neto cierra por redondeo, el centavo que falta
+ * va a una percepción (IIBB, si no IVA): ARCA controla el IVA contra su base y
+ * de los tributos solo que sumen ImpTrib. Sin percepciones, al neto.
+ */
+export function abrirPrecioFinal(final: number, p: { percepcionIva: boolean; alicuotaIIBB: number }) {
+  const objetivo = centavos(final)
+  const tPerc = p.percepcionIva ? TASA_PERCEPCION_IVA_DEVOLUCION / 100 : 0
+  const tIibb = (Number(p.alicuotaIIBB) || 0) / 100
+  const partes = (netoCent: number) => {
+    const neto = netoCent / 100
+    const iva = r2((neto * IVA_GENERAL) / 100)
+    const percepcionIva = tPerc > 0 ? r2(neto * tPerc) : 0
+    const percepcionIibb = tIibb > 0 ? r2(neto * tIibb) : 0
+    return { neto, iva, percepcionIva, percepcionIibb }
+  }
+  const suma = (x: ReturnType<typeof partes>) => centavos(x.neto) + centavos(x.iva) + centavos(x.percepcionIva) + centavos(x.percepcionIibb)
+  const base = Math.round(objetivo / (1 + IVA_GENERAL / 100 + tPerc + tIibb))
+  for (const d of [0, -1, 1, -2, 2, -3, 3]) {
+    const x = partes(base + d)
+    if (suma(x) === objetivo) return x
+  }
+  const x = partes(base)
+  const resto = (objetivo - suma(x)) / 100
+  if (x.percepcionIibb > 0 || tIibb > 0) return { ...x, percepcionIibb: r2(x.percepcionIibb + resto) }
+  if (x.percepcionIva > 0 || tPerc > 0) return { ...x, percepcionIva: r2(x.percepcionIva + resto) }
+  return { ...x, neto: r2(x.neto + resto) }
+}
+
 export function valorDevolucion({ renglones, aplica10 = false, conIva = false, alicuotaIIBB = 0 }: ValorDevolucionInput): ValorDevolucionResult {
   const netoPorRenglon: number[] = []
   const ivaPorRenglon: number[] = []
@@ -84,9 +127,26 @@ export function valorDevolucion({ renglones, aplica10 = false, conIva = false, a
   let ivaFiscal = 0
   let baseIva = 0
   let totalRev = 0
+  // P2-48: lo de precio final (todo adentro) lleva sus percepciones ya calculadas
+  let netoAbierto = 0
+  let percIvaAbierta = 0
+  let percIibbAbierta = 0
+  let baseIvaAbierta = 0
   for (const r of renglones) {
     const factor = (r.aplica10 ?? aplica10) ? 1 - DTO_CONTADO : 1
     const fiscal = r.fiscal ?? conIva
+    if (fiscal && r.precioFinal) {
+      const x = abrirPrecioFinal(r2((Number(r.subtotal) || 0) * factor), { percepcionIva: !!r.percepcionIva, alicuotaIIBB: Number(alicuotaIIBB) || 0 })
+      netoFiscal += x.neto
+      ivaFiscal += x.iva
+      netoAbierto += x.neto
+      percIvaAbierta += x.percepcionIva
+      percIibbAbierta += x.percepcionIibb
+      if (r.percepcionIva) baseIvaAbierta += x.neto
+      netoPorRenglon.push(x.neto)
+      ivaPorRenglon.push(x.iva)
+      continue
+    }
     // Por renglón, redondeado como lo va a escribir la NC en su detalle
     const neto = r2((Number(r.subtotal) || 0) * factor)
     let iva = 0
@@ -108,8 +168,12 @@ export function valorDevolucion({ renglones, aplica10 = false, conIva = false, a
   ivaFiscal = r2(ivaFiscal)
   baseIva = r2(baseIva)
   totalRev = r2(totalRev)
-  const percepcionIva = r2((baseIva * TASA_PERCEPCION_IVA_DEVOLUCION) / 100)
-  const percepcionIibb = netoFiscal > 0 ? r2((netoFiscal * (Number(alicuotaIIBB) || 0)) / 100) : 0
+  // Lo "tal cual facturado" percibe sobre su neto; lo de precio final ya trae las suyas
+  const baseIvaFacturado = baseIva
+  baseIva = r2(baseIva + baseIvaAbierta)
+  const netoFacturado = r2(netoFiscal - netoAbierto)
+  const percepcionIva = r2((baseIvaFacturado * TASA_PERCEPCION_IVA_DEVOLUCION) / 100 + percIvaAbierta)
+  const percepcionIibb = netoFiscal > 0 ? r2((netoFacturado > 0 ? (netoFacturado * (Number(alicuotaIIBB) || 0)) / 100 : 0) + percIibbAbierta) : 0
   // Suma en centavos enteros — misma aritmética que la emisión fiscal (ARCA
   // valida ImpTotal == ImpNeto + ImpIva + ImpTrib al centavo)
   const totalFiscal = (centavos(netoFiscal) + centavos(ivaFiscal) + centavos(percepcionIva) + centavos(percepcionIibb)) / 100
@@ -215,6 +279,9 @@ export function valorDevolucionConOrigen(
       aplica10: !!i.origen?.bonificado_contado,
       percepcionIva: !!i.origen?.fiscal && !!i.origen?.percepcion_iva,
       ivaUnitario: i.origen?.exacto ? i.origen.iva_unitario : null,
+      // P2-48: fiscal sin renglón facturado (sistema viejo / nunca facturado en gmv2):
+      // el precio es el FINAL y la NC sale por ese precio justo
+      precioFinal: !!i.origen?.fiscal && !i.origen?.exacto,
     })),
     alicuotaIIBB,
   })

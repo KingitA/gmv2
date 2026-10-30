@@ -428,13 +428,22 @@ export async function POST(request: Request) {
         ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
       }
 
+      // P2-48: en los renglones de precio FINAL (factura sin renglón: sistema viejo) el
+      // precio guardado es el final con todo adentro; en el detalle va el NETO unitario
+      // para que unitario × cantidad = total del renglón (el resto es IVA y percepciones).
+      const precioUnitarioDetalle = (item: any, idx: number) => {
+        const o = origenDe.get(item.id)
+        if (!(o?.fiscal && !o?.exacto)) return item.precio_venta_original || 0
+        const cant = Math.abs(Number(item.cantidad) || 0)
+        return cant > 0 ? Math.round((Math.abs(netoRenglon[idx] ?? 0) / cant) * 10000) / 10000 : 0
+      }
       const detallePayload = parte.items.map((item: any, idx: number) => {
         const bonif = origenDe.get(item.id)?.bonificado_contado
         return {
           articulo_id: item.articulo_id,
           descripcion: item.articulo.descripcion + (bonif ? " (bonif. 10% contado)" : ""),
           cantidad: -Math.abs(item.cantidad), // Negativo
-          precio_unitario: item.precio_venta_original || 0,
+          precio_unitario: precioUnitarioDetalle(item, idx),
           // Con 10% contado: el renglón sale bonificado (mismo redondeo por renglón
           // que usó el descuento en el cobro — coinciden al centavo)
           precio_total: -Math.abs(netoRenglon[idx] ?? 0),
@@ -601,7 +610,7 @@ export async function POST(request: Request) {
           descripcion:     item.articulo?.descripcion ?? item.descripcion ?? '—',
           sku:             item.articulo?.sku ?? '',
           cantidad:        -Math.abs(item.cantidad ?? 0),
-          precio_unitario: item.precio_venta_original ?? 0,
+          precio_unitario: precioUnitarioDetalle(item, idx),
           precio_total:    -Math.abs(netoRenglon[idx] ?? 0),
           marca:           marcaDesc.get(item.articulo?.marca_id) ?? '',
           descuento_propio: 0,

@@ -67,9 +67,13 @@ describe("valorDevolucionConOrigen — tal cual fue facturado (21/10/2026)", () 
     expect(v.total).toBe(1000)
   })
 
-  it("sin IVA del renglón (comprobante importado): 21% del neto", () => {
+  it("sin renglón facturado (comprobante importado): el precio es FINAL, todo adentro (P2-48)", () => {
+    // Antes: 82,64 era neto y se le sumaba 21 % (173,54 de IVA). Regla de Juan 29/10: es el precio final.
     const v = valorDevolucionConOrigen([{ cantidad: 10, precio_venta_original: 82.64, origen: fa({ exacto: false, bonificado_contado: false, percepcion_iva: false, iva_unitario: null }) }], 0)
-    expect(v.fiscal.iva).toBe(173.54)
+    expect(v.fiscal.total).toBe(826.4)
+    // Sin percepciones no hay neto que cierre justo (682,97 → 826,39; 682,98 → 826,41): el
+    // centavo queda en el neto y el IVA es el del neto redondeado de 826,40 / 1,21
+    expect(v.fiscal).toMatchObject({ neto: 682.97, iva: 143.43 })
   })
 
   it("devolución mixta: lo de factura va en NC (con IVA y percepciones), lo de presupuesto en REV (precio final, sin nada)", () => {
