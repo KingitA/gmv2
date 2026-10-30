@@ -288,6 +288,32 @@ export async function getSaldosCliente(
 }
 
 /**
+ * Créditos (NC/REV vivas) ya APLICADOS a cada comprobante: el 10 % contado, las
+ * devoluciones con su NC emitida, etc. (imputaciones crédito → débito).
+ * P2-28: lo de un viaje es total − esto. Con el total bruto, la REV del 10 % ya
+ * emitida se volvía a cobrar (CHEN: $399.991,26 en vez de $395.934,21): el libro
+ * ya la descuenta y saldoDeParada la restaba de "anterior" sin restarla de "este viaje".
+ */
+export async function creditosAplicadosA(supabase: SupabaseClient, comprobanteIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const ids = [...new Set(comprobanteIds.filter(Boolean))]
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase
+      .from("imputaciones")
+      .select("comprobante_id, monto_imputado, credito:comprobantes_venta!imputaciones_credito_comprobante_id_fkey(anulado_en)")
+      .in("comprobante_id", ids.slice(i, i + 200))
+      .not("credito_comprobante_id", "is", null)
+      .neq("estado", "anulado")
+    if (error) throw new Error(`créditos aplicados: ${error.message}`)
+    for (const r of data || []) {
+      if ((r as any).credito?.anulado_en) continue
+      out.set(r.comprobante_id, Math.round(((out.get(r.comprobante_id) ?? 0) + Number(r.monto_imputado || 0)) * 100) / 100)
+    }
+  }
+  return out
+}
+
+/**
  * Saldo de un cliente en una parada de viaje — UNA fórmula para la hoja de
  * ruta, la vista del chofer y la ficha del cliente en el viaje (antes había
  * tres y la ficha contaba dos veces el pedido ya facturado).
@@ -300,7 +326,8 @@ export function saldoDeParada(args: {
   saldos: SaldosCliente | undefined
   /** Σ saldo_pendiente de los comprobantes de los pedidos de este viaje */
   propioEnLibro: number
-  /** Lo de este viaje: comprobantes si está facturado, si no total del pedido */
+  /** Lo de este viaje: comprobantes si está facturado (total − créditos ya
+   *  aplicados: 10 % contado, NC de devolución — creditosAplicadosA), si no total del pedido */
   totalViaje: number
   /** Valor de las devoluciones cargadas en este viaje */
   devueltoViaje: number

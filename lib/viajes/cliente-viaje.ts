@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { ESTADOS_DEVOLUCION_EN_PROCESO, getSaldosCliente, saldoDeParada } from "@/lib/cuenta-corriente/saldo"
+import { creditosAplicadosA, ESTADOS_DEVOLUCION_EN_PROCESO, getSaldosCliente, saldoDeParada } from "@/lib/cuenta-corriente/saldo"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { enCobroPorComprobante } from "@/lib/cobranzas/en-cobro"
 import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
@@ -165,7 +165,7 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
     pedidoIdsViaje.length
       ? supabase
           .from("comprobantes_venta")
-          .select("pedido_id, total_factura, saldo_pendiente")
+          .select("id, pedido_id, total_factura, saldo_pendiente")
           .in("pedido_id", pedidoIdsViaje)
           .in("tipo_comprobante", ["FA", "FB", "FC", "PRES", "ND", "NDA", "NDB", "NDC"])
           .is("anulado_en", null)
@@ -211,9 +211,11 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
     if (!compsPorPedido.has(c.pedido_id)) compsPorPedido.set(c.pedido_id, [])
     compsPorPedido.get(c.pedido_id)!.push(c)
   }
+  // P2-28: total − créditos ya aplicados (10 % contado, NC de devolución), igual que la hoja
+  const creditosDe = await creditosAplicadosA(supabase, (compsViaje || []).map((k: any) => k.id))
   const totalViaje = pedidos.reduce((s, p) => {
     const cs = compsPorPedido.get(p.id)
-    return s + (cs?.length ? cs.reduce((x, k) => x + (Number(k.total_factura) || 0), 0) : Number(p.total) || 0)
+    return s + (cs?.length ? cs.reduce((x, k) => x + (Number(k.total_factura) || 0) - (creditosDe.get(k.id) ?? 0), 0) : Number(p.total) || 0)
   }, 0)
   const propioEnLibro = (compsViaje || []).reduce((s, k: any) => s + (Number(k.saldo_pendiente) || 0), 0)
   const { saldo_anterior, total_a_cobrar } = saldoDeParada({
