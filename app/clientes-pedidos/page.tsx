@@ -1704,7 +1704,9 @@ export default function ClientesPedidosPage() {
           <Button size="sm" variant="secondary" className="h-9 bg-white text-azul-900 hover:bg-azul-50" onClick={crearViajeConSeleccion}>
             <Truck className="h-4 w-4" /> Crear viaje
           </Button>
-          <Button size="sm" variant="secondary" className="h-9 bg-white text-azul-900 hover:bg-azul-50" onClick={pedirFacturarSeleccion}>
+          <Button size="sm" variant="secondary" className="h-9 bg-white text-azul-900 hover:bg-azul-50" onClick={pedirFacturarSeleccion}
+            disabled={!seleccionados.some(p => p.estado === "pendiente_facturacion")}
+            title={seleccionados.some(p => p.estado === "pendiente_facturacion") ? "Factura los tildados que están en Pendiente Facturación" : "No se facturan: ninguno está preparado (Pendiente Facturación)"}>
             <FileText className="h-4 w-4" /> Facturar
           </Button>
           <Select value="" onValueChange={(v) => cambiarPrioridadVarios(seleccionados.map(p => p.id), Number(v) as 1 | 2 | 3)}>

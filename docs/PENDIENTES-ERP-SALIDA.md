@@ -561,7 +561,7 @@ Entre el 27/10 15:19 y el 28/10 11:40, los pedidos reales **001945, 001956 y 001
 - **Facturar varios:** `POST /api/comprobantes-venta/generar-lote` `{ pedido_ids: [...] }` (hasta 30): factura uno atrás del otro con el mismo circuito que "Generar" y devuelve qué salió y qué no. **Falta el botón "Facturar" en `/clientes-pedidos` (Frontend).**
 - Probado en una base local descartable: 5 máquinas × 20 PRES a la vez → 100 números distintos y correlativos; 30 FA simultáneas con ARCA simulado → sin repetidos ni huecos; turno colgado se libera solo; el índice frena repetidos. Nada probado en producción ni emitido en ARCA.
 
-**Botón hecho (30/10, rama `frontend-p2`, 9ba14ad):** con pedidos tildados en `/clientes-pedidos`, "Facturar" (al lado de Crear viaje) abre una confirmación con la cantidad, avisa cuáles no están en Pendiente Facturación (se intentan igual) y frena si son más de 30. Llama a `generar-lote` y muestra pedido por pedido qué comprobantes salieron o el motivo del error (`components/pedidos/FacturarVariosDialog.tsx`).
+**Botón hecho (30/10, rama `frontend-p2`, 9ba14ad):** con pedidos tildados en `/clientes-pedidos`, "Facturar" (al lado de Crear viaje) abre una confirmación con la cantidad, manda **solo los que están en Pendiente Facturación** (los demás se listan como "No se facturan (no están preparados): #…": sin preparar se facturaría lo pedido y no lo preparado) y frena si son más de 30. Si ninguno califica, el botón queda deshabilitado. Llama a `generar-lote` y muestra pedido por pedido qué comprobantes salieron o el motivo del error (`components/pedidos/FacturarVariosDialog.tsx`).
 
 ### P2-21 — "Guardar pedido" tiene que volver a donde estaba · Dueño: Frontend
 

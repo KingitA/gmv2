@@ -39,8 +39,11 @@ export function FacturarVariosDialog({
     if (open) { setResultados(null); setError(null) }
   }, [open])
 
+  // Solo los preparados: un pedido sin preparar (pendiente, impreso…) se facturaría por
+  // lo pedido y no por lo que salió del depósito. Esos no se mandan.
+  const aEnviar = pedidos.filter((p) => p.estado === "pendiente_facturacion")
   const otroEstado = pedidos.filter((p) => p.estado !== "pendiente_facturacion")
-  const demasiados = pedidos.length > MAX_FACTURAR_JUNTOS
+  const demasiados = aEnviar.length > MAX_FACTURAR_JUNTOS
   const pedidoDe = new Map(pedidos.map((p) => [p.id, p]))
 
   const facturar = async () => {
@@ -49,7 +52,7 @@ export function FacturarVariosDialog({
       const r = await fetch("/api/comprobantes-venta/generar-lote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pedido_ids: pedidos.map((p) => p.id) }),
+        body: JSON.stringify({ pedido_ids: aEnviar.map((p) => p.id) }),
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(j.error || "No se pudieron facturar los pedidos")
@@ -68,7 +71,7 @@ export function FacturarVariosDialog({
     <Dialog open={open} onOpenChange={(o) => { if (!facturando) onOpenChange(o) }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Facturar {pedidos.length === 1 ? "1 pedido" : `${pedidos.length} pedidos`}</DialogTitle>
+          <DialogTitle>Facturar {aEnviar.length === 1 ? "1 pedido" : `${aEnviar.length} pedidos`}</DialogTitle>
           <DialogDescription>
             {resultados ? `Salieron ${ok} de ${resultados.length}.` : "Se facturan uno atrás del otro, igual que con Generar en cada pedido."}
           </DialogDescription>
@@ -102,22 +105,23 @@ export function FacturarVariosDialog({
           <div className="space-y-3 text-sm">
             {demasiados && (
               <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
-                Se pueden facturar hasta {MAX_FACTURAR_JUNTOS} pedidos por vez. Destildá {pedidos.length - MAX_FACTURAR_JUNTOS}.
+                Se pueden facturar hasta {MAX_FACTURAR_JUNTOS} pedidos por vez. Destildá {aEnviar.length - MAX_FACTURAR_JUNTOS}.
               </p>
             )}
             {otroEstado.length > 0 && (
               <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                 <p>
-                  {otroEstado.length === 1 ? "1 pedido no está" : `${otroEstado.length} pedidos no están`} en Pendiente Facturación:{" "}
-                  {otroEstado.map((p) => `#${p.numero_pedido}`).join(", ")}. Se intentan facturar igual; si no se puede, el resultado dice por qué.
+                  No se facturan (no están preparados): {otroEstado.map((p) => `#${p.numero_pedido}`).join(", ")}.
+                  {!aEnviar.length && " Ninguno de los tildados está en Pendiente Facturación."}
                 </p>
               </div>
             )}
             {error && <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">{error}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="outline" disabled={facturando} onClick={() => onOpenChange(false)}>Cancelar</Button>
-              <Button disabled={facturando || demasiados || !pedidos.length} onClick={facturar}>
+              <Button disabled={facturando || demasiados || !aEnviar.length}
+                title={!aEnviar.length ? "Ninguno está preparado (Pendiente Facturación)" : undefined} onClick={facturar}>
                 {facturando ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" />Facturando…</> : "Facturar"}
               </Button>
             </div>
