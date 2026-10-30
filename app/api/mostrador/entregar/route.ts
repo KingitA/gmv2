@@ -26,7 +26,7 @@ async function saldoDelPedido(sb: any, pedidoId: string) {
     .neq("estado_pago", "anulado")
     .is("anulado_en", null)
   if (error) throw error
-  const comps = (data || []).map((c: any) => ({ id: c.id as string, saldo: Math.max(0, Number(c.saldo_pendiente) || 0) }))
+  const comps: { id: string; saldo: number }[] = (data || []).map((c: any) => ({ id: c.id as string, saldo: Math.max(0, Number(c.saldo_pendiente) || 0) }))
   return { comps, total: Math.round(comps.reduce((s, c) => s + c.saldo, 0) * 100) / 100 }
 }
 
