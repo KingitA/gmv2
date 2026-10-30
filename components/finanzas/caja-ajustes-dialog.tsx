@@ -20,6 +20,7 @@ interface Renglon {
   cliente: { id: string; codigo: string | null; nombre: string } | null
   usuario: string | null
   comprobante: { tipo: string; numero: string } | null
+  cancelados?: Array<{ comprobante: { tipo: string; numero: string } | null; pago_id: string | null; saldo_anterior: number }>
 }
 interface Respuesta {
   saldo: number
@@ -126,6 +127,14 @@ export function CajaAjustesDialog({ open, onOpenChange }: { open: boolean; onOpe
                   <td className="px-2.5 py-1.5 text-neutro-600">
                     {r.motivo || "—"}
                     {r.comprobante && <span className="text-neutro-400"> · {r.comprobante.tipo} {r.comprobante.numero}</span>}
+                    {!!r.cancelados?.length && (
+                      <div className="mt-0.5 text-[12px] text-neutro-400">
+                        Cerró:{" "}
+                        {r.cancelados
+                          .map((x) => `${x.comprobante ? `${x.comprobante.tipo} ${x.comprobante.numero}` : "entrega a cuenta"} (${moneda(x.saldo_anterior)})`)
+                          .join(" · ")}
+                      </div>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-2.5 py-1.5 text-neutro-600">{r.usuario || "—"}</td>
                   <td className={cn("whitespace-nowrap px-2.5 py-1.5 text-right font-semibold tabular-nums", r.monto < 0 ? "text-error-600" : "text-exito-600")}>{moneda(r.monto)}</td>

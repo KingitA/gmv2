@@ -33,6 +33,8 @@ export interface RenglonAjuste {
   usuario_id: string | null
   pago_id: string | null
   comprobante: { id: string; tipo: string; numero: string } | null
+  /** Deuda asumida: lo que cerró (comprobantes pasados a pagados / entregas a cuenta), con su saldo anterior */
+  cancelados: Array<{ comprobante: { id: string; tipo: string; numero: string } | null; pago_id: string | null; saldo_anterior: number }>
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -69,10 +71,20 @@ export async function leerCajaAjustes(
     return q
   })
 
+  // Deuda asumida (P2-02): qué cerró cada ajuste
+  const asumidas = filas.filter((f) => f.origen === "deuda_asumida").map((f) => f.id)
+  const cancelados = await fetchByIds<any>(
+    (ch) => supabase.from("caja_ajustes_cancelados").select("ajuste_id, comprobante_id, pago_id, saldo_anterior").in("ajuste_id", ch),
+    asumidas,
+  )
+  const canceladosDe = new Map<string, any[]>()
+  for (const c of cancelados) canceladosDe.set(c.ajuste_id, [...(canceladosDe.get(c.ajuste_id) || []), c])
+
   const ids = (k: string) => [...new Set(filas.map((f) => f[k]).filter(Boolean))] as string[]
+  const compIds = [...new Set([...ids("comprobante_id"), ...cancelados.map((c) => c.comprobante_id).filter(Boolean)])] as string[]
   const [clientes, comprobantes, usuarios] = await Promise.all([
     fetchByIds<any>((ch) => supabase.from("clientes").select("id, codigo_cliente, codigo_cliente_eliminado, nombre_razon_social, razon_social, nombre").in("id", ch), ids("cliente_id")),
-    fetchByIds<any>((ch) => supabase.from("comprobantes_venta").select("id, tipo_comprobante, numero_comprobante").in("id", ch), ids("comprobante_id")),
+    fetchByIds<any>((ch) => supabase.from("comprobantes_venta").select("id, tipo_comprobante, numero_comprobante").in("id", ch), compIds),
     fetchByIds<any>((ch) => supabase.from("usuarios").select("id, nombre").in("id", ch), ids("usuario_id")),
   ])
   const cliDe = new Map(clientes.map((c) => [c.id, c]))
@@ -97,6 +109,14 @@ export async function leerCajaAjustes(
         usuario_id: f.usuario_id,
         pago_id: f.pago_id,
         comprobante: cp ? { id: cp.id, tipo: cp.tipo_comprobante, numero: cp.numero_comprobante } : null,
+        cancelados: (canceladosDe.get(f.id) || []).map((x) => {
+          const k = compDe.get(x.comprobante_id)
+          return {
+            comprobante: k ? { id: k.id, tipo: k.tipo_comprobante, numero: k.numero_comprobante } : null,
+            pago_id: x.pago_id,
+            saldo_anterior: Number(x.saldo_anterior) || 0,
+          }
+        }),
       }
     })
     .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
