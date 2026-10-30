@@ -101,6 +101,8 @@ export const PERMISOS = {
   emitir_comprobantes: ["admin", "administrativo"],
   /** Eliminar clientes (P2-02): borra o esconde, según su historial */
   eliminar_clientes: ["admin"],
+  /** Caja de ajustes (P2-03): ver todos los ajustes de plata — solo admin, como Finanzas */
+  caja_ajustes: ["admin"],
 } as const satisfies Record<string, readonly string[]>
 
 export type Permiso = keyof typeof PERMISOS

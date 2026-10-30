@@ -221,8 +221,18 @@ export default function ClientesPage() {
   async function handleDelete(id: string) {
     if (!confirm("¿Eliminar este cliente? Si tiene historial (pedidos, comprobantes) se conserva, pero el cliente deja de aparecer en listas y búsquedas y su código queda libre.")) return
 
-    const res = await fetch(`/api/clientes/${id}`, { method: "DELETE" })
-    const data = await res.json().catch(() => ({}))
+    let res = await fetch(`/api/clientes/${id}`, { method: "DELETE" })
+    let data = await res.json().catch(() => ({}))
+    // P2-02: con saldo se puede eliminar igual asumiendo la deuda (va a la caja de ajustes)
+    if (!res.ok && data.error_code === "CLIENTE_CON_SALDO" && data.puede_asumir) {
+      const saldo = Number(data.saldo) || 0
+      const texto = saldo > 0
+        ? `Tiene deuda de ${moneda(saldo)}.\n\n¿Asumir deuda y eliminarlo de todas formas?\nLa deuda queda en la caja de ajustes y el cliente en $0.`
+        : `Tiene saldo a favor de ${moneda(-saldo)}.\n\n¿Asumir el saldo y eliminarlo de todas formas?\nQueda en la caja de ajustes y el cliente en $0.`
+      if (!confirm(texto)) return
+      res = await fetch(`/api/clientes/${id}?asumir_deuda=1`, { method: "DELETE" })
+      data = await res.json().catch(() => ({}))
+    }
     if (!res.ok) {
       alert(data.error || "No se pudo eliminar el cliente")
       return

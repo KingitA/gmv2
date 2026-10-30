@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
 import { AjustarSaldoDialog, type CuentaAjustable } from "@/components/finanzas/ajustar-saldo-dialog"
 import { NuevoGastoDialog } from "@/components/finanzas/nuevo-gasto-dialog"
+import { CajaAjustesDialog } from "@/components/finanzas/caja-ajustes-dialog"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { cn } from "@/lib/utils"
 import { fecha, fechaCorta, fechaHora, fechaISO, hora, hoyISO, moneda, numero, sumarDiasISO } from "@/lib/formato"
@@ -75,6 +76,9 @@ export default function FinanzasPage() {
   const [nuevoGastoOpen, setNuevoGastoOpen] = useState(false)
   const [graficoOpen, setGraficoOpen] = useState(false)
   const [bolsaAbierta, setBolsaAbierta] = useState(false)
+  // Caja de ajustes (P2-03): solo el saldo acá; el detalle en su diálogo
+  const [ajustesSaldo, setAjustesSaldo] = useState<number | null>(null)
+  const [ajustesOpen, setAjustesOpen] = useState(false)
   const [calKey, setCalKey] = useState(0)
 
   const load = async () => {
@@ -88,6 +92,7 @@ export default function FinanzasPage() {
       fetch("/api/finanzas/proyeccion-retenciones").then(r => r.json()).catch(() => ({ proyeccion: {} })),
       fetch("/api/finanzas/panel").then(r => r.json()).catch(() => null),
     ])
+    fetch("/api/finanzas/caja-ajustes?solo_saldo=1").then(r => (r.ok ? r.json() : null)).then(d => setAjustesSaldo(d ? Number(d.saldo) : null)).catch(() => setAjustesSaldo(null))
     setCuentas((cajasRes.cuentas || []).filter((c: any) => c.cuenta_tipo !== "BILLETERA"))
     setCheques(chequesRes.cheques || [])
     setDepositados(depRes.cheques || [])
@@ -245,6 +250,20 @@ export default function FinanzasPage() {
           {bolsaAbierta && bolsa.map(c => <FilaCuenta key={claveCuenta(c)} c={c} />)}
         </Saldo>
       </div>
+
+      {/* ── Caja de ajustes (P2-03): un número más, sin prioridad; tocándolo, el detalle ── */}
+      {ajustesSaldo != null && (
+        <div className="flex justify-end">
+          <button type="button" onClick={() => setAjustesOpen(true)}
+            title="Redondeos de cobros, sobrantes ajustados, Ajustar saldo y deuda asumida · no suma al disponible"
+            className="inline-flex items-baseline gap-2 rounded-lg border border-neutro-200 bg-white px-3 py-1.5 text-[13px] hover:border-azul-300 hover:bg-azul-50">
+            <span className="font-semibold text-neutro-500">Ajustes</span>
+            <b className={cn("tabular-nums", ajustesSaldo < 0 ? "text-error-600" : "text-neutro-900")}>{moneda(ajustesSaldo, 0)}</b>
+            <span className="text-xs font-semibold text-azul-600">Ver</span>
+          </button>
+        </div>
+      )}
+      <CajaAjustesDialog open={ajustesOpen} onOpenChange={setAjustesOpen} />
 
       {/* ── Lo que hay que pagar: semana + atrasados ── */}
       <CalendarioPagos key={calKey} showCheques conSemana conTipos lateral="atrasados" onDataChanged={load} />

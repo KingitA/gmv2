@@ -12,37 +12,51 @@ import { errorCuit, moneda, normalizarCuit } from "@/lib/formato"
 //  - con historial (comprobantes con o sin CAE, pedidos, cobros…) → se conserva
 //    el historial y el cliente queda escondido de listas y búsquedas, con el
 //    código libre.
-export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+//  - ?asumir_deuda=1 (P2-02 + P2-03): con saldo, la deuda (o el saldo a favor) se
+//    asume: un ajuste lo deja en $0, cae en la caja de ajustes y se elimina igual.
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requirePermiso("eliminar_clientes")
   if (auth.error) return auth.error
   const { id } = await params
 
-  const { data, error } = await createAdminClient().rpc("cliente_eliminar", { p_cliente_id: id, p_usuario_id: auth.user.id })
+  const asumir = request.nextUrl.searchParams.get("asumir_deuda") === "1"
+  const { data, error } = await createAdminClient().rpc("cliente_eliminar", {
+    p_cliente_id: id,
+    p_usuario_id: auth.user.id,
+    ...(asumir ? { p_asumir_deuda: true } : {}),
+  })
   if (error) {
     console.error("[clientes] eliminar:", error)
     return NextResponse.json({ error: `No se pudo eliminar el cliente: ${error.message}` }, { status: 500 })
   }
 
-  const r = data as { resultado: string; saldo?: number; cantidad?: number; codigo?: string | null; con_cae?: boolean }
+  const r = data as { resultado: string; saldo?: number; cantidad?: number; codigo?: string | null; con_cae?: boolean; deuda_asumida?: number }
+  const asumida = Number(r?.deuda_asumida ?? 0)
+  const textoAsumida = Math.abs(asumida) >= 0.01
+    ? ` Se asumió ${asumida > 0 ? "la deuda" : "el saldo a favor"} de ${moneda(Math.abs(asumida))}: quedó en la caja de ajustes.`
+    : ""
   switch (r?.resultado) {
     case "borrado":
-      return NextResponse.json({ success: true, resultado: "borrado", mensaje: "Cliente eliminado." })
+      return NextResponse.json({ success: true, resultado: "borrado", mensaje: `Cliente eliminado.${textoAsumida}` })
     case "escondido":
       return NextResponse.json({
         success: true,
         resultado: "escondido",
-        mensaje: r.con_cae
+        deuda_asumida: asumida,
+        mensaje: (r.con_cae
           ? "Cliente eliminado. Sus facturas con CAE y su historial se conservan; ya no aparece en listas ni búsquedas y su código quedó libre."
-          : "Cliente eliminado. Sus pedidos y comprobantes se conservan como historial; ya no aparece en listas ni búsquedas y su código quedó libre.",
+          : "Cliente eliminado. Sus pedidos y comprobantes se conservan como historial; ya no aparece en listas ni búsquedas y su código quedó libre.") + textoAsumida,
       })
     case "con_saldo": {
       const saldo = Number(r.saldo ?? 0)
+      // La pantalla ofrece "¿Asumir deuda y eliminarlo de todas formas?" (?asumir_deuda=1)
       return NextResponse.json({
         error: saldo > 0
           ? `Tiene deuda de ${moneda(saldo)}: primero hay que saldarla.`
           : `Tiene saldo a favor de ${moneda(-saldo)}: primero hay que devolverlo o aplicarlo.`,
         error_code: "CLIENTE_CON_SALDO",
         saldo,
+        puede_asumir: true,
       }, { status: 409 })
     }
     case "pedidos_en_curso":
