@@ -899,7 +899,10 @@ recorrido Anterior/Siguiente de Modificación de artículos (calculado sobre la 
 - **Cantidad que separaste arranca VACÍA** (29/10, P2-16): `PanelCantidad` con
   `exigirCantidad` no confirma nada (ni el botón ni el segundo escaneo) hasta que el
   operario escribe lo que contó; escribir 0 = faltante (`datos/cantidad.ts`). Nunca volver
-  a precargar lo pedido: así se confirmaba sin contar. Recepción sigue precargando la OC.
+  a precargar lo pedido: así se confirmaba sin contar. Recepción igual desde el 30/10 (v0.4.1):
+  arranca vacía aunque el artículo esté en la OC; 0 = no llegó (el servidor lo deja faltante).
+- **Teclado**: un solo detector, el de core (`useTecladoAbierto` = `useTecladoAbiertoCore`,
+  `ui/teclado.ts`); `Marco` descuenta `--gm-teclado` (0px cuando el WebView ya se achicó).
 - **Reiniciar / Soltar** (29/10, P2-18): botón "⋯ Opciones" en la cabecera del pedido.
   `picking.reiniciar` → `reiniciarPreparacion` (todo a 0 y sin dueño, la sesión sigue) y
   `picking.soltar` → `soltarPedido` (todo a 0, TODAS las sesiones terminadas, el pedido
@@ -1653,6 +1656,29 @@ Queda solo lo no reversible: entradas del log `mobile_cambios` (se purgan a los 
 001584 consumido (salto en la numeración; 001614/001615 se vuelven a usar porque la numeración toma el máximo).
 Nota del dato de prueba: el presupuesto se insertó sin asiento en el libro mayor, por eso el saldo proyectado del
 cliente de prueba se vio en −$ 1.000 mientras el cobro estuvo sin enviar (esperable con ese dato artificial).
+
+### v0.3.7 (29/10/2026): segunda prueba integral de salida (P2-29, P2-31…P2-35, P2-47)
+
+Detalle en `docs/PENDIENTES-APPS-SALIDA.md`, sección "Segunda prueba integral (28/10) — App Chofer". Tests: `packages/core/test/chofer-p2.test.ts`.
+
+- **Pantalla del viaje (P2-35)**: cliente, dirección, bultos (+ pallets), "COBRAR SÍ O SÍ" y "Confirmar parada";
+  arriba, paradas que faltan y plata en mano. El resto vive en la ficha (`Cliente.tsx`). La hoja de resultado
+  y "Reabrir" están en `pantallas/ResultadoParada.tsx` (`useResultadoParada`), y las usan las dos pantallas.
+- **Cobrar no cierra la parada (P2-33)**: el overlay ya no la cierra y `cierreAConservar` desapareció. La parada cobrada queda en
+  "Atendidos, falta confirmar". El servidor todavía la cierra (pendiente de sacar en la ruta del cobro).
+- **Devolución contra su comprobante (P2-29)**: `devolucionAplica` en `datos/cuenta-cobro.ts`.
+- **Reparto al respaldo (P2-31)**: `comprobantes_ref` en la ficha + `textoReparto` (`datos/devolucion-tope.ts`); la pantalla
+  de devolución resuelve el origen de lo que entra desde la ficha.
+- **Cliente agregado (P2-34)**: conserva su cuenta si el sync completo borra su fila.
+- **Datos al día (P2-47/P2-32)**: `datos/frescura.ts` (`mantenerAlDia`, 5 min); cartel solo si el dato tiene más de 15 min.
+- Mock: el cobro no cierra la parada, PRES de respaldo 0002-00000001, reparto de lo devuelto de más y `comprobantes_ref`.
+
+### v0.3.8 (30/10/2026): P2-30 + ícono de "a cobrar"
+
+- **Monto con miles mientras se escribe (P2-30)**: el `MontoInput` de la app usa `CampoMonto` de `@gm/core/ui`.
+- **Lista del viaje**: "A cobrar $…" (total_a_cobrar − cobrado) con un ícono de atención rojo si es mayor a cero.
+- Teclado: lo maneja el core (`instalarTeclado`, `--gm-teclado`); la app no tiene arreglos propios
+  aparte de "Enter cierra el teclado" (`useEnterCierraTeclado`), que el core no hace.
 
 ### Probar sin backend
 `cd mobile && node scripts/fixture-vendedor.mjs` (una vez; solo lectura; el JSON tiene datos reales

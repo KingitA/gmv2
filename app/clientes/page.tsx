@@ -174,6 +174,7 @@ export default function ClientesPage() {
       data = await fetchAllRows(() => supabase
         .from("clientes")
         .select("*, localidades(nombre, zonas(nombre))")
+        .is("eliminado_at", null) // P2-02: los eliminados no aparecen ni en "Inactivos"
         .order("nombre_razon_social"), "id")
     } catch (error) {
       console.error("[v0] Error loading clientes:", error)
@@ -215,18 +216,18 @@ export default function ClientesPage() {
     setListasPrecio(data || [])
   }
 
+  // P2-02: elimina de verdad, en el servidor (sin historial se borra; con historial
+  // queda escondido con el código libre; con saldo o pedidos en curso no se puede)
   async function handleDelete(id: string) {
-    if (!confirm("¿Está seguro de eliminar este cliente?")) return
+    if (!confirm("¿Eliminar este cliente? Si tiene historial (pedidos, comprobantes) se conserva, pero el cliente deja de aparecer en listas y búsquedas y su código queda libre.")) return
 
-    const supabase = createClient()
-    const { error } = await supabase.from("clientes").update({ activo: false }).eq("id", id)
-
-    if (error) {
-      console.error("[v0] Error deleting cliente:", error)
-      alert(`Error al eliminar: ${error.message}`)
+    const res = await fetch(`/api/clientes/${id}`, { method: "DELETE" })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      alert(data.error || "No se pudo eliminar el cliente")
       return
     }
-
+    if (data.mensaje) alert(data.mensaje)
     loadClientes()
   }
 

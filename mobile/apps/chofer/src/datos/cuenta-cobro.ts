@@ -6,7 +6,7 @@
 import { anticiposDeSeleccion, PEDIDO_PREFIX, pedidosContadoAEnviar, pedidosContadoAlAplicarTodo } from "@gm/cobro"
 import { redondear } from "@gm/formato"
 import { origenDesdeComprado, valorDevolucionConOrigen, type CompradoConOrigen, type OrigenDevolucion } from "@gm/vendedor"
-import type { ComprobanteCobro, CuentaCobro, PedidoCobro } from "../datasets"
+import type { ComprobanteCobro, ComprobanteRef, CuentaCobro, PedidoCobro } from "../datasets"
 
 const r2 = (n: number) => redondear(n)
 const TIPOS_BONIFICABLES = ["FA", "FB", "FC", "PRES"]
@@ -27,6 +27,8 @@ export const estadoCuentaVacio = (): EstadoCuenta => ({ sel: {}, contadoPedidos:
 /** Los datos de la réplica que hacen falta para cobrarle a un cliente. */
 export interface DatosCuenta {
   cobro: CuentaCobro
+  /** P2-31: tipo y número de los comprobantes de origen de las devoluciones (ausente = réplica vieja) */
+  comprobantes_ref?: ComprobanteRef[] | null
   devoluciones: Array<{
     id: string
     monto_total: number
@@ -125,10 +127,37 @@ export function agruparCuenta(cobro: CuentaCobro) {
   return { compsPorPedido, sinPedido, pedidosSinFacturar, esSaldado }
 }
 
+/**
+ * P2-29 (28/10, CHEN): la devolución queda atada a SU comprobante (renglón → comprobante_venta_id) y
+ * el servidor imputa el cobro a lo seleccionado. Si se resta en un cobro que no incluye ese
+ * comprobante, el comprobante cobrado queda debiendo lo devuelto. Entonces una devolución resta en
+ * este cobro solo si TODOS sus comprobantes de origen QUE SE PUEDEN COBRAR ACÁ están seleccionados.
+ * Los que no están en la cuenta (ya pagados, o el respaldo 0002-00000001 del "sistema viejo", C8)
+ * no la frenan: lo devuelto contra ellos es crédito. Sin origen por renglón (réplica vieja o
+ * devolución sin comprobante) se resta como antes.
+ */
+export function comprobantesDeDevolucion(d: DatosCuenta["devoluciones"][number]): string[] {
+  const renglones = (d.devoluciones_detalle ?? []).filter((x) => x.estado_renglon !== "rechazado")
+  return [...new Set(renglones.map((x) => x.comprobante_venta_id).filter((x): x is string => !!x))]
+}
+export function devolucionAplica(d: DatosCuenta["devoluciones"][number], sel: Record<string, number>, cobro?: CuentaCobro | null): boolean {
+  const cobrables = cobro ? new Set(cobro.comprobantes.map((c) => c.id)) : null
+  return comprobantesDeDevolucion(d).filter((id) => !cobrables || cobrables.has(id)).every((id) => (sel[id] ?? 0) > 0.005)
+}
+
+/** "PRES 0001-00000028"; el respaldo, "sistema viejo"; uno que no está en la cuenta ni en la réplica, "un comprobante ya pagado". */
+export function etiquetaComprobante(cobro: CuentaCobro, id: string, refs?: ComprobanteRef[] | null): string {
+  const c = cobro.comprobantes.find((x) => x.id === id) ?? refs?.find((x) => x.id === id)
+  if (c?.numero_comprobante === "0002-00000001") return "la devolución del sistema viejo (la revisa la oficina)"
+  return c ? `${c.tipo_comprobante} ${c.numero_comprobante}${cobro.comprobantes.some((x) => x.id === id) ? "" : " (ya pagado)"}` : "un comprobante ya pagado"
+}
+
 export interface ResumenCuenta {
   totalImputado: number
   bonificacionEstimada: number
   devTotal: number
+  /** P2-29: devoluciones pendientes que NO restan en este cobro (su comprobante no está seleccionado) */
+  devNoAplicadas: number
   /** Lo que hay que entregar por este cliente: seleccionado − devoluciones − 10 % + a cuenta */
   totalCobro: number
   haySeleccion: boolean
@@ -143,7 +172,9 @@ export interface ResumenCuenta {
 export function resumenCuenta(datos: DatosCuenta | null | undefined, e: EstadoCuenta): ResumenCuenta {
   const comprobantes = datos?.cobro.comprobantes ?? []
   const dtosHechos = new Set(datos?.cobro.dtos_hechos ?? [])
-  const devPendientes = (datos?.devoluciones ?? []).filter((d) => d.estado === "pendiente")
+  const pendientes = (datos?.devoluciones ?? []).filter((d) => d.estado === "pendiente")
+  // P2-29: solo las devoluciones cuyos comprobantes se cobran acá
+  const devPendientes = pendientes.filter((d) => devolucionAplica(d, e.sel, datos?.cobro))
   let bonificacion = 0
   if (e.contadoGeneral) {
     // #26: lo devuelto en este cobro (sin NC todavía) no lleva el 10 %: sale de la base de su comprobante
@@ -162,6 +193,7 @@ export function resumenCuenta(datos: DatosCuenta | null | undefined, e: EstadoCu
     totalImputado,
     bonificacionEstimada: bonificacion,
     devTotal,
+    devNoAplicadas: pendientes.length - devPendientes.length,
     totalCobro: r2(Math.max(0, r2(totalImputado - devTotal - bonificacion)) + aCuenta),
     haySeleccion: Object.keys(e.sel).length > 0,
     // Imputaciones = solo comprobantes reales. "pedido:<id>" son anticipos → quedan a cuenta.

@@ -21,6 +21,7 @@ export async function clientesConMismoCuit(sb: any, cuit: string | null | undefi
     .from("clientes")
     .select("id, codigo_cliente, nombre, razon_social, localidad, activo")
     .in("cuit", [n, cuitDigitos(n)])
+    .is("eliminado_at", null) // P2-02: un cliente eliminado no cuenta
     .order("activo", { ascending: false })
     .limit(20)
   return ((data || []) as ClienteMismoCuit[]).filter((c) => c.id !== excluirId)

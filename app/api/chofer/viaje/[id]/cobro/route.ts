@@ -327,7 +327,7 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
         valorarDevoluciones(supabase, { clienteId: cliente_id, devolucionIds: devIds }),
         supabase
           .from("devoluciones_detalle")
-          .select("devolucion_id, comprobante_venta_id, estado_renglon, comprobante:comprobantes_venta!devoluciones_detalle_comprobante_venta_id_fkey(tipo_comprobante, numero_comprobante)")
+          .select("devolucion_id, comprobante_venta_id, estado_renglon, comprobante:comprobantes_venta!devoluciones_detalle_comprobante_venta_id_fkey(tipo_comprobante, numero_comprobante, saldo_pendiente, anulado_en)")
           .in("devolucion_id", devIds),
       ])
       // P2-29: cada devolución descuenta solo del comprobante al que pertenece. Si ese
@@ -343,7 +343,12 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
           devolucion_id: r.devolucion_id,
           comprobante_venta_id: r.comprobante_venta_id,
           rechazado: r.estado_renglon === "rechazado",
-          sin_comprobante_cobrable: r.comprobante?.tipo_comprobante === "PRES" && r.comprobante?.numero_comprobante === NUMERO_RESPALDO_DEVOLUCION,
+          // Igual que la app chofer (devolucionAplica): solo atan los orígenes que todavía
+          // se deben; uno ya pagado, anulado o el respaldo 0002-00000001 no frena
+          sin_comprobante_cobrable:
+            (r.comprobante?.tipo_comprobante === "PRES" && r.comprobante?.numero_comprobante === NUMERO_RESPALDO_DEVOLUCION) ||
+            !!r.comprobante?.anulado_en ||
+            Number(r.comprobante?.saldo_pendiente ?? 0) <= 0.005,
         })),
         impsCompletas.map((i) => i.comprobante_id),
       )

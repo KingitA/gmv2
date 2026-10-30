@@ -1,10 +1,15 @@
 // Códigos de cliente, proveedor y SKU de artículo: NUNCA se repiten (regla del dueño,
-// 14/10/2026). Cliente y proveedor: si el código está tomado se bloquea y se sugiere el
-// primer número libre; el alta de un viajante recibe automáticamente el primer libre
-// (ocupados 1, 2, 3, 5, 8 → 4, después 6, 7…). Un código de un cliente dado de baja
-// sigue OCUPADO (lo referencian pedidos y comprobantes viejos).
-// En la base: índice único + trigger que asigna el primer libre si el alta llega sin
-// código (supabase/migrations/20261014_codigos_unicos.sql).
+// 14/10/2026). Si el código está tomado se bloquea y se sugiere otro:
+//  - Cliente: el siguiente al código numérico MÁS ALTO (P2-01, regla de Juan 27/10:
+//    ocupados 1, 2, 3, 5, 90034 → 90035). Nunca se reusa un hueco: podría ser el
+//    código de un cliente del sistema viejo que todavía no se cargó (la apertura
+//    reconoce a los clientes por código). El alta del viajante recibe ese número.
+//  - Proveedor: el primer número libre (ocupados 1, 2, 3, 5, 8 → 4, después 6, 7…).
+// Los códigos no numéricos ("PRUEBA-R1") no cuentan. Un código de un cliente dado de
+// baja sigue OCUPADO (lo referencian pedidos y comprobantes viejos); el de uno
+// eliminado (P2-02) queda libre.
+// En la base: índice único + trigger que asigna el código si el alta llega sin él
+// (supabase/migrations/20261014_codigos_unicos.sql y 20261029b_codigo_cliente_siguiente.sql).
 
 export type EntidadCodigo = "cliente" | "proveedor"
 
@@ -45,8 +50,20 @@ export async function codigosOcupados(sb: any, entidad: EntidadCodigo): Promise<
   return out
 }
 
+/** El siguiente al número más alto (los no numéricos se ignoran). Sin numéricos → "1". */
+export function siguienteAlMayor(ocupados: Iterable<string | null | undefined>): string {
+  let mayor = 0
+  for (const c of ocupados) {
+    const n = normalizarCodigo(c)
+    if (n && /^d{1,12}$/.test(n)) mayor = Math.max(mayor, Number(n))
+  }
+  return String(mayor + 1)
+}
+
+/** Código para un alta: cliente → el más alto + 1; proveedor → el primer libre. */
 export async function siguienteCodigo(sb: any, entidad: EntidadCodigo): Promise<string> {
-  return primerLibre(await codigosOcupados(sb, entidad))
+  const ocupados = await codigosOcupados(sb, entidad)
+  return entidad === "cliente" ? siguienteAlMayor(ocupados) : primerLibre(ocupados)
 }
 
 /** ¿Quién tiene este código? (sin contar `excluirId`, el registro que se está editando) */

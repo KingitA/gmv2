@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.1 (versionCode 12) — 2026-10-30
+
+- Recepcion: la cantidad recibida arranca vacia (hay que contar, 0 = no llego); teclado: usa el detector de core
+
 ## v0.4.0 (versionCode 11) — 2026-10-29
 
 - 2a prueba de salida: cantidad separada arranca vacia (P2-16); teclado no tapa Confirmar/Faltante (P2-17); Reiniciar preparacion y Soltar pedido (P2-18); bultos al finalizar: cargar ahora o despues del control (P2-19)

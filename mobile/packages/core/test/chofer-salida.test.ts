@@ -3,7 +3,7 @@ import type { ItemOutbox } from "../src/db/idb"
 import { TEXTO_ENTREGA_BLOQUEADA } from "@gm/cobro"
 import { estadoCuentaVacio, resumenCuenta, type DatosCuenta } from "../../../apps/chofer/src/datos/cuenta-cobro"
 import { excedenteSistemaViejo, frena, primerExceso, textoExcedente, textoTope, topeDevolucion } from "../../../apps/chofer/src/datos/devolucion-tope"
-import { cierreAConservar, transferenciasDelViaje, viajeVisible } from "../../../apps/chofer/src/datos/overlay"
+import { transferenciasDelViaje, viajeVisible } from "../../../apps/chofer/src/datos/overlay"
 import { avisosParadaReabierta, formatResta, nombreGasto } from "../../../apps/chofer/src/ui"
 import type { ComprobanteCobro, OpCobrar, ParadaHoja, ViajeDetalle } from "../../../apps/chofer/src/datasets"
 
@@ -52,9 +52,9 @@ describe("C1 · bloqueo de entrega (#23)", () => {
     expect(v.paradas[0]).toMatchObject({ estado: "pendiente", entrega_bloqueada: true, cobro_cumplido: false })
   })
 
-  it("cobro sin señal que cubre lo exigido: se habilita la entrega y el cobro cierra la parada", () => {
+  it("cobro sin señal que cubre lo exigido: se habilita la entrega (la confirma el chofer, P2-33)", () => {
     const v = viajeVisible(viaje(parada()), [op("viaje.cobrar", cobro(100000))])
-    expect(v.paradas[0]).toMatchObject({ estado: "entregado", entrega_bloqueada: false, cobro_cumplido: true })
+    expect(v.paradas[0]).toMatchObject({ estado: "pendiente", entrega_bloqueada: false, cobro_cumplido: true })
   })
 
   it("el 10 % contado / ajuste del cobro también cubre lo exigido (#27)", () => {
@@ -69,9 +69,9 @@ describe("C1 · bloqueo de entrega (#23)", () => {
     expect(v.paradas[0]).toMatchObject({ cobro_cumplido: true, entrega_bloqueada: false })
   })
 
-  it("sin bloqueo, el cobro parcial cierra igual (regla del 29/09) y nunca queda bloqueada", () => {
+  it("sin bloqueo, el cobro parcial no cierra (P2-33) y nunca queda bloqueada", () => {
     const v = viajeVisible(viaje(parada({ bloquear_entrega: false, entrega_bloqueada: false })), [op("viaje.cobrar", cobro(1000))])
-    expect(v.paradas[0]).toMatchObject({ estado: "entregado", entrega_bloqueada: false })
+    expect(v.paradas[0]).toMatchObject({ estado: "pendiente", entrega_bloqueada: false })
   })
 
   it("réplica vieja (sin entrega_bloqueada ni descuentos): se deriva igual", () => {
@@ -210,12 +210,6 @@ describe("C7 · anular el cobro de una parada bloqueada la reabre (R4)", () => {
     const d = viaje(cerrada())
     d.viaje.estado = "en_rendicion"
     expect(viajeVisible(d, [anular()]).paradas[0]!.estado).toBe("entregado")
-  })
-  it("cobro local descartado en una bloqueada: el cierre NO se conserva", () => {
-    const c = op("viaje.cobrar", cobro(100000))
-    const v = viajeVisible(viaje(parada()), [c])
-    expect(v.paradas[0]!.estado).toBe("entregado")
-    expect(cierreAConservar(v, "c1", v.paradas[0]!.pagos[0]!.id)).toBeNull()
   })
   it("el aviso del servidor (parada_reabierta + mensaje) se muestra hasta marcarlo visto", () => {
     const it1 = { ...anular(), estado: "enviado" as const, resultado: { parada_reabierta: true, mensaje: "volvió a pendiente" } }

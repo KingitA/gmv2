@@ -8,8 +8,8 @@
 // marca "sin enviar"; una operación rechazada por el servidor NO cuenta (se muestra aparte).
 
 import type { ItemOutbox } from "@gm/core"
-import { cierreDeParadaPorCobro, cobroCumple, efectoAnulacionEnParada } from "@gm/cobro"
-import { moneda, redondear } from "@gm/formato"
+import { cobroCumple, efectoAnulacionEnParada } from "@gm/cobro"
+import { redondear } from "@gm/formato"
 import { claveDelCliente, montoDelPrincipal, repartirMetodos } from "@gm/cobro/conjunto"
 import type {
   BilleteraData, ClienteViajeRow, DineroHoja, MetodoPayload, OpCobrar, OpCobroAnular, OpDevolucion, OpFinalizar, OpGasto, OpIniciar, OpParada,
@@ -85,8 +85,6 @@ export interface ParadaVista extends ParadaHoja {
   resultadoSinEnviar?: boolean
   /** R4/C7: volvió a pendiente porque se anuló (sin enviar) el cobro que la cerró estando bloqueada */
   reabiertaPorAnulacion?: boolean
-  /** La cerró un cobro que todavía no salió del equipo (key de esa operación) */
-  cerradaPorCobro?: string
 }
 export interface ViajeVista extends ViajeDetalle {
   paradas: ParadaVista[]
@@ -200,18 +198,8 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
     }
   }
 
-  // Cobrar CIERRA la parada (misma regla que el servidor, @gm/cobro): un cobro en la cola deja
-  // entregada la parada que estaba pendiente. Se respeta el orden de la cola: si DESPUÉS del
-  // cobro hay un resultado de parada (p. ej. la reabrió), manda ese.
-  for (const { op, p } of cobrosDelViaje(ops, v.id)) {
-    const par = porCliente.get(p.cliente_id)
-    if (!par || yaEnReplica(op, p, clavesServidor)) continue
-    const resultadoPosterior = viv.some((o) => o.tipo === "viaje.parada" && o.seq > op.seq && (o.payload as OpParada).parada_id === par.id)
-    if (resultadoPosterior) continue
-    // Bloqueada sin cubrir lo exigido: el cobro entra pero la parada NO se cierra (#23, = servidor)
-    const cierre = cierreDeParadaPorCobro({ estado: par.estado, bultos: par.bultos, tienePedidos: par.pedidos.length > 0, minimoExigido: par.minimo_exigido, cobrado: par.cobrado, descuentos: par.descuentos_cobro ?? 0, bloqueada: par.bloquear_entrega })
-    if (cierre) Object.assign(par, { ...cierre, motivo_no_entrega: null, resuelto_at: op.capturadoAt, resultadoSinEnviar: true, cerradaPorCobro: op.key })
-  }
+  // P2-33 (Juan 28/10): cobrar NO cierra la parada: la entrega la confirma el chofer ("Confirmar
+  // parada"). Una parada cobrada y sin cerrar queda en "Visitados · falta cerrar la parada".
 
   // R4/C7 (27/10, = servidor): anular el cobro con el que se cerró una parada "NO ENTREGAR SIN
   // COBRAR" la deja sin cubrir lo exigido ⇒ con el viaje en curso vuelve a PENDIENTE (cobrar de
@@ -249,31 +237,6 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
   if (cierrePendiente) estado = "en_rendicion"
 
   return { ...v, viaje: { ...v.viaje, estado }, paradas, dinero, cierrePendiente, inicioPendiente, sinEnviar }
-}
-
-/**
- * Anular un cobro NO reabre la entrega (regla del dueño, 29/09/2026), SALVO en una parada
- * "NO ENTREGAR SIN COBRAR" que sin ese cobro deja de cubrir lo exigido (R4, 27/10): esa vuelve
- * a pendiente, igual que en el servidor (efectoAnulacionEnParada). Pero un cobro que nunca salió del equipo se descarta de la
- * cola, y con él se iría el cierre que produjo: esta función devuelve el resultado de parada
- * que hay que encolar para CONSERVAR el cierre (null si el cierre no dependía de ese cobro).
- */
-export function cierreAConservar(v: ViajeVista, clienteId: string, pagoId: string): OpParada | null {
-  if (!esIdLocal(pagoId)) return null
-  const par = v.paradas.find((p) => p.cliente_id === clienteId)
-  if (!par || par.estado === "pendiente" || par.cerradaPorCobro !== keyDeIdLocal(pagoId)) return null
-  const pago = par.pagos.find((p) => p.id === pagoId)
-  const cobradoSin = r2(par.cobrado - (pago?.monto || 0))
-  // R4/C7: bloqueada y sin ese cobro no cubre lo exigido ⇒ vuelve a pendiente (no se conserva)
-  if (efectoAnulacionEnParada({ estado: par.estado, bloqueada: !!par.bloquear_entrega, minimoExigido: par.minimo_exigido, cobradoSin, descuentos: par.descuentos_cobro ?? 0, viajeEnCurso: true }) === "reabrir") return null
-  return {
-    viaje_id: v.id,
-    parada_id: par.id,
-    cliente_id: clienteId,
-    estado: par.estado,
-    // "Cobrar sí o sí" sin alcanzar el mínimo: el servidor pide el motivo (nunca bloquea)
-    ...(cobradoSin + 0.01 < par.minimo_exigido ? { motivo_no_cobro: `Cobro anulado: quedó cobrado ${moneda(cobradoSin)} de ${moneda(par.minimo_exigido)} exigidos` } : {}),
-  }
 }
 
 /**

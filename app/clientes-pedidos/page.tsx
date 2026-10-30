@@ -987,10 +987,13 @@ export default function ClientesPedidosPage() {
 
       // Cambiar estado a "impreso" vía server action (admin client, bypass RLS)
       try {
-        await marcarPedidoImpreso(pedido.id)
-        setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, estado: "impreso" } : p))
-        setPedidoSeleccionado(prev => prev?.id === pedido.id ? { ...prev, estado: "impreso" } : prev)
-        toast.success("Pedido marcado como impreso")
+        // P2-20: solo pasa a "impreso" si estaba pendiente / en venta
+        const { estado } = await marcarPedidoImpreso(pedido.id)
+        if (estado === "impreso") {
+          setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, estado: "impreso" } : p))
+          setPedidoSeleccionado(prev => prev?.id === pedido.id ? { ...prev, estado: "impreso" } : prev)
+          toast.success("Pedido marcado como impreso")
+        }
       } catch (estadoErr: any) {
         console.error("[imprimir] Error al cambiar estado:", estadoErr)
         toast.error(`No se pudo actualizar el estado: ${estadoErr?.message || "error desconocido"}`)

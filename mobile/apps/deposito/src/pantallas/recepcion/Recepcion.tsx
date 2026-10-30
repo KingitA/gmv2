@@ -447,8 +447,12 @@ export function RecepcionItem() {
         articulo={{ id: articuloId, ...articulo }}
         titulo="Artículo"
         etiquetaInput="Cantidad recibida físicamente:"
-        inicial={enOC ? String(linea!.cantidad_oc) : ""}
+        // Arranca VACÍA aunque esté en la OC (P2-16 llevado a recepción, 30/10): se cuenta, no se confirma la OC
+        inicial=""
+        exigirCantidad
+        ayudaInput="Escribí lo que contaste · 0 = no llegó"
         mostrar={mostrar}
+        resumenTeclado={enOC ? <div style={{ color: C.green, fontSize: 14, fontWeight: 700, marginTop: 2 }}>En OC: {linea!.cantidad_oc}</div> : <div style={{ color: C.red, fontSize: 14, fontWeight: 700, marginTop: 2 }}>⚠ No pedido en esta OC</div>}
         cabecera={
           enOC ? (
             <div style={{ background: C.greenL, border: `1.5px solid ${C.greenB}`, borderRadius: 16, padding: "16px 20px", textAlign: "center" }}>
