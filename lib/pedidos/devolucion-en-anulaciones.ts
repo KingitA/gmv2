@@ -14,8 +14,9 @@ import { repartirDevolucionDeAnulacion } from "./ajuste-devoluciones"
  *  - la comisión la contaba como plata cobrada (lib/comisiones/liquidar.ts).
  * Parte devolución de cada crédito de anulación = lo devuelto del comprobante que
  * anuló (sus NC/REV de devolución + lo que a su vez le llegó así, si ya era
- * refacturado). Va primero a los débitos de ajuste de devoluciones (precio más
- * bajo) y el resto a los comprobantes nuevos (repartirDevolucionDeAnulacion).
+ * refacturado). Va primero a los débitos que neutralizan devoluciones (lo
+ * devuelto de este pedido, que no se vuelve a facturar) y el resto a los
+ * comprobantes nuevos (repartirDevolucionDeAnulacion).
  *
  * `devueltoEtiquetado`: lo devuelto por NC/REV "Devolución …" (lib/cobranzas/devuelto.ts);
  * se recibe por parámetro para no importarse en círculo.

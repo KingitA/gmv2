@@ -3,6 +3,7 @@ import { buildKardexDescuentos } from "./descuentos"
 import { getComisionPorcentaje, calcularComisionMonto } from "@/lib/comisiones/calcular"
 import { nowArgentina } from "@/lib/utils"
 import { cantidadAFacturar } from "@/lib/pedidos/cantidad-a-facturar"
+import { aplicarDevueltoAlDetalle } from "@/lib/pedidos/ajuste-devoluciones-refacturado"
 
 /**
  * Sincroniza el kardex de un pedido con sus renglones (pedidos_detalle).
@@ -201,6 +202,8 @@ export async function sincronizarKardexPedido(
   if (detRes.error) throw new Error(detRes.error.message)
   if (kRes.error) throw new Error(kRes.error.message)
   const detalle: any[] = detRes.data || []
+  // P2-43: refacturado → lo devuelto contra sus comprobantes anulados no se vende de nuevo
+  await aplicarDevueltoAlDetalle(admin, pedidoId, detalle, cantidadAFacturar)
   const kardexRows: any[] = kRes.data || []
   const vend: VendedorComisiones | null = (vendRes as any)?.data ?? null
 

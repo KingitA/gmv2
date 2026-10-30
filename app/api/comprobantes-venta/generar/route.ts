@@ -28,7 +28,7 @@ import { recalcularBonificadosPedido, cuposMercaderiaPedido, etiquetasCupos } fr
 import { leerCondicionesCliente } from "@/lib/pedidos/condiciones-pedido"
 import { estadoAlFacturar } from "@/lib/pedidos/estados"
 import { aplicarPagosDelPedidoRefacturado } from "@/lib/pedidos/refacturar"
-import { ajustarDevolucionesRefacturadas, type ResultadoAjusteDevoluciones } from "@/lib/pedidos/ajuste-devoluciones-refacturado"
+import { aplicarDevueltoAlDetalle, neutralizarDevolucionesRefacturadas, type ResultadoNeutralizacion } from "@/lib/pedidos/ajuste-devoluciones-refacturado"
 import { cuitDigitos, cuitValido, normalizarCuit } from "@/lib/formato"
 import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from "@/lib/comprobantes/numeracion"
 
@@ -281,6 +281,10 @@ async function generarPedido(body: any, auth: { user: { id: string } }) {
     }
 
     const IVA_RATE = 0.21
+
+    // P2-43 (Juan 31/10): pedido refacturado → lo devuelto contra sus comprobantes
+    // anulados NO se vuelve a facturar (cantidadAFacturar ya lo descuenta)
+    await aplicarDevueltoAlDetalle(supabase as any, pedido_id, pedido.detalle, cantidadAFacturar)
 
     const itemsCalculados: ItemCalculado[] = []
     for (const det of pedido.detalle) {
@@ -662,7 +666,7 @@ async function generarPedido(body: any, auth: { user: { id: string } }) {
     // Refacturado (#19/#20, regla del dueño 27/10): si el pedido ya estaba más
     // adelante (listo, en viaje, entregado) se queda donde estaba (estadoAlFacturar).
     let pagosRefacturado: Awaited<ReturnType<typeof aplicarPagosDelPedidoRefacturado>> | null = null
-    let ajusteDevoluciones: ResultadoAjusteDevoluciones | null = null
+    let ajusteDevoluciones: ResultadoNeutralizacion | null = null
     if (comprobantesGenerados.length > 0) {
       const { error: estadoErr } = await supabase
         .from("pedidos").update({ estado: estadoAlFacturar((pedido as any).estado) }).eq("id", pedido_id)
@@ -672,14 +676,13 @@ async function generarPedido(body: any, auth: { user: { id: string } }) {
       // pedido pasa a los nuevos (respeta lo que eligió quien cobró). Lo que estaba
       // a cuenta sigue a cuenta. Best-effort: si falla, queda el aviso.
       const nuevosIds = comprobantesGenerados.map((c: any) => c.id).filter(Boolean)
-      // P2-43 (Juan 31/10): las devoluciones ya acreditadas al precio del
-      // comprobante anulado se recalculan al precio del nuevo; sale la diferencia.
-      // Después del 10 % contado (paso 7): se valúan con el contado como cualquier
-      // devolución de un comprobante bonificado.
+      // P2-43 (Juan 31/10): lo devuelto de este pedido salió del comprobante nuevo;
+      // el crédito de esa devolución se neutraliza con un débito (PRES o ND) que
+      // cubre el crédito de la anulación. Lo devuelto de otros comprobantes queda aparte.
       try {
-        ajusteDevoluciones = await ajustarDevolucionesRefacturadas(supabase, pedido_id, nuevosIds, auth.user.id)
+        ajusteDevoluciones = await neutralizarDevolucionesRefacturadas(supabase as any, pedido_id, auth.user.id)
       } catch (e: any) {
-        ajusteDevoluciones = { emitidos: [], debitosIds: [], textos: [], advertencias: [`No se pudieron recalcular las devoluciones del pedido anterior: ${e?.message || e}. Revisalas a mano.`] }
+        ajusteDevoluciones = { emitidos: [], debitosIds: [], textos: [], advertencias: [`No se pudieron neutralizar las devoluciones del pedido anterior: ${e?.message || e}. Revisalas a mano.`] }
       }
       try {
         pagosRefacturado = await aplicarPagosDelPedidoRefacturado(
