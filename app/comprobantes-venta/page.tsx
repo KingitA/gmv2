@@ -216,7 +216,7 @@ export default function ComprobantesVentaPage() {
           ? `Anulación generada correctamente.\n` +
             `${data.inverso.tipo_comprobante} ${data.inverso.numero}` +
             (data.inverso.cae ? `\nCAE: ${data.inverso.cae}` : '')
-          : 'Comprobante anulado (la NC de la devolución ya lo acreditaba entero: no se emitió nada).') +
+          : 'Comprobante anulado (las devoluciones ya lo cancelaban entero: no se emitió nada).') +
         (data.devoluciones?.length ? `\n\n${data.devoluciones.join('\n')}` : '')
       )
       await cargarComprobantes()

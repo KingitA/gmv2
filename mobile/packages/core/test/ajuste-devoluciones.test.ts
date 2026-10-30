@@ -1,13 +1,12 @@
-// P2-43 (flujo de Juan, 31/10/2026, definitivo): al refacturar, lo devuelto SALE
-// del pedido. La REV de la devolución queda sin efecto; en fiscal la factura se
-// anula por total − NC de devolución (lib/pedidos/ajuste-devoluciones.ts).
+// P2-43 (regla DEFINITIVA de Juan, 31/10/2026): al refacturar, lo devuelto SALE
+// del pedido. Las REV/NC de devolución ya emitidas son intocables: la anulación
+// es por total − devoluciones imputadas (lib/pedidos/ajuste-devoluciones.ts).
 import { describe, expect, it } from "vitest"
 import {
   descontarDevuelto,
-  montoAnulacionFiscal,
+  montoAnulacion,
   parteDevolucionDeAnulacion,
   repartirDevolucionDeAnulacion,
-  revSinEfecto,
   stockAReingresar,
 } from "../../../../lib/pedidos/ajuste-devoluciones"
 
@@ -18,47 +17,74 @@ const detallePedido = [
   { id: "e", articulo_id: "esponja", cantidad: 10 },
 ]
 const devueltas = new Map([["esponja", 10]])
+const presNuevo = () => {
+  const cant = descontarDevuelto(detallePedido, devueltas)
+  return cant.get("t")! * 120 + cant.get("e")! * 12
+}
 
 describe("P2-43 ejemplo de Juan", () => {
-  it("REV de la devolución ya emitida: queda sin efecto; PRES 1.100, REV 1.100, PRES 1.200 → saldo $1.200", () => {
-    const sinEfecto = revSinEfecto(100, 100)
-    expect(sinEfecto).toEqual({ entera: true, parte: 100, queda: 0 })
-    // El PRES nuevo sale sin las esponjas
-    const cant = descontarDevuelto(detallePedido, devueltas)
-    expect(Object.fromEntries(cant)).toEqual({ t: 10, e: 0 })
-    const presNuevo = cant.get("t")! * 120 + cant.get("e")! * 12
-    expect(presNuevo).toBe(1200)
-    // Cuenta: PRES viejo − REV devolución + su asiento revertido − anulación (por el total) + PRES nuevo
-    expect(r2(1100 - 100 + sinEfecto.parte - 1100 + presNuevo)).toBe(1200)
-    // La anulación ya no trae lo devuelto: lo que pasa al nuevo es solo lo pagado
-    expect(parteDevolucionDeAnulacion(0, 1100, 1100)).toBe(0)
-    // Stock: la anulación reingresa los trapos; las esponjas ya volvieron con la devolución
-    expect(stockAReingresar(detallePedido, devueltas)).toEqual([10, 0])
+  it("comprobante nuevo sin lo devuelto: solo trapos a Neco, $1.200", () => {
+    expect(Object.fromEntries(descontarDevuelto(detallePedido, devueltas))).toEqual({ t: 10, e: 0 })
+    expect(presNuevo()).toBe(1200)
   })
 
-  it("devolución todavía pendiente (sin REV): no se emite, sale del pedido igual → saldo $1.200", () => {
-    const cant = descontarDevuelto(detallePedido, devueltas)
-    expect(r2(1100 - 1100 + cant.get("t")! * 120)).toBe(1200)
+  it("CASO 1 — devolución sin REV: anulación por el total $1.100 → saldo $1.200", () => {
+    const anulacion = montoAnulacion(1100, 0)
+    expect(anulacion).toBe(1100)
+    expect(r2(1100 - anulacion + presNuevo())).toBe(1200)
   })
 
-  it("con un pago de $500: la anulación deja a favor solo lo pagado, que pasa al PRES nuevo", () => {
-    // Saldo del PRES viejo: 1.100 − 100 (REV) − 500 = 500; la REV queda sin efecto → 600
-    const saldoViejo = 1100 - 100 - 500 + revSinEfecto(100, 100).parte
-    const aFavor = r2(1100 - saldoViejo) // la REV de anulación (1.100) cruza el saldo; sobra lo pagado
+  it("CASO 2 — REV de devolución $100 ya emitida e intocable: anulación por $1.000 → saldo $1.200", () => {
+    const anulacion = montoAnulacion(1100, 100)
+    expect(anulacion).toBe(1000)
+    expect(r2(1100 - 100 - anulacion + presNuevo())).toBe(1200)
+    // La anulación no trae lo devuelto: lo que pasa al nuevo es solo lo pagado
+    expect(parteDevolucionDeAnulacion(100, 1100, anulacion)).toBe(0)
+  })
+
+  it("CASO 2 con un pago de $500: a favor queda solo lo pagado y pasa al PRES nuevo", () => {
+    const saldoViejo = 1100 - 100 - 500
+    const aFavor = r2(montoAnulacion(1100, 100) - saldoViejo) // la REV de anulación cruza el saldo
     expect(aFavor).toBe(500)
-    expect(r2(1200 - aFavor)).toBe(700)
+    expect(r2(presNuevo() - aFavor)).toBe(700)
   })
 
-  it("se devolvió TODO: anulación total, REV sin efecto, ningún comprobante nuevo → saldo $0", () => {
-    const cant = descontarDevuelto(detallePedido, new Map([["trapo", 10], ["esponja", 10]]))
-    expect([...cant.values()].every((c) => c === 0)).toBe(true)
-    expect(r2(1100 - 1100 + revSinEfecto(1100, 1100).parte - 1100)).toBe(0)
+  it("stock: la anulación reingresa los trapos; las esponjas ya volvieron con la devolución", () => {
+    expect(stockAReingresar(detallePedido, devueltas)).toEqual([10, 0])
   })
 })
 
-describe("P2-43 devolución mezclada y bonificada", () => {
-  it("REV de $150 (100 de este pedido + 50 del sistema viejo): queda acreditada solo por $50", () => {
-    expect(revSinEfecto(-150, 100)).toEqual({ entera: false, parte: 100, queda: 50 })
+describe("P2-43 fiscal", () => {
+  it("CASO 2 — FA $1.100 con NC de devolución $100 → NC de anulación por $1.000, sin ND", () => {
+    expect(montoAnulacion(1100, 100)).toBe(1000)
+    expect(r2(1100 - 100 - 1000 + 1200)).toBe(1200)
+  })
+})
+
+describe("P2-43 todo devuelto", () => {
+  const todo = new Map([["trapo", 10], ["esponja", 10]])
+  it("no queda nada para el comprobante nuevo", () => {
+    expect([...descontarDevuelto(detallePedido, todo).values()].every((c) => c === 0)).toBe(true)
+    expect(stockAReingresar(detallePedido, todo)).toEqual([0, 0])
+  })
+  it("CASO 1: anulación total, devolución cerrada sin emitir → $0", () => {
+    expect(r2(1100 - montoAnulacion(1100, 0))).toBe(0)
+  })
+  it("CASO 2: la REV de devolución ya canceló todo → anulación sin inverso → $0", () => {
+    expect(montoAnulacion(1100, 1100)).toBe(0)
+    expect(r2(1100 - 1100 - montoAnulacion(1100, 1100))).toBe(0)
+  })
+})
+
+describe("P2-43 mixtas, parciales y bonificadas", () => {
+  it("REV de $150 (100 de este PRES + 50 imputados al respaldo): solo resta lo imputado a ESTE comprobante", () => {
+    // P2-41 imputó 100 a este PRES y 50 al respaldo 0002-00000001: la REV no se toca
+    expect(montoAnulacion(1100, 100)).toBe(1000)
+  })
+
+  it("una devolución con renglones en los dos casos: cada comprobante resta solo lo suyo", () => {
+    // Renglón contra el PRES A (con REV emitida) y renglón contra el PRES B (sin REV): A se anula por total − REV, B por el total
+    expect([montoAnulacion(600, 60), montoAnulacion(500, 0)]).toEqual([540, 500])
   })
 
   it("devolución parcial: se factura lo que el cliente se quedó", () => {
@@ -71,22 +97,6 @@ describe("P2-43 devolución mezclada y bonificada", () => {
       new Map([["a", 3]]),
     )
     expect(Object.fromEntries(cant)).toEqual({ regalo: 2, cobrado: 7 })
-  })
-})
-
-describe("P2-43 fiscal (NC con CAE no se deja sin efecto)", () => {
-  it("FA $1.100 con NC de devolución $100 → NC de anulación por $1.000, sin ND", () => {
-    expect(montoAnulacionFiscal(1100, 100)).toBe(1000)
-    // FA − NC devolución − NC anulación + FA nueva
-    expect(r2(1100 - 100 - montoAnulacionFiscal(1100, 100) + 1200)).toBe(1200)
-  })
-
-  it("si la NC de la devolución cubre toda la factura, no hay nada que anular en ARCA", () => {
-    expect(montoAnulacionFiscal(1100, 1100)).toBe(0)
-  })
-
-  it("la anulación por total − NC no trae devolución al comprobante nuevo", () => {
-    expect(parteDevolucionDeAnulacion(100, 1100, 1000)).toBe(0)
   })
 })
 

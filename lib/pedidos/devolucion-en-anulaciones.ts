@@ -5,9 +5,8 @@ import { parteDevolucionDeAnulacion, repartirDevolucionDeAnulacion } from "./aju
  * P2-43 — Lo DEVUELTO que llega a un comprobante refacturado dentro de la NC/REV
  * de anulación (no como pago).
  *
- * Con el flujo de Juan (31/10) la anulación ya no trae devoluciones: antes de
- * anular, la REV de la devolución de ese comprobante queda sin efecto, y en
- * fiscal la factura se anula por total − NC de devolución. Pero un comprobante
+ * Con la regla de Juan (31/10) la anulación ya no trae devoluciones: es por
+ * total − REV/NC de devolución imputadas (que quedan como están). Pero un comprobante
  * anulado por el TOTAL con la devolución imputada (refacturado antes de este
  * cambio) deja en su anulación lo pagado MÁS lo devuelto; esa parte devolución:
  *  - cuenta en la base del 10 % contado del comprobante nuevo (devueltoPorComprobante);

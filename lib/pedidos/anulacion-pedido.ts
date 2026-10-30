@@ -131,5 +131,24 @@ export async function evaluarAnulacionPedido(supabase: any, pedidoId: string): P
     parte_pedido: partes.get(c.id)?.pedido,
     parte_otros: partes.get(c.id)?.otros,
   }))
-  return { ...reglaAnulacionPedido(pedido.estado, comprobantes), estado: pedido.estado }
+  const regla = reglaAnulacionPedido(pedido.estado, comprobantes)
+  // P2-43 (Juan 31/10): una devolución que depósito todavía no revisó no se puede
+  // aplicar (no se sabe qué volvió ni si es vendible): primero se revisa.
+  if (regla.puede && propiosIds.size) {
+    const { data: pend } = await supabase
+      .from("devoluciones_detalle")
+      .select("devolucion:devoluciones!inner(numero_devolucion, estado)")
+      .in("comprobante_venta_id", [...propiosIds])
+      .eq("devolucion.estado", "pendiente")
+    const numeros = [...new Set((pend || []).map((d: any) => (Array.isArray(d.devolucion) ? d.devolucion[0] : d.devolucion)?.numero_devolucion).filter(Boolean))]
+    if (numeros.length) {
+      return {
+        puede: false,
+        motivo: `Depósito todavía no revisó ${numeros.length === 1 ? "la devolución" : "las devoluciones"} ${numeros.join(", ")} de este pedido. Revisala en Revisión de devoluciones y después refacturá.`,
+        aAnular: [],
+        estado: pedido.estado,
+      }
+    }
+  }
+  return { ...regla, estado: pedido.estado }
 }

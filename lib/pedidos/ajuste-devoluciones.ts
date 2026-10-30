@@ -1,17 +1,18 @@
-// P2-43 — Devoluciones de un pedido que se REFACTURA (flujo de Juan, 31/10/2026, definitivo).
+// P2-43 — Devoluciones de un pedido que se REFACTURA (regla DEFINITIVA de Juan, 31/10/2026).
+// Las REV/NC de devolución se emiten cuando la mercadería entra al depósito y son
+// INTOCABLES. Si el comprobante está cobrado al 100 %, no se refactura.
 // Ejemplo: PRES $1.100 (10 trapos × $100 + 10 esponjas × $10); devuelve las
-// esponjas (REV −$100). Al refacturar a Neco (+20 %):
-//  - REV de anulación por $1.100 (los dos artículos), como siempre;
-//  - las esponjas SALEN del pedido: la REV de la devolución queda SIN EFECTO
-//    (anulada, imputaciones liberadas y asiento revertido), sin documento nuevo;
-//    la devolución queda "aplicada en la refacturación del pedido N";
-//  - PRES nuevo solo con los trapos: $1.200. Saldo $1.200.
-// Lo que ve el cliente: PRES 1.100, REV 1.100, PRES 1.200.
-//  - Devolución mezclada con otros comprobantes o el sistema viejo: la parte de
-//    este pedido se aplica igual; lo demás queda acreditado en su NC/REV.
-//  - FISCAL: una NC con CAE no se puede dejar sin efecto. La factura se anula
-//    por lo que falta acreditar (total − NC de devolución imputada), sin ND.
-//  - Devolución aceptada todavía sin REV/NC: no se emite; se aplica igual.
+// esponjas. Se refactura a Neco (+20 %):
+//  CASO 1 — la devolución todavía no tiene REV/NC: anulación por el TOTAL
+//    ($1.100), PRES nuevo sin lo devuelto ($1.200), la devolución se cierra sin
+//    emitir ("aplicada en la refacturación"). Saldo 1.100 − 1.100 + 1.200 = $1.200.
+//  CASO 2 — ya tiene su REV/NC (−$100) imputada al comprobante: la REV/NC queda
+//    como está; la anulación es solo por lo que falta cancelar ($1.100 − $100 =
+//    $1.000; fiscal igual: NC de anulación por $1.000, sin ND); PRES nuevo sin lo
+//    devuelto ($1.200). Saldo 1.100 − 100 − 1.000 + 1.200 = $1.200.
+//  Mixtas: la parte de otros comprobantes o del sistema viejo ya está imputada a
+//  esos otros comprobantes (P2-41): no entra en la cuenta de este.
+//  Todo devuelto: sin comprobante nuevo → $0.
 // Parte pura (sin base), compartida con los tests. La parte con base está en
 // lib/pedidos/ajuste-devoluciones-refacturado.ts.
 
@@ -44,7 +45,7 @@ export function descontarDevuelto(
 /**
  * Cuánto stock reingresa la anulación de un comprobante: lo que salió MENOS lo
  * devuelto (la devolución ya reingresó lo vendible; lo no vendible no vuelve a
- * stock). Devuelve índice de renglón → cantidad a reingresar.
+ * stock; la que depósito no revisó no llega acá). Devuelve índice de renglón → cantidad a reingresar.
  */
 export function stockAReingresar(detalle: Array<{ articulo_id: string | null; cantidad: number }>, devuelto: Map<string, number>): number[] {
   const resto = new Map(devuelto)
@@ -58,27 +59,15 @@ export function stockAReingresar(detalle: Array<{ articulo_id: string | null; ca
   })
 }
 
-/**
- * Qué hacer con la REV (presupuesto) de una devolución al refacturar: su parte de
- * este pedido queda sin efecto. `parte` = lo que vale lo devuelto de este pedido.
- * Total → se anula entera; si no, queda acreditada solo por lo de otros orígenes.
- */
-export function revSinEfecto(totalRev: number, parte: number): { entera: boolean; parte: number; queda: number } {
-  const total = r2(Math.abs(totalRev))
-  const p = r2(Math.min(total, Math.max(0, parte)))
-  const queda = r2(total - p)
-  return { entera: queda < 0.01, parte: queda < 0.01 ? total : p, queda: queda < 0.01 ? 0 : queda }
-}
-
-/** FISCAL: la factura se anula por lo que falta acreditar (total − NC de devolución imputada a ella). */
-export function montoAnulacionFiscal(totalFactura: number, ncDevolucionImputada: number): number {
-  return r2(Math.max(0, Math.abs(totalFactura) - Math.max(0, ncDevolucionImputada)))
+/** Caso 2: el comprobante se anula por lo que falta cancelar (total − REV/NC de devolución imputadas a él). 0 = no hay inverso. */
+export function montoAnulacion(total: number, devolucionesImputadas: number): number {
+  return r2(Math.max(0, Math.abs(total) - Math.max(0, devolucionesImputadas)))
 }
 
 /**
- * Cuánto de una NC/REV de ANULACIÓN es devolución y no pago. Con el flujo de
- * Juan la anulación ya no trae devoluciones (la REV de la devolución queda sin
- * efecto; en fiscal la anulación es por total − NC), así que da 0. Queda para
+ * Cuánto de una NC/REV de ANULACIÓN es devolución y no pago. Con la regla de
+ * Juan la anulación ya no trae devoluciones (es por total − devoluciones
+ * imputadas), así que da 0. Queda para
  * los comprobantes refacturados antes (anulación por el total con la devolución
  * imputada: lo que le sobró incluía lo devuelto).
  *   devuelto: NC/REV de devolución vivas imputadas al comprobante anulado

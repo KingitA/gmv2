@@ -12,9 +12,9 @@
 // Solo créditos de ANULACIONES del mismo pedido; las NC/REV de devoluciones y
 // del 10 % contado tienen su propio circuito.
 //
-// P2-43 (Juan 31/10): al anular, la REV de la devolución del comprobante queda
-// sin efecto (en fiscal, la anulación es por total − NC): este crédito trae solo
-// lo pagado, y lo devuelto no se vuelve a facturar.
+// P2-43 (Juan 31/10): la anulación es por total − REV/NC de devolución ya
+// imputadas (esas quedan como están): este crédito trae solo lo pagado, y lo
+// devuelto no se vuelve a facturar.
 
 const CREDITOS = ["NCA", "NCB", "NCC", "REV"]
 const r2 = (n: number) => Math.round(n * 100) / 100
