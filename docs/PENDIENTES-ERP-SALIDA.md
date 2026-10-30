@@ -505,9 +505,13 @@ Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 - Base (en `20261029d_condicion_entrega.sql`): `clientes.flete_pago` y `pedidos.flete_pago` = `origen` / `destino`, solo con "transporte" (si no, vacío); el pedido nuevo lo copia del cliente. `PATCH /api/clientes/[id]` y `/api/vendedor/cliente/[id]` lo aceptan.
 - **Falta (Frontend):** en la ficha / alta del cliente (`app/clientes/[id]/page.tsx`), cuando la forma de entrega es "Envío por transporte", un selector "Flete: en origen (lo pagamos nosotros) / en destino (lo paga el cliente)" que guarde `flete_pago`. Si se quiere en el remito o la hoja de ruta, va aparte.
 
+**Pantalla hecha (30/10, rama `frontend-p2`, 9ba14ad):** en la ficha / alta del cliente, con "Envío por transporte" aparece "Flete: En origen (lo pagamos nosotros) / En destino (lo paga el cliente)" y guarda `flete_pago` (null si la entrega no es transporte).
+
 ### P2-08 — Retener entregas desde la ficha del cliente · Dueño: Frontend
 
 **Visto por Juan (28/10):** "retener entregas" (`clientes.retener_entregas`, `retener_motivo`) solo se puede marcar desde Viajes o desde Jarvis; en el alta y en la ficha del cliente no está. Tiene que poder marcarse y desmarcarse desde la ficha (con el motivo), con el mismo efecto que hoy (`lib/viajes/retencion.ts`).
+
+**Hecho (30/10, rama `frontend-p2`, 9ba14ad):** en la ficha del cliente (no en el alta), campo "Retener entregas": botón Retener con motivo obligatorio / Liberar. Va por `POST /api/clientes/[id]/retencion` (permiso de oficina: admin/administrativo) que usa `retenerCliente` / `liberarCliente` de `lib/viajes/retencion.ts` (bloquea o destraba las paradas de viajes armados). No pasa por el Guardar de la ficha.
 
 ### P2-09 — Dos campos distintos para "retira en el depósito" · Dueño: Cambios general · a verificar
 
@@ -519,6 +523,8 @@ En el alta, "Retira en Mostrador" guarda `condicion_entrega = 'retira_mostrador'
 ### P2-10 — El alta de cliente no limpia el nombre · Dueño: Frontend · baja
 
 PRUEBA 2 quedó guardado como "PRUEBA 2 " (con espacio al final) y PRUEBA 1 en minúsculas ("prueba1"). El alta debería sacar los espacios de los costados (y, si es la regla de la casa, pasar a mayúsculas como el resto de los clientes).
+
+**Hecho (30/10, rama `frontend-p2`, 9ba14ad):** `lib/clientes/nombre-cliente.ts` (`limpiarNombreCliente`: sin espacios de más y en MAYÚSCULAS, como 604 de los 625 clientes). Se aplica en el alta de la ficha del ERP, en `POST /api/clientes` y en `POST /api/vendedor/clientes` (alta desde la app vendedor). Al editar un cliente existente solo se sacan los espacios (no se le cambian las mayúsculas).
 
 ### P2-15 — Pedidos "en revisión" no se ven en /clientes-pedidos · Dueño: Frontend
 
@@ -554,6 +560,8 @@ Entre el 27/10 15:19 y el 28/10 11:40, los pedidos reales **001945, 001956 y 001
 - `generar`: candado por pedido (dos "Generar" del mismo pedido a la vez → el segundo recibe "ya se está facturando").
 - **Facturar varios:** `POST /api/comprobantes-venta/generar-lote` `{ pedido_ids: [...] }` (hasta 30): factura uno atrás del otro con el mismo circuito que "Generar" y devuelve qué salió y qué no. **Falta el botón "Facturar" en `/clientes-pedidos` (Frontend).**
 - Probado en una base local descartable: 5 máquinas × 20 PRES a la vez → 100 números distintos y correlativos; 30 FA simultáneas con ARCA simulado → sin repetidos ni huecos; turno colgado se libera solo; el índice frena repetidos. Nada probado en producción ni emitido en ARCA.
+
+**Botón hecho (30/10, rama `frontend-p2`, 9ba14ad):** con pedidos tildados en `/clientes-pedidos`, "Facturar" (al lado de Crear viaje) abre una confirmación con la cantidad, avisa cuáles no están en Pendiente Facturación (se intentan igual) y frena si son más de 30. Llama a `generar-lote` y muestra pedido por pedido qué comprobantes salieron o el motivo del error (`components/pedidos/FacturarVariosDialog.tsx`).
 
 ### P2-21 — "Guardar pedido" tiene que volver a donde estaba · Dueño: Frontend
 
