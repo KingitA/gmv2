@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.8 (versionCode 17) — 2026-10-30
+
+- La devolución se descuenta solo si se cobra su comprobante (dice contra cuál va); nombre del cliente nuevo en mayúsculas; teclado detectado aunque la app arranque con él abierto
+
 ## v0.4.7 (versionCode 16) — 2026-10-29
 
 - Cantidad sin apretar +; catálogo limpio en cada pedido; botones de pedido terminado; el 10% contado nunca como saldo a favor (A pagar); montos con puntos de miles al escribir; el teclado no tapa los campos; sincronización frenada con la base cargada
