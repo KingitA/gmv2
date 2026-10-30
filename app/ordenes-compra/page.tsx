@@ -325,6 +325,9 @@ function DetalleOrdenDialog({ orden, onClose }: { orden: OrdenCompra; onClose: (
   )
 }
 
+// Columnas del artículo que usa la orden de compra (sin vectores ni campos que no se muestran)
+const COLS_ARTICULO_OC = "id, descripcion, sku, ean13, unidades_por_bulto, precio_compra, descuento1, descuento2, descuento3, descuento4"
+
 export default function OrdenesCompraPage() {
   const supabase = createClient()
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([])
@@ -406,9 +409,10 @@ export default function OrdenesCompraPage() {
       return
     }
 
+    // Solo lo que usa la tabla: con * venían los vectores de búsqueda (~10 MB, P2-49)
     const { data } = await supabase
       .from("articulos")
-      .select("*")
+      .select(COLS_ARTICULO_OC)
       .eq("activo", true)
       .eq("proveedor_id", proveedorId)
       .order("descripcion")
@@ -555,7 +559,7 @@ export default function OrdenesCompraPage() {
       .from("ordenes_compra_detalle")
       .select(`
         *,
-        articulo:articulos(*)
+        articulo:articulos(${COLS_ARTICULO_OC})
       `)
       .eq("orden_compra_id", orden.id)
 

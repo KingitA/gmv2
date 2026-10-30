@@ -21,6 +21,8 @@ const NUM = { fontVariantNumeric: "tabular-nums" } as const
 
 interface ChequeFisico {
   key: string
+  /** El papel: un cheque compartido entre varios clientes es UN papel con un detalle por cobro (P2-36) */
+  papel: string
   pago_id: string
   cliente: string
   banco: string
@@ -139,6 +141,7 @@ export function ControlarRendicion({
               soloDigital = false
               fisicos.push({
                 key: d.id,
+                papel: d.cheque_id || (d.numero_cheque ? `${d.banco}|${d.numero_cheque}|${d.cuit_emisor ?? ""}|${d.fecha_cheque ?? ""}` : d.id),
                 pago_id: p.id,
                 cliente,
                 banco: d.banco ?? "—",
@@ -208,8 +211,15 @@ export function ControlarRendicion({
     }
   }
 
-  const chequesOk = cheques.filter((c) => checks[c.key])
-  const chequesFaltantes = cheques.filter((c) => !checks[c.key])
+  // P2-36: se muestra (y se tilda) por papel; un cheque compartido es una sola fila repartida
+  const papeles = [...cheques.reduce((m, c) => {
+    const g = m.get(c.papel) || { papel: c.papel, banco: c.banco, numero: c.numero, vencimiento: c.vencimiento, total: 0, partes: [] as ChequeFisico[] }
+    g.total = redondear(g.total + c.monto)
+    g.partes.push(c)
+    return m.set(c.papel, g)
+  }, new Map<string, { papel: string; banco: string; numero: string; vencimiento: string | null; total: number; partes: ChequeFisico[] }>()).values()]
+  const papelTildado = (g: (typeof papeles)[number]) => g.partes.every((c) => checks[c.key])
+  const chequesFaltantes = papeles.filter((g) => !papelTildado(g))
   const [fondos, setFondos] = useState(0)
   const [gastos, setGastos] = useState(0)
   const [retiros, setRetiros] = useState(0)
@@ -432,26 +442,33 @@ export function ControlarRendicion({
                   Cheques en el sobre — tildá los que están
                 </div>
                 <div className="mt-1.5 flex flex-col gap-1.5">
-                  {cheques.map((c) => (
+                  {papeles.map((g) => (
                     <label
-                      key={c.key}
+                      key={g.papel}
                       className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
-                        checks[c.key] ? "border-green-300 bg-green-50" : "border-slate-200 bg-slate-50"
+                        papelTildado(g) ? "border-green-300 bg-green-50" : "border-slate-200 bg-slate-50"
                       }`}
                     >
                       <input
                         type="checkbox"
-                        checked={!!checks[c.key]}
-                        onChange={(e) => setChecks((prev) => ({ ...prev, [c.key]: e.target.checked }))}
+                        checked={papelTildado(g)}
+                        onChange={(e) => setChecks((prev) => ({ ...prev, ...Object.fromEntries(g.partes.map((c) => [c.key, e.target.checked])) }))}
                         className="h-4 w-4"
                       />
-                      <span className="flex-1 min-w-0 truncate">
-                        📄 {c.banco} {c.numero}
-                        {c.vencimiento ? ` · venc ${fecha(c.vencimiento)}` : ""} ·{" "}
-                        <span className="text-slate-500">{c.cliente}</span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate">
+                          📄 {g.banco} {g.numero}
+                          {g.vencimiento ? ` · venc ${fecha(g.vencimiento)}` : ""}
+                          {g.partes.length === 1 && <> · <span className="text-slate-500">{g.partes[0].cliente}</span></>}
+                        </span>
+                        {g.partes.length > 1 && (
+                          <span className="block truncate text-xs text-slate-500" title="Un solo cheque que paga a varios clientes">
+                            Compartido: {g.partes.map((c) => `${c.cliente} ${moneda(c.monto)}`).join(" · ")}
+                          </span>
+                        )}
                       </span>
                       <span className="font-semibold" style={NUM}>
-                        {moneda(c.monto)}
+                        {moneda(g.total)}
                       </span>
                     </label>
                   ))}

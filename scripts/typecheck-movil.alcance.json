@@ -150,6 +150,7 @@
     "components/pedidos/AnularComprobantesDialog.tsx",
     "components/pedidos/FacturarVariosDialog.tsx",
     "lib/clientes/nombre-cliente.ts",
+    "lib/comprobantes/estado-pago-vista.ts",
     "components/clientes/retener-entregas.tsx",
     "app/api/clientes/[id]/retencion/route.ts",
     "app/api/finanzas/tablero/route.ts",

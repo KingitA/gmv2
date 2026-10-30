@@ -141,6 +141,7 @@ export function ReviewPedidoDialog({
                   <TableHead className="w-[55%]">Artículo</TableHead>
                   <TableHead className="w-[100px] text-center">Cant.</TableHead>
                   <TableHead className="w-[100px] text-center">Confianza</TableHead>
+                  <TableHead className="w-10"><span className="sr-only">Quitar</span></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -224,6 +225,14 @@ export function ReviewPedidoDialog({
                       <Badge variant="secondary" className={`${getConfidenceColor(item.confidence)} text-white border-0`}>
                         {item.confidence}
                       </Badge>
+                    </TableCell>
+                    {/* P2-45: sacar el renglón del pedido (sobre todo los LOW) */}
+                    <TableCell className="px-1 text-center">
+                      <button type="button" title="Quitar este renglón del pedido" aria-label="Quitar renglón"
+                        className="rounded p-1 text-muted-foreground hover:bg-red-100 hover:text-destructive"
+                        onClick={() => { setSearchingIdx(null); setItems(prev => prev.filter((_, i) => i !== idx)) }}>
+                        <X className="h-4 w-4" />
+                      </button>
                     </TableCell>
                   </TableRow>
                 ))}

@@ -20,6 +20,7 @@ import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { InputMonto } from "@/components/ui/input-monto"
 import { DateInputAR } from "@/components/ui/date-input-ar"
 import { formatCuit, moneda } from "@/lib/formato"
+import { esNotaContado, vistaEstadoPago } from "@/lib/comprobantes/estado-pago-vista"
 
 const TIPO_INVERSO_LABEL: Record<string, string> = {
   FA: 'Nota de Crédito A', FB: 'Nota de Crédito B',
@@ -38,6 +39,7 @@ type Comprobante = {
   total_factura: number
   saldo_pendiente: number
   estado_pago: string
+  observaciones?: string | null
   anulado_en: string | null
   pdf_url: string | null
   clientes?: {
@@ -90,10 +92,13 @@ const ESTADOS_PAGO: Record<string, { label: string; color: string }> = {
   pendiente: { label: "Pendiente", color: "bg-yellow-500" },
   parcial: { label: "Parcial", color: "bg-blue-500" },
   pagado: { label: "Pagado", color: "bg-green-500" },
+  aplicada: { label: "Aplicada", color: "bg-slate-500" },
 }
 
 export default function ComprobantesVentaPage() {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
+  // P2-23: imputaciones de las notas del 10 % contado (para no mostrar el 10 % como pago)
+  const [contado, setContado] = useState<{ porDebito: Record<string, number>; aplicadaA: Record<string, string[]> }>({ porDebito: {}, aplicadaA: {} })
   const [pedidosSinFacturar, setPedidosSinFacturar] = useState<Pedido[]>([])
   const [busqueda, setBusqueda] = useState("")
   const [filtroTipo, setFiltroTipo] = useState<string>("todos")
@@ -235,6 +240,7 @@ export default function ComprobantesVentaPage() {
         .order("fecha", { ascending: false })
         .order("numero_comprobante", { ascending: false }), "id")
       setComprobantes(data || [])
+      cargarContado(data || []).catch(() => {})
 
       // Remitos indexados por comprobante (solo activos: los anulados no se ofrecen)
       const { data: remitosData } = await supabase
@@ -251,6 +257,27 @@ export default function ComprobantesVentaPage() {
       setCargando(false)
     }
   }
+
+  const cargarContado = async (comps: Comprobante[]) => {
+    const notas = comps.filter((c) => !c.anulado_en && esNotaContado(c)).map((c) => c.id)
+    const numeroDe = new Map(comps.map((c) => [c.id, `${c.tipo_comprobante} ${c.numero_comprobante}`]))
+    const porDebito: Record<string, number> = {}
+    const aplicadaA: Record<string, string[]> = {}
+    for (let i = 0; i < notas.length; i += 100) {
+      const { data: imps } = await supabase
+        .from("imputaciones")
+        .select("comprobante_id, credito_comprobante_id, monto_imputado")
+        .in("credito_comprobante_id", notas.slice(i, i + 100))
+        .neq("estado", "anulado")
+      for (const imp of (imps || []) as any[]) {
+        porDebito[imp.comprobante_id] = (porDebito[imp.comprobante_id] || 0) + (Number(imp.monto_imputado) || 0)
+        const n = numeroDe.get(imp.comprobante_id)
+        if (n) (aplicadaA[imp.credito_comprobante_id] ||= []).push(n)
+      }
+    }
+    setContado({ porDebito, aplicadaA })
+  }
+  const vistaPago = (c: Comprobante) => vistaEstadoPago(c, contado.porDebito[c.id] || 0, contado.aplicadaA[c.id] || [])
 
   const cargarPedidosSinFacturar = async () => {
     try {
@@ -344,7 +371,7 @@ export default function ComprobantesVentaPage() {
     )
 
     const coincideTipo = filtroTipo === "todos" || comp.tipo_comprobante === filtroTipo
-    const coincideEstado = filtroEstado === "todos" || comp.estado_pago === filtroEstado
+    const coincideEstado = filtroEstado === "todos" || vistaPago(comp).estado === filtroEstado
 
     return coincideBusqueda && coincideTipo && coincideEstado
   })
@@ -477,6 +504,7 @@ export default function ComprobantesVentaPage() {
             <SelectItem value="pendiente">Pendiente</SelectItem>
             <SelectItem value="parcial">Parcial</SelectItem>
             <SelectItem value="pagado">Pagado</SelectItem>
+            <SelectItem value="aplicada">Aplicada (10 % contado)</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -536,9 +564,17 @@ export default function ComprobantesVentaPage() {
                     <TableCell className="text-right font-medium">{moneda(comp.total_factura)}</TableCell>
                     <TableCell className="text-right">{moneda(comp.saldo_pendiente)}</TableCell>
                     <TableCell>
-                      <Badge className={`${ESTADOS_PAGO[comp.estado_pago]?.color} text-white`}>
-                        {ESTADOS_PAGO[comp.estado_pago]?.label}
-                      </Badge>
+                      {(() => {
+                        const v = vistaPago(comp)
+                        return (
+                          <div className="flex flex-col gap-0.5">
+                            <Badge className={`${ESTADOS_PAGO[v.estado]?.color} text-white w-fit`} title={v.nota || undefined}>
+                              {ESTADOS_PAGO[v.estado]?.label}
+                            </Badge>
+                            {v.nota && <span className="text-[11px] text-muted-foreground">{v.nota}</span>}
+                          </div>
+                        )
+                      })()}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-1 justify-end">

@@ -862,7 +862,8 @@ export default function ClienteDetailPage() {
                   <p className="text-xs font-medium text-neutro-500">{ccBalance > 0 ? "Nos debe" : ccBalance < 0 ? "A favor del cliente" : "Al día"}</p>
                   {ccProyectado !== null && Math.abs(ccProyectado - ccBalance) > 0.009 && (
                     <p className="mt-2 text-xs text-neutro-600">
-                      Proyectado: <b className="tabular-nums">{ccProyectado < 0 ? "a favor " : ""}{moneda(Math.abs(ccProyectado), 0)}</b>
+                      {/* P2-23: con deuda real, un proyectado negativo (el 10 % contado) no es "a favor": se ve $0 */}
+                      Proyectado: <b className="tabular-nums">{ccProyectado < 0 && ccBalance <= 0 ? "a favor " : ""}{moneda(ccProyectado < 0 && ccBalance > 0 ? 0 : Math.abs(ccProyectado), 0)}</b>
                       <span className="block text-neutro-400">si se confirma lo pendiente (cobros y devoluciones)</span>
                     </p>
                   )}
