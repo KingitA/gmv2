@@ -18,7 +18,7 @@ import {
 } from "@/lib/deposito/articulos"
 import { cambiarEstadoArticulos } from "@/lib/articulos/estado"
 import { confirmarDevolucion, revisarDevolucion, type ItemDevolucionConfirmado, type RenglonRevision } from "@/lib/deposito/devoluciones"
-import { abrirPicking, aplicarPickingItem, cerrarPicking, ErrorDeposito } from "@/lib/deposito/picking"
+import { abrirPicking, aplicarPickingItem, cerrarPicking, ErrorDeposito, reiniciarPreparacion, soltarPedido } from "@/lib/deposito/picking"
 import { getUsuarioActual } from "@/lib/deposito/preparadores"
 import {
   aplicarItemRecepcion,
@@ -115,12 +115,43 @@ const pickingItem: HandlerDef<PayloadPickingItem> = {
   },
 }
 
-const pickingCerrar: HandlerDef<{ pedido_id: string }> = {
+/** Bultos / pallets: ausente = no se cargan (quedan para después del control, P2-19). */
+const cantidadCarga = (v: unknown) => v === undefined || (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 9999)
+
+const pickingCerrar: HandlerDef<{ pedido_id: string; bultos?: number; pallets?: number }> = {
   tipo: "picking.cerrar",
+  roles: ROLES,
+  validar: (p) =>
+    !esId(p?.pedido_id) ? "Pedido inválido" : !cantidadCarga(p.bultos) || !cantidadCarga(p.pallets) ? "Bultos o pallets inválidos (entero de 0 a 9999)" : null,
+  async aplicar(ctx, m) {
+    const { pedido_id, bultos, pallets } = m.payload
+    const r = await negocio(() => cerrarPicking(ctx.supabase, pedido_id, { bultos, pallets }))
+    return { ...r, replica: [await parchePedido(ctx, pedido_id)] }
+  },
+}
+
+/** Quién pide reiniciar/soltar: el usuario del dispositivo; admin salta la regla de la sesión (P2-18). */
+// Mismo nombre que queda en picking_items (getUsuarioActual: tabla usuarios > email).
+const quienPide = async (ctx: CtxOutbox) => ({ usuario: await getUsuarioActual(ctx.supabase), esAdmin: ctx.sesion.roles.includes("admin") })
+
+/** "Reiniciar preparación": todo lo separado a cero, la sesión sigue abierta. Idempotente. */
+const pickingReiniciar: HandlerDef<{ pedido_id: string }> = {
+  tipo: "picking.reiniciar",
   roles: ROLES,
   validar: (p) => (esId(p?.pedido_id) ? null : "Pedido inválido"),
   async aplicar(ctx, m) {
-    const r = await negocio(() => cerrarPicking(ctx.supabase, m.payload.pedido_id))
+    const r = await negocio(async () => reiniciarPreparacion(ctx.supabase, m.payload.pedido_id, await quienPide(ctx)))
+    return { ...r, replica: [await parchePedido(ctx, m.payload.pedido_id)] }
+  },
+}
+
+/** "Soltar pedido": vuelve a la cola sin sesiones y con el estado de antes. Idempotente. */
+const pickingSoltar: HandlerDef<{ pedido_id: string }> = {
+  tipo: "picking.soltar",
+  roles: ROLES,
+  validar: (p) => (esId(p?.pedido_id) ? null : "Pedido inválido"),
+  async aplicar(ctx, m) {
+    const r = await negocio(async () => soltarPedido(ctx.supabase, m.payload.pedido_id, await quienPide(ctx)))
     return { ...r, replica: [await parchePedido(ctx, m.payload.pedido_id)] }
   },
 }
@@ -407,6 +438,8 @@ export const HANDLERS_DEPOSITO: HandlerDef[] = [
   pickingAbrir,
   pickingItem,
   pickingCerrar,
+  pickingReiniciar,
+  pickingSoltar,
   recepcionIniciar,
   recepcionConformidad,
   recepcionItem,

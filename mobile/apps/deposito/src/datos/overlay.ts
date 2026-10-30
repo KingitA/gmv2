@@ -52,6 +52,18 @@ export function vistaPedido(p: PedidoDeposito, ops: ItemOutbox[]): PedidoVista {
     }
     if (!enCola(op)) continue
     if (op.tipo === "picking.cerrar") cierrePendiente = true
+    // Reiniciar / soltar (P2-18): todo lo separado hasta acá vuelve a cero y sin dueño.
+    // Los bonificados no se recalculan (igual que el servidor): esperan al próximo renglón.
+    if (op.tipo === "picking.reiniciar" || op.tipo === "picking.soltar") {
+      for (const d of detalle) {
+        d.cantidad_preparada = 0
+        d.estado_item = "PENDIENTE"
+        delete preparadores[d.id]
+        sinEnviar.add(d.id)
+      }
+      recalcular = false
+      continue
+    }
     if (op.tipo !== "picking.item") continue
     const x = op.payload as OpPickingItem
     const d = porId.get(x.pedido_detalle_id)

@@ -22,7 +22,10 @@ export function usePicking(pedido: PedidoVista | null, mostrar: (m: string, t?: 
   // Paridad con la web: abrir el pedido lo deja "en preparación" (una vez)
   useEffect(() => {
     if (!pedido || pedido.cierrePendiente || pedido.estado === "en_preparacion" || abiertosEstaSesion.has(pedido.id)) return
-    if (ops.some((o) => o.tipo === "picking.abrir" && (o.payload as { pedido_id: string }).pedido_id === pedido.id)) return
+    const delPedido = ops.filter((o) => (o.payload as { pedido_id?: string })?.pedido_id === pedido.id)
+    if (delPedido.some((o) => o.tipo === "picking.abrir")) return
+    // Recién soltado y sin enviar: no se vuelve a abrir solo (el primer renglón que se marque lo abre)
+    if (delPedido.some((o) => o.tipo === "picking.soltar")) return
     abiertosEstaSesion.add(pedido.id)
     void encolar("picking.abrir", { pedido_id: pedido.id }, `Abrir pedido ${pedido.numero_pedido}`)
   }, [pedido, ops, encolar])
@@ -69,12 +72,28 @@ export function usePicking(pedido: PedidoVista | null, mostrar: (m: string, t?: 
     [pedido, indice, yo, mostrar],
   )
 
+  /** Renglones que preparó OTRA persona: con eso, reiniciar o soltar es cosa de un admin (P2-18). */
+  const deOtros = pedido ? [...new Set(pedido.pedidos_detalle.map((d) => tomadoPorOtro(pedido, d.id, yo)).filter((x): x is string => !!x))] : []
+
+  /** "Reiniciar preparación": todo a cero, sigo yo con el pedido abierto. */
+  const reiniciar = useCallback(async () => {
+    if (!pedido) return
+    await encolar("picking.reiniciar", { pedido_id: pedido.id }, `Reiniciar preparación ${pedido.numero_pedido}`)
+  }, [pedido, encolar])
+
+  /** "Soltar pedido": vuelve a la cola sin sesión. Abrirlo de nuevo lo vuelve a tomar. */
+  const soltar = useCallback(async () => {
+    if (!pedido) return
+    abiertosEstaSesion.delete(pedido.id)
+    await encolar("picking.soltar", { pedido_id: pedido.id }, `Soltar pedido ${pedido.numero_pedido}`)
+  }, [pedido, encolar])
+
   const abrirItem = useCallback(
     (det: DetallePedido, opts: { replace?: boolean } = {}) => pedido && navigate(`/preparar/${pedido.id}/item/${det.id}`, { replace: opts.replace }),
     [pedido, navigate],
   )
 
-  return { yo, marcar, resolverCodigo, abrirItem }
+  return { yo, marcar, resolverCodigo, abrirItem, reiniciar, soltar, deOtros }
 }
 
 /**

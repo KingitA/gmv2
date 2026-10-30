@@ -896,6 +896,23 @@ recorrido Anterior/Siguiente de Modificación de artículos (calculado sobre la 
   cambiando solo `pedidos.estado`. Deja cada renglón PENDIENTE, en 0 y sin dueño en
   `picking_items`; si no, el pedido se ve "Listo" y los renglones quedan trabados a nombre
   de quien los preparó (índice único). La app no cambia: le llega como un pendiente más.
+- **Cantidad que separaste arranca VACÍA** (29/10, P2-16): `PanelCantidad` con
+  `exigirCantidad` no confirma nada (ni el botón ni el segundo escaneo) hasta que el
+  operario escribe lo que contó; escribir 0 = faltante (`datos/cantidad.ts`). Nunca volver
+  a precargar lo pedido: así se confirmaba sin contar. Recepción sigue precargando la OC.
+- **Reiniciar / Soltar** (29/10, P2-18): botón "⋯ Opciones" en la cabecera del pedido.
+  `picking.reiniciar` → `reiniciarPreparacion` (todo a 0 y sin dueño, la sesión sigue) y
+  `picking.soltar` → `soltarPedido` (todo a 0, TODAS las sesiones terminadas, el pedido
+  vuelve al estado de antes: `pedidos.estado_antes_preparacion`, que guarda
+  `abrirPicking`; sin la migración 20261029_deposito_soltar_pedido.sql vuelve a
+  "pendiente"). Puede el que tiene la sesión (o cualquiera si nadie la tiene); con
+  renglones de OTRA persona, solo admin (409 `renglones_de_otro` / `sin_sesion`). Los
+  dos idempotentes; el overlay deja todo pendiente al instante, sin señal.
+- **Bultos al finalizar** (29/10, P2-19): siempre se abre "Finalizar la preparación":
+  "Cargar bultos" (bultos y pallets viajan en `picking.cerrar` y `cerrarPicking` los graba
+  en la MISMA escritura que el estado) o "Dejar para después del control" (no manda
+  bultos: no se pisa lo que haya; la oficina los carga en el viaje, #22). Sin la columna
+  `pallets` graba solo los bultos.
 
 ### Renglón del artículo y ficha (22/09/2026, pedido del dueño tras el primer uso)
 **Problema:** la descripción iba en UNA línea a 22 px y se cortaba a los ~14 caracteres:

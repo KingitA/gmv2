@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.0 (versionCode 11) — 2026-10-29
+
+- 2a prueba de salida: cantidad separada arranca vacia (P2-16); teclado no tapa Confirmar/Faltante (P2-17); Reiniciar preparacion y Soltar pedido (P2-18); bultos al finalizar: cargar ahora o despues del control (P2-19)
+
 ## v0.3.2 (versionCode 10) — 2026-10-27
 
 - Login con nombre de usuario o mail (T1); incluye v0.3.1 (Buscar con teclado abierto, 'sin enviar' en una linea)

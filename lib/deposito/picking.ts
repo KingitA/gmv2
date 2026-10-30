@@ -55,9 +55,7 @@ export async function abrirPicking(supabase: any, pedido_id: string, usuarioDado
   // cada uno con su sesión.
   const usuario = usuarioDado ?? (await getUsuarioActual(supabase))
   await getOCrearSesion(supabase, pedido_id, usuario)
-  if (pedido.estado !== "en_preparacion") {
-    await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido_id)
-  }
+  if (pedido.estado !== "en_preparacion") await pasarAEnPreparacion(supabase, pedido)
 
   // Quién preparó cada renglón (para mostrar badges y bloquear los tomados por otro)
   const preparadores = await getPreparadoresPedido(supabase, pedido_id)
@@ -171,7 +169,7 @@ export async function aplicarPickingItem(supabase: any, args: ArgsPickingItem, u
 
   // Primer renglón marcado sin haber "abierto" el pedido (app offline): queda en preparación
   if (pedido && pedido.estado !== "en_preparacion" && ESTADOS_PREPARABLES.includes(pedido.estado) && estado_item !== "PENDIENTE") {
-    await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido.id)
+    await pasarAEnPreparacion(supabase, pedido)
   }
 
   // Recalcular en vivo las cantidades bonificadas según lo realmente preparado
@@ -181,6 +179,136 @@ export async function aplicarPickingItem(supabase: any, args: ArgsPickingItem, u
   }
 
   return { ...data, bonificados_actualizados, preparado_por }
+}
+
+// ─── Estado de antes de preparar (P2-18 "Soltar pedido") ─────────────────────
+// `pedidos.estado_antes_preparacion` llega con 20261029_deposito_soltar_pedido.sql.
+// Hasta que se aplique, todo anda igual sin ella (soltar vuelve a "pendiente").
+
+const SIN_COLUMNA_ESTADO_ANTES = /estado_antes_preparacion/i
+const ESTADOS_DE_COLA = ["pendiente", "impreso"]
+
+/** Pasa el pedido a "en preparación" recordando de dónde venía (pendiente / impreso). */
+async function pasarAEnPreparacion(supabase: any, pedido: { id: string; estado: string }) {
+  const { error } = await supabase
+    .from("pedidos")
+    .update({ estado: "en_preparacion", estado_antes_preparacion: pedido.estado })
+    .eq("id", pedido.id)
+  if (error && SIN_COLUMNA_ESTADO_ANTES.test(error.message)) {
+    await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido.id)
+  }
+}
+
+export interface QuienPide {
+  usuario?: UsuarioDeposito
+  /** admin: puede reiniciar o soltar aunque no tenga la sesión o haya renglones de otros */
+  esAdmin?: boolean
+}
+
+const esMismaPersona = (u: UsuarioDeposito, r: { usuario_id: string | null; nombre?: string; email?: string | null }) =>
+  u.id && r.usuario_id ? r.usuario_id === u.id : r.email ? r.email === u.email : r.nombre === u.nombre
+
+/**
+ * Quién puede reiniciar o soltar (P2-18): el que tiene la sesión abierta en el pedido
+ * (o cualquiera si nadie la tiene) y, si hay renglones preparados por OTRA persona,
+ * solo un admin: no se le borra el trabajo a un compañero desde otro equipo.
+ */
+async function controlarQuienPide(supabase: any, pedido: { id: string; numero_pedido: string }, usuario: UsuarioDeposito, esAdmin: boolean) {
+  const { data: sesiones, error: sErr } = await supabase
+    .from("picking_sesiones")
+    .select("id, usuario_id, usuario_email")
+    .eq("pedido_id", pedido.id)
+    .eq("estado", "EN_PROGRESO")
+  if (sErr) throw sErr
+  const { data: items, error: iErr } = await supabase
+    .from("picking_items")
+    .select("usuario_id, usuario_nombre, pedidos_detalle!inner(pedido_id)")
+    .eq("pedidos_detalle.pedido_id", pedido.id)
+  if (iErr) throw iErr
+  const abiertas = (sesiones || []) as Array<{ usuario_id: string | null; usuario_email: string | null }>
+  if (esAdmin) return { sesiones: abiertas.length }
+
+  const mia = abiertas.some((s) => esMismaPersona(usuario, { usuario_id: s.usuario_id, email: s.usuario_email }))
+  if (abiertas.length > 0 && !mia) {
+    const quien = [...new Set(abiertas.map((s) => (s.usuario_email || "otro operario").split("@")[0]))].join(", ")
+    throw new ErrorDeposito(`El pedido ${pedido.numero_pedido} lo tiene abierto ${quien}: lo puede soltar esa persona o un administrador.`, 409, { codigo: "sin_sesion" })
+  }
+  const deOtros = [...new Set(((items || []) as Array<{ usuario_id: string | null; usuario_nombre: string }>)
+    .filter((r) => !esMismaPersona(usuario, { usuario_id: r.usuario_id, nombre: r.usuario_nombre }))
+    .map((r) => r.usuario_nombre))]
+  if (deOtros.length) {
+    throw new ErrorDeposito(`Hay artículos preparados por ${deOtros.join(", ")}: los tiene que devolver esa persona o lo reinicia un administrador.`, 409, { codigo: "renglones_de_otro" })
+  }
+  return { sesiones: abiertas.length }
+}
+
+/** Todos los renglones del pedido a cero, PENDIENTE y sin dueño (como "devolver a pendiente" en cada uno). */
+async function renglonesACero(supabase: any, pedido_id: string) {
+  const { data: renglones, error: rErr } = await supabase.from("pedidos_detalle").select("id").eq("pedido_id", pedido_id)
+  if (rErr) throw rErr
+  const ids = ((renglones || []) as Array<{ id: string }>).map((r) => r.id)
+  if (!ids.length) return 0
+  const { error: dErr } = await supabase.from("pedidos_detalle").update({ cantidad_preparada: 0, estado_item: "PENDIENTE" }).eq("pedido_id", pedido_id)
+  if (dErr) throw dErr
+  const { error: pErr } = await supabase.from("picking_items").delete().in("pedido_detalle_id", ids)
+  if (pErr) throw pErr
+  return ids.length
+}
+
+/**
+ * "Reiniciar preparación" (app Depósito, P2-18): vuelve a cero todo lo separado y la
+ * sesión de quien lo pide queda abierta (sigue preparando desde cero). Idempotente.
+ * Los bonificados se recalculan con el primer renglón que se marque (como en #17).
+ */
+export async function reiniciarPreparacion(supabase: any, pedido_id: string, quien: QuienPide = {}) {
+  if (!pedido_id) throw new ErrorDeposito("pedido_id requerido", 400)
+  const { data: pedido } = await supabase.from("pedidos").select("id, numero_pedido, estado").eq("id", pedido_id).maybeSingle()
+  if (!pedido) throw new ErrorDeposito("Pedido no encontrado", 404)
+  if (!ESTADOS_PREPARABLES.includes(pedido.estado)) {
+    throw new ErrorDeposito(`El pedido ${pedido.numero_pedido} ya no está en preparación (${pedido.estado}): no se reinició.`, 409, { codigo: "pedido_cerrado" })
+  }
+  const usuario = quien.usuario ?? (await getUsuarioActual(supabase))
+  await controlarQuienPide(supabase, pedido, usuario, !!quien.esAdmin)
+
+  const renglones = await renglonesACero(supabase, pedido_id)
+  await getOCrearSesion(supabase, pedido_id, usuario)
+  if (pedido.estado !== "en_preparacion") await pasarAEnPreparacion(supabase, pedido)
+  return { ok: true, renglones }
+}
+
+/**
+ * "Soltar pedido" (app Depósito, P2-18): el pedido vuelve a la cola como si nadie lo
+ * hubiera abierto: renglones a cero, TODAS las sesiones terminadas y el estado de antes
+ * (impreso / pendiente). Caso real: 001945 quedó "en preparación" a nombre de Juan sin
+ * nada escaneado y no había cómo liberarlo. Idempotente: si ya está en la cola sin
+ * sesiones abiertas, no hace nada.
+ */
+export async function soltarPedido(supabase: any, pedido_id: string, quien: QuienPide = {}) {
+  if (!pedido_id) throw new ErrorDeposito("pedido_id requerido", 400)
+  // select("*"): funciona con o sin la columna estado_antes_preparacion
+  const { data: pedido } = await supabase.from("pedidos").select("*").eq("id", pedido_id).maybeSingle()
+  if (!pedido) throw new ErrorDeposito("Pedido no encontrado", 404)
+  if (!ESTADOS_PREPARABLES.includes(pedido.estado)) {
+    throw new ErrorDeposito(`El pedido ${pedido.numero_pedido} ya no está en preparación (${pedido.estado}): no se soltó.`, 409, { codigo: "pedido_cerrado" })
+  }
+  const usuario = quien.usuario ?? (await getUsuarioActual(supabase))
+  const { sesiones } = await controlarQuienPide(supabase, pedido, usuario, !!quien.esAdmin)
+  if (sesiones === 0 && ESTADOS_DE_COLA.includes(pedido.estado)) return { ok: true, ya_estaba: true, estado: pedido.estado }
+
+  const renglones = await renglonesACero(supabase, pedido_id)
+  await supabase.from("picking_sesiones").update({ estado: "TERMINADO", fin_at: nowArgentina() }).eq("pedido_id", pedido_id).eq("estado", "EN_PROGRESO")
+
+  const estado = ESTADOS_DE_COLA.includes(pedido.estado)
+    ? pedido.estado
+    : ESTADOS_DE_COLA.includes(pedido.estado_antes_preparacion) ? pedido.estado_antes_preparacion : "pendiente"
+  if (estado !== pedido.estado) {
+    const { error } = await supabase.from("pedidos").update({ estado, estado_antes_preparacion: null }).eq("id", pedido_id).eq("estado", pedido.estado)
+    if (error && SIN_COLUMNA_ESTADO_ANTES.test(error.message)) {
+      const { error: e2 } = await supabase.from("pedidos").update({ estado }).eq("id", pedido_id).eq("estado", pedido.estado)
+      if (e2) throw e2
+    } else if (error) throw error
+  }
+  return { ok: true, renglones, estado }
 }
 
 /**
@@ -235,8 +363,31 @@ export async function reiniciarPicking(supabase: any, pedido_id: string, estadoN
   return { ok: true, renglones: ids.length }
 }
 
+/**
+ * Bultos y pallets cargados al finalizar (P2-19). Sin carga = "dejar para después del
+ * control": la oficina los carga al armar el viaje (#22, PATCH /api/viajes/[id]/pedidos).
+ */
+export interface CargaPedido {
+  bultos?: number
+  pallets?: number
+}
+
+/** Escribe estado (si viene) + bultos/pallets; sin la columna pallets (20261026) graba sin ella. */
+async function actualizarConCarga(supabase: any, pedido_id: string, cambios: Record<string, unknown>, carga: CargaPedido) {
+  const fila: Record<string, unknown> = { ...cambios }
+  if (carga.bultos !== undefined) fila.bultos = carga.bultos
+  if (carga.pallets !== undefined) fila.pallets = carga.pallets
+  if (!Object.keys(fila).length) return
+  const { error } = await supabase.from("pedidos").update(fila).eq("id", pedido_id)
+  if (error && "pallets" in fila && /pallets/i.test(error.message)) {
+    delete fila.pallets
+    const { error: e2 } = await supabase.from("pedidos").update(fila).eq("id", pedido_id)
+    if (e2) throw e2
+  } else if (error) throw error
+}
+
 /** Finaliza la preparación (POST /api/deposito/picking/item). Idempotente: cerrar dos veces = una. */
-export async function cerrarPicking(supabase: any, pedido_id: string) {
+export async function cerrarPicking(supabase: any, pedido_id: string, carga: CargaPedido = {}) {
   if (!pedido_id) throw new ErrorDeposito("pedido_id requerido", 400)
 
   const { data: pedido } = await supabase.from("pedidos").select("id, estado").eq("id", pedido_id).maybeSingle()
@@ -247,6 +398,8 @@ export async function cerrarPicking(supabase: any, pedido_id: string) {
     if (pedido.estado === "eliminado" || pedido.estado === "cancelado" || pedido.estado === "anulado") {
       throw new ErrorDeposito(`El pedido está ${pedido.estado}: no se puede cerrar la preparación.`, 409, { codigo: "pedido_no_preparable" })
     }
+    // Lo cerró otro equipo sin bultos y este los trae: se guardan mientras no salió del depósito
+    if (pedido.estado === "pendiente_facturacion") await actualizarConCarga(supabase, pedido_id, {}, carga)
     const { resumen } = await getPreparadoresPedido(supabase, pedido_id)
     return { ok: true, ya_cerrado: true, preparadores: resumen }
   }
@@ -261,7 +414,8 @@ export async function cerrarPicking(supabase: any, pedido_id: string) {
   const pendientes = (items || []).filter((i: any) => !i.estado_item || i.estado_item === "PENDIENTE").length
   if (pendientes > 0) throw new ErrorDeposito(`Quedan ${pendientes} artículos sin resolver`, 400, { codigo: "renglones_pendientes" })
 
-  await supabase.from("pedidos").update({ estado: "pendiente_facturacion" }).eq("id", pedido_id)
+  // Estado y bultos en la misma escritura: un reintento nunca deja uno sin el otro
+  await actualizarConCarga(supabase, pedido_id, { estado: "pendiente_facturacion" }, carga)
 
   // Cerrar TODAS las sesiones de picking del pedido (una por persona)
   await supabase
