@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { marcaAjuste } from "@/lib/cobranzas/ajuste"
-import { baseTopeAjuste, normalizarAnticipos, pedidosContadoValidos, resolverAjuste } from "@/lib/cobranzas/reglas-cobro"
+import { baseTopeAjuste, devolucionesFueraDelCobro, normalizarAnticipos, pedidosContadoValidos, resolverAjuste } from "@/lib/cobranzas/reglas-cobro"
 import { asentarCobroEnBilletera } from "@/lib/cobranzas/billetera-chofer"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { esTripulante } from "@/lib/viajes/chofer"
@@ -13,6 +13,7 @@ import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendi
 import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
 import { controlarContadoDuplicado } from "@/lib/cobranzas/contado-duplicado"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
+import { NUMERO_RESPALDO_DEVOLUCION } from "@/lib/cobranzas/respaldo-devolucion"
 import { claveDelCliente, montoDelPrincipal, repartirMetodos, validarCobroConjunto } from "@/lib/cobranzas/cobro-conjunto"
 import { anularCobranza } from "@/lib/actions/cobranzas"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -320,11 +321,43 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
     const devolucionesADescontar: Array<{ devolucion_id: string; monto: number }> = []
     if (Array.isArray(devolucion_ids) && devolucion_ids.length) {
       const devIds = [...new Set(devolucion_ids as string[])]
-      const [{ data: devs }, { data: usados }, valores] = await Promise.all([
-        supabase.from("devoluciones").select("id, cliente_id, estado, monto_total").in("id", devIds),
+      const [{ data: devs }, { data: usados }, valores, { data: renglonesDev }] = await Promise.all([
+        supabase.from("devoluciones").select("id, cliente_id, estado, monto_total, numero_devolucion").in("id", devIds),
         supabase.from("devoluciones_descuentos").select("devolucion_id, monto").in("devolucion_id", devIds),
         valorarDevoluciones(supabase, { clienteId: cliente_id, devolucionIds: devIds }),
+        supabase
+          .from("devoluciones_detalle")
+          .select("devolucion_id, comprobante_venta_id, estado_renglon, comprobante:comprobantes_venta!devoluciones_detalle_comprobante_venta_id_fkey(tipo_comprobante, numero_comprobante, saldo_pendiente, anulado_en)")
+          .in("devolucion_id", devIds),
       ])
+      // P2-29: cada devolución descuenta solo del comprobante al que pertenece. Si ese
+      // comprobante no está entre los que se cobran, rechazo definitivo (422: la app no
+      // reintenta) — antes se restaba de otro y ese quedaba debiendo lo devuelto.
+      const compDe = new Map<string, string>()
+      for (const r of renglonesDev || []) {
+        const c: any = (r as any).comprobante
+        if (r.comprobante_venta_id && c) compDe.set(r.comprobante_venta_id, `${c.tipo_comprobante} ${c.numero_comprobante}`)
+      }
+      const fuera = devolucionesFueraDelCobro(
+        (renglonesDev || []).map((r: any) => ({
+          devolucion_id: r.devolucion_id,
+          comprobante_venta_id: r.comprobante_venta_id,
+          rechazado: r.estado_renglon === "rechazado",
+          // Igual que la app chofer (devolucionAplica): solo atan los orígenes que todavía
+          // se deben; uno ya pagado, anulado o el respaldo 0002-00000001 no frena
+          sin_comprobante_cobrable:
+            (r.comprobante?.tipo_comprobante === "PRES" && r.comprobante?.numero_comprobante === NUMERO_RESPALDO_DEVOLUCION) ||
+            !!r.comprobante?.anulado_en ||
+            Number(r.comprobante?.saldo_pendiente ?? 0) <= 0.005,
+        })),
+        impsCompletas.map((i) => i.comprobante_id),
+      )
+      if (fuera.size) {
+        const numDe = new Map((devs || []).map((d: any) => [d.id, d.numero_devolucion || "la devolución"]))
+        const detalle = [...fuera].map(([devId, comps]) => `${numDe.get(devId)} es de ${comps.map((c) => compDe.get(c) || "otro comprobante").join(", ")}`).join("; ")
+        const msg = `La devolución solo se descuenta del comprobante al que pertenece: ${detalle}. Cobrá ese comprobante o sacá la devolución de este cobro.`
+        return NextResponse.json({ error: msg, mensaje: msg, codigo: "DEVOLUCION_OTRO_COMPROBANTE", reintentable: false }, { status: 422 })
+      }
       const devMap = new Map((devs || []).map((d: any) => [d.id, d]))
       const usadoPorDev = new Map<string, number>()
       for (const u of usados || [])

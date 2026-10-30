@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { getSaldosClientes, saldoDeParada, valorDevolucionesDeViaje } from "@/lib/cuenta-corriente/saldo"
+import { creditosAplicadosA, getSaldosClientes, saldoDeParada, valorDevolucionesDeViaje } from "@/lib/cuenta-corriente/saldo"
 import { palletsDePedidos } from "./bultos"
 import { fechaCorta, sumarDiasISO } from "@/lib/formato"
 
@@ -20,7 +20,7 @@ export interface PedidoHoja {
   /** #22: pallets (además de los bultos) */
   pallets: number
   vendedor: string
-  comprobantes: Array<{ id: string; tipo: string; numero: string; total: number; saldo: number }>
+  comprobantes: Array<{ id: string; tipo: string; numero: string; total: number; creditos: number; saldo: number }>
   remitos: Array<{ id: string; tipo_remito: string; numero_remito: string; estado_pdf: string }>
 }
 
@@ -265,6 +265,8 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
   ])
   const clienteMap = new Map((clientes || []).map((c: any) => [c.id, c]))
 
+  // P2-28: créditos ya aplicados a cada comprobante (10 % contado, NC de devolución)
+  const creditosDe = await creditosAplicadosA(supabase, (comprobantes || []).map((c: any) => c.id))
   const compsPorPedido = new Map<string, any[]>()
   for (const c of comprobantes || []) {
     if (!compsPorPedido.has(c.pedido_id)) compsPorPedido.set(c.pedido_id, [])
@@ -333,6 +335,8 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
         tipo: x.tipo_comprobante,
         numero: numeroVisible(x.punto_venta, x.numero_comprobante),
         total: Number(x.total_factura) || 0,
+        // NC/REV ya aplicadas (10 % contado, devoluciones): lo que se cobra es total − esto
+        creditos: creditosDe.get(x.id) ?? 0,
         saldo: Number(x.saldo_pendiente) || 0,
       })),
       remitos: (remitosPorPedido.get(p.id) || []).map((x) => ({
@@ -341,9 +345,10 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     }))
 
     // Lo de ESTE viaje: si el pedido ya está facturado manda el comprobante
-    // (incluye percepciones); si no, el total del pedido.
+    // (incluye percepciones) MENOS los créditos ya aplicados (P2-28: la REV del
+    // 10 % contado ya emitida no se vuelve a cobrar); si no, el total del pedido.
     const totalViaje = r2(
-      pedidosHoja.reduce((s, p) => s + (p.comprobantes.length ? p.comprobantes.reduce((x, k) => x + k.total, 0) : p.total), 0),
+      pedidosHoja.reduce((s, p) => s + (p.comprobantes.length ? p.comprobantes.reduce((x, k) => x + k.total - k.creditos, 0) : p.total), 0),
     )
     // Lo de este viaje que YA pesa en el libro (saldo de sus comprobantes)
     const propioEnLibro = pedidosHoja.reduce((s, p) => s + p.comprobantes.reduce((x, k) => x + k.saldo, 0), 0)
@@ -375,7 +380,8 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       .flatMap((x) => x.imputaciones)
       .filter((i) => i.de_este_viaje)
       .reduce((s, i) => s + i.monto, 0)
-    const bajadoEnLibro = pedidosHoja.reduce((s, p) => s + p.comprobantes.reduce((x, k) => x + Math.max(0, k.total - k.saldo), 0), 0)
+    // Los créditos ya aplicados (NC/REV) no: lo exigido ya sale neto de ellos (P2-28)
+    const bajadoEnLibro = pedidosHoja.reduce((s, p) => s + p.comprobantes.reduce((x, k) => x + Math.max(0, k.total - k.creditos - k.saldo), 0), 0)
     const creditosEnLibro = Math.max(0, bajadoEnLibro - cobradoConfirmadoViaje)
     const descuentosCobro = r2(Math.max(0, bajaDelViaje - cobradoPendiente - devuelto) + creditosEnLibro)
     const cumplido = minimo <= 0 || cobrado + descuentosCobro + 0.01 >= minimo

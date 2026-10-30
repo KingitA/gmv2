@@ -25,7 +25,9 @@ import {
  *  3. si no (comprobante importado del sistema viejo, que solo tiene número,
  *     tipo y fecha, o artículo nunca facturado), según cómo va hoy ese artículo
  *     para ese cliente (motor de precios: cliente todo facturado ⇒ NC A/B aunque
- *     el artículo sea de presupuesto). Precio sugerido: el neto actual del cliente.
+ *     el artículo sea de presupuesto). Precio sugerido: si va por factura, el
+ *     precio FINAL al cliente hoy (la NC sale por ese precio justo, todo adentro,
+ *     P2-48); si va por presupuesto, el del presupuesto.
  *     - va en NEGRO → la REV se asocia al PRES de respaldo 0002-00000001 del
  *       cliente (regla de Juan 26/10, #28). Antes iba al PRES más reciente, que
  *       no tenía el artículo, y le bajaba la comisión (URQUIZA, PRES 0001-00000020).
@@ -351,10 +353,16 @@ async function comoVaHoy(supabase: SupabaseClient, clienteId: string, articuloId
 }
 
 export interface OrigenResuelto extends OrigenDevolucion {
-  /** Precio a usar si no es exacto (neto actual del cliente si va por factura) */
+  /**
+   * Precio a usar si no es exacto. P2-48: si va por factura es el precio FINAL al
+   * cliente hoy (la NC sale por ese precio justo, todo adentro: valorDevolucion
+   * lo abre hacia atrás); si va por presupuesto, el precio del presupuesto.
+   */
   precio_sugerido: number | null
-  /** Precio al cliente hoy (con IVA si va por factura) — para reconocer lo que mandan apps viejas */
+  /** Precio al cliente hoy (con IVA si va por factura) */
   precio_al_cliente: number | null
+  /** Neto hoy (sin IVA) si va por factura — para reconocer apps que todavía mandan el neto */
+  precio_neto_hoy: number | null
 }
 
 /**
@@ -412,7 +420,12 @@ export async function resolverOrigenesDevolucion(
     const hoyArt = hoy.get(id)
     // R2: si el motor no lo resolvió, manda el cliente; si es mixto, indeterminado (nunca "factura" por defecto)
     const o = elegirConVa(exacto, contexto, hoyArt?.va ?? vaPorCliente(cliente))
-    origenes.set(id, { ...o, precio_sugerido: o.exacto ? o.precio : hoyArt?.precio ?? null, precio_al_cliente: hoyArt?.alCliente ?? null })
+    origenes.set(id, {
+      ...o,
+      precio_sugerido: o.exacto ? o.precio : (o.fiscal ? hoyArt?.alCliente : hoyArt?.precio) ?? null,
+      precio_al_cliente: hoyArt?.alCliente ?? null,
+      precio_neto_hoy: hoyArt?.va === "factura" ? hoyArt.precio : null,
+    })
   }
   return { origenes, contexto }
 }
@@ -447,8 +460,9 @@ export async function prepararRenglonesDevolucion<T extends { articulo_id: strin
       precio = o.precio
     } else if (o) {
       if (!(precio > 0) && o.precio_sugerido) precio = o.precio_sugerido
-      // App vieja: mandó el precio al cliente (con IVA) de algo que va por factura
-      else if (o.fiscal && o.precio_sugerido && o.precio_al_cliente && Math.abs(o.precio_al_cliente - precio) < 0.005) precio = o.precio_sugerido
+      // P2-48: en factura sin renglón el precio es el FINAL. Una app que todavía
+      // manda el neto de hoy → se pasa al precio al cliente (antes era al revés).
+      else if (o.fiscal && o.precio_neto_hoy && o.precio_al_cliente && Math.abs(o.precio_neto_hoy - precio) < 0.005) precio = o.precio_al_cliente
     }
     out.push({ ...it, precio_venta_original: r2(precio), comprobante_venta_id: o?.comprobante_venta_id ?? null })
   }

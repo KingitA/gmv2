@@ -33,6 +33,9 @@ export const TIPOS_SOLO_CUENTA_PERSONAL = [
   "rendicion_diferencia",
   "rendicion_devuelta",
   "viaje_gasto_rechazado",
+  // P2-38 (20261030_billetera_traspaso_cuenta_personal.sql): el traspaso que compensa
+  // cada uno de los de arriba en la billetera; tampoco es plata en mano
+  "traspaso_cuenta_personal",
 ] as const
 
 /** Plata en mano según los movimientos (misma regla que saldos_financieros BILLETERA). */

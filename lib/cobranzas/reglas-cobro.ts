@@ -210,3 +210,32 @@ export function cierreDeParadaPorCobro(p: ParadaParaCierre): CierrePorCobro | nu
       : `Cobró ${pesos(p.cobrado)}${desc > 0.005 ? ` (+ ${pesos(desc)} de 10 % contado / ajuste)` : ""} de ${pesos(p.minimoExigido)} exigidos (parada cerrada al registrar el cobro)`,
   }
 }
+
+// ── P2-29 (regla de Juan, 2ª prueba): una devolución descuenta SOLO del comprobante al que
+// pertenece. Si se cobra otro, no se puede restar (CHEN: la devolución del PRES 0028 se restó
+// del 0026 y el 0026 quedó debiendo). Los renglones sin comprobante cobrable (sin origen o al
+// PRES de respaldo 0002-00000001, que está en $0) no atan la devolución a ningún comprobante.
+export interface RenglonDevolucionCobro {
+  devolucion_id: string
+  /** Comprobante de origen del renglón; null = sin origen */
+  comprobante_venta_id: string | null
+  /** El origen no es un débito cobrable (PRES de respaldo del sistema viejo) */
+  sin_comprobante_cobrable?: boolean
+  rechazado?: boolean
+}
+
+/** Por cada devolución, los comprobantes de origen que NO están entre los que se cobran. */
+export function devolucionesFueraDelCobro(
+  renglones: RenglonDevolucionCobro[],
+  comprobantesCobrados: Iterable<string>,
+): Map<string, string[]> {
+  const cobrados = new Set(comprobantesCobrados)
+  const fuera = new Map<string, Set<string>>()
+  for (const r of renglones) {
+    if (r.rechazado || !r.comprobante_venta_id || r.sin_comprobante_cobrable) continue
+    if (cobrados.has(r.comprobante_venta_id)) continue
+    if (!fuera.has(r.devolucion_id)) fuera.set(r.devolucion_id, new Set())
+    fuera.get(r.devolucion_id)!.add(r.comprobante_venta_id)
+  }
+  return new Map([...fuera].map(([k, v]) => [k, [...v]]))
+}
