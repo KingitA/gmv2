@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { useLocation, useNavigate } from "react-router"
 import { decidirAtras, indiceHistorial, useRuntime, type ItemOutbox } from "@gm/core"
-import { Encabezado, Frescura } from "@gm/core/ui"
+import { Encabezado, Frescura, useTecladoAbiertoCore } from "@gm/core/ui"
 import { AvisoUrgente } from "./pantallas/AvisoUrgente"
 
 // Paleta y medidas del módulo web /deposito (réplica fiel: los operarios ya la conocen)
@@ -19,7 +19,9 @@ export const C = {
 /** Marco de toda pantalla: encabezado del core (atrás, red, pendientes) + frescura + contenido. */
 export function Marco({ titulo, atras = true, dataset, derecha, children }: { titulo: string; atras?: boolean; dataset?: string; derecha?: ReactNode; children: ReactNode }) {
   return (
-    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: C.bg, color: C.text }}>
+    // --gm-teclado (core): si el WebView NO se achicó con el teclado, el contenido termina
+    // arriba del teclado igual (si se achicó vale 0px: no se descuenta dos veces)
+    <div style={{ height: "100dvh", paddingBottom: "var(--gm-teclado, 0px)", boxSizing: "border-box", display: "flex", flexDirection: "column", background: C.bg, color: C.text }}>
       <Encabezado titulo={titulo} atras={atras} derecha={derecha} compacto />
       {dataset && <Frescura dataset={dataset} viejoTrasMin={10} compacto />}
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "auto", position: "relative" }}>{children}</div>
@@ -168,43 +170,12 @@ export const SinEnviar = ({ n }: { n?: number } = {}) => (
   <span style={{ background: C.yellowL, color: C.yellow, border: `1px solid ${C.yellowB}`, fontSize: 11, fontWeight: 800, padding: "1px 7px", borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap" }}>⇪ {n != null ? `${n} ` : ""}sin enviar</span>
 )
 
-// Alto de la ventana SIN teclado, aprendido una vez por sesión de la app (si una pantalla
-// se monta con el teclado ya abierto, igual sabe cuál es el alto completo).
-let altoSinTeclado = typeof window === "undefined" ? 0 : window.visualViewport?.height ?? window.innerHeight
-
 /**
- * true mientras el teclado en pantalla está abierto. En Android el WebView se achica
- * (adjustResize): con el teclado, el alto visible baja a ~la mitad. Lo usan las pantallas
- * de búsqueda para esconder el pie y los contadores y dejarle lugar a los resultados.
+ * true mientras el teclado en pantalla está abierto. Es el de core (`ui/teclado.ts`, lo
+ * instala montarApp): un solo detector para las 3 apps. Lo usan las pantallas de búsqueda
+ * (esconden pie y contadores) y la de cantidad (se compacta, P2-17).
  */
-export function useTecladoAbierto(): boolean {
-  const [abierto, setAbierto] = useState(false)
-  useEffect(() => {
-    const vv = window.visualViewport
-    const medir = () => {
-      const alto = vv?.height ?? window.innerHeight
-      if (alto > altoSinTeclado) altoSinTeclado = alto
-      setAbierto(alto < altoSinTeclado * 0.75)
-    }
-    // Además de "resize": al enfocar/soltar un campo el teclado tarda en abrir/cerrar
-    // (animación); se vuelve a medir un rato después por si el WebView no avisa.
-    const timers: number[] = []
-    const luego = () => { for (const ms of [150, 400]) timers.push(window.setTimeout(medir, ms)) }
-    medir()
-    vv?.addEventListener("resize", medir)
-    window.addEventListener("resize", medir)
-    document.addEventListener("focusin", luego)
-    document.addEventListener("focusout", luego)
-    return () => {
-      vv?.removeEventListener("resize", medir)
-      window.removeEventListener("resize", medir)
-      document.removeEventListener("focusin", luego)
-      document.removeEventListener("focusout", luego)
-      timers.forEach(clearTimeout)
-    }
-  }, [])
-  return abierto
-}
+export const useTecladoAbierto = useTecladoAbiertoCore
 
 /** Operaciones que el servidor rechazó: visibles en la pantalla donde importan, con acción clara. */
 export function Rechazos({ items, ayuda }: { items: ItemOutbox[]; ayuda: string }) {
