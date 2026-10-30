@@ -4,6 +4,7 @@ import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
 import { normalizarCondicionIva, NIVEL_INICIAL } from "@/lib/clientes/normalizar"
 import { errorCuit, normalizarCuit } from "@/lib/formato"
+import { limpiarNombreCliente } from "@/lib/clientes/nombre-cliente"
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -126,9 +127,10 @@ export async function POST(request: NextRequest) {
     const { data: cliente, error: clienteError } = await supabase
       .from("clientes")
       .insert({
-        nombre,
-        razon_social,
-        nombre_razon_social: razon_social || nombre,
+        // P2-10: sin espacios en los costados y en mayúsculas
+        nombre: limpiarNombreCliente(nombre),
+        razon_social: limpiarNombreCliente(razon_social) || null,
+        nombre_razon_social: limpiarNombreCliente(razon_social || nombre),
         cuit: normalizarCuit(cuit),
         direccion,
         localidad_id,

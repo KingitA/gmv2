@@ -8,6 +8,7 @@ import { normalizarCondicionIva, NIVEL_INICIAL } from "@/lib/clientes/normalizar
 import { errorCuit, normalizarCuit } from "@/lib/formato"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { clientesConMismoCuit, avisoMismoCuit } from "@/lib/clientes/mismo-cuit"
+import { limpiarNombreCliente } from "@/lib/clientes/nombre-cliente"
 import { siguienteCodigo, esCodigoDuplicado } from "@/lib/codigos"
 import { patchListasMetodos, validarListasMetodos } from "@/lib/vendedor/ficha-listas"
 
@@ -122,7 +123,7 @@ export async function POST(request: Request) {
       vendedor_id,
     } = body
 
-    const nombreFinal = String(nombre || razon_social || "").trim()
+    const nombreFinal = limpiarNombreCliente(nombre || razon_social) // P2-10
     if (!nombreFinal) {
       return NextResponse.json({ error: "Ingresá el nombre o razón social." }, { status: 400 })
     }
@@ -168,8 +169,8 @@ export async function POST(request: Request) {
         // reenviar la operación no duplique y lo capturado después ya lo referencie (MOBILE.md → Vendedor)
         ...(esUuid(body.id) ? { id: body.id } : {}),
         nombre: nombreFinal,
-        razon_social: razon_social?.trim() || null,
-        nombre_razon_social: razon_social?.trim() || nombreFinal,
+        razon_social: limpiarNombreCliente(razon_social) || null,
+        nombre_razon_social: limpiarNombreCliente(razon_social) || nombreFinal,
         cuit: cuitLimpio,
         condicion_iva: normalizarCondicionIva(condicion_iva),
         metodo_facturacion: metodoGeneral,
