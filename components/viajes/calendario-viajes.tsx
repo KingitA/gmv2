@@ -10,6 +10,7 @@
 import { useMemo, useState, type DragEvent } from 'react'
 import { Plus } from 'lucide-react'
 import { ESTADO_VIAJE_COLOR } from '@/lib/viajes/estados'
+import { textoCarga } from '@/lib/viajes/bultos'
 import { quienLleva, sumarDias, viajeMovible, type ViajeCal } from '@/lib/viajes/use-viajes-rango'
 import { cn } from '@/lib/utils'
 import type { MarcaDia } from '@/lib/viajes/use-calendario-laboral'
@@ -138,7 +139,7 @@ export function CalendarioViajes(p: Props) {
                   <span className={cn('size-2 shrink-0 rounded-full', ESTADO_VIAJE_COLOR[v.estado] || 'bg-neutro-400')} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-semibold text-azul-900">{v.zonas.map(z => z.nombre).join(' + ') || v.nombre}{v.dias > 1 && <span className="ml-1 font-normal text-neutro-400">{v.dia_n}/{v.dias}</span>}</span>
-                    <span className="block truncate text-xs text-neutro-500">{quienLleva(v)}{v.pedidos_count > 0 && ` · ${v.pedidos_count} ped. · ${v.bultos} bultos`}</span>
+                    <span className="block truncate text-xs text-neutro-500">{quienLleva(v)}{v.pedidos_count > 0 && ` · ${v.pedidos_count} ped. · ${textoCarga(v.bultos, v.pallets || 0, "sin bultos")}`}</span>
                   </span>
                 </button>
               ))}
@@ -238,7 +239,7 @@ export function CalendarioViajes(p: Props) {
                           </div>
                           {p.modo === 'semana' && v.pedidos_count > 0 && (
                             <div className="mt-0.5 text-[11px] font-medium text-neutro-600 tabular-nums">
-                              {v.pedidos_count} ped. · {v.bultos} bultos
+                              {v.pedidos_count} ped. · {textoCarga(v.bultos, v.pallets || 0, "sin bultos")}
                             </div>
                           )}
                           {sobreEste && <div className="mt-1 text-[11px] font-semibold text-cian-700">Soltá para subirlos</div>}

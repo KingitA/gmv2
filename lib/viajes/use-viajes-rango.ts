@@ -23,6 +23,8 @@ export type ViajeCal = {
   pedidos_count: number
   clientes_count: number
   bultos: number
+  /** P2-27: pallets de los pedidos del viaje */
+  pallets?: number
   total: number
 }
 

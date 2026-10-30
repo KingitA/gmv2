@@ -323,8 +323,12 @@ export default function ViajeDashboardPage() {
           <p className="text-xs text-gray-500">Resueltos</p>
         </div>
         <div className="rounded-xl bg-white p-3 text-center shadow-sm">
-          <p className="text-2xl font-bold text-amber-600">{paradas.reduce((s, p) => s + (p.estado === "pendiente" ? p.bultos : 0), 0)}</p>
-          <p className="text-xs text-gray-500">Bultos por bajar</p>
+          <p className="text-base font-bold leading-8 text-amber-600">{textoCarga(
+            paradas.reduce((s, p) => s + (p.estado === "pendiente" ? p.bultos : 0), 0),
+            paradas.reduce((s, p) => s + (p.estado === "pendiente" ? p.pallets : 0), 0),
+            "nada",
+          )}</p>
+          <p className="text-xs text-gray-500">Por bajar</p>
         </div>
       </div>
 

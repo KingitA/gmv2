@@ -136,20 +136,21 @@ async function listarCalendario(supabase: SupabaseClient, searchParams: URLSearc
   })
 
   const ids = (viajes || []).map((v: any) => v.id)
-  const totales = new Map<string, { pedidos: number; bultos: number; total: number; clientes: Set<string> }>()
+  const totales = new Map<string, { pedidos: number; bultos: number; pallets: number; total: number; clientes: Set<string> }>()
   const nombres = new Map<string, string>()
   if (ids.length) {
     const usuarioIds = [...new Set((viajes || []).flatMap((v: any) => (v.viajes_choferes || []).map((c: any) => c.usuario_id)))]
     const [{ data: pedidos }, { data: usuarios }] = await Promise.all([
-      supabase.from("pedidos").select("viaje_id, cliente_id, bultos, total").in("viaje_id", ids).neq("estado", "eliminado"),
+      supabase.from("pedidos").select("viaje_id, cliente_id, bultos, pallets, total").in("viaje_id", ids).neq("estado", "eliminado"),
       usuarioIds.length
         ? supabase.from("usuarios").select("id, nombre").in("id", usuarioIds)
         : Promise.resolve({ data: [] as any[] }),
     ])
     for (const p of pedidos || []) {
-      const t = totales.get(p.viaje_id) || { pedidos: 0, bultos: 0, total: 0, clientes: new Set<string>() }
+      const t = totales.get(p.viaje_id) || { pedidos: 0, bultos: 0, pallets: 0, total: 0, clientes: new Set<string>() }
       t.pedidos++
       t.bultos += Number(p.bultos) || 0
+      t.pallets += Number(p.pallets) || 0
       t.total += Number(p.total) || 0
       t.clientes.add(p.cliente_id)
       totales.set(p.viaje_id, t)
@@ -173,6 +174,7 @@ async function listarCalendario(supabase: SupabaseClient, searchParams: URLSearc
         pedidos_count: t?.pedidos || 0,
         clientes_count: t?.clientes.size || 0,
         bultos: t?.bultos || 0,
+        pallets: t?.pallets || 0,
         total: Math.round((t?.total || 0) * 100) / 100,
       }
     }),
