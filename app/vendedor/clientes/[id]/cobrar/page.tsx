@@ -12,6 +12,7 @@ import { MARCA_CONTADO } from "@/lib/constants"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { numero, parseMonto, redondear, fecha } from "@/lib/formato"
+import { devolucionDescuentaEnCobro, vaContra, type OrigenDevolucionCobro } from "@/lib/vendedor/devolucion-cobro"
 
 // Cobro del viajante — espejo del patrón de /caja (Caja del Día):
 //  · "¿Qué paga?": pedidos con estado; tilde directa (sin casilla emergente),
@@ -68,6 +69,8 @@ interface DevolucionPendiente {
   restante: number
   aplica_10?: boolean
   valor_total?: number
+  /** P2-29: comprobantes de origen (ata = se debe: solo descuenta si se cobra) */
+  origenes?: OrigenDevolucionCobro[]
 }
 
 interface Cliente {
@@ -272,7 +275,13 @@ export default function VendedorCobrarPage() {
   // ── Totales (patrón /caja: métodos + NC 10% proyectada = cubierto) ──
   const totalImputado = Object.values(imputaciones).reduce((s, m) => s + (m || 0), 0)
   const totalPedidos = Object.values(pedidosSel).reduce((s, m) => s + (m || 0), 0)
-  const totalDevoluciones = Object.values(devSel).reduce((s, m) => s + (m || 0), 0)
+  // P2-29: una devolución descuenta solo si se cobra su comprobante (= servidor, 422 si no)
+  const devVigente: Record<string, number> = {}
+  for (const [id, monto] of Object.entries(devSel)) {
+    const d = devoluciones.find((x) => x.id === id)
+    if (!d || devolucionDescuentaEnCobro(d.origenes, imputaciones).descuenta) devVigente[id] = monto
+  }
+  const totalDevoluciones = Object.values(devVigente).reduce((s, m) => s + (m || 0), 0)
   const totalAsignado = round2(totalImputado + totalPedidos)
   const totalMetodos = round2(efectivo + metodos.reduce((s, m) => s + (m.monto || 0), 0))
 
@@ -449,7 +458,7 @@ export default function VendedorCobrarPage() {
                 }
               }),
             ajuste_redondeo: ajustePorRedondeo,
-            devoluciones: Object.entries(devSel)
+            devoluciones: Object.entries(devVigente)
               .filter(([, monto]) => monto > 0)
               .map(([devolucion_id, monto]) => ({ devolucion_id, monto })),
           },
@@ -828,7 +837,9 @@ export default function VendedorCobrarPage() {
                     🔄 Devoluciones a descontar
                   </p>
                   {devoluciones.map((d) => {
-                    const activo = devSel[d.id] !== undefined
+                    const regla = devolucionDescuentaEnCobro(d.origenes, imputaciones)
+                    const activo = devSel[d.id] !== undefined && regla.descuenta
+                    const contra = vaContra(d.origenes)
                     return (
                       <div
                         key={d.id}
@@ -836,7 +847,7 @@ export default function VendedorCobrarPage() {
                           activo ? "border-amber-400 bg-amber-50" : "border-gray-200 bg-white"
                         }`}
                       >
-                        <button onClick={() => toggleDevolucion(d)} className="flex items-center gap-2 min-w-0 flex-1 text-left">
+                        <button onClick={() => toggleDevolucion(d)} disabled={!regla.descuenta} className="flex items-center gap-2 min-w-0 flex-1 text-left disabled:opacity-70">
                           <span className="text-lg shrink-0">{activo ? "☑" : "☐"}</span>
                           <div className="min-w-0">
                             <p className="font-bold text-gray-900 text-sm">Devolución {d.numero_devolucion || ""}</p>
@@ -845,6 +856,8 @@ export default function VendedorCobrarPage() {
                               {d.aplica_10 ? " (neto del 10% contado — coincide con la NC)" : ""}
                               {!d.aplica_10 && d.restante < d.monto_total ? ` de ${formatCurrency(d.monto_total)}` : ""}
                             </p>
+                            {contra && <p className="text-gray-500 text-xs">{contra}</p>}
+                            {!regla.descuenta && <p className="text-amber-700 text-xs font-bold">Seleccioná {regla.faltan.join(", ")} para descontarla</p>}
                           </div>
                         </button>
                         {activo && (

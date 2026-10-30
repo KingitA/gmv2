@@ -149,7 +149,9 @@ export function clientesVisibles(filas: Cliente[], ops: ItemOutbox[]): Cliente[]
   })
   for (const { p } of de<any>(vivas(ops), "cliente.crear")) {
     if (ids.has(p.id)) continue
-    const nombre = String(p.nombre || p.razon_social || "").trim()
+    // P2-10: como lo guarda el servidor (lib/clientes/nombre-cliente.ts → limpiarNombreCliente):
+    // sin espacios de más y en MAYÚSCULAS; así no cambia de golpe cuando llega el parche
+    const nombre = String(p.nombre || p.razon_social || "").replace(/\s+/g, " ").trim().toLocaleUpperCase("es-AR")
     out.push(conEdiciones({ ...CLIENTE_VACIO, ...p, id: p.id, nombre, sinEnviar: true }, ops))
   }
   return out.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))

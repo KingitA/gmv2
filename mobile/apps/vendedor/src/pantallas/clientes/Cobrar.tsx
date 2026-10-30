@@ -26,6 +26,7 @@ import { ResumenCuenta } from "./comprobantes-ui"
 import { fecha, normalizarCuit } from "@gm/formato"
 import { AvisosBcra, CuitInput, FechaInput, MontoInput, Pantalla, Rechazos, dejarAviso, dejarAvisoSinCuit, formatCurrency, round2, useToast } from "../../ui"
 import { saldoVisible } from "../../datos/saldo"
+import { devolucionDescuentaEnCobro, vaContra } from "@gm/vendedor"
 
 // Port de app/vendedor/clientes/[id]/cobrar/page.tsx — espejo del patrón de /caja (Caja del Día):
 //  · "¿Qué paga?": pedidos con estado; tilde directa, monto editable inline que se confirma
@@ -188,7 +189,17 @@ export function Cobrar() {
   // ── Totales (patrón /caja: métodos + NC 10% proyectada = cubierto) ──
   const totalImputado = Object.values(imputaciones).reduce((s, m) => s + (m || 0), 0)
   const totalPedidos = Object.values(pedidosSel).reduce((s, m) => s + (m || 0), 0)
-  const totalDevoluciones = Object.values(devSel).reduce((s, m) => s + (m || 0), 0)
+  // P2-29: una devolución descuenta solo si se cobra su comprobante (= servidor, 422 si no).
+  // Lo tildado de una que dejó de aplicar (se destildó su comprobante) no suma ni viaja.
+  const devVigente = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const [id, monto] of Object.entries(devSel)) {
+      const d = devoluciones.find((x) => x.id === id)
+      if (!d || devolucionDescuentaEnCobro(d.origenes, imputaciones).descuenta) out[id] = monto
+    }
+    return out
+  }, [devSel, devoluciones, imputaciones])
+  const totalDevoluciones = Object.values(devVigente).reduce((s, m) => s + (m || 0), 0)
   const totalAsignado = round2(totalImputado + totalPedidos)
   const totalMetodos = round2(efectivo + metodos.reduce((s, m) => s + (m.monto || 0), 0))
 
@@ -463,7 +474,7 @@ export function Cobrar() {
                 }
               }),
             ajuste_redondeo: ajustePorRedondeo,
-            devoluciones: Object.entries(devSel)
+            devoluciones: Object.entries(devVigente)
               .filter(([, monto]) => monto > 0)
               .map(([devolucion_id, monto]) => ({ devolucion_id, monto })),
           },
@@ -825,10 +836,12 @@ export function Cobrar() {
                 <div className="space-y-1.5 pt-1">
                   <p className="px-1 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-600">🔄 Devoluciones a descontar</p>
                   {devoluciones.map((d) => {
-                    const activo = devSel[d.id] !== undefined
+                    const regla = devolucionDescuentaEnCobro(d.origenes, imputaciones)
+                    const activo = devSel[d.id] !== undefined && regla.descuenta
+                    const contra = vaContra(d.origenes)
                     return (
-                      <div key={d.id} className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 ${activo ? "border-amber-400 bg-amber-50" : "border-gray-200 bg-white"}`}>
-                        <button onClick={() => toggleDevolucion(d)} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left">
+                      <div key={d.id} className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 ${activo ? "border-amber-400 bg-amber-50" : regla.descuenta ? "border-gray-200 bg-white" : "border-gray-200 bg-gray-50"}`}>
+                        <button onClick={() => toggleDevolucion(d)} disabled={!regla.descuenta} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-70">
                           <span className="shrink-0 text-lg">{activo ? "☑" : "☐"}</span>
                           <div className="min-w-0">
                             <p className="text-sm font-bold text-gray-900">Devolución {d.numero_devolucion || ""}</p>
@@ -836,6 +849,8 @@ export function Cobrar() {
                               disponible {formatCurrency(d.restante)}
                               {d.restante < d.monto_total ? ` de ${formatCurrency(d.monto_total)}` : ""}
                             </p>
+                            {contra && <p className="text-xs text-gray-500">{contra}</p>}
+                            {!regla.descuenta && <p className="text-xs font-bold text-amber-700">Seleccioná {regla.faltan.join(", ")} para descontarla</p>}
                           </div>
                         </button>
                         {activo && <MontoInput valor={devSel[d.id]!} onCambio={(v) => setDevSel((prev) => ({ ...prev, [d.id]: Math.min(Math.max(0, v), d.restante) }))} className={CLS_MONTO} />}
