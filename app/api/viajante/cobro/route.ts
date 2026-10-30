@@ -9,7 +9,8 @@ import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
 import { controlarContadoDuplicado } from "@/lib/cobranzas/contado-duplicado"
 import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobranzas/creditos"
 import { marcaAjuste } from "@/lib/cobranzas/ajuste"
-import { topeAjuste } from "@/lib/cobranzas/reglas-cobro"
+import { devolucionesFueraDelCobro, topeAjuste } from "@/lib/cobranzas/reglas-cobro"
+import { NUMERO_RESPALDO_DEVOLUCION } from "@/lib/cobranzas/respaldo-devolucion"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { moneda, normalizarCuit } from "@/lib/formato"
@@ -114,7 +115,7 @@ export async function POST(request: NextRequest) {
       const devIds = [...new Set(todosDescuentos.map((d) => d.devolucion_id))]
       const { data: devs } = await supabase
         .from("devoluciones")
-        .select("id, cliente_id, estado, monto_total")
+        .select("id, cliente_id, estado, monto_total, numero_devolucion")
         .in("id", devIds)
       const devMap = new Map((devs || []).map((d: any) => [d.id, d]))
       const { data: usados } = await supabase
@@ -146,6 +147,44 @@ export async function POST(request: NextRequest) {
             { error: `La devolución tiene ${moneda(restante)} disponibles (valor en cobro) y se intentó descontar ${moneda(d.monto)}` },
             { status: 400 }
           )
+      }
+
+      // P2-29: cada devolución descuenta solo del comprobante al que pertenece (misma
+      // regla que el cobro del chofer y la app chofer, devolucionesFueraDelCobro). Atan
+      // solo los orígenes que todavía se deben: uno ya pagado, anulado o el respaldo
+      // 0002-00000001 no frena. Rechazo definitivo (4xx: la cola no reintenta).
+      const { data: renglonesDev } = await supabase
+        .from("devoluciones_detalle")
+        .select("devolucion_id, comprobante_venta_id, estado_renglon, comprobante:comprobantes_venta!devoluciones_detalle_comprobante_venta_id_fkey(tipo_comprobante, numero_comprobante, saldo_pendiente, anulado_en)")
+        .in("devolucion_id", devIds)
+      const compDe = new Map<string, string>()
+      for (const r of renglonesDev || []) {
+        const cp: any = (r as any).comprobante
+        if (r.comprobante_venta_id && cp) compDe.set(r.comprobante_venta_id, `${cp.tipo_comprobante} ${cp.numero_comprobante}`)
+      }
+      const numDe = new Map((devs || []).map((d: any) => [d.id, d.numero_devolucion || "la devolución"]))
+      for (const c of clientes) {
+        const idsCliente = new Set(devolucionesDe(c).map((d) => d.devolucion_id))
+        if (!idsCliente.size) continue
+        const fuera = devolucionesFueraDelCobro(
+          (renglonesDev || [])
+            .filter((r: any) => idsCliente.has(r.devolucion_id))
+            .map((r: any) => ({
+              devolucion_id: r.devolucion_id,
+              comprobante_venta_id: r.comprobante_venta_id,
+              rechazado: r.estado_renglon === "rechazado",
+              sin_comprobante_cobrable:
+                (r.comprobante?.tipo_comprobante === "PRES" && r.comprobante?.numero_comprobante === NUMERO_RESPALDO_DEVOLUCION) ||
+                !!r.comprobante?.anulado_en ||
+                Number(r.comprobante?.saldo_pendiente ?? 0) <= 0.005,
+            })),
+          (c.imputaciones || []).map((i: any) => i.comprobante_id),
+        )
+        if (fuera.size) {
+          const detalle = [...fuera].map(([devId, comps]) => `${numDe.get(devId)} es de ${comps.map((x) => compDe.get(x) || "otro comprobante").join(", ")}`).join("; ")
+          const msg = `La devolución solo se descuenta del comprobante al que pertenece: ${detalle}. Cobrá ese comprobante o sacá la devolución de este cobro.`
+          return NextResponse.json({ error: msg, mensaje: msg, codigo: "DEVOLUCION_OTRO_COMPROBANTE", reintentable: false }, { status: 422 })
+        }
       }
     }
 

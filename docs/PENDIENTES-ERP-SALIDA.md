@@ -583,6 +583,10 @@ Dentro del viaje, la sección "Pedidos del viaje" repite la lista de arriba; lo 
 
 En la hoja de ruta, un pedido con bultos y pallets se ve "2" grande y abajo "1 pal.": no se sabe si es 1 pallet con 2 bultos o 1 pallet + 2 bultos. Mostrarlo escrito: "2 bultos + 1 pallet" (y en el total "132 bultos + 1 pallet").
 
+### P2-29 (servidor del vendedor) — La devolución solo descuenta de su comprobante · Dueño: Cuentas corrientes — **Hecho 30/10, rama `cc-p2b`, sin merge**
+
+`POST /api/viajante/cobro` aplica la misma regla que el chofer (`devolucionesFueraDelCobro`, por cliente, con sus imputaciones): 422 `DEVOLUCION_OTRO_COMPROBANTE`, definitivo. Atan solo los orígenes que todavía se deben. Falta la app vendedor (ver PENDIENTES-APPS-SALIDA, P2-29 vendedor): **mergear junto**.
+
 ### P2-28 — Hoja de ruta: CHEN no descuenta el 10 % contado ya emitido · Dueño: Hojas de ruta/viajes (a verificar en la app chofer)
 
 Pedido 002016 con 10 % contado: al generar salió la REV 0001-00000025 por $4.057,05 imputada al PRES 0001-00000026 (saldo $36.513,45). La hoja del viaje PRUEBA2 muestra en CHEN "este viaje" **$399.991,26** = 40.570,50 + 359.420,76 (los totales brutos); lo que se le cobra es **$395.934,21** (36.513,45 + 359.420,76). Además la instrucción no avisa que es de contado. Ver qué muestra la app chofer.
