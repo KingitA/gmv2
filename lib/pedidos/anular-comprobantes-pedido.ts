@@ -43,6 +43,8 @@ export interface ResultadoAnulacionPedido {
   a_favor: number
   estado_pedido: string | null
   advertencias: string[]
+  /** P2-43: qué pasó con las devoluciones de los comprobantes anulados */
+  devoluciones?: string[]
 }
 
 /** Corte a mitad de camino: lo anulado hasta ahí y el motivo del corte. */
@@ -96,6 +98,8 @@ async function anularConCandado(supabase: any, pedidoId: string, usuarioId: stri
 
   const anulados: AnuladoDePedido[] = []
   const advertencias: string[] = []
+  // P2-43: devoluciones aplicadas (salen del pedido; su REV queda sin efecto)
+  const devolucionesAplicadas: string[] = []
   let pedidoInfo: { id: string; numero_pedido: string | null } | null = null
   for (const c of ev.aAnular) {
     try {
@@ -132,6 +136,7 @@ async function anularConCandado(supabase: any, pedidoId: string, usuarioId: stri
         continue
       }
       const r = await anularComprobante(supabase, c.id, usuarioId)
+      if (r.devoluciones?.length) devolucionesAplicadas.push(...r.devoluciones)
       anulados.push({
         original: { id: c.id, tipo_comprobante: c.tipo_comprobante, numero_comprobante: c.numero_comprobante, total: c.total_factura },
         inverso: r.inverso,
@@ -157,7 +162,7 @@ async function anularConCandado(supabase: any, pedidoId: string, usuarioId: stri
   }
 
   // ── 3. Cruce de lo que quedó abierto de esta anulación (débitos ↔ créditos) ──
-  const inversoIds = anulados.map((a) => a.inverso.id)
+  const inversoIds = anulados.map((a) => a.inverso?.id).filter(Boolean) as string[]
   if (inversoIds.length) {
     const { data: inversos } = await supabase
       .from("comprobantes_venta")
@@ -224,5 +229,5 @@ async function anularConCandado(supabase: any, pedidoId: string, usuarioId: stri
     advertencias.push(`Siguen vivos: ${quedan.map((c) => `${c.tipo_comprobante} ${c.numero_comprobante}`).join(", ")}.`)
   }
 
-  return { anulados, a_favor: aFavor, estado_pedido: estado, advertencias }
+  return { anulados, a_favor: aFavor, estado_pedido: estado, advertencias, devoluciones: devolucionesAplicadas }
 }

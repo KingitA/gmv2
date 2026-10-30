@@ -212,9 +212,12 @@ export default function ComprobantesVentaPage() {
       if (!res.ok) throw new Error(data.error || 'Error anulando comprobante')
       setConfirmAnular(null)
       alert(
-        `Anulación generada correctamente.\n` +
-        `${data.inverso.tipo_comprobante} ${data.inverso.numero}` +
-        (data.inverso.cae ? `\nCAE: ${data.inverso.cae}` : '')
+        (data.inverso
+          ? `Anulación generada correctamente.\n` +
+            `${data.inverso.tipo_comprobante} ${data.inverso.numero}` +
+            (data.inverso.cae ? `\nCAE: ${data.inverso.cae}` : '')
+          : 'Comprobante anulado (la NC de la devolución ya lo acreditaba entero: no se emitió nada).') +
+        (data.devoluciones?.length ? `\n\n${data.devoluciones.join('\n')}` : '')
       )
       await cargarComprobantes()
     } catch (e: any) {

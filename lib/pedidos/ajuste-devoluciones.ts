@@ -1,83 +1,26 @@
-// P2-43 — Devoluciones de un pedido REFACTURADO (regla de Juan, 31/10/2026, 2ª versión):
-// la refacturación sale SIN los artículos devueltos.
-//  1. Lo devuelto contra los comprobantes de ESTE pedido no se vuelve a facturar:
-//     cantidad a facturar = lo preparado − lo devuelto. El crédito de esa parte
-//     de la devolución se NEUTRALIZA con un débito (PRES si fue REV, ND si fue NC):
-//     el pedido queda como si se hubiera vendido sin esos artículos.
-//  2. Lo devuelto de OTROS comprobantes o del sistema viejo (respaldo
-//     0002-00000001) queda aparte: su NC/REV sigue acreditando por su lado. Si
-//     una NC/REV mezcla las dos partes, se neutraliza solo la de este pedido.
-// Ejemplo de Juan: PRES $1.100 (10 trapos × $100 + 10 esponjas × $10), devuelve
-// las esponjas (REV $100), se refactura +20 %: anulación −$1.100, PRES de
-// neutralización +$100, PRES nuevo solo con los trapos $1.200. Saldo $1.200.
+// P2-43 — Devoluciones de un pedido que se REFACTURA (flujo de Juan, 31/10/2026, definitivo).
+// Ejemplo: PRES $1.100 (10 trapos × $100 + 10 esponjas × $10); devuelve las
+// esponjas (REV −$100). Al refacturar a Neco (+20 %):
+//  - REV de anulación por $1.100 (los dos artículos), como siempre;
+//  - las esponjas SALEN del pedido: la REV de la devolución queda SIN EFECTO
+//    (anulada, imputaciones liberadas y asiento revertido), sin documento nuevo;
+//    la devolución queda "aplicada en la refacturación del pedido N";
+//  - PRES nuevo solo con los trapos: $1.200. Saldo $1.200.
+// Lo que ve el cliente: PRES 1.100, REV 1.100, PRES 1.200.
+//  - Devolución mezclada con otros comprobantes o el sistema viejo: la parte de
+//    este pedido se aplica igual; lo demás queda acreditado en su NC/REV.
+//  - FISCAL: una NC con CAE no se puede dejar sin efecto. La factura se anula
+//    por lo que falta acreditar (total − NC de devolución imputada), sin ND.
+//  - Devolución aceptada todavía sin REV/NC: no se emite; se aplica igual.
 // Parte pura (sin base), compartida con los tests. La parte con base está en
 // lib/pedidos/ajuste-devoluciones-refacturado.ts.
 
-import { valorDevolucionConOrigen, type OrigenDevolucion } from "../cobranzas/valor-devolucion"
-
 const r2 = (n: number) => Math.round(n * 100) / 100
-const MINIMO = 0.005
-
-export interface RenglonDevuelto {
-  id: string
-  articulo_id: string
-  descripcion?: string | null
-  cantidad: number
-  /** Precio y origen con que se acreditó (comprobante anulado de este pedido) */
-  precio: number
-  origen: OrigenDevolucion
-}
-
-export interface Neutralizacion {
-  /** ND (true) o PRES (false) */
-  fiscal: boolean
-  /** Importes en positivo: es un débito al cliente */
-  neto: number
-  iva: number
-  baseIva: number
-  percepcionIva: number
-  percepcionIibb: number
-  total: number
-  detalle: Array<{ articulo_id: string; descripcion?: string | null; cantidad: number; neto: number }>
-}
 
 /**
- * Cuánto se acreditó por la parte de la devolución que es de este pedido, por
- * clase (factura / presupuesto), con la MISMA regla que emitió la NC/REV
- * (valorDevolucionConOrigen, misma alícuota IIBB): es lo que hay que neutralizar.
- */
-export function neutralizacionDevolucion(renglones: RenglonDevuelto[], alicuotaIIBB: number): Neutralizacion[] {
-  const v = valorDevolucionConOrigen(
-    renglones.map((r) => ({ cantidad: r.cantidad, precio_venta_original: r.precio, origen: r.origen })),
-    alicuotaIIBB,
-  )
-  const out: Neutralizacion[] = []
-  for (const fiscal of [true, false]) {
-    const total = fiscal ? v.fiscal.total : v.rev.total
-    if (total < MINIMO) continue
-    const detalle = renglones
-      .map((r, i) => ({ r, neto: v.netoPorRenglon[i] ?? 0 }))
-      .filter(({ r, neto }) => !!r.origen.fiscal === fiscal && neto >= MINIMO)
-      .map(({ r, neto }) => ({ articulo_id: r.articulo_id, descripcion: r.descripcion, cantidad: r.cantidad, neto: r2(neto) }))
-    out.push(
-      fiscal
-        ? { fiscal, neto: v.fiscal.neto, iva: v.fiscal.iva, baseIva: v.fiscal.baseIva, percepcionIva: v.fiscal.percepcionIva, percepcionIibb: v.fiscal.percepcionIibb, total: v.fiscal.total, detalle }
-        : { fiscal, neto: v.rev.total, iva: 0, baseIva: 0, percepcionIva: 0, percepcionIibb: 0, total: v.rev.total, detalle },
-    )
-  }
-  return out
-}
-
-/** Tipo del débito que neutraliza: PRES (la devolución fue REV) o ND A/B/C (fue NC). */
-export function tipoNeutralizacion(fiscal: boolean, tipoCredito: string | null | undefined): string {
-  if (!fiscal) return "PRES"
-  return tipoCredito === "NCA" ? "NDA" : tipoCredito === "NCC" ? "NDC" : "NDB"
-}
-
-/**
- * Cantidad a facturar de cada renglón del pedido descontando lo devuelto contra
- * sus comprobantes anulados. Lo devuelto se descuenta de los renglones cobrados
- * (no de la mercadería bonificada), en orden. Devuelve renglón → cantidad.
+ * Cantidad a facturar de cada renglón del pedido descontando lo devuelto (lo
+ * aplicado en la refacturación). Se descuenta de los renglones cobrados (no de
+ * la mercadería bonificada), en orden. Devuelve renglón → cantidad.
  */
 export function descontarDevuelto(
   renglones: Array<{ id: string; articulo_id: string; cantidad: number; es_bonificado?: boolean | null }>,
@@ -99,25 +42,64 @@ export function descontarDevuelto(
 }
 
 /**
- * Cuánto de una NC/REV de ANULACIÓN es devolución y no pago (base del 10 %
- * contado y comisión del comprobante refacturado). Al anular, el inverso cubre
- * todo el comprobante: lo que le queda de crédito es lo pagado + lo devuelto.
- * La parte devolución (`devParte`) va primero a los débitos que neutralizan
- * devoluciones y lo que sobra, en orden, a los comprobantes nuevos. La
- * imputación contra el comprobante anulado (el cruce de la anulación) no
- * cuenta. Devuelve comprobante_id → parte devolución.
+ * Cuánto stock reingresa la anulación de un comprobante: lo que salió MENOS lo
+ * devuelto (la devolución ya reingresó lo vendible; lo no vendible no vuelve a
+ * stock). Devuelve índice de renglón → cantidad a reingresar.
  */
+export function stockAReingresar(detalle: Array<{ articulo_id: string | null; cantidad: number }>, devuelto: Map<string, number>): number[] {
+  const resto = new Map(devuelto)
+  return detalle.map((d) => {
+    const cant = Math.abs(Number(d.cantidad) || 0)
+    if (!d.articulo_id) return cant
+    const dev = resto.get(d.articulo_id) ?? 0
+    const saca = Math.min(cant, dev)
+    if (saca > 0) resto.set(d.articulo_id, dev - saca)
+    return cant - saca
+  })
+}
+
+/**
+ * Qué hacer con la REV (presupuesto) de una devolución al refacturar: su parte de
+ * este pedido queda sin efecto. `parte` = lo que vale lo devuelto de este pedido.
+ * Total → se anula entera; si no, queda acreditada solo por lo de otros orígenes.
+ */
+export function revSinEfecto(totalRev: number, parte: number): { entera: boolean; parte: number; queda: number } {
+  const total = r2(Math.abs(totalRev))
+  const p = r2(Math.min(total, Math.max(0, parte)))
+  const queda = r2(total - p)
+  return { entera: queda < 0.01, parte: queda < 0.01 ? total : p, queda: queda < 0.01 ? 0 : queda }
+}
+
+/** FISCAL: la factura se anula por lo que falta acreditar (total − NC de devolución imputada a ella). */
+export function montoAnulacionFiscal(totalFactura: number, ncDevolucionImputada: number): number {
+  return r2(Math.max(0, Math.abs(totalFactura) - Math.max(0, ncDevolucionImputada)))
+}
+
+/**
+ * Cuánto de una NC/REV de ANULACIÓN es devolución y no pago. Con el flujo de
+ * Juan la anulación ya no trae devoluciones (la REV de la devolución queda sin
+ * efecto; en fiscal la anulación es por total − NC), así que da 0. Queda para
+ * los comprobantes refacturados antes (anulación por el total con la devolución
+ * imputada: lo que le sobró incluía lo devuelto).
+ *   devuelto: NC/REV de devolución vivas imputadas al comprobante anulado
+ *   total: total del comprobante anulado; anulacion: total de la NC/REV de anulación
+ */
+export function parteDevolucionDeAnulacion(devuelto: number, total: number, anulacion: number): number {
+  return r2(Math.max(0, Math.max(0, devuelto) - Math.max(0, Math.abs(total) - Math.abs(anulacion))))
+}
+
+/** Reparte la parte devolución de un crédito de anulación entre los comprobantes nuevos a los que se imputó (en orden; el cruce con el anulado no cuenta). */
 export function repartirDevolucionDeAnulacion(
   devParte: number,
-  imputaciones: Array<{ comprobante_id: string; monto: number; es_ajuste: boolean; es_original: boolean }>,
+  imputaciones: Array<{ comprobante_id: string; monto: number; es_original: boolean }>,
 ): Map<string, number> {
   const out = new Map<string, number>()
   let resto = Math.max(0, r2(devParte))
-  const orden = [...imputaciones.filter((i) => i.es_ajuste && !i.es_original), ...imputaciones.filter((i) => !i.es_ajuste && !i.es_original)]
-  for (const i of orden) {
-    if (resto < MINIMO) break
+  for (const i of imputaciones) {
+    if (resto < 0.005) break
+    if (i.es_original) continue
     const parte = r2(Math.min(resto, Math.max(0, Number(i.monto) || 0)))
-    if (parte < MINIMO) continue
+    if (parte < 0.005) continue
     resto = r2(resto - parte)
     out.set(i.comprobante_id, r2((out.get(i.comprobante_id) ?? 0) + parte))
   }

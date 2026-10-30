@@ -14,6 +14,8 @@ import { ultimoAutorizado, solicitarCAE } from '@/lib/arca/wsfev1'
 import { postearLibroConAviso } from '@/lib/cuenta-corriente/postear-libro'
 import { cuitDigitos, cuitValido, normalizarCuit } from '@/lib/formato'
 import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from '@/lib/comprobantes/numeracion'
+import { aplicarDevolucionesAlAnular, type DevolucionesAplicadas } from '@/lib/pedidos/ajuste-devoluciones-refacturado'
+import { montoAnulacionFiscal, stockAReingresar } from '@/lib/pedidos/ajuste-devoluciones'
 
 /**
  * ANULAR UN COMPROBANTE de venta = emitir su inverso exacto (FA→NC con CAE,
@@ -25,6 +27,12 @@ import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoF
  *
  * Un corte de validación (ya anulado, sin CUIT, ARCA sin configurar…) se lanza
  * como CorteAnulacion con el cuerpo y el status HTTP que respondía la ruta.
+ *
+ * P2-43 (flujo de Juan 31/10/2026): las devoluciones de un FA/FB/FC/PRES se
+ * APLICAN al anularlo (lib/pedidos/ajuste-devoluciones-refacturado.ts): la REV de
+ * la devolución queda sin efecto; si fue NC con CAE, el inverso es por total − NC
+ * (sin ND; si la NC cubre todo, no hay inverso). Lo devuelto no reingresa stock
+ * de nuevo (ya lo reingresó la devolución) y no se vuelve a facturar.
  */
 export class CorteAnulacion extends Error {
   constructor(public body: { error: string; error_code?: string; [k: string]: any }, public status: number) {
@@ -35,7 +43,10 @@ export class CorteAnulacion extends Error {
 export interface ResultadoAnulacion {
   success: true
   advertencias?: string[]
-  inverso: {
+  /** P2-43: qué pasó con sus devoluciones */
+  devoluciones?: string[]
+  /** null: una NC de devolución ya cubría todo el comprobante (no hay nada que anular en ARCA) */
+  inverso: null | {
     id: string
     tipo_comprobante: string
     numero: string
@@ -159,7 +170,7 @@ async function anularComprobanteEnTurno(
 
   // Parcial: importes escalados a la parte y un solo renglón de detalle
   const parcial = opts.parcial ?? null
-  const base = parcial ? montosParciales(original, parcial.monto) : original
+  let base = parcial ? montosParciales(original, parcial.monto) : original
   if (parcial) {
     // Con el signo del original (la NC lleva el renglón en negativo): el espejo lo invierte
     const s = Number(original.total_factura) < 0 ? -1 : 1
@@ -224,6 +235,17 @@ async function anularComprobanteEnTurno(
       error: `El CUIT del cliente "${original.cliente.nombre_razon_social ?? ''}" no es válido (${original.cliente.cuit}): corregilo en la ficha del cliente.`,
       error_code: 'CLIENTE_CUIT_INVALIDO',
     }, 422)
+  }
+
+  // ─── P2-43: aplicar sus devoluciones (ya validado todo lo demás) ───
+  let dev: DevolucionesAplicadas | null = null
+  if (!parcial) {
+    dev = await aplicarDevolucionesAlAnular(supabase, original, usuarioId)
+    if (dev.menos > 0.005) {
+      const monto = montoAnulacionFiscal(original.total_factura, dev.menos)
+      if (monto <= 0.005) return await anularSinInverso(supabase, original, dev, usuarioId)
+      base = montosParciales(original, monto)
+    }
   }
 
   if (esFiscal && certDisponible && empresaConfig) {
@@ -377,6 +399,18 @@ async function anularComprobanteEnTurno(
     precio_unitario: d.precio_unitario,
     precio_total:    r2(-d.precio_total),
   }))
+  // P2-43 fiscal: lo ya acreditado por la NC de la devolución no se vuelve a acreditar
+  if (dev && dev.menos > 0.005) {
+    const suma = detallePayload.reduce((s: number, d: any) => s + Number(d.precio_total || 0), 0)
+    const resto = r2(totalNeto - suma)
+    detallePayload.push({
+      articulo_id:     null,
+      descripcion:     `Menos lo ya acreditado por ${dev.ncs.join(', ')} (devolución)`,
+      cantidad:        1,
+      precio_unitario: resto,
+      precio_total:    resto,
+    })
+  }
 
   const logId = cae ? await registrarCAEObtenido(supabase, {
     tipo: tipoInverso, puntoVenta, numero: numeroComprobante,
@@ -457,9 +491,11 @@ async function anularComprobanteEnTurno(
   }
 
   // ─── 11. Stock: si el original decrementó stock, lo recuperamos ───
+  // P2-43: menos lo devuelto (la devolución ya lo reingresó si era vendible)
   if (!parcial && ORIGINAL_DECREMENTO_STOCK.has(original.tipo_comprobante)) {
-    for (const d of original.detalle) {
-      const cantidad = Math.abs(d.cantidad)
+    const reingresa = stockAReingresar(original.detalle, dev?.devuelto ?? new Map())
+    for (const [i, d] of original.detalle.entries()) {
+      const cantidad = reingresa[i]
       if (cantidad <= 0) continue
 
       await supabase.rpc('increment_stock_actual', {
@@ -579,9 +615,11 @@ async function anularComprobanteEnTurno(
     if (pdfMarcaErr) console.error('[Anular PDF] No se pudo marcar estado_pdf=error:', pdfMarcaErr.message)
   }
 
+  if (dev?.advertencias.length) advertencias.push(...dev.advertencias)
   return {
     success: true,
     ...(advertencias.length ? { advertencias } : {}),
+    ...(dev?.textos.length ? { devoluciones: dev.textos } : {}),
     inverso: {
       id:              inverso.id,
       tipo_comprobante: tipoInverso,
@@ -590,5 +628,27 @@ async function anularComprobanteEnTurno(
       cae:              cae ?? null,
       vencimiento_cae:  vencimientoCae ?? null,
     },
+  }
+}
+
+/**
+ * P2-43 fiscal: la NC de la devolución ya acredita TODO el comprobante → no hay
+ * nada que anular en ARCA. Se marca anulado (remito anulado, comisión
+ * reconciliada); lo devuelto ya reingresó el stock con la devolución.
+ */
+async function anularSinInverso(supabase: any, original: any, dev: DevolucionesAplicadas, usuarioId: string): Promise<ResultadoAnulacion> {
+  await supabase.from('comprobantes_venta').update({ anulado_en: nowArgentina() }).eq('id', original.id)
+  await supabase.from('remitos').update({ estado: 'anulado' }).eq('comprobante_id', original.id).eq('estado', 'activo')
+  try {
+    const { liquidarComisiones } = await import('@/lib/comisiones/liquidar')
+    await liquidarComisiones(supabase, [original.id], usuarioId)
+  } catch (e) {
+    console.error('[Anular] Error reconciliando comisiones:', e)
+  }
+  return {
+    success: true,
+    advertencias: [...dev.advertencias, `${original.tipo_comprobante} ${original.numero_comprobante}: la NC de la devolución (${dev.ncs.join(', ')}) ya lo acreditaba entero; queda anulado sin emitir nada en ARCA.`],
+    ...(dev.textos.length ? { devoluciones: dev.textos } : {}),
+    inverso: null,
   }
 }

@@ -11,8 +11,8 @@ import { Loader2, AlertTriangle, CheckCircle2 } from "lucide-react"
 import { moneda } from "@/lib/formato"
 
 type Anulable = { id: string; tipo_comprobante: string; numero_comprobante: string; total_factura: number }
-type Evaluacion = { puede: boolean; motivo: string | null; aAnular: Anulable[]; devoluciones?: Array<{ numero: string; articulos: string; aparte: boolean; fiscal: boolean; sin_nc: boolean }> }
-type Resultado = { a_favor: number; anulados: unknown[]; estado_pedido?: string | null; advertencias?: string[] }
+type Evaluacion = { puede: boolean; motivo: string | null; aAnular: Anulable[]; devoluciones?: Array<{ numero: string; texto: string }> }
+type Resultado = { a_favor: number; anulados: unknown[]; estado_pedido?: string | null; advertencias?: string[]; devoluciones?: string[] }
 
 const FISCALES = new Set(["FA", "FB", "FC", "NCA", "NCB", "NCC", "NDA", "NDB", "NDC"])
 
@@ -87,6 +87,7 @@ export function AnularComprobantesDialog({
             {resultado.a_favor > 0 && (
               <p className="text-slate-600">Lo que ya había pagado contra este pedido (<strong>{moneda(resultado.a_favor)}</strong>) se aplica al comprobante nuevo cuando lo vuelvas a generar.</p>
             )}
+            {resultado.devoluciones?.map((d, i) => <p key={`d${i}`} className="text-slate-600">{d}</p>)}
             {resultado.advertencias?.map((a, i) => <p key={i} className="text-amber-700">{a}</p>)}
             <div className="flex justify-end"><Button onClick={() => onOpenChange(false)}>Listo</Button></div>
           </div>
@@ -111,14 +112,8 @@ export function AnularComprobantesDialog({
             )}
             {evaluacion?.puede && !!evaluacion.devoluciones?.length && (
               <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-700">
-                <p>El comprobante nuevo sale <strong>sin lo devuelto</strong> y el crédito de esa devolución se neutraliza:</p>
-                {evaluacion.devoluciones.map((d) => (
-                  <p key={d.numero}>
-                    <strong>{d.numero}</strong>: {d.articulos}.{d.fiscal ? " Fue con NC: se neutraliza con una ND con CAE en ARCA." : ""}
-                    {d.aparte ? " Lo que trae de otros comprobantes o del sistema viejo queda aparte." : ""}
-                    {d.sin_nc ? " Todavía no tiene NC/REV: emitila antes de volver a generar." : ""}
-                  </p>
-                ))}
+                <p>Lo devuelto <strong>sale del pedido</strong>: no se vuelve a facturar.</p>
+                {evaluacion.devoluciones.map((d) => <p key={d.numero}>{d.texto}</p>)}
               </div>
             )}
             {evaluacion?.puede && hayFiscal && (
