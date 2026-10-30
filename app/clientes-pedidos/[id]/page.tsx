@@ -287,7 +287,9 @@ export default function PedidoEditPage() {
         if (changes.length > 0) await guardarItemsPedido(id, changes)
       }
 
-      await loadAll()
+      // P2-21: guardado, vuelve a donde estaba (el pedido abierto en la lista, con sus filtros)
+      if (new URLSearchParams(window.location.search).get("volver") === "lista") router.back()
+      else router.push(`/clientes-pedidos?pedido=${pedido?.numero_pedido || ""}`)
     } catch (err: any) {
       alert(err.message || "Error al guardar")
     } finally {

@@ -24,7 +24,7 @@ export type PedidoFila = {
   viaje_id: string | null
   /** Día previsto sin viaje (calendario). Si hay viaje, manda la fecha del viaje. */
   fecha_entrega?: string | null
-  clientes?: { nombre_razon_social: string; cuit?: string | null; localidad?: string | null } | null
+  clientes?: { nombre_razon_social: string; cuit?: string | null; direccion?: string | null; localidad?: string | null } | null
   vendedores?: { nombre: string } | null
   viajes?: { nombre: string; fecha: string } | null
   zona?: { id: string; nombre: string } | null
@@ -143,7 +143,7 @@ export function TablaPedidos(p: Props) {
                   <td className="px-2 whitespace-nowrap tabular-nums text-neutro-600">{formatDateAR(x.fecha)}</td>
                   <td className="px-2 py-2">
                     <div className="truncate font-semibold uppercase text-azul-900">{x.clientes?.nombre_razon_social || '—'}</div>
-                    {(x.clientes?.localidad || x.vendedores?.nombre) && <div className="truncate text-xs uppercase text-neutro-500">{[x.clientes?.localidad, x.vendedores?.nombre].filter(Boolean).join(" · ")}</div>}
+                    {(x.clientes?.direccion?.trim() || x.clientes?.localidad || x.vendedores?.nombre) && <div className="truncate text-xs uppercase text-neutro-500">{[x.clientes?.direccion?.trim(), x.clientes?.localidad, x.vendedores?.nombre].filter(Boolean).join(" · ")}</div>}
                     {pk && (
                       <div className="mt-1 flex items-center gap-2 text-[11px] font-semibold text-exito-600">
                         <span className="size-1.5 animate-pulse rounded-full bg-exito-500" />Preparando: {pk.operario}

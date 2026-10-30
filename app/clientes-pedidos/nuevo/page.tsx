@@ -210,7 +210,8 @@ export default function NuevoPedidoPage() {
       if (entrega && entrega !== cliente.condicion_entrega) {
         try { await actualizarEncabezadoPedido(pedido.id, { condicion_entrega: entrega }) } catch { /* se corrige en la ficha del pedido */ }
       }
-      router.push(`/clientes-pedidos/${pedido.id}`)
+      // replace: al guardar el pedido, "atrás" no vuelve al formulario de alta (P2-21)
+      router.replace(`/clientes-pedidos/${pedido.id}`)
     } catch (err: any) {
       alert(err.message || "Error al crear el pedido")
       setCreating(false)

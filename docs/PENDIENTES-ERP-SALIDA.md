@@ -495,6 +495,8 @@ Proveedores: Juan no lo pidió; preguntarle si va la misma regla.
 
 **Dónde:** `app/clientes-pedidos/page.tsx`, renglón del listado. La consulta ya trae `clientes.direccion` (línea ~426), así que no hace falta tocar la base. Que quede: nombre, y abajo "dirección · localidad · vendedor". Si no tiene dirección, como hoy.
 
+**Hecho (30/10, rama `frontend-p2`, f2bb581):** el renglón muestra "dirección · localidad · vendedor" (`components/clientes/tabla-pedidos.tsx`).
+
 ### P2-07 — Entrega por transporte: aclarar flete en origen o en destino · Dueño: Cambios general
 
 **Pedido de Juan (28/10):** cuando la condición de entrega del cliente es "Envío por Transporte", tiene que poder elegirse si el flete se paga **en origen** (lo pagamos nosotros al despachar) o **en destino** (lo paga el cliente al recibir). Hoy el alta/ficha del cliente no tiene ese dato. Ver dónde se usa (`condicion_entrega = 'transporte'`, tabla `transportes`) y si tiene que llegar también al pedido, al remito y a la hoja de ruta.
@@ -521,6 +523,8 @@ PRUEBA 2 quedó guardado como "PRUEBA 2 " (con espacio al final) y PRUEBA 1 en m
 ### P2-15 — Pedidos "en revisión" no se ven en /clientes-pedidos · Dueño: Frontend
 
 El primer pedido de un cliente nuevo tomado en la app vendedor nace **en revisión** (está bien, regla del 09/10). Pero el listado de `/clientes-pedidos` abre filtrado en Pendiente + Impreso y esos pedidos **no aparecen salvo que se toque "Todos"**: la oficina no se entera de que tiene pedidos para revisar. Que "En revisión" esté incluido en el filtro por defecto (o un aviso arriba: "Hay N pedidos para revisar"). Visto con los pedidos 002020 a 002023 (PRUEBA 1 a 4).
+
+**Hecho (30/10, rama `frontend-p2`, f2bb581):** el filtro por defecto pasa a En revisión + Pendiente + Impreso; si el filtro elegido deja afuera pedidos en revisión, arriba de la lista aparece "Hay N pedidos para revisar… Mostrarlos".
 
 ### P2-20 — Cambios de estado de un pedido sin registro de quién · Dueño: Cambios general
 
@@ -554,6 +558,8 @@ Entre el 27/10 15:19 y el 28/10 11:40, los pedidos reales **001945, 001956 y 001
 ### P2-21 — "Guardar pedido" tiene que volver a donde estaba · Dueño: Frontend
 
 Al editar un pedido (ej. cambiar la lista) y apretar "Guardar pedido", la pantalla queda en el mismo lugar. Tiene que volver a donde estaba el usuario (el listado / el modal desde donde entró).
+
+**Hecho (30/10, rama `frontend-p2`, f2bb581):** al guardar, si se entró desde el pedido abierto en la lista ("Editar pedido" / "Agregar / Editar") vuelve ahí con los mismos filtros; si no, abre la lista con ese pedido. El alta de pedido (`/clientes-pedidos/nuevo`) ya no queda en el "atrás".
 
 ### P2-23 — Pedido de contado: el PRES figura "parcial" y la REV del 10 % "pagado" · Dueño: Frontend (consultar a Cuentas corrientes)
 
@@ -626,6 +632,8 @@ CHEN 002017: la devolución DEV-00001 (2 aceite baby) se valuó a precio **Neco*
 ### P2-44 — "Anular comprobantes" en un pedido cobrado al 100 %: no está bloqueado de entrada y muestra un "éxito" viejo · Dueño: Frontend
 
 PRUEBA 1 (002020, cobrado completo): el botón **no** aparece deshabilitado con "Cobrado al 100 %" (frontend R1/R3 decía que sí). Juan lo apretó, trabajó un rato y recién al final salió "el pedido ya está cobrado al 100 %: no se puede refacturar". Al cerrar, apareció **"Comprobantes generados exitosamente: PRES 0001-00000035"**, que era el aviso del pedido anterior (002017). Verificado en la base: para 002020 no se anuló ni se generó nada; cuenta, comisión, caja y stock sin cambios. Arreglar: deshabilitar el botón de entrada y limpiar el aviso anterior.
+
+**Hecho (30/10, rama `frontend-p2`, f2bb581):** mientras se revisa si se puede refacturar el botón queda deshabilitado (antes se habilitaba en cada recarga de la lista y mientras esperaba al servidor, que a ratos estaba lento por P2-49); cobrado al 100 % → "Cobrado al 100 %" con el motivo. El aviso de "comprobantes generados" ya no es un `alert` (que podía quedar y salir después, sobre otro pedido): es un aviso con el número de pedido.
 
 ### P2-45 — Importar pedido (Excel / .eml): poder borrar un renglón LOW · Dueño: Frontend
 
