@@ -1,359 +1,253 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import type { OrigenDevolucion } from "@/lib/cobranzas/valor-devolucion"
-import { alicuotaIIBBVigente, origenesDeRenglones } from "@/lib/cobranzas/origen-devolucion"
-import { emitirComprobanteAjuste } from "@/lib/comprobantes/emitir-ajuste"
-import { moneda } from "@/lib/formato"
-import { calcularAjusteDevolucion, tipoAjuste, type AjusteClase, type RenglonAjuste } from "./ajuste-devoluciones"
-import { MOTIVO_AJUSTE_DEVOLUCION } from "./devolucion-en-anulaciones"
+import { insertarKardex } from "@/lib/kardex/insertar-kardex"
+import { ahoraISO } from "@/lib/formato"
+import { descontarDevuelto } from "./ajuste-devoluciones"
 
-// P2-43 (regla de Juan 31/10/2026): al refacturar un pedido, las devoluciones ya
-// acreditadas contra su comprobante anulado se recalculan al precio del
-// comprobante NUEVO y sale solo la diferencia (lib/pedidos/ajuste-devoluciones.ts):
-// crédito extra (REV / NC) si subió, débito (PRES / ND) si bajó. Después cada
-// renglón de la devolución queda apuntando al comprobante nuevo y a su precio:
-// la devolución vale lo de la factura vigente (y un segundo refacturar compara
-// contra este, no contra el primero).
-//
-// - Crédito: se imputa al comprobante nuevo de su clase.
-// - Débito: lo cubre el crédito de la anulación (lo devuelto al precio viejo vive
-//   ahí): refacturar.ts lo imputa primero a estos débitos.
-// - Base del 10 % contado y comisión: lib/pedidos/devolucion-en-anulaciones.ts.
+// P2-43 (regla DEFINITIVA de Juan, 31/10/2026 — ver lib/pedidos/ajuste-devoluciones.ts):
+// al ANULAR un comprobante de venta (refacturar o anular de a uno), sus
+// devoluciones se aplican y la mercadería devuelta sale del pedido.
+//  - Caso 2: devolución con su REV/NC ya emitida e imputada al comprobante → la
+//    REV/NC es INTOCABLE; la anulación es solo por lo que falta cancelar
+//    (total − devoluciones imputadas). Si lo cubren todo, no hay inverso.
+//  - Caso 1: devolución aceptada sin REV/NC → se cierra sin emitirla ("facturado").
+//  - Devolución que depósito todavía no revisó → no se refactura hasta revisarla
+//    (lib/pedidos/anulacion-pedido.ts).
+// La devolución queda marcada `[aplicada:<comprobante>]` en sus observaciones; al
+// volver a generar, lo devuelto de esos comprobantes no se factura
+// (aplicarDevueltoAlDetalle, en generar y en el kardex).
 
+const CREDITOS = ["NCA", "NCB", "NCC", "REV"]
 const VENTAS = ["FA", "FB", "FC", "PRES"]
-const FISCALES = new Set(["FA", "FB", "FC"])
 const r2 = (n: number) => Math.round(n * 100) / 100
-const CLIENTE_COLS = "id, cuit, condicion_iva, exento_iva, exento_iibb, provincia, percepcion_iibb, metodo_facturacion, metodo_limpieza, metodo_perf0, metodo_perf_plus"
+const marca = (compId: string) => `[aplicada:${compId}]`
 
-interface CompRef {
+interface RenglonDev {
   id: string
-  tipo_comprobante: string
-  numero_comprobante: string
-}
-
-export interface AjustePlaneado extends AjusteClase {
-  tipo: string
-  /** Comprobante nuevo de esa clase (imputación del crédito y asociado fiscal); si no hay, el anulado */
-  referencia: CompRef | null
-}
-
-export interface PlanDevolucion {
   devolucion_id: string
   numero: string
-  cliente_id: string
-  /** Lo acreditado (al precio del comprobante anulado) y lo que vale al precio nuevo */
-  acreditado: number
-  valor_nuevo: number
-  /** Alícuota IIBB con la que se valuó (la vigente) */
-  alicuota_iibb: number
-  ajustes: AjustePlaneado[]
-  /** A dónde pasa cada renglón (null en la estimación: el comprobante todavía no existe) */
-  renglones: Array<{ id: string; comprobante_venta_id: string | null; precio_venta_original: number }>
-  /** Artículos devueltos que no están en el comprobante nuevo (no se recalculan) */
-  sin_comprobante: string[]
-  texto: string
+  estado: string
+  observaciones: string
+  articulo_id: string
+  descripcion: string | null
+  cantidad: number
+  precio: number
+  comprobante_venta_id: string
+  es_vendible: boolean
 }
 
-/**
- * Qué ajuste sale por cada devolución del pedido. Con `nuevosIds` (al emitir):
- * contra los comprobantes recién emitidos. Sin ellos (antes de Generar): una
- * estimación con los precios actuales del pedido.
- */
-export async function planAjusteDevoluciones(
-  supabase: SupabaseClient,
-  pedidoId: string,
-  opts: { nuevosIds?: string[] } = {},
-): Promise<PlanDevolucion[]> {
-  const { data: comps } = await supabase
-    .from("comprobantes_venta")
-    .select("id, tipo_comprobante, numero_comprobante, anulado_en, cliente_id")
-    .eq("pedido_id", pedidoId)
-    .in("tipo_comprobante", VENTAS)
-  const anulados = ((comps || []) as any[]).filter((c) => c.anulado_en)
-  if (!anulados.length) return []
-  const anuladoDe = new Map<string, CompRef>(anulados.map((c) => [c.id, c]))
-
-  const { data: det } = await supabase
+async function renglonesContra(supabase: SupabaseClient, compIds: string[], estados: string[]): Promise<RenglonDev[]> {
+  if (!compIds.length) return []
+  const { data } = await supabase
     .from("devoluciones_detalle")
-    .select("id, devolucion_id, articulo_id, cantidad, precio_venta_original, estado_renglon, comprobante_venta_id, articulo:articulos!devoluciones_detalle_articulo_id_fkey(descripcion, segmento_precio), devolucion:devoluciones!inner(id, numero_devolucion, estado, cliente_id)")
-    .in("comprobante_venta_id", [...anuladoDe.keys()])
-  const renglones = ((det || []) as any[]).filter((d) => {
+    .select("id, devolucion_id, articulo_id, cantidad, precio_venta_original, estado_renglon, es_vendible, comprobante_venta_id, articulo:articulos!devoluciones_detalle_articulo_id_fkey(descripcion), devolucion:devoluciones!inner(id, numero_devolucion, estado, observaciones)")
+    .in("comprobante_venta_id", compIds)
+  const out: RenglonDev[] = []
+  for (const d of (data || []) as any[]) {
     const dev = Array.isArray(d.devolucion) ? d.devolucion[0] : d.devolucion
-    return dev?.estado === "facturado" && d.estado_renglon !== "rechazado" && Number(d.cantidad) > 0
-  })
-  if (!renglones.length) return []
-
-  const clienteId = (anulados[0] as any).cliente_id as string
-  const { data: cliente } = await supabase.from("clientes").select(CLIENTE_COLS).eq("id", clienteId).single()
-
-  // Comprobantes nuevos con sus renglones
-  const nuevos: Array<CompRef & { detalle: Array<{ articulo_id: string; precio_unitario: number }> }> = []
-  if (opts.nuevosIds?.length) {
-    const { data } = await supabase
-      .from("comprobantes_venta")
-      .select("id, tipo_comprobante, numero_comprobante, comprobantes_venta_detalle(articulo_id, precio_unitario, es_bonificado)")
-      .in("id", opts.nuevosIds)
-      .in("tipo_comprobante", VENTAS)
-    for (const c of (data || []) as any[]) {
-      nuevos.push({
-        id: c.id,
-        tipo_comprobante: c.tipo_comprobante,
-        numero_comprobante: c.numero_comprobante,
-        detalle: (c.comprobantes_venta_detalle || [])
-          .filter((d: any) => d.es_bonificado !== true && Number(d.precio_unitario) > 0)
-          .map((d: any) => ({ articulo_id: d.articulo_id, precio_unitario: Number(d.precio_unitario) })),
-      })
-    }
-  }
-
-  // Estimación: precios actuales del pedido (como los va a escribir Generar)
-  const delPedido = new Map<string, { final: number; neto: number; perf: boolean }>()
-  if (!opts.nuevosIds) {
-    const { data } = await supabase
-      .from("pedidos_detalle")
-      .select("articulo_id, precio_final, precio_base, es_bonificado")
-      .eq("pedido_id", pedidoId)
-    for (const d of (data || []) as any[]) {
-      if (d.es_bonificado === true || delPedido.has(d.articulo_id)) continue
-      const final = Number(d.precio_final) || 0
-      delPedido.set(d.articulo_id, { final, neto: Number(d.precio_base) > 0 ? Number(d.precio_base) : r2(final / 1.21), perf: false })
-    }
-    for (const d of renglones) {
-      const p = delPedido.get(d.articulo_id)
-      const art = Array.isArray(d.articulo) ? d.articulo[0] : d.articulo
-      if (p) p.perf = art?.segmento_precio === "perfumeria"
-    }
-  }
-
-  const [viejos, alicuota, notas10] = await Promise.all([
-    origenesDeRenglones(
-      supabase,
-      clienteId,
-      renglones.map((d) => ({ articulo_id: d.articulo_id, comprobante_venta_id: d.comprobante_venta_id, precio_venta_original: Number(d.precio_venta_original) || 0 })),
-      cliente as any,
-    ),
-    alicuotaIIBBVigente(supabase, (cliente || {}) as any),
-    notasContado(supabase, clienteId, renglones),
-  ])
-
-  // Destino de cada renglón: comprobante nuevo de la misma clase con el artículo (si no, de cualquiera)
-  const destino = renglones.map((d, i) => {
-    const fiscalViejo = viejos[i].fiscal
-    if (opts.nuevosIds) {
-      const con = nuevos.filter((c) => c.detalle.some((x) => x.articulo_id === d.articulo_id))
-      const c = con.find((x) => FISCALES.has(x.tipo_comprobante) === fiscalViejo) ?? con[0]
-      if (!c) return null
-      return { comp: c as CompRef, precio: c.detalle.find((x) => x.articulo_id === d.articulo_id)!.precio_unitario }
-    }
-    const p = delPedido.get(d.articulo_id)
-    if (!p || !(p.final > 0)) return null
-    return { comp: null, precio: fiscalViejo ? p.neto : p.perf ? p.neto : p.final, iva: fiscalViejo ? r2(p.final - p.neto) : null }
-  })
-
-  // Origen nuevo: real (comprobante emitido) o estimado (mismo origen con el precio del pedido)
-  const conDestino = renglones.map((d, i) => ({ d, i, dest: destino[i] })).filter((x) => x.dest)
-  const nuevosOrigenes = opts.nuevosIds
-    ? await origenesDeRenglones(
-        supabase,
-        clienteId,
-        conDestino.map(({ d, dest }) => ({ articulo_id: d.articulo_id, comprobante_venta_id: dest!.comp!.id, precio_venta_original: dest!.precio })),
-        cliente as any,
-      )
-    : conDestino.map(({ i, dest }) => ({
-        ...viejos[i],
-        comprobante_venta_id: null,
-        exacto: true,
-        precio: dest!.precio,
-        iva_unitario: (dest as any).iva ?? null,
-        bonificado_contado: false,
-      }) as OrigenDevolucion)
-
-  // Por devolución
-  const porDev = new Map<string, { numero: string; items: RenglonAjuste[]; dest: Array<{ id: string; comp: CompRef | null; precio: number }>; sin: string[]; anulado: Map<boolean, CompRef> }>()
-  renglones.forEach((d, i) => {
-    const dev = Array.isArray(d.devolucion) ? d.devolucion[0] : d.devolucion
+    if (!estados.includes(dev?.estado) || d.estado_renglon === "rechazado" || !(Number(d.cantidad) > 0)) continue
     const art = Array.isArray(d.articulo) ? d.articulo[0] : d.articulo
-    if (!porDev.has(d.devolucion_id)) porDev.set(d.devolucion_id, { numero: dev?.numero_devolucion || d.devolucion_id, items: [], dest: [], sin: [], anulado: new Map() })
-    const g = porDev.get(d.devolucion_id)!
-    const k = conDestino.findIndex((x) => x.i === i)
-    if (k < 0) {
-      g.sin.push(art?.descripcion || d.articulo_id)
-      return
-    }
-    // El 10 % con que se acreditó (la anulación ya bajó la NC/REV del contado: se toma de la emisión)
-    const viejo = { ...viejos[i], bonificado_contado: notas10.get(`${d.devolucion_id}|${viejos[i].fiscal}`) ?? viejos[i].bonificado_contado }
-    g.items.push({
+    out.push({
       id: d.id,
+      devolucion_id: d.devolucion_id,
+      numero: dev?.numero_devolucion || d.devolucion_id,
+      estado: dev?.estado,
+      observaciones: dev?.observaciones || "",
       articulo_id: d.articulo_id,
       descripcion: art?.descripcion ?? null,
       cantidad: Number(d.cantidad) || 0,
-      precio_viejo: Number(d.precio_venta_original) || 0,
-      origen_viejo: viejo,
-      precio_nuevo: conDestino[k].dest!.precio,
-      origen_nuevo: nuevosOrigenes[k],
-    })
-    g.dest.push({ id: d.id, comp: conDestino[k].dest!.comp, precio: conDestino[k].dest!.precio })
-    const an = anuladoDe.get(d.comprobante_venta_id)
-    if (an && !g.anulado.has(viejo.fiscal)) g.anulado.set(viejo.fiscal, an)
-  })
-
-  const out: PlanDevolucion[] = []
-  for (const [devId, g] of porDev) {
-    const calc = calcularAjusteDevolucion(g.items, alicuota)
-    const ajustes: AjustePlaneado[] = calc.ajustes.map((a) => {
-      const nuevoDeClase = g.items
-        .map((it, j) => (it.origen_nuevo.fiscal === a.fiscal ? g.dest[j].comp : null))
-        .find(Boolean) as CompRef | undefined
-      const referencia = nuevoDeClase ?? g.anulado.get(a.fiscal) ?? null
-      const tipoRef = nuevoDeClase?.tipo_comprobante ?? g.anulado.get(a.fiscal)?.tipo_comprobante
-        ?? (a.fiscal ? g.items.find((it) => it.origen_nuevo.fiscal)?.origen_nuevo.tipo_comprobante : null)
-      return { ...a, tipo: tipoAjuste(a.fiscal, a.signo, tipoRef), referencia }
-    })
-    const acreditado = calc.viejo.total
-    const valorNuevo = calc.nuevo.total
-    out.push({
-      devolucion_id: devId,
-      numero: g.numero,
-      cliente_id: clienteId,
-      acreditado,
-      valor_nuevo: valorNuevo,
-      alicuota_iibb: alicuota,
-      ajustes,
-      renglones: g.dest.map((x) => ({ id: x.id, comprobante_venta_id: x.comp?.id ?? null, precio_venta_original: x.precio })),
-      sin_comprobante: g.sin,
-      texto: textoPlan(g.numero, acreditado, valorNuevo, ajustes, g.sin),
+      precio: Number(d.precio_venta_original) || 0,
+      comprobante_venta_id: d.comprobante_venta_id,
+      es_vendible: d.es_vendible !== false,
     })
   }
   return out
 }
 
-function textoPlan(numero: string, acreditado: number, valorNuevo: number, ajustes: AjustePlaneado[], sin: string[]): string {
-  const base = ajustes.length
-    ? `La devolución ${numero} se recalcula a ${moneda(valorNuevo)} (estaba acreditada en ${moneda(acreditado)}): sale ${ajustes.map((a) => `${a.tipo} por ${moneda(a.total)}`).join(" y ")}.`
-    : `La devolución ${numero} queda igual (${moneda(acreditado)}).`
-  return sin.length ? `${base} No están en el comprobante nuevo: ${sin.join(", ")}.` : base
-}
-
-/** ¿La NC/REV de cada devolución salió con el 10 % contado? (nota que deja generar-nc-reversa). Clave devolucion|fiscal. */
-async function notasContado(supabase: SupabaseClient, clienteId: string, renglones: any[]): Promise<Map<string, boolean>> {
-  const out = new Map<string, boolean>()
-  const numeros = new Map<string, string>()
-  for (const d of renglones) {
-    const dev = Array.isArray(d.devolucion) ? d.devolucion[0] : d.devolucion
-    if (dev?.numero_devolucion) numeros.set(d.devolucion_id, dev.numero_devolucion)
-  }
-  for (const [devId, numero] of numeros) {
-    const { data } = await supabase
-      .from("comprobantes_venta")
-      .select("tipo_comprobante, observaciones")
-      .eq("cliente_id", clienteId)
-      .in("tipo_comprobante", ["NCA", "NCB", "NCC", "REV"])
-      .is("anulado_en", null)
-      .ilike("observaciones", `Devolución ${numero}%`)
-    for (const c of (data || []) as any[]) {
-      const obs = String(c.observaciones || "")
-      if (obs !== `Devolución ${numero}` && !obs.startsWith(`Devolución ${numero} `)) continue
-      const fiscal = c.tipo_comprobante !== "REV"
-      if (obs.includes("bonificados 10% contado")) out.set(`${devId}|${fiscal}`, true)
-      else if (!out.has(`${devId}|${fiscal}`)) out.set(`${devId}|${fiscal}`, false)
-    }
-  }
-  return out
-}
-
-export interface ResultadoAjusteDevoluciones {
-  emitidos: Array<{ devolucion: string; id: string; tipo: string; numero: string; total: number }>
-  /** Débitos de ajuste: los cubre el crédito de la anulación (refacturar.ts) */
-  debitosIds: string[]
-  textos: string[]
-  advertencias: string[]
-}
-
-/** Al emitir el comprobante nuevo de un pedido refacturado: emite los ajustes y pasa las devoluciones al comprobante nuevo. */
-export async function ajustarDevolucionesRefacturadas(
-  supabase: SupabaseClient,
-  pedidoId: string,
-  nuevosIds: string[],
-  usuarioId: string,
-): Promise<ResultadoAjusteDevoluciones> {
-  const res: ResultadoAjusteDevoluciones = { emitidos: [], debitosIds: [], textos: [], advertencias: [] }
-  if (!nuevosIds.length) return res
-  const plan = await planAjusteDevoluciones(supabase, pedidoId, { nuevosIds })
-
-  for (const p of plan) {
-    const mixto = p.ajustes.find((a) => a.mixto)
-    if (mixto) {
-      res.advertencias.push(`${p.texto} No se emitió solo: el comprobante nuevo cambia las percepciones en sentido contrario al precio. Hacelo a mano.`)
-      continue
-    }
-    let ok = true
-    // Fiscal primero (si ARCA falla, no queda una REV suelta de un ajuste a medias)
-    for (const a of [...p.ajustes].sort((x, y) => Number(y.fiscal) - Number(x.fiscal))) {
-      try {
-        const em = await emitirComprobanteAjuste(supabase, {
-          tipo: a.tipo,
-          clienteId: p.cliente_id,
-          neto: a.neto,
-          iva: a.iva,
-          baseIva: a.baseIva,
-          percepcionIva: a.percepcionIva,
-          percepcionIibb: a.percepcionIibb,
-          alicuotaIIBB: p.alicuota_iibb,
-          detalle: a.detalle.map((d) => ({ articulo_id: d.articulo_id, descripcion: `${d.descripcion || "Artículo"} — diferencia de precio al refacturar`, cantidad: d.cantidad, neto: d.neto })),
-          asociado: a.referencia,
-          observaciones: `Devolución ${p.numero} — ajuste por refacturación${a.referencia ? ` (${a.referencia.tipo_comprobante} ${a.referencia.numero_comprobante})` : ""}: acreditada ${moneda(p.acreditado)} → ${moneda(p.valor_nuevo)}`,
-          motivo: MOTIVO_AJUSTE_DEVOLUCION,
-          usuarioId,
-        })
-        res.emitidos.push({ devolucion: p.numero, id: em.id, tipo: em.tipo, numero: em.numero, total: em.total })
-        res.advertencias.push(...em.advertencias)
-        if (a.signo > 0) {
-          // Crédito extra → al comprobante nuevo de su clase (si ya no debe, queda a favor)
-          if (a.referencia && nuevosIds.includes(a.referencia.id)) {
-            const { error } = await supabase.rpc("cc_imputar_credito", { p_credito_id: em.id, p_debito_id: a.referencia.id, p_monto: null, p_usuario_id: usuarioId })
-            if (error) res.advertencias.push(`El ${em.tipo} ${em.numero} quedó a favor sin imputar (${error.message}): imputalo al ${a.referencia.tipo_comprobante} ${a.referencia.numero_comprobante} desde la cuenta corriente.`)
-          }
-        } else {
-          res.debitosIds.push(em.id)
-        }
-      } catch (e: any) {
-        ok = false
-        res.advertencias.push(`No se pudo emitir el ajuste de la devolución ${p.numero} (${a.tipo} por ${moneda(a.total)}): ${e?.message || e}. Emitilo a mano.`)
-        break
-      }
-    }
-    if (!ok) continue
-    // La devolución vale ahora lo del comprobante nuevo
-    for (const r of p.renglones) {
-      if (!r.comprobante_venta_id) continue
-      const { error } = await supabase
-        .from("devoluciones_detalle")
-        .update({ comprobante_venta_id: r.comprobante_venta_id, precio_venta_original: r.precio_venta_original })
-        .eq("id", r.id)
-      if (error) res.advertencias.push(`Renglón de la devolución ${p.numero} sin pasar al comprobante nuevo (${error.message}).`)
-    }
-    res.textos.push(p.texto)
-  }
-  return res
-}
-
-/** Para el diálogo de anular: devoluciones ya acreditadas contra los comprobantes vivos del pedido. */
-export async function devolucionesAcreditadasDelPedido(supabase: SupabaseClient, pedidoId: string): Promise<Array<{ numero: string }>> {
+/** Artículo → cantidad devuelta y APLICADA en la refacturación, contra los comprobantes anulados del pedido. */
+export async function devueltoDelPedidoPorArticulo(supabase: SupabaseClient, pedidoId: string): Promise<Map<string, number>> {
   const { data: comps } = await supabase
     .from("comprobantes_venta")
     .select("id")
     .eq("pedido_id", pedidoId)
     .in("tipo_comprobante", VENTAS)
-    .is("anulado_en", null)
+    .not("anulado_en", "is", null)
   const ids = ((comps || []) as any[]).map((c) => c.id)
-  if (!ids.length) return []
-  const { data } = await supabase
-    .from("devoluciones_detalle")
-    .select("devolucion:devoluciones!inner(numero_devolucion, estado)")
-    .in("comprobante_venta_id", ids)
-  const numeros = new Set<string>()
-  for (const d of (data || []) as any[]) {
-    const dev = Array.isArray(d.devolucion) ? d.devolucion[0] : d.devolucion
-    if (dev?.estado === "facturado" && dev.numero_devolucion) numeros.add(dev.numero_devolucion)
+  const renglones = await renglonesContra(supabase, ids, ["facturado"])
+  const out = new Map<string, number>()
+  // Solo lo aplicado al anular (los anulados antes de este cambio siguen con su REV viva)
+  for (const r of renglones) if (r.observaciones.includes(marca(r.comprobante_venta_id))) out.set(r.articulo_id, (out.get(r.articulo_id) ?? 0) + r.cantidad)
+  return out
+}
+
+/**
+ * Descuenta lo devuelto de los renglones del pedido EN MEMORIA, para que
+ * cantidadAFacturar dé lo que va al comprobante nuevo (generar y kardex usan la
+ * misma función). Un renglón con algo devuelto queda como PARCIAL por lo que
+ * resta; si no resta nada, como FALTANTE. No graba nada.
+ */
+export async function aplicarDevueltoAlDetalle(
+  supabase: SupabaseClient,
+  pedidoId: string,
+  detalle: any[],
+  cantidadAFacturar: (d: any) => number,
+): Promise<Map<string, number>> {
+  const devuelto = await devueltoDelPedidoPorArticulo(supabase, pedidoId)
+  if (!devuelto.size) return devuelto
+  const cantidades = descontarDevuelto(
+    detalle.map((d) => ({ id: d.id, articulo_id: d.articulo_id, cantidad: cantidadAFacturar(d), es_bonificado: d.es_bonificado })),
+    devuelto,
+  )
+  for (const d of detalle) {
+    const nueva = cantidades.get(d.id)
+    if (nueva == null || nueva === cantidadAFacturar(d)) continue
+    if (nueva <= 0) d.estado_item = "FALTANTE"
+    else {
+      d.estado_item = "PARCIAL"
+      d.cantidad_preparada = nueva
+    }
   }
-  return [...numeros].map((numero) => ({ numero }))
+  return devuelto
+}
+
+export interface DevolucionesAplicadas {
+  /** Lo que ya cancelaron las REV/NC de devolución imputadas al comprobante (la anulación es por total − esto) */
+  menos: number
+  /** Artículo → cantidad devuelta (no reingresa stock con la anulación) */
+  devuelto: Map<string, number>
+  /** Las REV/NC de devolución que ya cancelaron parte (para el detalle y el aviso) */
+  creditos: string[]
+  textos: string[]
+  advertencias: string[]
+}
+
+/**
+ * Antes de emitir el inverso de un FA/FB/FC/PRES: aplica sus devoluciones. No
+ * toca ninguna REV/NC emitida: devuelve cuánto ya cancelaron (`menos`). Se
+ * puede repetir: lo ya marcado no se marca de nuevo.
+ */
+export async function aplicarDevolucionesAlAnular(
+  supabase: SupabaseClient,
+  original: { id: string; tipo_comprobante: string; numero_comprobante: string; cliente_id: string; pedido_id: string | null },
+  usuarioId: string,
+): Promise<DevolucionesAplicadas> {
+  const res: DevolucionesAplicadas = { menos: 0, devuelto: new Map(), creditos: [], textos: [], advertencias: [] }
+  if (!VENTAS.includes(original.tipo_comprobante)) return res
+
+  // Caso 2: REV/NC de devolución imputadas a este comprobante (por P2-41, solo su parte)
+  const { data: imps } = await supabase
+    .from("imputaciones")
+    .select("monto_imputado, credito:comprobantes_venta!imputaciones_credito_comprobante_id_fkey(tipo_comprobante, numero_comprobante, observaciones, anulado_en, estado_pago)")
+    .eq("comprobante_id", original.id)
+    .eq("estado", "confirmado")
+    .not("credito_comprobante_id", "is", null)
+  for (const i of (imps || []) as any[]) {
+    const cr = Array.isArray(i.credito) ? i.credito[0] : i.credito
+    if (!cr || cr.anulado_en || cr.estado_pago === "anulado" || !CREDITOS.includes(cr.tipo_comprobante)) continue
+    if (!String(cr.observaciones || "").startsWith("Devolución")) continue
+    res.menos = r2(res.menos + (Number(i.monto_imputado) || 0))
+    const nombre = `${cr.tipo_comprobante} ${cr.numero_comprobante}`
+    if (!res.creditos.includes(nombre)) res.creditos.push(nombre)
+  }
+
+  const renglones = await renglonesContra(supabase, [original.id], ["confirmado", "facturado"])
+  for (const r of renglones) res.devuelto.set(r.articulo_id, (res.devuelto.get(r.articulo_id) ?? 0) + r.cantidad)
+  if (!renglones.length) return res
+
+  let refPedido = `${original.tipo_comprobante} ${original.numero_comprobante}`
+  if (original.pedido_id) {
+    const { data: p } = await supabase.from("pedidos").select("numero_pedido").eq("id", original.pedido_id).maybeSingle()
+    if (p?.numero_pedido) refPedido = `pedido ${p.numero_pedido}`
+  }
+  const leyenda = `Aplicada en la refacturación del ${refPedido} ${marca(original.id)}`
+
+  const porDev = new Map<string, RenglonDev[]>()
+  for (const r of renglones) porDev.set(r.devolucion_id, [...(porDev.get(r.devolucion_id) || []), r])
+  for (const [devId, rs] of porDev) {
+    const numero = rs[0].numero
+    const arts = rs.map((r) => `${r.cantidad} ${r.descripcion || "artículo"}`).join(", ")
+    const conCredito = rs[0].estado === "facturado"
+    if (!rs[0].observaciones.includes(marca(original.id))) {
+      // Caso 1: aceptada sin REV/NC → se cierra sin emitir. Caso 2: queda como está, marcada.
+      const obs = [rs[0].observaciones, leyenda].filter(Boolean).join(" · ")
+      const { error } = await supabase.from("devoluciones").update({ estado: "facturado", observaciones: obs }).eq("id", devId)
+      if (error) res.advertencias.push(`No se pudo marcar la devolución ${numero} como aplicada (${error.message}).`)
+      // Kardex: lo vendible que su REV/NC reingresó sale (la venta refacturada ya no lo incluye)
+      if (conCredito) res.advertencias.push(...(await kardexSalida(supabase, original, rs, numero, usuarioId)))
+    }
+    res.textos.push(conCredito
+      ? `${arts} (${numero}) salen del comprobante nuevo por estar devueltos; la REV/NC de la devolución queda como está.`
+      : `${arts} (${numero}) salen del comprobante nuevo por estar devueltos; la devolución se cierra sin emitir REV/NC (aplicada en la refacturación).`)
+  }
+  if (res.menos > 0.005) res.textos.push(`La anulación es por lo que falta cancelar: ${res.creditos.join(", ")} ya canceló parte del ${original.tipo_comprobante} ${original.numero_comprobante}.`)
+  return res
+}
+
+/** Lo vendible devuelto que la NC/REV había reingresado al kardex sale (la venta refacturada ya no lo incluye). */
+async function kardexSalida(supabase: SupabaseClient, original: { id: string; tipo_comprobante: string; numero_comprobante: string; cliente_id: string; pedido_id: string | null }, rs: RenglonDev[], numero: string, usuarioId: string): Promise<string[]> {
+  const vendibles = rs.filter((r) => r.es_vendible)
+  if (!vendibles.length) return []
+  const { data: info } = await supabase.from("articulos").select("id, sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas").in("id", vendibles.map((r) => r.articulo_id))
+  const infoDe = new Map(((info || []) as any[]).map((a) => [a.id, a]))
+  const fiscal = original.tipo_comprobante !== "PRES"
+  const avisos: string[] = []
+  for (const r of vendibles) {
+    try {
+      await insertarKardex(supabase, {
+        tipo_movimiento: "ajuste_salida",
+        fecha: ahoraISO(),
+        articulo_id: r.articulo_id,
+        cantidad: r.cantidad,
+        precio_lista: 0,
+        precio_unitario_final: 0,
+        iva_porcentaje: 0,
+        iva_monto_unitario: 0,
+        iva_incluido: !fiscal,
+        subtotal_neto: 0,
+        subtotal_iva: 0,
+        subtotal_total: 0,
+        cliente_id: original.cliente_id,
+        pedido_id: original.pedido_id,
+        comprobante_venta_id: original.id,
+        tipo_comprobante: original.tipo_comprobante,
+        numero_comprobante: original.numero_comprobante,
+        metodo_facturacion: fiscal ? "Factura" : "Presupuesto",
+        color_dinero: fiscal ? "BLANCO" : "NEGRO",
+        operador_id: usuarioId,
+      } as any, infoDe.get(r.articulo_id) || {})
+    } catch (e: any) {
+      avisos.push(`Kardex de ${r.descripcion || r.articulo_id} (${numero}) sin corregir: ${e?.message || e}.`)
+    }
+  }
+  return avisos
+}
+
+/** Para el diálogo de anular y la confirmación de Generar: devoluciones de los comprobantes del pedido. */
+export async function devolucionesDelPedido(supabase: SupabaseClient, pedidoId: string, opts: { anulados?: boolean } = {}): Promise<Array<{ numero: string; articulos: string; aparte: boolean; fiscal: boolean; sin_credito: boolean; texto: string }>> {
+  let q = supabase.from("comprobantes_venta").select("id, tipo_comprobante").eq("pedido_id", pedidoId).in("tipo_comprobante", VENTAS)
+  q = opts.anulados ? q.not("anulado_en", "is", null) : q.is("anulado_en", null)
+  const { data: comps } = await q
+  const tipoDe = new Map(((comps || []) as any[]).map((c) => [c.id, c.tipo_comprobante as string]))
+  if (!tipoDe.size) return []
+  let renglones = await renglonesContra(supabase, [...tipoDe.keys()], opts.anulados ? ["facturado"] : ["pendiente", "confirmado", "facturado"])
+  if (opts.anulados) renglones = renglones.filter((r) => r.observaciones.includes(marca(r.comprobante_venta_id)))
+  if (!renglones.length) return []
+  const devIds = [...new Set(renglones.map((r) => r.devolucion_id))]
+  const { data: todos } = await supabase.from("devoluciones_detalle").select("devolucion_id, comprobante_venta_id, cantidad, estado_renglon").in("devolucion_id", devIds)
+  const aparte = new Set(((todos || []) as any[]).filter((d) => !tipoDe.has(d.comprobante_venta_id) && d.estado_renglon !== "rechazado" && Number(d.cantidad) > 0).map((d) => d.devolucion_id))
+  return devIds.map((id) => {
+    const rs = renglones.filter((r) => r.devolucion_id === id)
+    const fiscal = rs.some((r) => tipoDe.get(r.comprobante_venta_id) !== "PRES")
+    const sinCredito = rs[0].estado === "confirmado"
+    const articulos = rs.map((r) => `${r.cantidad} ${r.descripcion || "artículo"}`).join(", ")
+    const texto = `${articulos} (${rs[0].numero}) ${opts.anulados ? "no van" : "salen"} del comprobante nuevo` +
+      (opts.anulados
+        ? " (devueltos, aplicados en la refacturación)."
+        : rs[0].estado === "pendiente"
+          ? ": depósito todavía no la revisó. Revisala antes de refacturar."
+          : sinCredito
+            ? " por estar devueltos; la devolución se cierra sin emitir REV/NC."
+            : ` por estar devueltos; la anulación es por lo que falta cancelar (la ${fiscal ? "NC" : "REV"} de la devolución ya canceló su parte y queda como está).`) +
+      (aparte.has(id) ? " Lo que trae de otros comprobantes o del sistema viejo queda aparte, acreditado." : "")
+    return { numero: rs[0].numero, articulos, aparte: aparte.has(id), fiscal, sin_credito: sinCredito, texto }
+  })
 }

@@ -1,96 +1,113 @@
-// P2-43 (Juan 31/10/2026): al refacturar, la devolución vale al precio de la
-// factura vigente y sale solo la diferencia (lib/pedidos/ajuste-devoluciones.ts).
+// P2-43 (regla DEFINITIVA de Juan, 31/10/2026): al refacturar, lo devuelto SALE
+// del pedido. Las REV/NC de devolución ya emitidas son intocables: la anulación
+// es por total − devoluciones imputadas (lib/pedidos/ajuste-devoluciones.ts).
 import { describe, expect, it } from "vitest"
-import { calcularAjusteDevolucion, repartirDevolucionDeAnulacion, tipoAjuste, type RenglonAjuste } from "../../../../lib/pedidos/ajuste-devoluciones"
-import type { OrigenDevolucion } from "../../../../lib/cobranzas/valor-devolucion"
+import {
+  descontarDevuelto,
+  montoAnulacion,
+  parteDevolucionDeAnulacion,
+  repartirDevolucionDeAnulacion,
+  stockAReingresar,
+} from "../../../../lib/pedidos/ajuste-devoluciones"
 
-const pres = (precio: number, o: Partial<OrigenDevolucion> = {}): OrigenDevolucion => ({
-  comprobante_venta_id: "pres", tipo_comprobante: "PRES", numero_comprobante: "0001-00000001",
-  fiscal: false, percepcion_iva: false, bonificado_contado: false, exacto: true, precio, iva_unitario: null, ...o,
-})
-const fa = (neto: number, o: Partial<OrigenDevolucion> = {}): OrigenDevolucion => ({
-  comprobante_venta_id: "fa", tipo_comprobante: "FA", numero_comprobante: "0007-00000001",
-  fiscal: true, percepcion_iva: true, bonificado_contado: false, exacto: true, precio: neto, iva_unitario: null, ...o,
-})
-const renglon = (cantidad: number, viejo: number, ov: OrigenDevolucion, nuevo: number, on: OrigenDevolucion): RenglonAjuste => ({
-  id: "r", articulo_id: "a", descripcion: "Art", cantidad, precio_viejo: viejo, origen_viejo: ov, precio_nuevo: nuevo, origen_nuevo: on,
-})
+const r2 = (n: number) => Math.round(n * 100) / 100
+// PRES viejo: 10 trapos × $100 + 10 esponjas × $10 = $1.100. Se refactura a Neco (+20 %)
+const detallePedido = [
+  { id: "t", articulo_id: "trapo", cantidad: 10 },
+  { id: "e", articulo_id: "esponja", cantidad: 10 },
+]
+const devueltas = new Map([["esponja", 10]])
+const presNuevo = () => {
+  const cant = descontarDevuelto(detallePedido, devueltas)
+  return cant.get("t")! * 120 + cant.get("e")! * 12
+}
 
-describe("P2-43 ajuste de devoluciones al refacturar", () => {
-  it("ejemplo de Juan: compra a $100, devuelve, se refactura a $110 → REV por $10", () => {
-    const c = calcularAjusteDevolucion([renglon(1, 100, pres(100), 110, pres(110))], 0)
-    expect(c.viejo.total).toBe(100)
-    expect(c.nuevo.total).toBe(110)
-    expect(c.ajustes).toHaveLength(1)
-    const a = c.ajustes[0]
-    expect([a.fiscal, a.signo, a.total, tipoAjuste(a.fiscal, a.signo, "PRES")]).toEqual([false, 1, 10, "REV"])
-    expect(a.detalle).toEqual([{ articulo_id: "a", descripcion: "Art", cantidad: 1, neto: 10 }])
+describe("P2-43 ejemplo de Juan", () => {
+  it("comprobante nuevo sin lo devuelto: solo trapos a Neco, $1.200", () => {
+    expect(Object.fromEntries(descontarDevuelto(detallePedido, devueltas))).toEqual({ t: 10, e: 0 })
+    expect(presNuevo()).toBe(1200)
   })
 
-  it("precio más bajo → débito PRES por la diferencia", () => {
-    const [a] = calcularAjusteDevolucion([renglon(3, 100, pres(100), 90, pres(90))], 0).ajustes
-    expect([a.signo, a.total, tipoAjuste(a.fiscal, a.signo, "PRES")]).toEqual([-1, 30, "PRES"])
+  it("CASO 1 — devolución sin REV: anulación por el total $1.100 → saldo $1.200", () => {
+    const anulacion = montoAnulacion(1100, 0)
+    expect(anulacion).toBe(1100)
+    expect(r2(1100 - anulacion + presNuevo())).toBe(1200)
   })
 
-  it("mismo precio → no sale nada", () => {
-    expect(calcularAjusteDevolucion([renglon(5, 100, pres(100), 100, pres(100))], 3).ajustes).toEqual([])
+  it("CASO 2 — REV de devolución $100 ya emitida e intocable: anulación por $1.000 → saldo $1.200", () => {
+    const anulacion = montoAnulacion(1100, 100)
+    expect(anulacion).toBe(1000)
+    expect(r2(1100 - 100 - anulacion + presNuevo())).toBe(1200)
+    // La anulación no trae lo devuelto: lo que pasa al nuevo es solo lo pagado
+    expect(parteDevolucionDeAnulacion(100, 1100, anulacion)).toBe(0)
   })
 
-  it("factura A con IVA, percepción IVA e IIBB: la NC de ajuste lleva cada componente", () => {
-    // 10 u. a $100 neto → $110 neto; 21 % IVA, 3 % percepción IVA, 3 % IIBB
-    const c = calcularAjusteDevolucion([renglon(10, 100, fa(100), 110, fa(110))], 3)
-    expect(c.viejo.total).toBe(1270)
-    expect(c.nuevo.total).toBe(1397)
-    const [a] = c.ajustes
-    expect({ neto: a.neto, iva: a.iva, perc: a.percepcionIva, iibb: a.percepcionIibb, total: a.total, mixto: a.mixto })
-      .toEqual({ neto: 100, iva: 21, perc: 3, iibb: 3, total: 127, mixto: false })
-    expect(tipoAjuste(a.fiscal, a.signo, "FA")).toBe("NCA")
-    expect(tipoAjuste(true, -1, "FB")).toBe("NDB")
+  it("CASO 2 con un pago de $500: a favor queda solo lo pagado y pasa al PRES nuevo", () => {
+    const saldoViejo = 1100 - 100 - 500
+    const aFavor = r2(montoAnulacion(1100, 100) - saldoViejo) // la REV de anulación cruza el saldo
+    expect(aFavor).toBe(500)
+    expect(r2(presNuevo() - aFavor)).toBe(700)
   })
 
-  it("con 10 % contado en lo acreditado, el ajuste compara contra lo que se acreditó", () => {
-    // Se acreditó $90 (100 − 10 %); el comprobante nuevo no tiene contado: vale $110
-    const [a] = calcularAjusteDevolucion([renglon(1, 100, pres(100, { bonificado_contado: true }), 110, pres(110))], 0).ajustes
-    expect([a.signo, a.total]).toEqual([1, 20])
-  })
-
-  it("el artículo pasó de presupuesto a factura: débito PRES de lo viejo y NC de lo nuevo", () => {
-    const c = calcularAjusteDevolucion([renglon(1, 121, pres(121), 100, fa(100, { percepcion_iva: false }))], 0)
-    const fiscal = c.ajustes.find((a) => a.fiscal)!
-    const rev = c.ajustes.find((a) => !a.fiscal)!
-    expect([fiscal.signo, fiscal.total, tipoAjuste(true, fiscal.signo, "FA")]).toEqual([1, 121, "NCA"])
-    expect([rev.signo, rev.total, tipoAjuste(false, rev.signo, "PRES")]).toEqual([-1, 121, "PRES"])
-  })
-
-  it("percepción en sentido contrario al precio → marcado mixto (no se emite solo)", () => {
-    // Baja el neto pero el comprobante nuevo lleva percepción IVA y el viejo no: el total sube
-    const [a] = calcularAjusteDevolucion([renglon(1, 100, fa(100, { percepcion_iva: false }), 99, fa(99))], 0).ajustes
-    expect([a.signo, a.neto, a.percepcionIva]).toEqual([1, 1, 2.97])
-    expect(a.mixto).toBe(true)
-  })
-
-  it("el detalle suma el neto del ajuste al centavo", () => {
-    const rs = [
-      { ...renglon(3, 33.33, pres(33.33), 36.67, pres(36.67)), id: "1", articulo_id: "a" },
-      { ...renglon(7, 12.01, pres(12.01), 13.13, pres(13.13)), id: "2", articulo_id: "b" },
-    ]
-    const [a] = calcularAjusteDevolucion(rs, 0).ajustes
-    expect(Math.round(a.detalle.reduce((s, d) => s + d.neto, 0) * 100) / 100).toBe(a.neto)
+  it("stock: la anulación reingresa los trapos; las esponjas ya volvieron con la devolución", () => {
+    expect(stockAReingresar(detallePedido, devueltas)).toEqual([10, 0])
   })
 })
 
-describe("P2-43 parte devolución del crédito de anulación", () => {
-  it("primero el débito de ajuste, después el comprobante nuevo; el cruce con el anulado no cuenta", () => {
-    const rep = repartirDevolucionDeAnulacion(100, [
-      { comprobante_id: "orig", monto: 500, es_ajuste: false, es_original: true },
-      { comprobante_id: "nuevo", monto: 300, es_ajuste: false, es_original: false },
-      { comprobante_id: "ajuste", monto: 20, es_ajuste: true, es_original: false },
+describe("P2-43 fiscal", () => {
+  it("CASO 2 — FA $1.100 con NC de devolución $100 → NC de anulación por $1.000, sin ND", () => {
+    expect(montoAnulacion(1100, 100)).toBe(1000)
+    expect(r2(1100 - 100 - 1000 + 1200)).toBe(1200)
+  })
+})
+
+describe("P2-43 todo devuelto", () => {
+  const todo = new Map([["trapo", 10], ["esponja", 10]])
+  it("no queda nada para el comprobante nuevo", () => {
+    expect([...descontarDevuelto(detallePedido, todo).values()].every((c) => c === 0)).toBe(true)
+    expect(stockAReingresar(detallePedido, todo)).toEqual([0, 0])
+  })
+  it("CASO 1: anulación total, devolución cerrada sin emitir → $0", () => {
+    expect(r2(1100 - montoAnulacion(1100, 0))).toBe(0)
+  })
+  it("CASO 2: la REV de devolución ya canceló todo → anulación sin inverso → $0", () => {
+    expect(montoAnulacion(1100, 1100)).toBe(0)
+    expect(r2(1100 - 1100 - montoAnulacion(1100, 1100))).toBe(0)
+  })
+})
+
+describe("P2-43 mixtas, parciales y bonificadas", () => {
+  it("REV de $150 (100 de este PRES + 50 imputados al respaldo): solo resta lo imputado a ESTE comprobante", () => {
+    // P2-41 imputó 100 a este PRES y 50 al respaldo 0002-00000001: la REV no se toca
+    expect(montoAnulacion(1100, 100)).toBe(1000)
+  })
+
+  it("una devolución con renglones en los dos casos: cada comprobante resta solo lo suyo", () => {
+    // Renglón contra el PRES A (con REV emitida) y renglón contra el PRES B (sin REV): A se anula por total − REV, B por el total
+    expect([montoAnulacion(600, 60), montoAnulacion(500, 0)]).toEqual([540, 500])
+  })
+
+  it("devolución parcial: se factura lo que el cliente se quedó", () => {
+    expect(descontarDevuelto([{ id: "e", articulo_id: "esponja", cantidad: 10 }], new Map([["esponja", 4]])).get("e")).toBe(6)
+  })
+
+  it("lo devuelto no se descuenta de la mercadería bonificada", () => {
+    const cant = descontarDevuelto(
+      [{ id: "regalo", articulo_id: "a", cantidad: 2, es_bonificado: true }, { id: "cobrado", articulo_id: "a", cantidad: 10 }],
+      new Map([["a", 3]]),
+    )
+    expect(Object.fromEntries(cant)).toEqual({ regalo: 2, cobrado: 7 })
+  })
+})
+
+describe("P2-43 refacturados antes de este cambio (anulación por el total con la devolución viva)", () => {
+  it("lo que sobró de la anulación incluye lo devuelto: cuenta como devolución, no como pago", () => {
+    const dev = parteDevolucionDeAnulacion(100, 1100, 1100)
+    expect(dev).toBe(100)
+    const rep = repartirDevolucionDeAnulacion(dev, [
+      { comprobante_id: "viejo", monto: 600, es_original: true },
+      { comprobante_id: "nuevo", monto: 400, es_original: false },
     ])
-    expect(Object.fromEntries(rep)).toEqual({ ajuste: 20, nuevo: 80 })
-  })
-
-  it("lo que pasa de lo devuelto es pago (no se reparte de más)", () => {
-    const rep = repartirDevolucionDeAnulacion(50, [{ comprobante_id: "nuevo", monto: 300, es_ajuste: false, es_original: false }])
-    expect(rep.get("nuevo")).toBe(50)
+    expect(Object.fromEntries(rep)).toEqual({ nuevo: 100 })
   })
 })

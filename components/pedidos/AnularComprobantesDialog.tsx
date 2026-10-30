@@ -11,8 +11,8 @@ import { Loader2, AlertTriangle, CheckCircle2 } from "lucide-react"
 import { moneda } from "@/lib/formato"
 
 type Anulable = { id: string; tipo_comprobante: string; numero_comprobante: string; total_factura: number }
-type Evaluacion = { puede: boolean; motivo: string | null; aAnular: Anulable[]; devoluciones?: Array<{ numero: string }> }
-type Resultado = { a_favor: number; anulados: unknown[]; estado_pedido?: string | null; advertencias?: string[] }
+type Evaluacion = { puede: boolean; motivo: string | null; aAnular: Anulable[]; devoluciones?: Array<{ numero: string; texto: string }> }
+type Resultado = { a_favor: number; anulados: unknown[]; estado_pedido?: string | null; advertencias?: string[]; devoluciones?: string[] }
 
 const FISCALES = new Set(["FA", "FB", "FC", "NCA", "NCB", "NCC", "NDA", "NDB", "NDC"])
 
@@ -87,6 +87,7 @@ export function AnularComprobantesDialog({
             {resultado.a_favor > 0 && (
               <p className="text-slate-600">Lo que ya había pagado contra este pedido (<strong>{moneda(resultado.a_favor)}</strong>) se aplica al comprobante nuevo cuando lo vuelvas a generar.</p>
             )}
+            {resultado.devoluciones?.map((d, i) => <p key={`d${i}`} className="text-slate-600">{d}</p>)}
             {resultado.advertencias?.map((a, i) => <p key={i} className="text-amber-700">{a}</p>)}
             <div className="flex justify-end"><Button onClick={() => onOpenChange(false)}>Listo</Button></div>
           </div>
@@ -110,9 +111,10 @@ export function AnularComprobantesDialog({
               <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-700">{evaluacion.motivo}</p>
             )}
             {evaluacion?.puede && !!evaluacion.devoluciones?.length && (
-              <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-700">
-                Tiene {evaluacion.devoluciones.length === 1 ? "la devolución" : "las devoluciones"} <strong>{evaluacion.devoluciones.map((d) => d.numero).join(", ")}</strong> ya acreditada{evaluacion.devoluciones.length === 1 ? "" : "s"}. Al volver a generar se recalcula{evaluacion.devoluciones.length === 1 ? "" : "n"} al precio del comprobante nuevo y sale la diferencia: crédito (REV o NC) si el precio sube, débito (PRES o ND) si baja. Antes de generar te muestro el importe.
-              </p>
+              <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-700">
+                <p>Lo devuelto <strong>sale del pedido</strong>: no se vuelve a facturar.</p>
+                {evaluacion.devoluciones.map((d) => <p key={d.numero}>{d.texto}</p>)}
+              </div>
             )}
             {evaluacion?.puede && hayFiscal && (
               <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">

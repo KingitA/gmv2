@@ -12,9 +12,9 @@
 // Solo créditos de ANULACIONES del mismo pedido; las NC/REV de devoluciones y
 // del 10 % contado tienen su propio circuito.
 //
-// P2-43: ese crédito trae también lo devuelto al precio viejo. Si al refacturar
-// el precio bajó, sale un débito de ajuste por la diferencia
-// (ajuste-devoluciones-refacturado.ts): se cubre PRIMERO con este crédito.
+// P2-43 (Juan 31/10): la anulación es por total − REV/NC de devolución ya
+// imputadas (esas quedan como están): este crédito trae solo lo pagado, y lo
+// devuelto no se vuelve a facturar.
 
 const CREDITOS = ["NCA", "NCB", "NCC", "REV"]
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -31,11 +31,10 @@ export async function aplicarPagosDelPedidoRefacturado(
   pedidoId: string,
   nuevosIds: string[],
   usuarioId: string | null,
-  debitosAjuste: string[] = [],
 ): Promise<{ aplicados: CreditoAplicado[]; advertencias: string[] }> {
   const aplicados: CreditoAplicado[] = []
   const advertencias: string[] = []
-  if (!nuevosIds.length && !debitosAjuste.length) return { aplicados, advertencias }
+  if (!nuevosIds.length) return { aplicados, advertencias }
 
   const { data: creditos } = await supabase
     .from("comprobantes_venta")
@@ -51,11 +50,10 @@ export async function aplicarPagosDelPedidoRefacturado(
   const { data: nuevos } = await supabase
     .from("comprobantes_venta")
     .select("id, tipo_comprobante, numero_comprobante, saldo_pendiente")
-    .in("id", [...debitosAjuste, ...nuevosIds])
+    .in("id", nuevosIds)
     .gt("saldo_pendiente", 0.005)
-  // Ajustes de devoluciones primero; después fiscales antes que PRES (mismo orden que la emisión)
-  const orden = (c: any) => (debitosAjuste.includes(c.id) ? 0 : c.tipo_comprobante === "PRES" ? 2 : 1)
-  const debitos = [...(nuevos || [])].sort((a: any, b: any) => orden(a) - orden(b))
+  // Fiscales antes que PRES (mismo orden que la emisión)
+  const debitos = [...(nuevos || [])].sort((a: any, b: any) => Number(a.tipo_comprobante === "PRES") - Number(b.tipo_comprobante === "PRES"))
 
   for (const cr of creditos) {
     let disponible = -Number(cr.saldo_pendiente)

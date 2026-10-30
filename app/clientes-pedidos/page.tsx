@@ -686,10 +686,10 @@ export default function ClientesPedidosPage() {
     }
     setGenerandoComprobante(pedidoId)
     try {
-      // P2-43: pedido refacturado con devoluciones ya acreditadas → avisar qué ajuste sale
+      // P2-43: pedido refacturado con devoluciones aplicadas → avisar qué no va al comprobante nuevo
       const estimado = await fetch(`/api/pedidos/${pedidoId}/ajuste-devoluciones`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
-      const conAjuste = (estimado?.devoluciones || []).filter((d: any) => d.ajustes?.length)
-      if (conAjuste.length && !confirm(`${conAjuste.map((d: any) => d.texto).join("\n")}\n\n(Estimado con los precios actuales del pedido; el importe final sale del comprobante nuevo.)\n\n¿Generar los comprobantes?`)) return
+      const devs = estimado?.devoluciones || []
+      if (devs.length && !confirm(`${devs.map((d: any) => d.texto).join("\n")}\n\n¿Generar los comprobantes?`)) return
       const response = await fetch("/api/comprobantes-venta/generar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -709,13 +709,8 @@ export default function ClientesPedidosPage() {
       // P2-44: aviso con el número de pedido (un alert podía aparecer después, sobre otro pedido)
       const numeroGenerado = pedidos.find((p) => p.id === pedidoId)?.numero_pedido
       toast.success(`Pedido #${numeroGenerado || ""}: comprobantes generados`, {
-        description: [
-          result.comprobantes.map((c: any) => `${c.tipo_comprobante} ${c.numero}`).join(" · "),
-          ...(result.ajustes_devoluciones?.emitidos || []).map((a: any) => `Ajuste ${a.devolucion}: ${a.tipo} ${a.numero}`),
-        ].join(" · "),
+        description: result.comprobantes.map((c: any) => `${c.tipo_comprobante} ${c.numero}`).join(" · "),
       })
-      if (result.ajustes_devoluciones?.textos?.length) toast.info(result.ajustes_devoluciones.textos.join(" "))
-      if (result.ajustes_devoluciones_error) toast.warning(result.ajustes_devoluciones_error)
 
       // Recargar pedidos y comprobantes
       await cargarPedidos()
