@@ -207,8 +207,9 @@ export default function ClientesPedidosPage() {
   const url = useUrlParams()
   const router = useRouter()
   const hoy = todayArgentina()
-  // Por defecto: pendientes e impresos de los últimos 30 días (decisión del dueño, 07/10/2026)
-  const DEF = { estados: "pendiente,impreso", desde: sumarDias(hoy, -30) }
+  // Por defecto: en revisión, pendientes e impresos de los últimos 30 días
+  // (decisión del dueño, 07/10/2026; "en revisión" sumado por P2-15: si no, la oficina no los ve)
+  const DEF = { estados: "en_revision,pendiente,impreso", desde: sumarDias(hoy, -30) }
   const [busqueda, setBusquedaLocal] = useState(() => url.get("q"))
   const estadosParam = url.get("estados", DEF.estados)
   const desdeParam = url.get("desde", DEF.desde)
@@ -268,20 +269,27 @@ export default function ClientesPedidosPage() {
   const [anularAbierto, setAnularAbierto] = useState(false)
   // R1/R3: se puede refacturar en cualquier estado hasta que está cobrado al 100 %.
   // Se pregunta al abrir el pedido para mostrar el botón ya deshabilitado con el motivo.
-  const [anulacionBloqueada, setAnulacionBloqueada] = useState<{ pedidoId: string; motivo: string } | null>(null)
+  // P2-44: mientras se pregunta queda deshabilitado, y una recarga de la lista no
+  // lo vuelve a habilitar (antes se reseteaba a "se puede" en cada recarga).
+  const [anulacion, setAnulacion] = useState<{ pedidoId: string; puede: boolean; motivo: string | null } | null>(null)
   const pedidoConComprobantes = pedidoSeleccionado && totalFacturado(comprobantesGenerados[pedidoSeleccionado.id], pedidoSeleccionado.id) != null ? pedidoSeleccionado.id : null
+  const firmaComprobantes = pedidoConComprobantes
+    ? (comprobantesGenerados[pedidoConComprobantes] || []).map((c) => c.id + (c.anulado_en ? "x" : "")).sort().join(",")
+    : ""
   useEffect(() => {
-    setAnulacionBloqueada(null)
-    if (!pedidoConComprobantes) return
+    if (!pedidoConComprobantes) { setAnulacion(null); return }
     let vigente = true
     fetch(`/api/pedidos/${pedidoConComprobantes}/anular-comprobantes`)
       .then((r) => (r.ok ? r.json() : null))
       .then((ev) => {
-        if (vigente && ev && !ev.puede) setAnulacionBloqueada({ pedidoId: pedidoConComprobantes, motivo: ev.motivo || "No se puede refacturar." })
+        if (!vigente) return
+        // Si no se pudo preguntar queda habilitado: el modal vuelve a revisar y el servidor frena igual
+        setAnulacion({ pedidoId: pedidoConComprobantes, puede: !ev || !!ev.puede, motivo: ev && !ev.puede ? ev.motivo || "No se puede refacturar." : null })
       })
-      .catch(() => {})
+      .catch(() => { if (vigente) setAnulacion({ pedidoId: pedidoConComprobantes, puede: true, motivo: null }) })
     return () => { vigente = false }
-  }, [pedidoConComprobantes, comprobantesGenerados])
+  }, [pedidoConComprobantes, firmaComprobantes])
+  const anulacionDelPedido = pedidoSeleccionado && anulacion?.pedidoId === pedidoSeleccionado.id ? anulacion : null
   const [eliminando, setEliminando] = useState(false)
   const [pickingStatus, setPickingStatus] = useState<Record<string, any>>({})
   const [expandedPriorities, setExpandedPriorities] = useState<Record<string, boolean>>({ "1": true, "2": true, "3": true })
@@ -691,9 +699,11 @@ export default function ClientesPedidosPage() {
         alert(SIN_NADA_PARA_FACTURAR)
         return
       }
-      alert(
-        `Comprobantes generados exitosamente:\n${result.comprobantes.map((c: any) => `${c.tipo_comprobante} ${c.numero}`).join("\n")}`,
-      )
+      // P2-44: aviso con el número de pedido (un alert podía aparecer después, sobre otro pedido)
+      const numeroGenerado = pedidos.find((p) => p.id === pedidoId)?.numero_pedido
+      toast.success(`Pedido #${numeroGenerado || ""}: comprobantes generados`, {
+        description: result.comprobantes.map((c: any) => `${c.tipo_comprobante} ${c.numero}`).join(" · "),
+      })
 
       // Recargar pedidos y comprobantes
       await cargarPedidos()
@@ -1090,6 +1100,10 @@ export default function ClientesPedidosPage() {
     if (entregaParam && (p.viaje_id || p.fecha_entrega !== entregaParam)) return false
     return true
   })
+
+  const enRevisionOcultos = filtros.estados.length && !filtros.estados.includes("en_revision")
+    ? pedidos.filter((p) => p.estado === "en_revision").length
+    : 0
 
   const pedidosLista: PedidoFila[] = [...pedidosFiltrados]
     .sort((a, b) => {
@@ -1551,6 +1565,18 @@ export default function ClientesPedidosPage() {
         onLimpiar={limpiarFiltros}
       />
 
+      {/* P2-15: pedidos en revisión que el filtro de estados deja afuera */}
+      {enRevisionOcultos > 0 && (
+        <button
+          type="button"
+          onClick={() => setFiltros({ estados: [...filtros.estados, "en_revision"] })}
+          className="flex w-full items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-left text-sm text-red-700 hover:bg-red-100"
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
+          Hay <b>{enRevisionOcultos}</b> {enRevisionOcultos === 1 ? "pedido para revisar" : "pedidos para revisar"} que el filtro no muestra. <span className="underline">Mostrarlos</span>
+        </button>
+      )}
+
       {/* ═══ PEDIDOS EN PROCESAMIENTO ═══ */}
       {queue.filter(q => q.status !== "done").length > 0 && (
         <div className="space-y-2">
@@ -1800,10 +1826,12 @@ export default function ClientesPedidosPage() {
                   <Printer className="h-3.5 w-3.5 mr-1.5" />Imprimir
                 </Button>
                 {tieneComprobantes(pedidoSeleccionado.id) && (
-                  anulacionBloqueada?.pedidoId === pedidoSeleccionado.id ? (
-                    <Button size="sm" disabled title={anulacionBloqueada.motivo}
+                  !anulacionDelPedido || !anulacionDelPedido.puede ? (
+                    <Button size="sm" disabled title={anulacionDelPedido?.motivo || "Revisando si se puede refacturar…"}
                       className="bg-transparent border border-white/20 text-white/60 font-medium disabled:opacity-100">
-                      <Undo2 className="h-3.5 w-3.5 mr-1.5" />Cobrado al 100 %
+                      {!anulacionDelPedido
+                        ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Anular comprobantes</>
+                        : <><Undo2 className="h-3.5 w-3.5 mr-1.5" />{/cobrado/i.test(anulacionDelPedido.motivo || "") ? "Cobrado al 100 %" : "No se puede refacturar"}</>}
                     </Button>
                   ) : (
                     <Button size="sm" onClick={() => setAnularAbierto(true)}
@@ -1828,7 +1856,7 @@ export default function ClientesPedidosPage() {
                     <DollarSign className="h-3.5 w-3.5 mr-1.5" />Registrar pago
                   </Button>
                 </Link>
-                <Link href={`/clientes-pedidos/${pedidoSeleccionado.id}`} className="contents">
+                <Link href={`/clientes-pedidos/${pedidoSeleccionado.id}?volver=lista`} className="contents">
                   <Button size="sm" className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
                     <FileText className="h-3.5 w-3.5 mr-1.5" />Editar pedido
                   </Button>
@@ -2033,7 +2061,7 @@ export default function ClientesPedidosPage() {
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                     Artículos del pedido · <span className="text-slate-600">{detallesPedido.length}</span>
                   </p>
-                  <Link href={`/clientes-pedidos/${pedidoSeleccionado.id}`}>
+                  <Link href={`/clientes-pedidos/${pedidoSeleccionado.id}?volver=lista`}>
                     <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-slate-300">
                       <Plus className="h-3 w-3" />Agregar / Editar
                     </Button>
