@@ -198,7 +198,7 @@ export async function POST(request: NextRequest) {
     paso.pago = true
 
     // ── 4. Entregado (el cliente se lleva la mercadería) ──
-    await supabase.from("pedidos").update({ estado: "entregado" }).eq("id", pedido.id)
+    await supabase.from("pedidos").update({ estado: "entregado", actualizado_por: auth.user.id }).eq("id", pedido.id)
 
     const ncContado = Number(gen.bonificacion_contado?.total_bonificacion || 0)
     return NextResponse.json({

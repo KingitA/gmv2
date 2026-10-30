@@ -14,10 +14,11 @@ import { useToast } from "@/hooks/use-toast"
 import { ShoppingCart, PackageCheck, Undo2, Trash2, Search, Loader2, Printer } from "lucide-react"
 import { searchProductos } from "@/lib/actions/productos"
 import { previewPrecioArticulo, previewPreciosArticulos } from "@/lib/actions/pedidos"
-import { createClient as createSupabase } from "@/lib/supabase/client"
 import { CondicionesPedidoPanel, useCondicionesPedido } from "@/components/pedidos/CondicionesPedidoPanel"
-import { moneda, formatCuit } from "@/lib/formato"
+import { moneda, formatCuit, normalizarCuit } from "@/lib/formato"
 import { InputMonto } from "@/components/ui/input-monto"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { MetodoPagoForm, type MetodoPago } from "@/components/pagos/MetodoPagoForm"
 
 interface ItemVenta {
   producto_id: string
@@ -200,35 +201,44 @@ export default function MostradorPage() {
     }
   }
 
-  // ── Cobrar pedido para retirar (efectivo) ──
+  // ── Entregar pedido para retirar (P2-40) ──
+  // Por el servidor (/api/mostrador/entregar): pagado → entrega; con saldo, cobra
+  // con los mismos medios que /caja (efectivo, transferencia, cheque o mixto) y
+  // entrega si el saldo quedó en $0. Queda quién y cuándo.
   const idemKeysRef = useRef<Record<string, string>>({})
+  const [cobrarDe, setCobrarDe] = useState<any | null>(null)
+  const [metodosCobro, setMetodosCobro] = useState<MetodoPago[]>([])
 
-  const cobrarPedido = async (pedido: any) => {
+  const abrirCobro = (pedido: any) => {
+    setMetodosCobro([{ id: crypto.randomUUID(), tipo: "efectivo", monto: pedido.saldo_total }])
+    setCobrarDe(pedido)
+  }
+
+  const entregarPedido = async (pedido: any, metodos?: MetodoPago[]) => {
     setCobrando(pedido.id)
     try {
       // Clave de idempotencia por pedido: el doble click no duplica el cobro
-      idemKeysRef.current[pedido.id] ||= crypto.randomUUID()
-      const res = await fetch("/api/pagos-clientes", {
+      if (metodos) idemKeysRef.current[pedido.id] ||= crypto.randomUUID()
+      const res = await fetch("/api/mostrador/entregar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cliente_id: pedido.cliente_id,
-          metodos: [{ tipo: "efectivo", monto: pedido.saldo_total }],
-          imputaciones: pedido.comprobantes
-            .filter((c: any) => c.saldo > 0)
-            .map((c: any) => ({ comprobante_id: c.id, monto_imputado: c.saldo })),
-          observaciones: `Retiro mostrador ${pedido.numero_pedido}`,
-          confirmar: true,
-          idempotency_key: idemKeysRef.current[pedido.id],
+          pedido_id: pedido.id,
+          ...(metodos ? {
+            cobro: {
+              metodos: metodos.map(({ id: _id, ...m }) => ({ ...m, cuit_emisor: m.cuit_emisor ? normalizarCuit(m.cuit_emisor) : undefined })),
+              idempotency_key: idemKeysRef.current[pedido.id],
+            },
+          } : {}),
         }),
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error)
       delete idemKeysRef.current[pedido.id]
-      // entregar el pedido
-      const sb = createSupabase()
-      await sb.from("pedidos").update({ estado: "entregado" }).eq("id", pedido.id)
-      toast({ title: `Cobrado y entregado ${pedido.numero_pedido}`, description: d.numero_recibo ?? undefined })
+      setCobrarDe(null)
+      toast(d.entregado
+        ? { title: d.mensaje, description: d.numero_recibo ?? undefined }
+        : { title: "No se entregó todavía", description: d.mensaje })
       cargarParaRetirar()
     } catch (e: any) {
       toast({ variant: "destructive", title: "Error", description: e.message })
@@ -463,10 +473,10 @@ export default function MostradorPage() {
                       <span className="font-bold">{moneda(p.saldo_total)}</span>
                       <Button
                         size="sm"
-                        disabled={cobrando === p.id || p.saldo_total <= 0}
-                        onClick={() => cobrarPedido(p)}
+                        disabled={cobrando === p.id}
+                        onClick={() => (p.saldo_total > 0 ? abrirCobro(p) : entregarPedido(p))}
                       >
-                        {cobrando === p.id ? "..." : p.saldo_total > 0 ? "Cobrar efectivo y entregar" : "Sin saldo"}
+                        {cobrando === p.id ? "..." : p.saldo_total > 0 ? "Cobrar y entregar" : "Entregar"}
                       </Button>
                     </div>
                   </div>
@@ -566,6 +576,32 @@ export default function MostradorPage() {
             )}
           </TabsContent>
         </Tabs>
+
+        {/* Cobrar y entregar (P2-40): mismos medios que /caja, varios a la vez = mixto */}
+        <Dialog open={!!cobrarDe} onOpenChange={(o) => { if (!o && !cobrando) setCobrarDe(null) }}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                Cobrar y entregar {cobrarDe?.numero_pedido} — {cobrarDe?.cliente}
+              </DialogTitle>
+            </DialogHeader>
+            <p className="text-sm">
+              Saldo del pedido: <span className="font-bold">{moneda(cobrarDe?.saldo_total ?? 0)}</span>
+              {" "}· Cargado: <span className="font-bold">{moneda(metodosCobro.reduce((s, m) => s + (m.tipo === "deposito" ? (m.items || []).reduce((a, it) => a + Number(it.monto || 0), 0) : Number(m.monto || 0)), 0))}</span>
+            </p>
+            <MetodoPagoForm metodos={metodosCobro} onChange={setMetodosCobro} />
+            <p className="text-xs text-muted-foreground">
+              Efectivo y cheque entran en el acto. Una transferencia o echeq queda pendiente hasta confirmarla en Caja:
+              el pedido se entrega cuando el saldo quede en $0.
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCobrarDe(null)} disabled={!!cobrando}>Cancelar</Button>
+              <Button onClick={() => cobrarDe && entregarPedido(cobrarDe, metodosCobro)} disabled={!!cobrando || metodosCobro.length === 0}>
+                {cobrando ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cobrar y entregar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   )
