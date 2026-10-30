@@ -1,3 +1,5 @@
 export * from "./componentes"
 export * from "./pantallas"
 export * from "./formato"
+export * from "./teclado"
+export * from "./monto"

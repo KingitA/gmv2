@@ -4,6 +4,7 @@ import { createBrowserRouter, redirect, RouterProvider, type RouteObject } from 
 import { instalarBotonAtras } from "../nav/atras"
 import { crearRuntime, type ConfigApp, type Runtime } from "../runtime"
 import { PantallaLogin, PantallaPendientes } from "../ui/pantallas"
+import { instalarTeclado } from "../ui/teclado"
 import { GmProvider, useSesion } from "./contexto"
 
 export interface OpcionesMontar {
@@ -43,6 +44,8 @@ function Atras({ router }: { router: ReturnType<typeof createBrowserRouter> }) {
  */
 export async function montarApp(opts: OpcionesMontar): Promise<Runtime> {
   const runtime = await crearRuntime(opts.config)
+  // El teclado no tapa el campo enfocado ni lo fijo abajo (P2-14 / P2-17, ui/teclado.ts)
+  instalarTeclado()
   const router = createBrowserRouter([
     ...opts.rutas.map((r) => ({ ...r, errorElement: r.errorElement ?? <ErrorRuta /> })),
     { path: "/pendientes", element: <PantallaPendientes />, errorElement: <ErrorRuta /> },

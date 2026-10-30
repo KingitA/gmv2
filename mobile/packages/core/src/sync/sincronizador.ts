@@ -1,11 +1,12 @@
 import type { EstadoSync } from "@gm/contrato"
 import { Emisor } from "../emitter"
 import type { Api } from "../net/api"
-import { ErrorSesion } from "../net/errores"
+import { ErrorRed, ErrorSesion } from "../net/errores"
 import type { Conectividad } from "../platform/conectividad"
 import type { Outbox } from "./outbox"
 import type { Replica } from "./replica"
 import type { Reloj } from "./reloj"
+import { esperaPorFallos, momentoResync } from "./freno"
 
 export interface DefDataset {
   nombre: string
@@ -46,6 +47,11 @@ export class Sincronizador {
   private corriendo = false
   private _ultimoError: string | null = null
   private bajas: Array<() => void> = []
+  /** P2-49: fallos seguidos de sync (espera creciente) y re-sincronización diferida por cambios */
+  private fallosSeguidos = 0
+  private primerCambio: number | null = null
+  private ultimoCambio = 0
+  private timerCambios: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private api: Api,
@@ -92,6 +98,9 @@ export class Sincronizador {
     for (const t of this.timers) clearTimeout(t)
     this.timers = []
     if (this.timerOutbox) clearTimeout(this.timerOutbox)
+    if (this.timerCambios) clearTimeout(this.timerCambios)
+    this.timerCambios = null
+    this.primerCambio = null
     for (const b of this.bajas) b()
     this.bajas = []
   }
@@ -117,12 +126,21 @@ export class Sincronizador {
   }
 
   async dataset(nombre: string): Promise<boolean> {
+    // P2-49: frenado (503 del servidor o fallos seguidos): no se intenta, ni se cuenta como fallo
+    if (this.api.syncFrenadoMs > 0) return false
     try {
       await this.replica.sincronizar(nombre)
+      this.fallosSeguidos = 0
       this.setError(null)
       return true
     } catch (e: any) {
       this.setError(e?.message || String(e))
+      // Sin señal no es culpa del servidor (lo resuelve la vuelta de la red). Con señal, un
+      // timeout (servidor que no llega a contestar) o un 5xx sí: se espacia el próximo intento
+      if (!(e instanceof ErrorSesion) && (!(e instanceof ErrorRed) || this.red.online)) {
+        this.fallosSeguidos++
+        this.api.frenarSync(esperaPorFallos(this.fallosSeguidos))
+      }
       return false
     }
   }
@@ -135,17 +153,33 @@ export class Sincronizador {
       await this.reloj.medir(est.server_time, t0, Date.now())
       const cambio = est.cambios_seq !== null && this.ultimoSeq !== null && est.cambios_seq !== this.ultimoSeq
       this.ultimoSeq = est.cambios_seq
-      if (resync && cambio) {
-        for (const d of this.opts.datasets.filter((x) => x.invalidable).sort((a, b) => a.prioridad - b.prioridad)) {
-          await this.dataset(d.nombre)
-        }
-      }
+      // P2-49: no re-sincronizar a los 15 s de cada cambio: esperar a que se calmen
+      if (resync && cambio) this.agendarPorCambios()
       // Hay red: aprovechar para empujar el outbox si quedó algo
       // El servidor acaba de responder: empujar el outbox ya, sin esperar su backoff
       if (this.outbox.contadores.pendientes > 0) void this.outbox.enviar({ forzar: true })
     } catch {
       /* sin red: el próximo tick reintenta */
     }
+  }
+
+  /** Re-sincroniza los datasets `invalidable` cuando los cambios del servidor se calman. */
+  private agendarPorCambios() {
+    const ahora = Date.now()
+    this.primerCambio ??= ahora
+    this.ultimoCambio = ahora
+    if (this.timerCambios) clearTimeout(this.timerCambios)
+    const en = Math.max(this.api.syncFrenadoMs, momentoResync(this.primerCambio, this.ultimoCambio) - ahora)
+    this.timerCambios = setTimeout(() => {
+      this.timerCambios = null
+      this.primerCambio = null
+      if (!this.corriendo || !this.red.online) return
+      void (async () => {
+        for (const d of this.opts.datasets.filter((x) => x.invalidable).sort((a, b) => a.prioridad - b.prioridad)) {
+          if (!(await this.dataset(d.nombre))) break
+        }
+      })()
+    }, en)
   }
 
   private agendarOutbox() {

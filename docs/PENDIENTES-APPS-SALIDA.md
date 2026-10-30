@@ -324,17 +324,23 @@ Revisado en el código: C1 a C6, V1 a V5, T1 y D3 están **bien hechos**. Pendie
 
 Roadmap: `PRUEBA-INTEGRAL-SALIDA-2.md`. No pasar a main ni instalar en el NuStar hasta que Juan termine la prueba.
 
-### P2-11 — Pantalla de "pedido terminado": botones en otro orden
+### P2-11 — Pantalla de "pedido terminado": botones en otro orden — **Hecho 29/10 (5d16867, rama vendedor-p2, APK v0.4.7)**
 Hoy el botón principal es "Nuevo pedido para el mismo cliente", que es lo que menos se usa. Tiene que quedar: **botón principal azul "Volver al inicio"**, después **"Ver mis pedidos"**, y abajo, en chico (donde hoy está "Volver al inicio"), **"Nuevo pedido para <cliente>"**.
 
-### P2-12 — Cargar la cantidad sin apretar "+"
+### P2-12 — Cargar la cantidad sin apretar "+" — **Hecho 29/10 (5d16867)**: se carga al salir de la casilla (tocar otro artículo o cerrar el teclado). Borrar el número de algo ya cargado y salir no lo quita (eso es el 🗑); "+" carga una sola vez.
 Al tomar el pedido, hoy hay que apretar "+" para que el artículo quede cargado. Tiene que alcanzar con **escribir la cantidad**: al pasar a otro artículo, lo escrito queda cargado.
 
-### P2-13 — Pedido nuevo arranca con la pantalla limpia
+### P2-13 — Pedido nuevo arranca con la pantalla limpia — **Hecho 29/10 (5d16867)**: rubros, categorías y subcategorías cerrados, también en Novedades/Ofertas/Habituales/Proveedor (abiertos solo con búsqueda).
 Hoy un pedido nuevo abre todo como quedó en el anterior. Tiene que arrancar en la pantalla por defecto: las 3 categorías **cerradas**, con sus subcategorías cerradas, y lo mismo en Novedades, Ofertas, Habituales y Proveedor.
 
-### P2-14 — El teclado tapa el campo de cantidad
+### P2-14 — El teclado tapa el campo de cantidad — **Hecho 29/10 (5d16867) en CORE** (`ui/teclado.ts`, ver "Core para las 3 apps" abajo). Falta probarlo en el NuStar.
 Si se toca la cantidad de un artículo que está de la mitad de la pantalla para abajo, el teclado lo tapa. Al tocarlo, el artículo tiene que **subir** y quedar visible arriba del teclado.
+
+### Core para las 3 apps (29/10, sesión App Vendedor, 5d16867)
+
+- **Teclado (P2-14 vendedor, P2-17 depósito):** `instalarTeclado()` lo llama `montarApp` de `@gm/core`: **las apps no hacen nada, entra al recompilar.** Pone `interactive-widget=resizes-content` en el viewport (el WebView achica el contenido con el teclado y lo fijo abajo sube solo), trae a la vista el campo enfocado si quedó tapado, y suelta el foco al cerrar el teclado con "atrás" (lo escrito se confirma como en un `onBlur`). Si algo **fijo abajo** igual queda tapado (un cartel propio, no la `Hoja` de core, que ya lo hace): `style={{ bottom: "var(--gm-teclado, 0px)" }}` o `paddingBottom: "var(--gm-teclado, 0px)"`. Hook `useTecladoAbiertoCore()` si hace falta saber si está abierto (depósito tiene uno propio, `useTecladoAbierto`, que sigue andando).
+- **Monto con miles mientras se escribe (P2-30 chofer):** `CampoMonto` de `@gm/core/ui`, mismas props que el `MontoInput` de las apps: `<CampoMonto valor={n} onCambio={setN} decimales={2} className="…" />` (`enVivo` para recibir el número en cada tecla). La coma separa centavos; un "." recién tipeado es la coma (teclados sin coma). Para chofer alcanza con que su `MontoInput` (`apps/chofer/src/ui.tsx:434`) devuelva `<CampoMonto … />`, como hizo vendedor.
+- **Freno de la sincronización (P2-49, base cargada):** en `@gm/core`, **entra solo al recompilar** (las apps no hacen nada). `net/api.ts` + `sync/freno.ts` + `sync/sincronizador.ts`: (1) si `/api/mobile/sync/*` contesta 503, no se vuelve a llamar hasta que pase el `Retry-After` / `reintentar_en_s` (+ hasta 15 s al azar), para ningún dataset ni el refresco al abrir un cliente; (2) un cambio visto en el sondeo ya no re-sincroniza a los 15 s: espera 60-90 s después del último cambio (tope 5 min desde el primero); (3) fallos seguidos de sync (5xx o sin respuesta con señal) esperan 30 s, 1, 2, 4… hasta 10 min (±20 %). El outbox (escrituras) no se frena: tiene su propio backoff (O10). Mientras está frenado, la pantalla muestra los datos que tiene con la barra "Datos al…".
 
 ## Segunda prueba integral (28/10) — App Depósito
 

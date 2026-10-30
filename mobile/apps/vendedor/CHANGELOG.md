@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.7 (versionCode 16) — 2026-10-29
+
+- Cantidad sin apretar +; catálogo limpio en cada pedido; botones de pedido terminado; el 10% contado nunca como saldo a favor (A pagar); montos con puntos de miles al escribir; el teclado no tapa los campos; sincronización frenada con la base cargada
+
 ## v0.4.6 (versionCode 15) — 2026-10-27
 
 - Pedidos del sistema viejo con su nombre (Mis pedidos y Cobrar); el inicio descuenta los retiros sin enviar aunque la billetera no se haya descargado

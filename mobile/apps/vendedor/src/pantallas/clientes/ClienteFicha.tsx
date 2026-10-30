@@ -11,6 +11,7 @@ import { EditorListaMetodo, fichaCompleta } from "./EditorListaMetodo"
 import { usePdfComprobantes } from "../../datos/comprobantes-pdf"
 import { BarraCompartir, MarcaPdf, TituloCompartible, useSeleccionCompartir } from "./comprobantes-ui"
 import { CuadroSegmentos } from "../segmentos-ui"
+import { saldoVisible } from "../../datos/saldo"
 
 // Port de app/vendedor/clientes/[id]/page.tsx. Lee la cuenta del cliente de la réplica
 // (+ lo hecho acá sin enviar) y ENCOLA: cliente.editar (compare-and-set por campo),
@@ -296,7 +297,8 @@ export function ClienteFicha() {
   const pdfComps = comprobantes.map((cp) => ({ id: cp.id, tipo_comprobante: cp.tipo_comprobante, numero_comprobante: cp.numero_comprobante, fecha: cp.fecha }))
   const editando = edicion.abierto && !!form
   const editandoBonif = edicionBonif.abierto && !!bonifEdit
-  const proy = cliente.saldo_proyectado ?? cliente.saldo_actual
+  // P2-42: un proyectado negativo por el 10 % contado en camino no es "a favor" (datos/saldo.ts)
+  const proy = saldoVisible(cliente.saldo_actual, cliente.saldo_proyectado)
   const hayPendiente = Math.abs(cliente.saldo_actual - proy) > 0.01
 
   return (
