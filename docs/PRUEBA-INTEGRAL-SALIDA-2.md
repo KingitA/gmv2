@@ -305,9 +305,9 @@ Se corre en el editor SQL de Supabase, en este orden. Cada paso con su simulacro
 | P2-21 | 5 | "Guardar pedido" deja la pantalla en el mismo lugar; tiene que volver a donde estaba. | Baja | Frontend | traspaso escrito |
 | P2-23 | 5 | Pedido con 10 % contado: el PRES figura "parcial" y la REV "pagado" sin que el cliente haya pagado nada. | Media | Frontend (con Cuentas corrientes) | traspaso escrito |
 | P2-24 | 5 | Anular los comprobantes de un pedido "facturado" lo deja en "facturado"; tiene que volver a "pendiente de facturación" (si ya está en viaje/entregado, se queda). | Media | Listas de precios + Cuentas corrientes | traspaso escrito |
-| P2-25 | 5 | Al tildar pedidos, "subir a un viaje" no lista el viaje ya creado. | Media | Hojas de ruta/viajes | traspaso escrito |
-| P2-26 | 5 | Unificar "Pedidos del viaje" con la lista: cruz roja para sacar y bultos editables, el campo vacío y no 0 (sale "036"). | Baja | Hojas de ruta/viajes | traspaso escrito |
-| P2-27 | 5 | Hoja de ruta: "2 / 1 pal." no se entiende; escribir "2 bultos + 1 pallet". | Baja | Hojas de ruta/viajes | traspaso escrito |
+| P2-25 | 5 | Al tildar pedidos, "subir a un viaje" no lista el viaje ya creado. | Media | Hojas de ruta/viajes | hecho en rama viajes-p2 (39837fe), falta merge |
+| P2-26 | 5 | Unificar "Pedidos del viaje" con la lista: cruz roja para sacar y bultos editables, el campo vacío y no 0 (sale "036"). | Baja | Hojas de ruta/viajes | hecho en rama viajes-p2 (39837fe), falta merge |
+| P2-27 | 5 | Hoja de ruta: "2 / 1 pal." no se entiende; escribir "2 bultos + 1 pallet". | Baja | Hojas de ruta/viajes | hecho en rama viajes-p2 (39837fe), falta merge |
 | P2-28 | 5 | Hoja de ruta: CHEN figura $399.991,26 sin restar la REV del 10 % ya emitida ($395.934,21) y sin avisar que es de contado. | Media | Hojas de ruta/viajes | a verificar en la app |
 | P2-29 | 6 | App chofer: la devolución de CHEN (atada al PRES 0028) se restó del PRES 0026 al cobrarlo: el 0026 queda debiendo $8.105,08. | Alta | App Chofer + Cuentas corrientes | traspaso escrito |
 | P2-30 | 6 | App chofer: el monto del cobro no separa miles mientras se escribe. | Media | App Chofer | traspaso escrito |
