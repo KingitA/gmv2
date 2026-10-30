@@ -32,6 +32,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ data
     return NextResponse.json(res, { headers: { "Cache-Control": "no-store" } })
   } catch (e: any) {
     console.error(`[mobile/sync] ${dataset}:`, e)
+    // P2-49: base saturada (statement timeout) → 503 con Retry-After y algo de
+    // azar, para que los equipos no vuelvan todos juntos a los 15 s y la carguen más
+    if (esBaseSaturada(e)) {
+      const espera = 60 + Math.floor(Math.random() * 120)
+      return NextResponse.json(
+        { error: "El servidor está con mucha carga. La app vuelve a sincronizar sola en un rato.", reintentar_en_s: espera },
+        { status: 503, headers: { "Retry-After": String(espera), "Cache-Control": "no-store" } },
+      )
+    }
     return NextResponse.json({ error: e?.message || "Error de sincronización" }, { status: e?.status && e.status < 500 ? e.status : 500 })
   }
+}
+
+// Postgres 57014 = query_canceled (statement timeout); también llega como texto
+function esBaseSaturada(e: any): boolean {
+  const msg = `${e?.code ?? ""} ${e?.message ?? ""}`
+  return e?.code === "57014" || /statement timeout|canceling statement/i.test(msg)
 }

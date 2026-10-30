@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 import { canAccess, getHomeForRoles } from "@/lib/role-utils"
+import { COOKIE_ROLES, ROLES_TTL_S, cookieDeRoles, rolesDeCookie, usuarioDelToken } from "@/lib/supabase/roles-cookie"
 
 // Vercel Hobby middleware timeout = 1.5s. Falla rápido si Supabase no responde.
 function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
@@ -65,7 +66,10 @@ export async function updateSession(request: NextRequest) {
   const isPublicRoute = publicRoutes.some(r => pathname === r || pathname.startsWith(r + "/"))
 
   const { data: { session }, error: sesionError } = await supabase.auth.getSession()
-  const user = session?.user ?? null
+  // P2-49: el id sale del token, sin tocar session.user (ese acceso es el que
+  // llenaba los logs con "Using the user object as returned from getSession()")
+  const usuarioId = usuarioDelToken(session?.access_token)
+  const user = usuarioId ? { id: usuarioId } : null
   if (cookiesToSet.length) requestHeaders.set("cookie", request.cookies.toString())
 
   if (!user) {
@@ -88,25 +92,37 @@ export async function updateSession(request: NextRequest) {
   // Rutas de auth con usuario ya logueado: dejar pasar (ej: cambiar contraseña)
   if (isPublicRoute) return applyResponse(NextResponse.next({ request: { headers: requestHeaders } }), cookiesToSet)
 
-  // Obtener roles del usuario (query indexada)
-  const { data: rolesData, error: rolesError } = await supabase
-    .from("usuarios_roles")
-    .select("roles(nombre)")
-    .eq("usuario_id", user.id)
+  // Roles del usuario: de la cookie firmada si está vigente (P2-49: antes se
+  // consultaba la base en cada pedido de página); si no, de la base, y se guardan
+  let roles = await rolesDeCookie(request.cookies.get(COOKIE_ROLES)?.value, user.id)
+  if (!roles) {
+    const { data: rolesData, error: rolesError } = await supabase
+      .from("usuarios_roles")
+      .select("roles(nombre)")
+      .eq("usuario_id", user.id)
 
-  // P2-46: si la consulta de roles no llegó a tiempo, sin roles se iba al login
-  // (parecía que se había cerrado la sesión). Se reintenta desde el navegador.
-  if (rolesError) {
-    const url = request.nextUrl.clone()
-    url.pathname = "/auth/renovar"
-    url.search = ""
-    url.searchParams.set("next", pathname + request.nextUrl.search)
-    return applyResponse(NextResponse.redirect(url), cookiesToSet)
+    // P2-46: si la consulta de roles no llegó a tiempo, sin roles se iba al login
+    // (parecía que se había cerrado la sesión). Se reintenta desde el navegador.
+    if (rolesError) {
+      const url = request.nextUrl.clone()
+      url.pathname = "/auth/renovar"
+      url.search = ""
+      url.searchParams.set("next", pathname + request.nextUrl.search)
+      return applyResponse(NextResponse.redirect(url), cookiesToSet)
+    }
+
+    roles = (rolesData || [])
+      .map((r: any) => r.roles?.nombre)
+      .filter(Boolean) as string[]
+    const valor = await cookieDeRoles(user.id, roles)
+    if (valor) {
+      cookiesToSet = [...cookiesToSet, {
+        name: COOKIE_ROLES,
+        value: valor,
+        options: { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: ROLES_TTL_S },
+      }]
+    }
   }
-
-  const roles: string[] = (rolesData || [])
-    .map((r: any) => r.roles?.nombre)
-    .filter(Boolean)
 
   // Inyectar roles en request headers para que layout/server components los lean sin segunda query
   requestHeaders.set("x-user-roles", roles.join(","))
