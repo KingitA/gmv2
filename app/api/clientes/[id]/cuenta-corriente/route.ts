@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from '@/lib/auth';
 import { getSaldosCliente } from '@/lib/cuenta-corriente/saldo';
 import { fetchAllRows } from '@/lib/supabase/fetch-all';
+import { comprobantesAplicados } from '@/lib/pedidos/ajuste-devoluciones';
 
 export const dynamic = "force-dynamic";
 
@@ -182,7 +183,8 @@ export async function GET(
                 anulado: !!comp.anulado_en,
             })),
             pagos: pagosConImputaciones,
-            devoluciones: devoluciones || [],
+            // P2-43: las ya aplicadas en la refacturación de su pedido no son crédito en proceso
+            devoluciones: (devoluciones || []).filter((d: any) => !comprobantesAplicados(d.observaciones).size),
             movimientos: movimientos || [],
         };
 

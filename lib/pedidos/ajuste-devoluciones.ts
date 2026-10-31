@@ -13,10 +13,87 @@
 //  Mixtas: la parte de otros comprobantes o del sistema viejo ya está imputada a
 //  esos otros comprobantes (P2-41): no entra en la cuenta de este.
 //  Todo devuelto: sin comprobante nuevo → $0.
+//  PENDIENTE (Juan 1/11: no traba la refacturación de un pedido que está en la
+//    calle): como el caso 1, por lo DECLARADO (lo que cargó el chofer o el
+//    vendedor); queda marcada y nunca emite su REV/NC. Cuando depósito la revisa,
+//    si acepta menos, la diferencia se le cobra al cliente (PRES, o ND si el
+//    origen era factura) al precio del comprobante nuevo.
 // Parte pura (sin base), compartida con los tests. La parte con base está en
 // lib/pedidos/ajuste-devoluciones-refacturado.ts.
 
 const r2 = (n: number) => Math.round(n * 100) / 100
+const IVA_RATE = 0.21
+
+/** Comprobantes en cuya refacturación se aplicó la devolución (marca `[aplicada:<id>]` en sus observaciones). */
+export function comprobantesAplicados(observaciones: string | null | undefined): Set<string> {
+  return new Set([...String(observaciones || "").matchAll(/\[aplicada:([^\]]+)\]/g)].map((m) => m[1]))
+}
+
+/** Aplicada cuando depósito todavía no la había revisado: vale lo declarado. */
+export const MARCA_DECLARADA = "[declarada]"
+export const esAplicadaDeclarada = (observaciones: string | null | undefined) => String(observaciones || "").includes(MARCA_DECLARADA)
+
+/**
+ * Un renglón contra un comprobante donde la devolución ya se aplicó no es
+ * crédito (ni en proceso ni NC/REV): el comprobante nuevo ya salió sin eso.
+ */
+export function renglonAplicado(observaciones: string | null | undefined, comprobanteVentaId: string | null | undefined): boolean {
+  return !!comprobanteVentaId && comprobantesAplicados(observaciones).has(comprobanteVentaId)
+}
+
+/** Lo declarado de un renglón (antes de la revisión de depósito). */
+export const cantidadDeclarada = (r: { cantidad: number | string | null; cantidad_original?: number | string | null }) =>
+  Number(r.cantidad_original ?? r.cantidad) || 0
+
+/** Lo que el cliente se quedó de un renglón aplicado por lo declarado: declarado − aceptado (rechazado = todo). */
+export function faltanteDeclarado(r: { cantidad: number | string | null; cantidad_original?: number | string | null; estado_renglon?: string | null }): number {
+  const aceptado = r.estado_renglon === "rechazado" ? 0 : Number(r.cantidad) || 0
+  return Math.max(0, Math.round((cantidadDeclarada(r) - aceptado) * 1000) / 1000)
+}
+
+export interface DiferenciaACobrar {
+  neto: number
+  iva: number
+  /** Base de la percepción IVA */
+  baseIva: number
+  percepcionIva: number
+  percepcionIibb: number
+  alicuotaIIBB: number
+  total: number
+  detalle: Array<{ articulo_id: string; descripcion: string; cantidad: number; neto: number }>
+}
+
+/**
+ * Valúa lo que el cliente se quedó al precio del comprobante nuevo (el renglón
+ * del pedido, ya con la lista nueva: misma cuenta que generar). Factura: neto +
+ * IVA, percepciones en la misma proporción que el comprobante de referencia.
+ * Presupuesto: precio final (perfumería: neto, como generar).
+ */
+export function valuarDiferencia(
+  renglones: Array<{ articulo_id: string; descripcion: string; cantidad: number; precio_final: number; precio_base?: number | null; perfumeria?: boolean }>,
+  fiscal: boolean,
+  ref: { neto: number; percepcion_iva: number; percepcion_iibb: number } | null,
+): DiferenciaACobrar {
+  const detalle: DiferenciaACobrar["detalle"] = []
+  let neto = 0
+  let iva = 0
+  for (const r of renglones) {
+    if (!(r.cantidad > 0)) continue
+    const final = Number(r.precio_final) || 0
+    const base = Number(r.precio_base) > 0 ? Number(r.precio_base) : r2(final / (1 + IVA_RATE))
+    const unit = fiscal ? base : r.perfumeria ? base : final
+    const n = r2(unit * r.cantidad)
+    neto = r2(neto + n)
+    if (fiscal) iva = r2(iva + r2(r2(final - base) * r.cantidad))
+    detalle.push({ articulo_id: r.articulo_id, descripcion: r.descripcion, cantidad: r.cantidad, neto: n })
+  }
+  const refNeto = Math.abs(Number(ref?.neto) || 0)
+  const prop = (x: number | undefined) => (fiscal && refNeto > 0 ? r2((Math.abs(Number(x) || 0) * neto) / refNeto) : 0)
+  const percepcionIva = prop(ref?.percepcion_iva)
+  const percepcionIibb = prop(ref?.percepcion_iibb)
+  const alicuotaIIBB = fiscal && refNeto > 0 ? r2((Math.abs(Number(ref?.percepcion_iibb) || 0) / refNeto) * 100) : 0
+  return { neto, iva, baseIva: neto, percepcionIva, percepcionIibb, alicuotaIIBB, total: r2(neto + iva + percepcionIva + percepcionIibb), detalle }
+}
 
 /**
  * Cantidad a facturar de cada renglón del pedido descontando lo devuelto (lo

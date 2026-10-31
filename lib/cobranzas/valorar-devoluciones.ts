@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { valorDevolucionConOrigen, type OrigenDevolucion, type ValorDevolucionResult } from "@/lib/cobranzas/valor-devolucion"
 import { alicuotaIIBBVigente, origenesDeRenglones } from "@/lib/cobranzas/origen-devolucion"
 import type { ClientePercepcion } from "@/lib/comprobantes/calcular-percepciones"
+import { renglonAplicado } from "@/lib/pedidos/ajuste-devoluciones"
 
 /**
  * Valúa devoluciones de un cliente con la regla única de
@@ -51,7 +52,7 @@ export async function valorarDevoluciones(
   const [{ data: detalle }, clienteRow] = await Promise.all([
     supabase
       .from("devoluciones_detalle")
-      .select("id, devolucion_id, articulo_id, cantidad, precio_venta_original, estado_renglon, comprobante_venta_id")
+      .select("id, devolucion_id, articulo_id, cantidad, precio_venta_original, estado_renglon, comprobante_venta_id, devolucion:devoluciones(observaciones)")
       .in("devolucion_id", devolucionIds),
     cliente && "cuit" in cliente
       ? Promise.resolve(cliente)
@@ -63,8 +64,12 @@ export async function valorarDevoluciones(
           .then((r) => r.data as any),
   ])
 
-  // Rechazados (o en 0) no valen nada
-  const vivos = (detalle || []).filter((d: any) => d.estado_renglon !== "rechazado" && Number(d.cantidad) > 0)
+  // Rechazados (o en 0) no valen nada. P2-43: lo ya aplicado en la refacturación
+  // de su comprobante tampoco (el comprobante nuevo salió sin eso): no es crédito
+  const obsDe = (d: any) => (Array.isArray(d.devolucion) ? d.devolucion[0] : d.devolucion)?.observaciones
+  const vivos = (detalle || []).filter(
+    (d: any) => d.estado_renglon !== "rechazado" && Number(d.cantidad) > 0 && !renglonAplicado(obsDe(d), d.comprobante_venta_id),
+  )
   const [origenes, alicuota] = await Promise.all([
     origenesDeRenglones(
       supabase,

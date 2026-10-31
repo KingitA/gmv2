@@ -14,6 +14,7 @@ import { hoyISO, sumarDiasISO } from "@/lib/formato"
 import { sinPedidosVacios } from "@/lib/pedidos/sin-mercaderia"
 import { NUMERO_RESPALDO_DEVOLUCION } from "@/lib/cobranzas/respaldo-devolucion"
 import { origenDeRenglon, type OrigenDevolucionCobro } from "@/lib/vendedor/devolucion-cobro"
+import { comprobantesAplicados } from "@/lib/pedidos/ajuste-devoluciones"
 
 export interface SesionFicha {
   vendedorIds: string[]
@@ -156,7 +157,7 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
   // cuánto ya se descontó en cobros anteriores (se puede descontar parcial).
   const { data: devolucionesPendientes } = await supabase
     .from("devoluciones")
-    .select("id, numero_devolucion, pedido_id, monto_total, created_at")
+    .select("id, numero_devolucion, pedido_id, monto_total, created_at, observaciones")
     .eq("cliente_id", id)
     .eq("estado", "pendiente")
     .order("created_at", { ascending: false })
@@ -191,7 +192,10 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
       origenesDev.set(r.devolucion_id, l)
     }
   }
-  const devolucionesConRestante = (devolucionesPendientes || []).map((d: any) => {
+  // P2-43: una ya aplicada en la refacturación de su pedido no es crédito (vale 0): no se ofrece
+  const devolucionesConRestante = (devolucionesPendientes || [])
+    .filter((d: any) => !comprobantesAplicados(d.observaciones).size || (valoresDev.get(d.id)?.total ?? 0) > 0.005)
+    .map((d: any) => {
     const descontado = Math.round((descontadoPorDev.get(d.id) || 0) * 100) / 100
     const v = valoresDev.get(d.id)
     const valorTotal = v?.total ?? (Number(d.monto_total) || 0)
