@@ -44,7 +44,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         mensaje:
           resultado.estado === "rechazado"
             ? "Se rechazaron todos los renglones: la devolución quedó rechazada."
-            : "Devolución aceptada y stock actualizado. Emití la NC/Reversa para acreditar el crédito en la cuenta corriente.",
+            : resultado.estado === "facturado"
+              ? "Devolución revisada y stock actualizado. Ya estaba aplicada en la refacturación del pedido: no se emite NC/Reversa."
+              : "Devolución aceptada y stock actualizado. Emití la NC/Reversa para acreditar el crédito en la cuenta corriente.",
       })
     }
 

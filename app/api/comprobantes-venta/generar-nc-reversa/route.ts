@@ -13,6 +13,7 @@ import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeH
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { importePorOrigen, TASA_PERCEPCION_IVA_DEVOLUCION, valorDevolucionConOrigen } from "@/lib/cobranzas/valor-devolucion"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
+import { renglonAplicado } from "@/lib/pedidos/ajuste-devoluciones"
 import { cuitDigitos, cuitValido, ahoraISO } from "@/lib/formato"
 import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from "@/lib/comprobantes/numeracion"
 
@@ -115,9 +116,18 @@ export async function POST(request: Request) {
       }, { status: 422 })
     }
 
-    devolucion.detalle = (devolucion.detalle ?? []).filter(
+    // P2-43: lo ya aplicado en la refacturación de su comprobante no se acredita
+    // nunca (el comprobante nuevo salió sin eso); sale solo lo de otros comprobantes
+    const todosRenglones = (devolucion.detalle ?? []).filter(
       (item: any) => item.estado_renglon !== "rechazado" && Number(item.cantidad) > 0,
     )
+    devolucion.detalle = todosRenglones.filter((item: any) => !renglonAplicado(devolucion.observaciones, item.comprobante_venta_id))
+    if (todosRenglones.length > 0 && devolucion.detalle.length === 0) {
+      return NextResponse.json({
+        error: "Esta devolución ya se aplicó en la refacturación de su pedido: no lleva NC ni Reversa.",
+        error_code: "DEVOLUCION_APLICADA",
+      }, { status: 422 })
+    }
     if (devolucion.detalle.length === 0) {
       return NextResponse.json({
         error: "La devolución no tiene renglones aceptados: no hay nada para acreditar.",

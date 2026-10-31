@@ -14,12 +14,20 @@
  *    la oficina emita la NC/REV a mano; el sistema nunca la emite solo).
  *  - Queda quién (uuid + nombre), cuándo y los valores originales.
  *
+ * P2-43 (Juan 1/11): si ya se aplicó en la refacturación del pedido por lo
+ * declarado (`[declarada]`), la revisión sigue siendo para lo físico (stock),
+ * pero NO deja nada para NC/REV: lo aplicado queda `facturado` (o `confirmado`
+ * si trae renglones de otros comprobantes, por esa parte) y, si se acepta menos
+ * de lo declarado, la diferencia se le cobra al cliente
+ * (lib/pedidos/diferencia-devolucion-aplicada.ts).
+ *
  * Solo desde `pendiente`: una segunda llamada da 409 y no toca stock. Cada
  * reingreso de stock se guarda contra su movimiento (`Devolución #<id>`), así
  * una revisión interrumpida se puede reintentar sin duplicar stock.
  */
 
 import { ahoraISO, redondear } from "@/lib/formato"
+import { comprobantesAplicados, esAplicadaDeclarada } from "@/lib/pedidos/ajuste-devoluciones"
 import { ErrorDeposito } from "./picking"
 
 export interface ItemDevolucionConfirmado {
@@ -68,7 +76,11 @@ export interface RenglonRevisado {
 export interface ResultadoRevision {
   ok: true
   devolucion_id: string
-  estado: "confirmado" | "rechazado"
+  estado: "confirmado" | "rechazado" | "facturado"
+  /** Ya aplicada en la refacturación del pedido: no emite NC/REV por esa parte */
+  aplicada?: boolean
+  /** Lo que no volvió de una aplicada, cobrado al cliente (PRES/ND) */
+  diferencia?: { emitidos: Array<{ id: string; tipo: string; numero: string; total: number }>; textos: string[]; advertencias: string[] }
   monto_original: number
   monto_total: number
   aceptados: number
@@ -95,7 +107,7 @@ export async function revisarDevolucion(supabase: any, input: RevisarDevolucionI
 
   const { data: dev, error: devErr } = await supabase
     .from("devoluciones")
-    .select("id, estado, numero_devolucion, monto_total")
+    .select("id, estado, numero_devolucion, monto_total, observaciones")
     .eq("id", devolucionId)
     .maybeSingle()
   if (devErr) throw devErr
@@ -111,7 +123,7 @@ export async function revisarDevolucion(supabase: any, input: RevisarDevolucionI
 
   const { data: detalle, error: detErr } = await supabase
     .from("devoluciones_detalle")
-    .select("id, articulo_id, cantidad, precio_venta_original, es_vendible, condicion, cantidad_original, condicion_original, es_vendible_original")
+    .select("id, articulo_id, cantidad, precio_venta_original, es_vendible, condicion, cantidad_original, condicion_original, es_vendible_original, comprobante_venta_id")
     .eq("devolucion_id", devolucionId)
   if (detErr) throw detErr
   if (!detalle?.length) throw new ErrorDeposito("La devolución no tiene renglones.", 422)
@@ -156,7 +168,14 @@ export async function revisarDevolucion(supabase: any, input: RevisarDevolucionI
   })
 
   const aceptados = decisiones.filter((x: any) => x.aceptado)
-  const estadoFinal: "confirmado" | "rechazado" = aceptados.length ? "confirmado" : "rechazado"
+  // Aplicada en la refacturación: lo aceptado contra esos comprobantes no va a NC/REV
+  const aplicados = esAplicadaDeclarada(dev.observaciones) ? comprobantesAplicados(dev.observaciones) : new Set<string>()
+  const aplicada = aplicados.size > 0
+  const estadoFinal: ResultadoRevision["estado"] = !aceptados.length
+    ? "rechazado"
+    : aplicada && aceptados.every((x: any) => aplicados.has(x.d.comprobante_venta_id))
+      ? "facturado"
+      : "confirmado"
 
   // ── Renglones: valores nuevos + originales (solo la primera vez) ──
   for (const x of decisiones) {
@@ -248,10 +267,22 @@ export async function revisarDevolucion(supabase: any, input: RevisarDevolucionI
   const { data: descs } = await supabase.from("devoluciones_descuentos").select("monto").eq("devolucion_id", devolucionId)
   const descontado = redondear((descs || []).reduce((s: number, x: any) => s + (Number(x.monto) || 0), 0))
 
+  // Aplicada: lo que no volvió se le cobra al cliente (si falla, queda el aviso; la revisión ya quedó hecha)
+  let diferencia: ResultadoRevision["diferencia"]
+  if (aplicada) {
+    try {
+      const { cobrarDiferenciaDevolucionAplicada } = await import("@/lib/pedidos/diferencia-devolucion-aplicada")
+      diferencia = await cobrarDiferenciaDevolucionAplicada(supabase, devolucionId, usuarioId)
+    } catch (e: any) {
+      diferencia = { emitidos: [], textos: [], advertencias: [`No se pudo cobrar lo que no volvió de la devolución: ${e?.message || e}. Cobralo a mano.`] }
+    }
+  }
+
   return {
     ok: true,
     devolucion_id: devolucionId,
     estado: estadoFinal,
+    ...(aplicada ? { aplicada, diferencia } : {}),
     monto_original: Number(dev.monto_total) || 0,
     monto_total: montoTotal,
     aceptados: aceptados.length,
@@ -289,7 +320,8 @@ export async function confirmarDevolucion(
   if (!devolucion_id) throw new ErrorDeposito("devolucion_id requerido", 400)
   const { data: dev } = await supabase.from("devoluciones").select("id, estado").eq("id", devolucion_id).maybeSingle()
   if (!dev) throw new ErrorDeposito("Devolución no encontrada", 404)
-  if (dev.estado === "confirmado") return { ok: true, ya_confirmada: true }
+  // "facturado": una aplicada en la refacturación ya revisada (reintento del outbox)
+  if (dev.estado === "confirmado" || dev.estado === "facturado") return { ok: true, ya_confirmada: true }
 
   let uid = usuarioId ?? null
   if (!uid) {

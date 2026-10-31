@@ -4,6 +4,7 @@ import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { enCobroPorComprobante } from "@/lib/cobranzas/en-cobro"
 import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
 import { sinPedidosVacios } from "@/lib/pedidos/sin-mercaderia"
+import { comprobantesAplicados } from "@/lib/pedidos/ajuste-devoluciones"
 
 // Ficha de UN cliente dentro de un viaje de reparto: lo que ve el chofer al bajar
 // del camión (pedido con renglones, comprobantes pendientes, devoluciones y cobros
@@ -145,7 +146,7 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
       .order("created_at", { ascending: false }),
     supabase
       .from("devoluciones")
-      .select("id, numero_devolucion, estado, monto_total, created_at, viaje_id")
+      .select("id, numero_devolucion, estado, monto_total, created_at, viaje_id, observaciones")
       .eq("cliente_id", clienteId)
       .in("estado", ESTADOS_DEVOLUCION_EN_PROCESO as unknown as string[])
       .or(`viaje_id.is.null,viaje_id.neq.${viajeId}`)
@@ -153,7 +154,8 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
   ])
   const valoresAjenas = (devsAjenas || []).length ? await valorarDevoluciones(supabase, { clienteId, devolucionIds: (devsAjenas || []).map((d: any) => d.id) }).catch(() => new Map()) : new Map()
   const cobros_sin_confirmar = (cobrosAjenos || []).map((p: any) => ({ id: p.id, monto: Number(p.monto) || 0, created_at: comoUtc(p.created_at) || String(p.created_at), origen: p.viaje_id ? ("viaje" as const) : ("oficina" as const) }))
-  const otras_devoluciones = (devsAjenas || []).map((d: any) => ({ id: d.id, numero_devolucion: d.numero_devolucion, estado: d.estado, valor: Math.round(((valoresAjenas.get(d.id) as any)?.total ?? Number(d.monto_total) ?? 0) * 100) / 100, created_at: comoUtc(d.created_at) || String(d.created_at) }))
+  // P2-43: las ya aplicadas en la refacturación de su pedido no son crédito (valen 0)
+  const otras_devoluciones = (devsAjenas || []).filter((d: any) => !comprobantesAplicados(d.observaciones).size || ((valoresAjenas.get(d.id) as any)?.total ?? 0) > 0.005).map((d: any) => ({ id: d.id, numero_devolucion: d.numero_devolucion, estado: d.estado, valor: Math.round(((valoresAjenas.get(d.id) as any)?.total ?? Number(d.monto_total) ?? 0) * 100) / 100, created_at: comoUtc(d.created_at) || String(d.created_at) }))
 
   // Saldos desde la FUENTE ÚNICA (lib/cuenta-corriente/saldo.ts): real y
   // proyectado del cliente, y el proyectado SIN lo de este viaje para el saldo

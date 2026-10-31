@@ -22,6 +22,12 @@ import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { InputMonto } from "@/components/ui/input-monto"
 import { fecha, fechaHora, numero, redondear } from "@/lib/formato"
 import { createClient } from "@/lib/supabase/client"
+import { comprobantesAplicados } from "@/lib/pedidos/ajuste-devoluciones"
+
+// P2-43: devolución ya aplicada en la refacturación de su pedido ("pedido N" sale de la leyenda)
+const aplicadaEn = (obs: string | null | undefined) =>
+  comprobantesAplicados(obs).size ? (String(obs).match(/Aplicada en la refacturación del (.+?) \[aplicada:/)?.[1] ?? "pedido") : null
+const sinMarcas = (obs: string | null | undefined) => String(obs || "").replace(/\s*\[(aplicada:[^\]]+|declarada)\]/g, "")
 
 const ESTADO_UI: Record<string, { label: string; cls: string }> = {
   pendiente: { label: "Pendiente depósito", cls: "bg-amber-100 text-amber-800 border-amber-300" },
@@ -155,7 +161,10 @@ export default function RevisionDevolucionesPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      if (data.estado === "rechazado") {
+      if (data.aplicada) {
+        toast({ title: "Revisada", description: `${dev.numero_devolucion}: ya estaba aplicada en la refacturación, no lleva NC/Reversa.${(data.diferencia?.textos || []).length ? " " + data.diferencia.textos.join(" ") : ""}` })
+        if ((data.diferencia?.advertencias || []).length) toast({ title: "Ojo", description: data.diferencia.advertencias.join(" "), variant: "destructive" })
+      } else if (data.estado === "rechazado") {
         toast({ title: "Rechazada", description: dev.numero_devolucion })
       } else {
         toast({ title: "Aceptada", description: `Quedó en ${formatCurrency(data.monto_total)}. Ahora podés emitir la NC/Reversa.` })
@@ -296,6 +305,11 @@ export default function RevisionDevolucionesPage() {
                         {dev.estado === "confirmado" && (dev.confirmado_por || dev.fecha_confirmacion) && (
                           <div className="text-[10px] text-slate-500 mt-0.5 whitespace-nowrap">
                             Aceptó {dev.confirmado_por || "—"}{dev.fecha_confirmacion ? ` · ${fechaHora(dev.fecha_confirmacion)}` : ""}
+                          </div>
+                        )}
+                        {pendiente && aplicadaEn(dev.observaciones) && (
+                          <div className="flex items-center gap-1 text-[10px] font-semibold text-amber-700 mt-0.5 max-w-[260px]" title="El comprobante nuevo ya salió sin lo declarado; esta devolución no emite NC/Reversa.">
+                            <AlertTriangle className="h-3 w-3 shrink-0" /> Ya aplicada en la refacturación del {aplicadaEn(dev.observaciones)}: si aceptás menos, se cobra la diferencia
                           </div>
                         )}
                         {deMas > 0 && (
@@ -456,7 +470,7 @@ export default function RevisionDevolucionesPage() {
                           </table>
                           <div className="flex items-center justify-between gap-3 mt-1.5">
                             <p className="text-[11px] text-slate-400">
-                              {dev.observaciones || ""}
+                              {sinMarcas(dev.observaciones)}
                               {dev.retira_viajante ? (dev.observaciones ? " · " : "") + "Retiró mercadería el viajante" : ""}
                               {Number(dev.descontado) > 0 ? `${dev.observaciones || dev.retira_viajante ? " · " : ""}Ya descontado en cobros: ${formatCurrency(Number(dev.descontado))}` : ""}
                             </p>

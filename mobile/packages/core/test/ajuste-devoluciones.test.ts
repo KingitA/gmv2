@@ -3,11 +3,17 @@
 // es por total − devoluciones imputadas (lib/pedidos/ajuste-devoluciones.ts).
 import { describe, expect, it } from "vitest"
 import {
+  cantidadDeclarada,
+  comprobantesAplicados,
   descontarDevuelto,
+  esAplicadaDeclarada,
+  faltanteDeclarado,
   montoAnulacion,
   parteDevolucionDeAnulacion,
+  renglonAplicado,
   repartirDevolucionDeAnulacion,
   stockAReingresar,
+  valuarDiferencia,
 } from "../../../../lib/pedidos/ajuste-devoluciones"
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -109,5 +115,72 @@ describe("P2-43 refacturados antes de este cambio (anulación por el total con l
       { comprobante_id: "nuevo", monto: 400, es_original: false },
     ])
     expect(Object.fromEntries(rep)).toEqual({ nuevo: 100 })
+  })
+})
+
+describe("P2-43 devolución PENDIENTE al refacturar (Juan 1/11: no traba la refacturación)", () => {
+  // DEV pendiente: el chofer declaró 10 esponjas; depósito todavía no la revisó
+  const obs = "Aplicada en la refacturación del pedido 002017 [aplicada:pres-viejo] · [declarada]"
+  const saldoRefacturado = 1100 - montoAnulacion(1100, 0) + presNuevo()
+  const precioPedido = { articulo_id: "esponja", descripcion: "ESPONJA", precio_final: 12, precio_base: 12 / 1.21 }
+
+  it("se aplica como el caso 1 por lo declarado: anulación por el total, PRES nuevo sin las esponjas → saldo $1.200", () => {
+    expect(montoAnulacion(1100, 0)).toBe(1100)
+    expect(saldoRefacturado).toBe(1200)
+    // La anulación no reingresa las esponjas: las reingresa depósito al revisarla (lo que llegue)
+    expect(stockAReingresar(detallePedido, devueltas)).toEqual([10, 0])
+  })
+
+  it("queda marcada: ya no es crédito en proceso (ni en el saldo ni en las apps) y no emite REV/NC", () => {
+    expect([...comprobantesAplicados(obs)]).toEqual(["pres-viejo"])
+    expect(esAplicadaDeclarada(obs)).toBe(true)
+    expect(renglonAplicado(obs, "pres-viejo")).toBe(true)
+    // Un renglón contra otro comprobante sigue su curso (NC/REV aparte)
+    expect(renglonAplicado(obs, "otra-factura")).toBe(false)
+    expect(renglonAplicado("Devolución común", "pres-viejo")).toBe(false)
+  })
+
+  it("revisión aceptando TODO lo declarado: no se emite nada → saldo $1.200", () => {
+    // revisarDevolucion guarda lo declarado en cantidad_original
+    expect(faltanteDeclarado({ cantidad: 10, cantidad_original: 10, estado_renglon: "aceptado" })).toBe(0)
+    expect(saldoRefacturado).toBe(1200)
+  })
+
+  it("revisión aceptando MENOS (llegaron 6): se cobran las 4 que faltan al precio del PRES nuevo → PRES $48, saldo $1.248", () => {
+    const falta = faltanteDeclarado({ cantidad: 6, cantidad_original: 10, estado_renglon: "aceptado" })
+    expect(falta).toBe(4)
+    const v = valuarDiferencia([{ ...precioPedido, cantidad: falta }], false, null)
+    expect(v.total).toBe(48)
+    expect(v.iva).toBe(0)
+    expect(r2(saldoRefacturado + v.total)).toBe(1248)
+  })
+
+  it("revisión con el renglón RECHAZADO: se cobran las 10 declaradas → PRES $120, saldo $1.320", () => {
+    const falta = faltanteDeclarado({ cantidad: 0, cantidad_original: 10, estado_renglon: "rechazado" })
+    expect(falta).toBe(10)
+    const v = valuarDiferencia([{ ...precioPedido, cantidad: falta }], false, null)
+    expect(v.total).toBe(120)
+    expect(r2(saldoRefacturado + v.total)).toBe(1320)
+  })
+
+  it("lo aplicado sigue valiendo lo declarado aunque depósito acepte menos (el comprobante nuevo ya salió así)", () => {
+    expect(cantidadDeclarada({ cantidad: 6, cantidad_original: 10 })).toBe(10)
+    expect(cantidadDeclarada({ cantidad: 10, cantidad_original: null })).toBe(10)
+  })
+
+  it("origen factura: ND por neto + IVA y percepciones en la proporción de la factura nueva", () => {
+    // FA nueva: neto $1.000 con perc. IVA $30 e IIBB $20; esponja a $12,10 final ($10 neto)
+    const v = valuarDiferencia(
+      [{ articulo_id: "esponja", descripcion: "ESPONJA", cantidad: 4, precio_final: 12.1, precio_base: 10 }],
+      true,
+      { neto: 1000, percepcion_iva: 30, percepcion_iibb: 20 },
+    )
+    expect([v.neto, v.iva, v.percepcionIva, v.percepcionIibb, v.alicuotaIIBB]).toEqual([40, 8.4, 1.2, 0.8, 2])
+    expect(v.total).toBe(50.4)
+  })
+
+  it("presupuesto de perfumería: se cobra al neto, como lo factura generar", () => {
+    const v = valuarDiferencia([{ articulo_id: "p", descripcion: "PERFUME", cantidad: 2, precio_final: 121, precio_base: 100, perfumeria: true }], false, null)
+    expect(v.total).toBe(200)
   })
 })
