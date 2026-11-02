@@ -231,8 +231,13 @@ async function generarRecurrencias(
     const inserts = []
 
     for (let i = 1; i <= maxOcurrencias; i++) {
-        // Mismo día, `incremento * i` meses después (31/01 + 1 mes desborda a marzo, como antes)
-        const fecha = new Date(Date.UTC(anioBase, mesBase - 1 + (incremento * i), diaBase, 12)).toISOString().slice(0, 10) // formato-ok: aritmética de calendario en UTC a mediodía
+        // Mismo día, `incremento * i` meses después; si ese mes es más corto, su
+        // último día (30/01 → 28/02 → 30/03, no 02/03 ni febrero sin cuota)
+        const meses0 = mesBase - 1 + (incremento * i)
+        const anio = anioBase + Math.floor(meses0 / 12)
+        const mes = meses0 % 12 + 1
+        const ultimoDia = new Date(Date.UTC(anio, mes, 0, 12)).getUTCDate()
+        const fecha = `${anio}-${String(mes).padStart(2, '0')}-${String(Math.min(diaBase, ultimoDia)).padStart(2, '0')}`
 
         if (limite && fecha > limite) break
         if (fecha > dosAnios) break
