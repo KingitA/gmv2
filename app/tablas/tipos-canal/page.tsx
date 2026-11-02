@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Trash2, Plus, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
 
 interface TipoCanal {
   id: string
@@ -17,6 +18,11 @@ interface TipoCanal {
   descripcion: string | null
   activo: boolean
 }
+
+const COLUMNAS: ColumnaTabla<TipoCanal>[] = [
+  { id: "nombre", titulo: "Nombre", valor: (i) => i.nombre },
+  { id: "descripcion", titulo: "Descripción", valor: (i) => i.descripcion },
+]
 
 export default function TiposCanalPage() {
   const [items, setItems] = useState<TipoCanal[]>([])
@@ -26,6 +32,7 @@ export default function TiposCanalPage() {
   const [nombre, setNombre] = useState("")
   const [descripcion, setDescripcion] = useState("")
   const supabase = createClient()
+  const tabla = useTablaFiltrable(items, COLUMNAS, "nombre")
 
   useEffect(() => { load() }, [])
 
@@ -82,21 +89,22 @@ export default function TiposCanalPage() {
         <Button onClick={openNew} size="sm"><Plus className="h-4 w-4 mr-1" /> Nuevo</Button>
       </div>
 
+      <BuscadorTabla tabla={tabla} placeholder="Buscar tipo de canal…" />
       <div className="bg-white border rounded-xl overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Descripción</TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="nombre" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="descripcion" /></TableHead>
               <TableHead className="w-[100px] text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow><TableCell colSpan={3} className="text-center py-8"><CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm" /></TableCell></TableRow>
-            ) : items.length === 0 ? (
-              <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No hay tipos de canal cargados</TableCell></TableRow>
-            ) : items.map(item => (
+            ) : tabla.filas.length === 0 ? (
+              <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">{items.length === 0 ? "No hay tipos de canal cargados" : "Ninguno coincide con la búsqueda o los filtros"}</TableCell></TableRow>
+            ) : tabla.filas.map(item => (
               <TableRow key={item.id}>
                 <TableCell className="font-medium">{item.nombre}</TableCell>
                 <TableCell className="text-muted-foreground text-sm">{item.descripcion || "—"}</TableCell>

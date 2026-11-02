@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { InputMonto } from "@/components/ui/input-monto"
 import { porcentaje } from "@/lib/formato"
+import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
 
 interface Zona {
   id: string
@@ -38,9 +39,19 @@ interface Transporte {
   porcentaje_flete: number
 }
 
+const COLUMNAS: ColumnaTabla<Zona>[] = [
+  { id: "nombre", titulo: "Nombre", valor: (z) => z.nombre },
+  { id: "descripcion", titulo: "Descripción", valor: (z) => z.descripcion },
+  { id: "tipo_flete", titulo: "Tipo Flete", valor: (z) => (z.tipo_flete === "transporte" ? "Transporte" : z.tipo_flete ? "Propio" : "Definir flete") },
+  { id: "transporte", titulo: "Transporte", valor: (z) => z.transportes?.nombre },
+  { id: "flete", titulo: "% Flete", numero: (z) => (z.porcentaje_flete != null ? Number(z.porcentaje_flete) : null) },
+  { id: "dias", titulo: "Días Visita", valor: (z) => z.dias_visita },
+]
+
 export default function ZonasPage() {
   const [zonas, setZonas] = useState<Zona[]>([])
   const [transportes, setTransportes] = useState<Transporte[]>([])
+  const tabla = useTablaFiltrable(zonas, COLUMNAS, "nombre")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingZona, setEditingZona] = useState<Zona | null>(null)
   const [formData, setFormData] = useState({
@@ -328,20 +339,24 @@ export default function ZonasPage() {
             </Dialog>
           </CardHeader>
           <CardContent>
+            <BuscadorTabla tabla={tabla} placeholder="Buscar zona, transporte, días…" />
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Descripción</TableHead>
-                  <TableHead>Tipo Flete</TableHead>
-                  <TableHead>Transporte</TableHead>
-                  <TableHead>% Flete</TableHead>
-                  <TableHead>Días Visita</TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="nombre" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="descripcion" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="tipo_flete" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="transporte" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="flete" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="dias" /></TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {zonas.map((zona) => (
+                {tabla.filas.length === 0 && (
+                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">{zonas.length === 0 ? "No hay zonas cargadas" : "Ninguno coincide con la búsqueda o los filtros"}</TableCell></TableRow>
+                )}
+                {tabla.filas.map((zona) => (
                   <TableRow key={zona.id}>
                     <TableCell className="font-medium">{zona.nombre}</TableCell>
                     <TableCell>{zona.descripcion || "-"}</TableCell>

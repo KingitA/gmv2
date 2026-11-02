@@ -5,7 +5,8 @@
 // por FK ON UPDATE CASCADE, y borrar está bloqueado mientras haya artículos que
 // la usen (ON DELETE RESTRICT) — en ese caso se ofrece desactivar.
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
+import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -39,6 +40,14 @@ export function CatalogoArticuloABM({ tabla, columnaArticulo, titulo, subtitulo,
   const [orden, setOrden] = useState("0")
   const [saving, setSaving] = useState(false)
   const supabase = createClient()
+  const columnas = useMemo<ColumnaTabla<TipoCatalogo>[]>(() => [
+    { id: "orden", titulo: "Orden", numero: (i) => i.orden },
+    { id: "nombre", titulo: "Nombre", valor: (i) => i.nombre },
+    { id: "descripcion", titulo: "Descripción", valor: (i) => i.descripcion },
+    { id: "articulos", titulo: "Artículos", numero: (i) => usos[i.nombre] ?? null },
+    { id: "estado", titulo: "Estado", valor: (i) => (i.activo ? "Activo" : "Inactivo") },
+  ], [usos])
+  const t = useTablaFiltrable(items, columnas)
 
   useEffect(() => { load() }, [])
 
@@ -116,24 +125,25 @@ export function CatalogoArticuloABM({ tabla, columnaArticulo, titulo, subtitulo,
         <Button onClick={openNew} size="sm"><Plus className="h-4 w-4 mr-1" /> Nuevo</Button>
       </div>
 
+      <BuscadorTabla tabla={t} placeholder={`Buscar ${singular}…`} />
       <div className="bg-white border rounded-xl overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[60px]">Orden</TableHead>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Descripción</TableHead>
-              <TableHead className="w-[90px] text-right">Artículos</TableHead>
-              <TableHead className="w-[80px]">Estado</TableHead>
+              <TableHead className="w-[60px]"><CabeceraFiltrable tabla={t} id="orden" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={t} id="nombre" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={t} id="descripcion" /></TableHead>
+              <TableHead className="w-[90px] text-right"><CabeceraFiltrable tabla={t} id="articulos" alinear="derecha" /></TableHead>
+              <TableHead className="w-[80px]"><CabeceraFiltrable tabla={t} id="estado" /></TableHead>
               <TableHead className="w-[130px] text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow><TableCell colSpan={6} className="text-center py-8"><CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm" /></TableCell></TableRow>
-            ) : items.length === 0 ? (
-              <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No hay {singular}s cargados</TableCell></TableRow>
-            ) : items.map(item => (
+            ) : t.filas.length === 0 ? (
+              <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">{items.length === 0 ? `No hay ${singular}s cargados` : "Ninguno coincide con la búsqueda o los filtros"}</TableCell></TableRow>
+            ) : t.filas.map(item => (
               <TableRow key={item.id} className={!item.activo ? "opacity-50" : ""}>
                 <TableCell className="text-muted-foreground text-sm">{item.orden}</TableCell>
                 <TableCell className="font-medium font-mono">{item.nombre}</TableCell>

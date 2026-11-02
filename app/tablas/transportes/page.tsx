@@ -16,6 +16,7 @@ import Link from "next/link"
 import { InputMonto } from "@/components/ui/input-monto"
 import { InputCUIT } from "@/components/ui/input-cuit"
 import { errorCuit, formatCuit, moneda, normalizarCuit, porcentaje } from "@/lib/formato"
+import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
 
 type Transporte = {
   id: string
@@ -45,8 +46,20 @@ type DestinoAsignado = {
   _pending?: boolean  // true = not yet saved to DB
 }
 
+const num = (n: number | null | undefined) => (n == null ? null : Number(n))
+const COLUMNAS: ColumnaTabla<Transporte>[] = [
+  { id: "nombre", titulo: "Nombre", valor: (t) => t.nombre },
+  { id: "cuit", titulo: "CUIT", valor: (t) => formatCuit(t.cuit) },
+  { id: "telefono", titulo: "Teléfono", valor: (t) => t.telefono },
+  { id: "flete", titulo: "% Flete", numero: (t) => num(t.porcentaje_flete) },
+  { id: "bulto", titulo: "$/Bulto", numero: (t) => num(t.precio_bulto) },
+  { id: "pallet", titulo: "$/Pallet", numero: (t) => num(t.precio_pallet) },
+  { id: "seguro", titulo: "% Seguro", numero: (t) => num(t.porcentaje_seguro) },
+]
+
 export default function TransportesPage() {
   const [transportes, setTransportes] = useState<Transporte[]>([])
+  const tabla = useTablaFiltrable(transportes, COLUMNAS, "nombre")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editando, setEditando] = useState<Transporte | null>(null)
   const [formData, setFormData] = useState({
@@ -244,24 +257,25 @@ export default function TransportesPage() {
       </div>
 
       {/* Tabla */}
+      <BuscadorTabla tabla={tabla} placeholder="Buscar transporte, CUIT o teléfono…" />
       <div className="bg-white border rounded-xl overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>CUIT</TableHead>
-              <TableHead>Teléfono</TableHead>
-              <TableHead>% Flete</TableHead>
-              <TableHead>$/Bulto</TableHead>
-              <TableHead>$/Pallet</TableHead>
-              <TableHead>% Seguro</TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="nombre" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="cuit" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="telefono" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="flete" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="bulto" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="pallet" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="seguro" /></TableHead>
               <TableHead className="w-[80px] text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {transportes.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No hay transportes</TableCell></TableRow>
-            ) : transportes.map(t => (
+            {tabla.filas.length === 0 ? (
+              <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">{transportes.length === 0 ? "No hay transportes" : "Ninguno coincide con la búsqueda o los filtros"}</TableCell></TableRow>
+            ) : tabla.filas.map(t => (
               <TableRow key={t.id}>
                 <TableCell className="font-medium">{t.nombre}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">{formatCuit(t.cuit) || "—"}</TableCell>

@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { createBrowserClient } from "@supabase/ssr"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,6 +14,7 @@ import { Plus, Pencil, Trash2, ArrowLeft, UserCheck } from "lucide-react"
 import Link from "next/link"
 import { InputMonto } from "@/components/ui/input-monto"
 import { porcentaje } from "@/lib/formato"
+import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
 
 type Vendedor = {
   id: string
@@ -186,6 +187,17 @@ export default function ViajantesPage() {
 
   const fmtPct = (n: number | null) => porcentaje(Number(n ?? 0))
 
+  const columnas = useMemo<ColumnaTabla<Vendedor>[]>(() => [
+    { id: "nombre", titulo: "Nombre", valor: (v) => v.nombre },
+    { id: "email", titulo: "Email", valor: (v) => [v.email, v.emails_alternativos].filter(Boolean).join(" ") },
+    { id: "telefono", titulo: "Teléfono", valor: (v) => v.telefono },
+    { id: "com_lb", titulo: "Com. Limp/Bazar", numero: (v) => Number(v.comision_limpieza_bazar ?? 0) },
+    { id: "com_p0", titulo: "Com. Perf. negro", numero: (v) => Number(v.comision_perfumeria_0 ?? 0) },
+    { id: "com_pp", titulo: "Com. Perf. c/fact", numero: (v) => Number(v.comision_perfumeria_plus ?? 0) },
+    { id: "usuario", titulo: "Usuario", valor: (v) => usuarios.find((u) => u.id === v.usuario_id)?.nombre ?? "Sin usuario" },
+  ], [usuarios])
+  const tabla = useTablaFiltrable(vendedores, columnas, "nombre")
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b">
@@ -317,28 +329,29 @@ export default function ViajantesPage() {
             <CardTitle>Lista de Viajantes</CardTitle>
           </CardHeader>
           <CardContent>
+            <BuscadorTabla tabla={tabla} placeholder="Buscar viajante, email, teléfono…" />
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>Com. Limp/Bazar</TableHead>
-                  <TableHead>Com. Perf. negro</TableHead>
-                  <TableHead>Com. Perf. c/fact</TableHead>
-                  <TableHead>Usuario</TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="nombre" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="email" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="telefono" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="com_lb" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="com_p0" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="com_pp" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="usuario" /></TableHead>
                   <TableHead>Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {vendedores.length === 0 ? (
+                {tabla.filas.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center text-muted-foreground">
-                      No hay viajantes registrados
+                      {vendedores.length === 0 ? "No hay viajantes registrados" : "Ninguno coincide con la búsqueda o los filtros"}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  vendedores.map((vendedor) => {
+                  tabla.filas.map((vendedor) => {
                     const usuario = usuarioDe(vendedor.usuario_id)
                     return (
                       <TableRow key={vendedor.id}>

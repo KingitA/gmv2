@@ -13,6 +13,7 @@ import { Plus, Pencil, Trash2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
 
 interface Localidad {
   id: string
@@ -28,9 +29,17 @@ interface Zona {
   nombre: string
 }
 
+const COLUMNAS: ColumnaTabla<Localidad>[] = [
+  { id: "nombre", titulo: "Nombre", valor: (l) => l.nombre },
+  { id: "provincia", titulo: "Provincia", valor: (l) => l.provincia },
+  { id: "cp", titulo: "Código Postal", valor: (l) => l.codigo_postal },
+  { id: "zona", titulo: "Zona", valor: (l) => l.zonas?.nombre },
+]
+
 export default function LocalidadesPage() {
   const [localidades, setLocalidades] = useState<Localidad[]>([])
   const [zonas, setZonas] = useState<Zona[]>([])
+  const tabla = useTablaFiltrable(localidades, COLUMNAS, "nombre")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingLocalidad, setEditingLocalidad] = useState<Localidad | null>(null)
   const [formData, setFormData] = useState({
@@ -225,18 +234,22 @@ export default function LocalidadesPage() {
             </Dialog>
           </CardHeader>
           <CardContent>
+            <BuscadorTabla tabla={tabla} placeholder="Buscar localidad, provincia, CP o zona…" />
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Provincia</TableHead>
-                  <TableHead>Código Postal</TableHead>
-                  <TableHead>Zona</TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="nombre" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="provincia" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="cp" /></TableHead>
+                  <TableHead><CabeceraFiltrable tabla={tabla} id="zona" /></TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {localidades.map((localidad) => (
+                {tabla.filas.length === 0 && (
+                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">{localidades.length === 0 ? "No hay localidades cargadas" : "Ninguno coincide con la búsqueda o los filtros"}</TableCell></TableRow>
+                )}
+                {tabla.filas.map((localidad) => (
                   <TableRow key={localidad.id}>
                     <TableCell className="font-medium">{localidad.nombre}</TableCell>
                     <TableCell>{localidad.provincia}</TableCell>

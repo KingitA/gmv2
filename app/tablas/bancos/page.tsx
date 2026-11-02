@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Plus, Pencil, Trash2, Building2 } from "lucide-react"
 import { toast } from "sonner"
+import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
 
 interface Banco {
   id: string
@@ -21,10 +22,20 @@ interface Banco {
   activo: boolean
 }
 
+const COLUMNAS: ColumnaTabla<Banco>[] = [
+  { id: "banco", titulo: "Banco", valor: (b) => b.banco },
+  { id: "nombre", titulo: "Nombre / Alias", valor: (b) => [b.nombre, b.alias].filter(Boolean).join(" ") },
+  { id: "cbu", titulo: "CBU", valor: (b) => b.cbu },
+  { id: "cvu", titulo: "CVU", valor: (b) => b.cvu },
+  { id: "cuenta", titulo: "Cuenta", valor: (b) => b.cuenta },
+  { id: "estado", titulo: "Estado", valor: (b) => (b.activo ? "Activo" : "Inactivo") },
+]
+
 const emptyForm = { banco: "", nombre: "", alias: "", cbu: "", cvu: "", cuenta: "" }
 
 export default function BancosPage() {
   const [bancos, setBancos] = useState<Banco[]>([])
+  const tabla = useTablaFiltrable(bancos, COLUMNAS, "banco")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editando, setEditando] = useState<Banco | null>(null)
   const [formData, setFormData] = useState(emptyForm)
@@ -106,27 +117,28 @@ export default function BancosPage() {
         </Button>
       </div>
 
+      <BuscadorTabla tabla={tabla} placeholder="Buscar banco, alias, CBU…" />
       <div className="bg-white border rounded-xl overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Banco</TableHead>
-              <TableHead>Nombre / Alias</TableHead>
-              <TableHead>CBU</TableHead>
-              <TableHead>CVU</TableHead>
-              <TableHead>Cuenta</TableHead>
-              <TableHead className="text-center">Estado</TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="banco" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="nombre" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="cbu" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="cvu" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="cuenta" /></TableHead>
+              <TableHead className="text-center"><CabeceraFiltrable tabla={tabla} id="estado" /></TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {bancos.length === 0 ? (
+            {tabla.filas.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                  No hay bancos cargados. Agregá las cuentas bancarias de la empresa.
+                  {bancos.length === 0 ? "No hay bancos cargados. Agregá las cuentas bancarias de la empresa." : "Ninguno coincide con la búsqueda o los filtros"}
                 </TableCell>
               </TableRow>
-            ) : bancos.map((b) => (
+            ) : tabla.filas.map((b) => (
               <TableRow key={b.id}>
                 <TableCell className="font-medium">{b.banco}</TableCell>
                 <TableCell>

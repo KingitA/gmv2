@@ -9,6 +9,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label"
 import { Trash2, Plus, Pencil } from "lucide-react"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
+
+const COLUMNAS: ColumnaTabla<any>[] = [
+  { id: "nombre", titulo: "Nombre", valor: (i) => i.nombre },
+  { id: "codigo", titulo: "Código", valor: (i) => i.codigo },
+  { id: "descripcion", titulo: "Descripción", valor: (i) => i.descripcion },
+]
 
 export default function CondicionesEntregaPage() {
   const [items, setItems] = useState<any[]>([])
@@ -19,6 +26,7 @@ export default function CondicionesEntregaPage() {
   const [codigo, setCodigo] = useState("")
   const [descripcion, setDescripcion] = useState("")
   const supabase = createClient()
+  const tabla = useTablaFiltrable(items, COLUMNAS, "nombre")
 
   useEffect(() => { load() }, [])
 
@@ -83,22 +91,23 @@ export default function CondicionesEntregaPage() {
         <Button onClick={openNew} size="sm"><Plus className="h-4 w-4 mr-1" /> Nueva</Button>
       </div>
 
+      <BuscadorTabla tabla={tabla} placeholder="Buscar condición…" />
       <div className="bg-white border rounded-xl overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Código</TableHead>
-              <TableHead>Descripción</TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="nombre" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="codigo" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="descripcion" /></TableHead>
               <TableHead className="w-[100px] text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow><TableCell colSpan={4} className="text-center py-8"><CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm" /></TableCell></TableRow>
-            ) : items.length === 0 ? (
-              <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No hay condiciones cargadas</TableCell></TableRow>
-            ) : items.map(item => (
+            ) : tabla.filas.length === 0 ? (
+              <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">{items.length === 0 ? "No hay condiciones cargadas" : "Ninguno coincide con la búsqueda o los filtros"}</TableCell></TableRow>
+            ) : tabla.filas.map(item => (
               <TableRow key={item.id}>
                 <TableCell className="font-medium">{item.nombre}</TableCell>
                 <TableCell className="font-mono text-sm text-muted-foreground">{item.codigo}</TableCell>

@@ -10,6 +10,13 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Pencil } from "lucide-react"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
+
+const COLUMNAS: ColumnaTabla<any>[] = [
+  { id: "nombre", titulo: "Nombre", valor: (i) => i.nombre },
+  { id: "patente", titulo: "Patente", valor: (i) => i.patente },
+  { id: "estado", titulo: "Estado", valor: (i) => (i.activo ? "Activo" : "Inactivo") },
+]
 
 export default function VehiculosPage() {
   const [items, setItems] = useState<any[]>([])
@@ -19,6 +26,7 @@ export default function VehiculosPage() {
   const [nombre, setNombre] = useState("")
   const [patente, setPatente] = useState("")
   const supabase = createClient()
+  const tabla = useTablaFiltrable(items, COLUMNAS, "nombre")
 
   useEffect(() => { load() }, [])
 
@@ -71,22 +79,23 @@ export default function VehiculosPage() {
         </Button>
       </div>
 
+      <BuscadorTabla tabla={tabla} placeholder="Buscar vehículo o patente…" />
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Nombre</TableHead>
-            <TableHead>Patente</TableHead>
-            <TableHead>Estado</TableHead>
+            <TableHead><CabeceraFiltrable tabla={tabla} id="nombre" /></TableHead>
+            <TableHead><CabeceraFiltrable tabla={tabla} id="patente" /></TableHead>
+            <TableHead><CabeceraFiltrable tabla={tabla} id="estado" /></TableHead>
             <TableHead className="w-40" />
           </TableRow>
         </TableHeader>
         <TableBody>
           {loading ? (
             <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground"><CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm" /></TableCell></TableRow>
-          ) : items.length === 0 ? (
-            <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Todavía no hay vehículos</TableCell></TableRow>
+          ) : tabla.filas.length === 0 ? (
+            <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">{items.length === 0 ? "Todavía no hay vehículos" : "Ninguno coincide con la búsqueda o los filtros"}</TableCell></TableRow>
           ) : (
-            items.map((item) => (
+            tabla.filas.map((item) => (
               <TableRow key={item.id} className={item.activo ? "" : "opacity-50"}>
                 <TableCell className="font-medium">{item.nombre}</TableCell>
                 <TableCell>{item.patente || "—"}</TableCell>

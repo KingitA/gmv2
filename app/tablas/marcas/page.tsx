@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Plus, Pencil, Trash2, Upload, Download, Check, X, AlertCircle } from "lucide-react"
 import * as XLSX from "xlsx"
+import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
 
 type Marca = {
   id: string
@@ -18,6 +19,11 @@ type Marca = {
   descripcion: string
   activo: boolean
 }
+
+const COLUMNAS: ColumnaTabla<Marca>[] = [
+  { id: "codigo", titulo: "Código", valor: (m) => m.codigo },
+  { id: "descripcion", titulo: "Descripción", valor: (m) => m.descripcion },
+]
 
 type ImportRow = { codigo: string; descripcion: string; accion: "nuevo" | "actualizar" | "sin_cambios" }
 
@@ -35,6 +41,7 @@ export default function MarcasPage() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const supabase = createClient()
+  const tabla = useTablaFiltrable(marcas, COLUMNAS, "codigo")
 
   useEffect(() => { loadMarcas() }, [])
 
@@ -181,19 +188,20 @@ export default function MarcasPage() {
         </div>
       </div>
 
+      <BuscadorTabla tabla={tabla} placeholder="Buscar marca o código…" />
       <div className="bg-white border rounded-xl overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[120px]">Código</TableHead>
-              <TableHead>Descripción</TableHead>
+              <TableHead className="w-[120px]"><CabeceraFiltrable tabla={tabla} id="codigo" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="descripcion" /></TableHead>
               <TableHead className="w-[100px] text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {marcas.length === 0 ? (
-              <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No hay marcas cargadas</TableCell></TableRow>
-            ) : marcas.map(m => (
+            {tabla.filas.length === 0 ? (
+              <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">{marcas.length === 0 ? "No hay marcas cargadas" : "Ninguna marca coincide con la búsqueda o los filtros"}</TableCell></TableRow>
+            ) : tabla.filas.map(m => (
               <TableRow key={m.id}>
                 <TableCell className="font-mono font-semibold">{m.codigo}</TableCell>
                 <TableCell>{m.descripcion}</TableCell>
