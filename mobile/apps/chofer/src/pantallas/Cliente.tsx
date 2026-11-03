@@ -1,20 +1,21 @@
-import { useRef, useState, type ReactNode } from "react"
+import { useState } from "react"
 import { efectoAnulacionEnParada, TEXTO_ENTREGA_BLOQUEADA } from "@gm/cobro"
 import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOnline, useRuntime } from "@gm/core"
-import { DS, esEnCurso, ESTADOS_COBRABLES, idClienteViaje, type DetallePedido, type OpCobroAnular } from "../datasets"
-import { agregarAlBorrador } from "../datos/borrador-devolucion"
+import { DS, esEnCurso, ESTADOS_COBRABLES, idClienteViaje, type OpCobroAnular } from "../datasets"
+import { pdfPedido, usePdf } from "../datos/comprobantes-pdf"
 import { textoReparto } from "../datos/devolucion-tope"
 import { valorDeDevolucion } from "../datos/cuenta-cobro"
 import { esIdLocal, keyDeIdLocal } from "../datos/overlay"
 import { rechazosDe, useClienteViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
 import { AvisosAnulacion, AvisosBcra, ESTADO_PARADA, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, RenglonesDevolucion, SinEnviar, TEXTO_PARADA_REABIERTA, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
+import { RenglonesPedido } from "./RenglonesPedido"
 import { textoBultos, useResultadoParada } from "./ResultadoParada"
 
 // Ficha del cliente en el viaje (= app/chofer/[viajeId]/cliente/[clienteId]/page.tsx).
 // P2-35: acá adentro va todo lo que salió de la lista del viaje — bultos, "cobrar sí o sí", nota de
 // oficina, remitos y "Confirmar parada" / "Reabrir" — además de lo de siempre:
-// pedido con sus renglones (deslizar para devolver), saldo y devoluciones, cobros
+// pedido con sus renglones (deslizar para devolver, RenglonesPedido.tsx), "📄 Comprobantes" del pedido, saldo y devoluciones, cobros
 // registrados (con anulación mientras no se rindió), y las dos acciones: Devolución y Cobrar.
 // Las dos "hojas" de la web son RUTAS acá: /cobrar y /devolucion (la jerarquía es real).
 // Anular un cobro: ?ver=anular:<pagoId>. Un cobro que todavía no salió del equipo se
@@ -34,6 +35,7 @@ export function Cliente() {
   const [ocupado, setOcupado] = useState(false)
   useAvisoEntrante(mostrar)
   const abrirPdf = useAbrirPdf(mostrar)
+  const pdf = usePdf(mostrar)
   const resultado = useResultadoParada(viajeId, viaje?.paradas ?? [], mostrar)
   // Con señal, re-leer SOLO esta ficha al entrar
   useRefrescarFilas(DS.clientesViaje, [idClienteViaje(viajeId, clienteId)])
@@ -62,21 +64,6 @@ export function Cliente() {
   const par = viaje?.paradas.find((p) => p.cliente_id === clienteId) ?? null
   const remitos = par ? par.pedidos.flatMap((ped) => ped.remitos) : []
   const pagoAnular = anular.valor ? pagos_registrados.find((p) => p.id === anular.valor) ?? null : null
-
-  const irADevolucionCon = (item: DetallePedido) => {
-    agregarAlBorrador(viajeId, clienteId, {
-      articulo_id: item.articulo_id,
-      sku: item.articulos?.sku ?? null,
-      descripcion: item.articulos?.descripcion || "Artículo",
-      // Del pedido: por defecto vuelve TODO lo facturado (se corrige si es parcial)
-      cantidad: item.cantidad,
-      precio_venta_original: item.precio_final,
-      motivo: "otro",
-      condicion: "vendible",
-      origen: "pedido",
-    })
-    navigate(`/viajes/${viajeId}/clientes/${clienteId}/devolucion`)
-  }
 
   const confirmarAnulacion = async () => {
     if (!pagoAnular) return
@@ -154,11 +141,17 @@ export function Cliente() {
               {par.motivo_no_cobro && `No cobró: ${par.motivo_no_cobro}.`}
             </p>
           )}
+          {/* 03/11 (Juan): lo que se comparte son los valorizados; el remito queda chico */}
+          {par.pedidos.map((ped) => (
+            <button key={ped.id} disabled={pdf.ocupado || !online} onClick={() => void pdf.abrir(pdfPedido(ped))} className="min-h-14 w-full rounded-xl border-2 border-sky-300 bg-sky-50 py-2 text-lg font-bold text-sky-800 active:scale-95 disabled:opacity-50">
+              {pdf.ocupado ? "Bajando…" : `📄 Comprobantes${par.pedidos.length > 1 ? ` · pedido #${ped.numero}` : ""}`}
+            </button>
+          ))}
           {remitos.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-x-4">
               {remitos.map((r) => (
-                <button key={r.id} disabled={r.estado_pdf !== "generado" || !online} onClick={() => void abrirPdf(`/api/remitos/${r.id}/pdf`)} className="min-h-12 flex-1 rounded-xl border border-sky-200 bg-sky-50 py-2 text-base font-bold text-sky-800 active:scale-95 disabled:opacity-50">
-                  📄 Remito {r.tipo_remito === "REM" ? "R" : "X"} {r.numero_remito}
+                <button key={r.id} disabled={r.estado_pdf !== "generado" || !online} onClick={() => void abrirPdf(`/api/remitos/${r.id}/pdf`)} className="min-h-10 text-sm text-sky-700 underline disabled:opacity-50">
+                  Remito {r.tipo_remito === "REM" ? "R" : "X"} {r.numero_remito}
                 </button>
               ))}
             </div>
@@ -191,22 +184,7 @@ export function Cliente() {
               <h3 className="font-bold text-gray-700">Pedido #{pedido.numero}</h3>
               {!esReadOnly && enCurso && <span className="text-xs text-gray-400">← deslizá para devolver</span>}
             </div>
-            <div className="divide-y divide-gray-100">
-              {pedido.detalle.map((item) => (
-                <SwipeableItem key={item.id} onDevolver={() => irADevolucionCon(item)} disabled={esReadOnly || !enCurso}>
-                  <div className="flex items-center justify-between px-4 py-3 text-sm">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-gray-800">{item.articulos?.descripcion || "Artículo"}</p>
-                      <p className="text-xs text-gray-400">{item.articulos?.sku}</p>
-                    </div>
-                    <div className="ml-3 shrink-0 text-right">
-                      <p className="text-xs text-gray-500">{item.cantidad} × {formatCurrency(item.precio_final)}</p>
-                      <p className="font-bold text-gray-800">{formatCurrency(item.subtotal)}</p>
-                    </div>
-                  </div>
-                </SwipeableItem>
-              ))}
-            </div>
+            <RenglonesPedido detalle={pedido.detalle} viajeId={viajeId} clienteId={clienteId} puedeDevolver={!esReadOnly && enCurso} />
             <div className="mx-4 mt-1 flex justify-between border-t py-3 text-sm font-bold">
               <span className="text-gray-700">Total pedido</span>
               <span>{formatCurrency(pedido.total)}</span>
@@ -324,49 +302,5 @@ export function Cliente() {
         )}
       </HojaConfirmar>
     </Pantalla>
-  )
-}
-
-// ─── SwipeableItem (= web): deslizá a la izquierda para revelar "Devolver" ────
-
-function SwipeableItem({ children, onDevolver, disabled }: { children: ReactNode; onDevolver: () => void; disabled?: boolean }) {
-  const [offset, setOffset] = useState(0)
-  const [revealed, setRevealed] = useState(false)
-  const startX = useRef(0)
-  const THRESHOLD = 70
-  const BUTTON_W = 90
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (disabled) return
-    startX.current = e.touches[0]!.clientX
-  }
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (disabled) return
-    const dx = e.touches[0]!.clientX - startX.current
-    if (dx < 0) setOffset(Math.max(dx, -BUTTON_W))
-  }
-  const handleTouchEnd = () => {
-    if (disabled) return
-    if (offset < -THRESHOLD) { setOffset(-BUTTON_W); setRevealed(true) } else { setOffset(0); setRevealed(false) }
-  }
-  return (
-    <div className="relative overflow-hidden">
-      <div className="absolute bottom-0 right-0 top-0 flex items-center justify-center bg-amber-500" style={{ width: BUTTON_W }}>
-        <button onClick={() => { setOffset(0); setRevealed(false); onDevolver() }} className="flex h-full w-full flex-col items-center justify-center text-white">
-          <span className="text-xl">↩</span>
-          <span className="text-xs font-bold">Devolver</span>
-        </button>
-      </div>
-      <div
-        className="relative bg-white"
-        style={{ transform: `translateX(${offset}px)` }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onClick={() => { if (revealed) { setOffset(0); setRevealed(false) } }}
-      >
-        {children}
-      </div>
-    </div>
   )
 }

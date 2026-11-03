@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.9 (versionCode 15) — 2026-11-03
+
+- Cobro más limpio; tocar el pedido abre su detalle (deslizar para devolver); tocar un comprobante abre el PDF para compartir; botón Comprobantes en la ficha
+
 ## v0.3.8 (versionCode 14) — 2026-10-30
 
 - P2-30 monto con miles al tipear (CampoMonto de core) + ícono rojo de a cobrar en la lista del viaje; sobre main con el core nuevo (teclado, freno de sync)

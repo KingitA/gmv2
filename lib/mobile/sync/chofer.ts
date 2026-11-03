@@ -126,7 +126,34 @@ export async function filaClienteViaje(ctx: CtxSync, viajeId: string, clienteId:
       console.error("[sync/chofer_viaje_clientes] comprobantes_ref:", e?.message || e)
       return null
     }),
+    // 03/11: el detalle de cada pedido que todavía se cobra (desde el cobro se abre y se devuelve)
+    detalle_pedidos: await detallePedidosDe(ctx.supabase, cobro).catch((e) => {
+      console.error("[sync/chofer_viaje_clientes] detalle_pedidos:", e?.message || e)
+      return null
+    }),
   }
+}
+
+/**
+ * Renglones de los pedidos que el chofer ve en el cobro (los saldados no se muestran): sin facturar o
+ * con comprobantes pendientes. Los 10 más recientes, en UNA consulta.
+ */
+export async function detallePedidosDe(
+  supabase: CtxSync["supabase"],
+  cobro: { comprobantes: Array<{ pedido_id: string | null }>; pedidos: Array<{ id: string }>; pedidos_facturados: string[] },
+): Promise<Record<string, unknown[]>> {
+  const conSaldo = new Set(cobro.comprobantes.map((c) => c.pedido_id).filter((x): x is string => !!x))
+  const facturados = new Set(cobro.pedidos_facturados)
+  const ids = cobro.pedidos.filter((p) => conSaldo.has(p.id) || !facturados.has(p.id)).map((p) => p.id).slice(-10)
+  if (!ids.length) return {}
+  const { data, error } = await supabase
+    .from("pedidos_detalle")
+    .select("id, pedido_id, cantidad, precio_final, subtotal, es_bonificado, articulo_id, articulos(sku, descripcion, unidades_por_bulto)")
+    .in("pedido_id", ids)
+  if (error) throw error
+  const out: Record<string, unknown[]> = {}
+  for (const d of (data || []) as any[]) (out[d.pedido_id] ??= []).push(d)
+  return out
 }
 
 /** Tipo y número de los comprobantes de origen de las devoluciones de la ficha. Una consulta por id; nada si no hay devoluciones. */

@@ -73,7 +73,7 @@ function reset() {
     })
     const total = r2(detalle.reduce((s, d) => s + d.subtotal, 0))
     S.pedidos.push({ id: pedidoId, numero_pedido: String(1700 + i).padStart(6, "0"), fecha: hoy(), estado: "en_viaje", total, bultos: 3 + i, cliente_id: c.id, viaje_id: viajeId, observaciones: null, detalle, pago_contado_10: false, anticipo_pago_id: null })
-    if (i === 2) S.pedidos.push({ id: uid(3050), numero_pedido: "001750", fecha: hoy(), estado: "impreso", total: 352718.8, bultos: 4, cliente_id: c.id, viaje_id: null, observaciones: null, detalle: [], pago_contado_10: false, anticipo_pago_id: null })
+    if (i === 2) S.pedidos.push({ id: uid(3050), numero_pedido: "001750", fecha: hoy(), estado: "impreso", total: 352718.8, bultos: 4, cliente_id: c.id, viaje_id: null, observaciones: null, detalle: [{ id: uid(3051), articulo_id: f.articulos[20].id, cantidad: 40, precio_final: 8817.97, subtotal: 352718.8, es_bonificado: false }], pago_contado_10: false, anticipo_pago_id: null })
     if (i !== 2) {
       S.comprobantes.push({ id: uid(4000 + i), cliente_id: c.id, pedido_id: pedidoId, tipo_comprobante: i === 5 ? "PRES" : "FA", numero_comprobante: i === 5 ? "0001-00000022" : `0003-${String(5000 + i).padStart(8, "0")}`, fecha: hoy(), total_neto: i === 5 ? total : r2(total / 1.21), total_factura: total, saldo_pendiente: total, estado_pago: "pendiente", anulado_en: null })
       S.remitos.push({ id: uid(4500 + i), pedido_id: pedidoId, tipo_remito: "REM", numero_remito: `0001-${String(800 + i).padStart(8, "0")}`, estado_pdf: "generado" })
@@ -186,6 +186,7 @@ function filaCliente(viajeId, clienteId) {
       pedidos_facturados: [...new Set(S.comprobantes.filter((k) => k.cliente_id === clienteId && k.pedido_id).map((k) => k.pedido_id))],
       dtos_hechos: [],
     },
+    detalle_pedidos: Object.fromEntries(pedidosCli.map((p) => [p.id, p.detalle.map((d) => ({ ...d, pedido_id: p.id, articulos: { sku: artDe(d.articulo_id)?.sku, descripcion: artDe(d.articulo_id)?.descripcion, unidades_por_bulto: artDe(d.articulo_id)?.unidades_por_bulto } }))])),
     comprados: S.f.articulos.slice(10, 16).map((a) => ({ articulo_id: a.id, sku: a.sku, ean13: a.ean13, descripcion: a.descripcion, imagen_url: null, unidades_por_bulto: a.unidades_por_bulto, ultimo_precio: 1234.5, ultima_fecha: "2026-08-20", comprobante_venta_id: uid(4900), numero_comprobante: "0003-00004900", tipo_comprobante: "FA", cantidad_total: 12 })),
   }
 }
@@ -523,6 +524,7 @@ createServer(async (req, res) => {
     if (d && comp) return json(200, { precio: d.precio_final, fecha: comp.fecha, comprobante: comp.numero_comprobante, fuente: "factura", origen: { comprobante_venta_id: comp.id, tipo_comprobante: comp.tipo_comprobante, numero_comprobante: comp.numero_comprobante, fiscal: comp.tipo_comprobante !== "PRES", percepcion_iva: false, bonificado_contado: false, exacto: true, precio: d.precio_final, iva_unitario: null } })
     return json(200, { precio: 999.99, fecha: null, comprobante: null, fuente: "vigente" })
   }
+  if (/^\/api\/comprobantes-venta\/.+\/pdf$/.test(url.pathname)) { res.writeHead(302, { Location: "https://placehold.co/600x800.png?text=" + (url.pathname.includes("/pedido/") ? "Comprobantes+del+pedido" : "Comprobante") + "+(mock)", ...cors }); return res.end() }
   if (/^\/api\/remitos\/.+\/pdf$/.test(url.pathname)) { res.writeHead(302, { Location: "https://placehold.co/600x800.png?text=Remito+(mock)", ...cors }); return res.end() }
   if (url.pathname.startsWith("/api/bcra/deudor/")) return json(200, { cuit: url.pathname.split("/").pop(), denominacion: "DEMO SA", situacion_max: 1, sin_antecedentes: true, apto: true, entidades: [] })
   json(404, { error: "No existe en el mock" })
