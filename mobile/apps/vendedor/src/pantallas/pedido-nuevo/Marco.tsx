@@ -6,7 +6,7 @@ import { numero, parseMonto } from "@gm/formato"
 import { SEGS, SEG_LABEL, type Articulo, type BonifSeg, type CondPedido, type OpPedido, COND_VACIA } from "../../datasets"
 import { nuevoBorrador, type Borrador } from "../../datos/borradores"
 import { buscarPorCodigo, eansDe, matchExacto } from "../../datos/busqueda"
-import { useCatalogosFicha, useEncolar, usePedidos } from "../../datos/hooks"
+import { useCatalogosFicha, useEncolar, usePedidos, useViajes } from "../../datos/hooks"
 import { formatCurrency, useFotoZoom, useToast, ZoomFoto } from "../../ui"
 import { ProveedorPedido, usePedidoEnCurso, useVer } from "./contexto"
 import { clienteListasDe, fichaListasDe, metodoLabel, useSegmentosCliente } from "../../datos/segmentos"
@@ -40,6 +40,7 @@ function Contenido() {
   const foto = useFotoZoom()
   const { toast, mostrar } = useToast()
   useRetomarPedido()
+  useViajeDelPedido()
 
   const enCarrito = location.pathname.endsWith("/carrito") || location.pathname.endsWith("/listo")
   const articuloId = ver?.startsWith("articulo:") ? ver.slice(9) : null
@@ -86,6 +87,25 @@ function Contenido() {
       {foto.src && <ZoomFoto src={foto.src} onCerrar={foto.cerrar} />}
     </>
   )
+}
+
+/**
+ * Levantar pedido desde un viaje del calendario (?viaje=<id>, 03/11/2026): el borrador queda
+ * para ese viaje y el pedido sale con viaje_id. Un pedido que ya existe no cambia de viaje
+ * desde acá (eso lo hace la oficina).
+ */
+function useViajeDelPedido() {
+  const p = usePedidoEnCurso()
+  const [sp, setSp] = useSearchParams()
+  const viajeParam = sp.get("viaje")
+  const { viajes, cargando } = useViajes()
+  useEffect(() => {
+    if (!viajeParam || cargando || !p.cliente) return
+    setSp((prev) => { const n = new URLSearchParams(prev); n.delete("viaje"); return n }, { replace: true })
+    if (p.borrador?.pedidoId) return
+    const v = viajes.find((x) => x.id === viajeParam)
+    if (v && p.borrador?.viaje?.id !== v.id) p.setViaje({ id: v.id, nombre: v.resumen.nombre, fecha: v.resumen.fecha })
+  }, [viajeParam, cargando, viajes, p, setSp])
 }
 
 /**

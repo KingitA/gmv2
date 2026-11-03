@@ -159,22 +159,22 @@ describe("Vendedor · overlay de clientes y cuenta corriente", () => {
   })
 })
 
-describe("Vendedor · overlay de viajes", () => {
+describe("Vendedor · overlay de viajes (calendario de reparto, 03/11/2026)", () => {
+  const cli = (id: string) => ({ id, nombre: id, localidad: null, direccion: null, telefono: null, saldo_actual: 0, saldo_proyectado: 0, pedidos: [], parada: null })
   const viaje: ViajeVendedor = {
-    id: "v1", resumen: { id: "v1", nombre: "Levantamiento", estado: "en_curso", fecha_inicio: "2026-09-21", fecha_fin_estimada: null, zonas: [] },
-    clientes: [
-      { id: "c1", nombre: "Uno", localidad: null, saldo_actual: 0, estado_viaje: "pendiente", pedido: null },
-      { id: "c2", nombre: "Dos", localidad: null, saldo_actual: 0, estado_viaje: "pendiente", pedido: null },
-    ],
+    id: "v1",
+    resumen: { id: "v1", nombre: "BAHIA 10/11", estado: "programado", fecha: "2026-11-10", dias: 1, fecha_fin: "2026-11-10", zonas: [], choferes: [], mis_pedidos: 1, mis_total: 500 },
+    admite_pedidos: true,
+    clientes: [cli("c1"), cli("c2")],
+    totales: { pedidos: 1, total: 500, entregados: 0, no_entregados: 0, cobrado: 0 },
   }
-  it("pedido tomado sin señal = pedido levantado; no va gana aunque haya pedido (igual que el servidor)", () => {
-    const v = viajesVisibles([viaje], [op("pedido.crear", opPedido()), op("viaje.cliente_no_va", { viaje_id: "v1", cliente_id: "c2", no_va: true })])[0]!
-    expect(v.clientes!.map((c) => c.estado_viaje)).toEqual(["pedido_levantado", "no_va"])
-    const v2 = viajesVisibles([viaje], [op("pedido.crear", opPedido()), op("viaje.cliente_no_va", { viaje_id: "v1", cliente_id: "c1", no_va: true })])[0]!
-    expect(v2.clientes![0]!.estado_viaje).toBe("no_va")
+  it("un pedido levantado para el viaje y sin enviar ya se ve en su cliente y suma", () => {
+    const v = viajesVisibles([viaje], [op("pedido.crear", { ...opPedido(), viaje_id: "v1" })])[0]!
+    expect(v.clientes![0]!.pedidos).toMatchObject([{ sinEnviar: true, cliente_id: "c1" }])
+    expect(v.resumen.mis_pedidos).toBe(2)
+    expect(v.totales!.pedidos).toBe(2)
   })
-  it("viaje creado y completado sin señal", () => {
-    const v = viajesVisibles([], [op("viaje.crear", { id: "v9", fecha_inicio: "2026-09-21", zona_ids: ["z1"], vista: { nombre: "Levantamiento SUR", zonas: [{ id: "z1", nombre: "SUR" }] } }), op("viaje.estado", { viaje_id: "v9", estado: "completado" })])
-    expect(v[0]).toMatchObject({ id: "v9", sinEnviar: true, resumen: { nombre: "Levantamiento SUR", estado: "completado" } })
+  it("un pedido suelto (sin viaje) no toca el viaje", () => {
+    expect(viajesVisibles([viaje], [op("pedido.crear", opPedido())])[0]).toBe(viaje)
   })
 })

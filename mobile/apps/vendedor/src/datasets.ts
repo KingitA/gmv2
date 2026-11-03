@@ -302,6 +302,8 @@ export interface OpPedido {
   precios_al: string | null
   /** false = solo guardar renglones, sin confirmar (edición desde el detalle del pedido) */
   confirmar?: boolean
+  /** Viaje del calendario desde el que se levantó (solo pedidos nuevos): el servidor lo sube ahí */
+  viaje_id?: string | null
   /** Para mostrarlo en "Mis pedidos" antes de que sincronice */
   vista: { cliente_nombre: string; total: number; numero_pedido?: string | null; estado?: string | null }
 }
@@ -314,13 +316,35 @@ export interface OpViajeEstado { viaje_id: string; estado: "completado" | "en_cu
 
 // ─── Viajes ──────────────────────────────────────────────────────────────────
 
-export interface ViajeResumen { id: string; nombre: string; estado: string; fecha_inicio: string | null; fecha_fin_estimada: string | null; zonas: Array<{ id: string; nombre: string }> }
-export interface ClienteViaje {
-  id: string; nombre: string; localidad: string | null; telefono?: string | null; saldo_actual: number
-  /** Fuente única (lib/cuenta-corriente/saldo.ts); falta en réplicas viejas */
-  saldo_proyectado?: number
-  estado_viaje: "pendiente" | "pedido_levantado" | "no_va"
-  pedido: { id: string; numero_pedido: string | null; total: number; estado: string } | null
+// CALENDARIO DE REPARTO (03/11/2026): los viajes los programa la oficina; el vendedor ve los
+// que tocan sus zonas y carga pedidos ahí. = lib/vendedor/viajes-reparto.ts (servidor).
+export interface ViajeResumen {
+  id: string; nombre: string; estado: string; fecha: string; dias: number; fecha_fin: string
+  zonas: Array<{ id: string; nombre: string }>
+  /** Chofer(es) si la oficina ya los asignó */
+  choferes: string[]
+  /** Pedidos de SUS clientes ya cargados en el viaje */
+  mis_pedidos: number; mis_total: number
 }
-/** id = viaje.id. `viaje`/`clientes` solo en los viajes con detalle replicado. */
-export interface ViajeVendedor { id: string; resumen: ViajeResumen; viaje?: ViajeResumen; clientes?: ClienteViaje[]; sinEnviar?: boolean }
+export interface PedidoDelViaje { id: string; numero_pedido: string | null; estado: string; total: number; cliente_id: string; sinEnviar?: boolean }
+export interface ClienteViaje {
+  id: string; nombre: string; localidad: string | null; direccion: string | null; telefono: string | null
+  saldo_actual: number; saldo_proyectado: number
+  pedidos: PedidoDelViaje[]
+  /** Cómo fue la parada (null = el viaje no salió o el cliente no tiene parada) */
+  parada: {
+    estado: string; motivo_no_entrega: string | null; motivo_no_cobro: string | null
+    total_viaje: number; cobrado: number
+    comprobantes: Array<{ id: string; tipo: string; numero: string; total: number; saldo: number }>
+  } | null
+}
+/** id = viaje.id. `viaje`/`clientes`/`totales` solo en los viajes con detalle replicado. */
+export interface ViajeVendedor {
+  id: string
+  resumen: ViajeResumen
+  viaje?: ViajeResumen
+  /** true = todavía programado: se pueden levantar pedidos para este viaje */
+  admite_pedidos?: boolean
+  clientes?: ClienteViaje[]
+  totales?: { pedidos: number; total: number; entregados: number; no_entregados: number; cobrado: number }
+}

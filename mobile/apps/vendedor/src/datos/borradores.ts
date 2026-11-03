@@ -57,6 +57,8 @@ export interface Borrador {
   actualizadoAt: string
   /** Presente = venta a un cliente que todavía no existe (ver Prospecto) */
   prospecto?: Prospecto | null
+  /** Viaje del calendario para el que se levanta (03/11/2026): el pedido sale con viaje_id */
+  viaje?: { id: string; nombre: string; fecha: string } | null
 }
 
 const PREFIJO = "borrador:"

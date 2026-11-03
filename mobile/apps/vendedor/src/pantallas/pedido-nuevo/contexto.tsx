@@ -63,6 +63,8 @@ export interface PedidoEnCurso {
   quitar(articuloId: string): void
   setCond(c: CondPedido): void
   setObs(o: string): void
+  /** Viaje del calendario para el que se levanta (null = pedido suelto, lo asigna la oficina) */
+  setViaje(v: { id: string; nombre: string; fecha: string } | null): void
   descartar(): Promise<void>
   /** Reemplaza el borrador entero (retomar un pedido del servidor / uno pendiente de enviar) */
   cargarBorrador(b: Borrador): void
@@ -186,6 +188,7 @@ export function ProveedorPedido({ clienteId, children }: { clienteId: string; ch
       quitar: (id) => cambiar((b) => sinArticulo(b, id), base),
       setCond: (c) => cambiar((b) => ({ ...b, cond: c }), base),
       setObs: (o) => cambiar((b) => ({ ...b, obs: o }), base),
+      setViaje: (v) => cambiar((b) => ({ ...b, viaje: v }), base),
       descartar,
       cargarBorrador: (b) => cambiar(() => b, () => b),
     }),
