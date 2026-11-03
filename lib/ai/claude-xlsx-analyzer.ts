@@ -156,6 +156,23 @@ async function parseXlsxToStructuredData(buffer: Buffer, filename: string): Prom
 }
 
 /**
+ * Columna de código de un bloque [startCol, endCol]: la de más valores de 1 a 8 dígitos
+ * casi todos distintos (descarta CAJA/Bulto, que se repiten, y EAN de 13). Si dos
+ * columnas compiten (precios enteros), gana la de más a la izquierda. null si no hay.
+ */
+function detectarColumnaCodigo(dataRows: string[][], startCol: number, endCol: number, excluir: Set<number>): number | null {
+    const cuentas: { col: number; n: number }[] = []
+    for (let c = startCol; c <= endCol; c++) {
+        if (excluir.has(c)) continue
+        const valores = dataRows.map(r => r[c] ?? '').filter(v => /^\d{1,8}$/.test(v))
+        if (valores.length >= 3 && new Set(valores).size / valores.length >= 0.6) cuentas.push({ col: c, n: valores.length })
+    }
+    if (cuentas.length === 0) return null
+    const max = Math.max(...cuentas.map(x => x.n))
+    return cuentas.find(x => x.n >= max * 0.8)!.col
+}
+
+/**
  * Formats parsed sheet data into a compact text representation for Claude.
  * Uses column index markers [C0], [C1] etc. for precise identification.
  * mode='order' pre-filters to only rows with PEDIDO values > 0.
@@ -191,6 +208,18 @@ function formatSheetsForClaude(sheets: ParsedSheetData[], filename: string, mode
             rowsToSend = []
             let generatedRows = 0
 
+            // Columna de código de cada bloque (tablas lado a lado). Una fila con cantidad
+            // en PEDIDO pero sin código es un título de sección ("SOLARES DERMAGLOS" con un
+            // 1 que quedó en la plantilla) → se ignora. Si el bloque no tiene columna de
+            // código (planilla libre "descripción | cantidad"), no se aplica.
+            const pedidoCols = new Set(sheet.pedidoColumnIndices)
+            const largoMax = Math.max(0, ...sheet.dataRows.map(r => r.length))
+            const columnaCodigo = sheet.pedidoColumnIndices.map((colIdx, i) => {
+                const startCol = i === 0 ? 0 : sheet.pedidoColumnIndices[i - 1] + 1
+                const endCol = i === sheet.pedidoColumnIndices.length - 1 ? largoMax - 1 : colIdx
+                return detectarColumnaCodigo(sheet.dataRows, startCol, endCol, pedidoCols)
+            })
+
             for (const row of sheet.dataRows) {
                 // Generate a separate row for each PEDIDO column that has a quantity > 0
                 for (let i = 0; i < sheet.pedidoColumnIndices.length; i++) {
@@ -200,6 +229,12 @@ function formatSheetsForClaude(sheets: ParsedSheetData[], filename: string, mode
                     const num = parseMonto(val) ?? NaN // formato argentino ("1.500" = 1500)
 
                     if (!isNaN(num) && num > 0) {
+                        const codCol = columnaCodigo[i]
+                        if (codCol != null && !/\d/.test(row[codCol] ?? '')) {
+                            const titulo = row.find((c, idx) => c && !pedidoCols.has(idx)) ?? ''
+                            console.log(`[ClaudeXlsx] Sheet "${sheet.sheetName}": fila sin código ignorada ("${titulo}", PEDIDO=${val})`)
+                            continue
+                        }
                         const newRow = new Array(row.length).fill('')
 
                         // left boundary: 0 for first block, or column after previous PEDIDO
