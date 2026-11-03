@@ -213,7 +213,7 @@ function formatSheetsForClaude(sheets: ParsedSheetData[], filename: string, mode
             // 1 que quedó en la plantilla) → se ignora. Si el bloque no tiene columna de
             // código (planilla libre "descripción | cantidad"), no se aplica.
             const pedidoCols = new Set(sheet.pedidoColumnIndices)
-            const largoMax = Math.max(0, ...sheet.dataRows.map(r => r.length))
+            const largoMax = sheet.dataRows.reduce((m, r) => Math.max(m, r.length), 0) // sin spread: hojas enormes
             const columnaCodigo = sheet.pedidoColumnIndices.map((colIdx, i) => {
                 const startCol = i === 0 ? 0 : sheet.pedidoColumnIndices[i - 1] + 1
                 const endCol = i === sheet.pedidoColumnIndices.length - 1 ? largoMax - 1 : colIdx
