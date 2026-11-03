@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.2 (versionCode 13) — 2026-11-03
+
+- Mercaderia bonificada al final: no se marca sola, se prepara despues de todo lo demas y sin ella no se finaliza; direccion y localidad en la cola
+
 ## v0.4.1 (versionCode 12) — 2026-10-30
 
 - Recepcion: la cantidad recibida arranca vacia (hay que contar, 0 = no llego); teclado: usa el detector de core
