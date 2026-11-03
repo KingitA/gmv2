@@ -4,9 +4,9 @@
 // sirve para el cliente de la parada y para cada cliente AGREGADO a un cobro conjunto.
 
 import { anticiposDeSeleccion, PEDIDO_PREFIX, pedidosContadoAEnviar, pedidosContadoAlAplicarTodo } from "@gm/cobro"
-import { redondear } from "@gm/formato"
+import { fecha, redondear } from "@gm/formato"
 import { origenDesdeComprado, valorDevolucionConOrigen, type CompradoConOrigen, type OrigenDevolucion } from "@gm/vendedor"
-import type { ComprobanteCobro, ComprobanteRef, CuentaCobro, PedidoCobro } from "../datasets"
+import type { ComprobanteCobro, ComprobanteRef, CuentaCobro, MovimientoComprobante, PedidoCobro } from "../datasets"
 
 const r2 = (n: number) => redondear(n)
 const TIPOS_BONIFICABLES = ["FA", "FB", "FC", "PRES"]
@@ -29,6 +29,8 @@ export interface DatosCuenta {
   cobro: CuentaCobro
   /** P2-31: tipo y número de los comprobantes de origen de las devoluciones (ausente = réplica vieja) */
   comprobantes_ref?: ComprobanteRef[] | null
+  /** 03/11: lo que ya le restó al total de cada comprobante (ausente = réplica vieja) */
+  cuenta_comprobantes?: Record<string, MovimientoComprobante[]> | null
   devoluciones: Array<{
     id: string
     monto_total: number
@@ -155,6 +157,8 @@ export function etiquetaComprobante(cobro: CuentaCobro, id: string, refs?: Compr
 export interface ResumenCuenta {
   totalImputado: number
   bonificacionEstimada: number
+  /** 10 % contado de ESTE cobro, por comprobante (para su resumen de cuenta) */
+  bonificacionPorComprobante: Record<string, number>
   devTotal: number
   /** P2-29: devoluciones pendientes que NO restan en este cobro (su comprobante no está seleccionado) */
   devNoAplicadas: number
@@ -176,12 +180,15 @@ export function resumenCuenta(datos: DatosCuenta | null | undefined, e: EstadoCu
   // P2-29: solo las devoluciones cuyos comprobantes se cobran acá
   const devPendientes = pendientes.filter((d) => devolucionAplica(d, e.sel, datos?.cobro))
   let bonificacion = 0
+  const bonificacionPorComprobante: Record<string, number> = {}
   if (e.contadoGeneral) {
     // #26: lo devuelto en este cobro (sin NC todavía) no lleva el 10 %: sale de la base de su comprobante
     const devueltoSinNc = e.incluirDevoluciones ? devueltoSinNcPorComprobante(devPendientes) : new Map<string, number>()
     for (const cp of comprobantes) {
       const nc = ncContadoDe(cp, e.sel[cp.id] ?? 0, dtosHechos)
-      bonificacion += nc > 0 ? Math.max(0, nc - r2((devueltoSinNc.get(cp.id) ?? 0) * 0.1)) : 0
+      const b = nc > 0 ? r2(Math.max(0, nc - r2((devueltoSinNc.get(cp.id) ?? 0) * 0.1))) : 0
+      if (b > 0) bonificacionPorComprobante[cp.id] = b
+      bonificacion += b
     }
   }
   bonificacion = r2(bonificacion)
@@ -192,6 +199,7 @@ export function resumenCuenta(datos: DatosCuenta | null | undefined, e: EstadoCu
   return {
     totalImputado,
     bonificacionEstimada: bonificacion,
+    bonificacionPorComprobante,
     devTotal,
     devNoAplicadas: pendientes.length - devPendientes.length,
     totalCobro: r2(Math.max(0, r2(totalImputado - devTotal - bonificacion)) + aCuenta),
@@ -282,4 +290,35 @@ export function alternarContadoTodo(e: EstadoCuenta, cobro: CuentaCobro): Estado
   const sel = { ...e.sel }
   for (const p of pedidosSinFacturar) if (sel[PEDIDO_PREFIX + p.id] !== undefined) sel[PEDIDO_PREFIX + p.id] = montoAnticipo(p, activar)
   return { ...e, sel, contadoPedidos, contadoGeneral: activar }
+}
+
+/**
+ * Resumen de cuenta de un comprobante (pedido de Juan, 03/11/2026): en vez del saldo suelto,
+ *   Presupuesto 0001-00000035   339.161,76
+ *   Devolución DEV-00001         −8.105,08
+ *   Total                       331.056,68
+ *   10 % contado               −33.105,67   (el de este cobro, si se marcó)
+ *   Pago 28/10                 −100.000,00
+ *   Debe                        197.951,01
+ * Lo que no cierra contra el saldo del servidor queda como "Otros ajustes" (la cuenta siempre da).
+ * null = no hay nada que explicar (el saldo es el total).
+ */
+export interface RenglonResumen { concepto: string; monto: number; total?: boolean }
+export function resumenComprobante(cp: ComprobanteCobro, movs: MovimientoComprobante[] | null | undefined, contadoEsteCobro = 0, nombre = `${cp.tipo_comprobante} ${cp.numero_comprobante}`): RenglonResumen[] | null {
+  const lista = movs ?? []
+  const enCobro = r2(cp.en_cobro || 0)
+  if (!lista.length && !(contadoEsteCobro > 0) && !(enCobro > 0.005)) return null
+  const cuando = (m: MovimientoComprobante) => (m.tipo === "pago" && m.fecha ? `${m.concepto.replace(/^Pago/, `Pago ${fecha(m.fecha).slice(0, 5)}`)}` : m.concepto)
+  const out: RenglonResumen[] = [{ concepto: nombre, monto: r2(cp.total_factura) }]
+  const devs = lista.filter((m) => m.tipo === "devolucion")
+  for (const m of devs) out.push({ concepto: cuando(m), monto: -m.monto })
+  if (devs.length) out.push({ concepto: "Total", monto: r2(cp.total_factura - devs.reduce((s, m) => s + m.monto, 0)), total: true })
+  for (const m of lista.filter((x) => x.tipo === "contado")) out.push({ concepto: cuando(m), monto: -m.monto })
+  if (contadoEsteCobro > 0) out.push({ concepto: "10 % contado", monto: -r2(contadoEsteCobro) })
+  for (const m of lista.filter((x) => x.tipo === "pago" || x.tipo === "credito")) out.push({ concepto: cuando(m), monto: -m.monto })
+  const otros = r2(cp.total_factura - lista.reduce((s, m) => s + m.monto, 0) - cp.saldo_pendiente)
+  if (Math.abs(otros) > 0.01) out.push({ concepto: "Otros ajustes", monto: -otros })
+  if (enCobro > 0.005) out.push({ concepto: "En otro cobro sin confirmar", monto: -enCobro })
+  out.push({ concepto: "Debe", monto: r2(Math.max(0, saldoCobrable(cp) - contadoEsteCobro)), total: true })
+  return out
 }

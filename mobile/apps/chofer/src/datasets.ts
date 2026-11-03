@@ -267,7 +267,10 @@ export interface ClienteViajeRow {
   comprobantes_ref?: ComprobanteRef[] | null
   /** 03/11: renglones de cada pedido que se puede cobrar (tocar el pedido en el cobro abre su detalle). Ausente = réplica vieja */
   detalle_pedidos?: Record<string, DetallePedido[]> | null
+  /** 03/11: lo que ya le restó al total de cada comprobante que se cobra (= lib/mobile/sync/cuenta-comprobantes.ts). Ausente = réplica vieja */
+  cuenta_comprobantes?: Record<string, MovimientoComprobante[]> | null
 }
+export interface MovimientoComprobante { tipo: "pago" | "devolucion" | "contado" | "credito"; concepto: string; fecha: string | null; monto: number }
 export interface ComprobanteRef { id: string; tipo_comprobante: string; numero_comprobante: string }
 
 // ─── Billetera (= GET /api/chofer/billetera) ─────────────────────────────────

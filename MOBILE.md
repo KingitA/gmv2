@@ -1712,6 +1712,14 @@ Detalle en `docs/PENDIENTES-APPS-SALIDA.md`, sección "Segunda prueba integral (
 - Teclado: lo maneja el core (`instalarTeclado`, `--gm-teclado`); la app no tiene arreglos propios
   aparte de "Enter cierra el teclado" (`useEnterCierraTeclado`), que el core no hace.
 
+### v0.3.10 (03/11/2026): resumen de cuenta de cada comprobante en el cobro
+
+- Debajo de cada comprobante con movimientos: total, devoluciones, "Total", 10 % contado (el ya hecho y el de este
+  cobro si se marcó), pagos con fecha, otros créditos y "Debe" (`resumenComprobante` en `datos/cuenta-cobro.ts`;
+  lo que no cierra con el saldo del servidor queda como "Otros ajustes").
+- Servidor: `cuenta_comprobantes` en la ficha (`lib/mobile/sync/cuenta-comprobantes.ts`): imputaciones confirmadas
+  por comprobante. Un refacturado abre el crédito de la anulación en lo que traía el anulado ("Pago (en PRES 0028)").
+
 ### v0.3.9 (03/11/2026): cobro más limpio y comprobantes para compartir (pedido de Juan)
 
 - **Cobro** (`SelectorCuenta.tsx`): "Seleccionar todo" es un botón chico; "10 % contado" y "Descontar devoluciones" son

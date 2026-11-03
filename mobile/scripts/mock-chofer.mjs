@@ -80,7 +80,7 @@ function reset() {
     }
     if (i === 1 || i === 3) {
       const viejo = r2(15000 + i * 1234.5)
-      S.comprobantes.push({ id: uid(4100 + i), cliente_id: c.id, pedido_id: null, tipo_comprobante: "FA", numero_comprobante: `0003-${String(4000 + i).padStart(8, "0")}`, fecha: "2026-08-20", total_neto: r2(viejo / 1.21), total_factura: viejo, saldo_pendiente: viejo, estado_pago: "pendiente", anulado_en: null })
+      S.comprobantes.push({ id: uid(4100 + i), cliente_id: c.id, pedido_id: null, tipo_comprobante: "FA", numero_comprobante: `0003-${String(4000 + i).padStart(8, "0")}`, fecha: "2026-08-20", total_neto: r2(viejo / 1.21), total_factura: r2(viejo + 30000), saldo_pendiente: viejo, estado_pago: "parcial", anulado_en: null })
     }
     S.paradas.push({ id: uid(2000 + i), viaje_id: viajeId, cliente_id: c.id, orden: i + 1, exigir_cobro_anterior: i === 3, exigir_cobro_actual: i === 1 || i === 4, bloquear_entrega: i === 4, motivo_bloqueo: i === 4 ? "Debe 2 facturas" : null, nota_oficina: i === 0 ? "Entregar por el fondo, preguntar por Marta" : null, estado: "pendiente", bultos_entregados: null, motivo_no_entrega: null, motivo_no_cobro: null, resuelto_at: null })
   }
@@ -186,6 +186,8 @@ function filaCliente(viajeId, clienteId) {
       pedidos_facturados: [...new Set(S.comprobantes.filter((k) => k.cliente_id === clienteId && k.pedido_id).map((k) => k.pedido_id))],
       dtos_hechos: [],
     },
+    // Resumen de cuenta: el mock solo conoce pagos (total − saldo)
+    cuenta_comprobantes: Object.fromEntries(compsDe(clienteId).filter((k) => k.total_factura - k.saldo_pendiente > 0.005).map((k) => [k.id, [{ tipo: "devolucion", concepto: "Devolución DEV-00009", fecha: "2026-08-25", monto: 5000 }, { tipo: "pago", concepto: "Pago", fecha: "2026-09-01", monto: r2(k.total_factura - k.saldo_pendiente - 5000) }]])),
     detalle_pedidos: Object.fromEntries(pedidosCli.map((p) => [p.id, p.detalle.map((d) => ({ ...d, pedido_id: p.id, articulos: { sku: artDe(d.articulo_id)?.sku, descripcion: artDe(d.articulo_id)?.descripcion, unidades_por_bulto: artDe(d.articulo_id)?.unidades_por_bulto } }))])),
     comprados: S.f.articulos.slice(10, 16).map((a) => ({ articulo_id: a.id, sku: a.sku, ean13: a.ean13, descripcion: a.descripcion, imagen_url: null, unidades_por_bulto: a.unidades_por_bulto, ultimo_precio: 1234.5, ultima_fecha: "2026-08-20", comprobante_venta_id: uid(4900), numero_comprobante: "0003-00004900", tipo_comprobante: "FA", cantidad_total: 12 })),
   }

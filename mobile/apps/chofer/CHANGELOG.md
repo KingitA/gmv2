@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.10 (versionCode 16) — 2026-11-03
+
+- Resumen de cuenta de cada comprobante en el cobro (total, devoluciones, 10 %, pagos, debe)
+
 ## v0.3.9 (versionCode 15) — 2026-11-03
 
 - Cobro más limpio; tocar el pedido abre su detalle (deslizar para devolver); tocar un comprobante abre el PDF para compartir; botón Comprobantes en la ficha

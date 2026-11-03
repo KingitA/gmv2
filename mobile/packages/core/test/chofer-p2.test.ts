@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { comprobantesDeDevolucion, estadoCuentaVacio, etiquetaComprobante, resumenCuenta, type DatosCuenta } from "../../../apps/chofer/src/datos/cuenta-cobro"
+import { comprobantesDeDevolucion, estadoCuentaVacio, etiquetaComprobante, resumenComprobante, resumenCuenta, type DatosCuenta } from "../../../apps/chofer/src/datos/cuenta-cobro"
 import { textoReparto } from "../../../apps/chofer/src/datos/devolucion-tope"
 import { datasetsViejos, MINUTOS_DATO_VIEJO } from "../../../apps/chofer/src/datos/frescura"
 import type { ComprobanteCobro } from "../../../apps/chofer/src/datasets"
@@ -91,5 +91,33 @@ describe("P2-31 · devolución de más en un PRES: la pantalla dice cómo se rep
   })
   it("todo al respaldo: solo la parte de más", () => {
     expect(textoReparto([{ articulo_id: "a", cantidad: 1, comprobante_venta_id: "resp", articulos: art }], refs)).toEqual(["ACEITE BABY: 1 de más va como devolución del sistema viejo, la revisa la oficina."])
+  })
+})
+
+describe("03/11 · resumen de cuenta del comprobante (CHEN, PRES 0035 refacturado)", () => {
+  const pres35 = comp("p35", "0001-00000035", 339161.76, { saldo_pendiente: 231056.68, estado_pago: "parcial", nc_contado: 33105.67 })
+  const movs = [
+    { tipo: "pago" as const, concepto: "Pago (en PRES 0001-00000028)", fecha: "2026-10-28", monto: 100000 },
+    { tipo: "devolucion" as const, concepto: "Devolución DEV-00001 (en PRES 0001-00000028)", fecha: "2026-10-28", monto: 8105.08 },
+  ]
+  it("sin el 10 %: total, devolución, pago y lo que debe (la cuenta da)", () => {
+    expect(resumenComprobante(pres35, movs, 0, "Presupuesto 0001-00000035")).toEqual([
+      { concepto: "Presupuesto 0001-00000035", monto: 339161.76 },
+      { concepto: "Devolución DEV-00001 (en PRES 0001-00000028)", monto: -8105.08 },
+      { concepto: "Total", monto: 331056.68, total: true },
+      { concepto: "Pago 28/10 (en PRES 0001-00000028)", monto: -100000 },
+      { concepto: "Debe", monto: 231056.68, total: true },
+    ])
+  })
+  it("con el 10 % de este cobro: −33.105,67 y debe 197.951,01", () => {
+    const r = resumenCuenta(cuenta([pres35], []), { ...estadoCuentaVacio(), sel: { p35: 231056.68 }, contadoGeneral: true })
+    expect(r.bonificacionPorComprobante).toEqual({ p35: 33105.67 })
+    const x = resumenComprobante(pres35, movs, r.bonificacionPorComprobante.p35)!
+    expect(x.find((l) => l.concepto === "10 % contado")?.monto).toBe(-33105.67)
+    expect(x.at(-1)).toEqual({ concepto: "Debe", monto: 197951.01, total: true })
+  })
+  it("lo que no cierra con el saldo queda como otros ajustes; sin movimientos no hay resumen", () => {
+    expect(resumenComprobante({ ...pres35, saldo_pendiente: 231000 }, movs)!.find((l) => l.concepto === "Otros ajustes")?.monto).toBe(-56.68)
+    expect(resumenComprobante(comp("x", "1", 100), [])).toBeNull()
   })
 })
