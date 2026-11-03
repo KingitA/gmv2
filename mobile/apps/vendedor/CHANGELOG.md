@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.10 (versionCode 19) — 2026-11-03
+
+- Mis Viajes: el calendario cambia de mes con las flechas
+
 ## v0.4.9 (versionCode 18) — 2026-11-03
 
 - Mis Viajes: calendario de los viajes que programa la oficina, con chofer; cargar pedidos al viaje; ver entregas, cobros y comprobantes de cada viaje
