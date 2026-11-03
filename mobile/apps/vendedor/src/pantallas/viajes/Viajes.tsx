@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { useNavigate, useParams } from "react-router"
+import { useNavigate, useParams, useSearchParams } from "react-router"
 import { useOnline, useParamEstado } from "@gm/core"
 import { hoyISO } from "@gm/formato"
 import { localMatch } from "@gm/vendedor"
@@ -68,12 +68,18 @@ export function Viajes() {
   const { viajes, cargando } = useViajes()
   const hoy = hoyISO()
   const limites = mesesNavegables(hoy)
-  const [mes, setMes] = useParamEstado("mes", mesDe(hoy))
+  const [sp, setSp] = useSearchParams()
+  const mes = sp.get("mes") || mesDe(hoy)
   const [dia, setDia] = useParamEstado("dia", "")
 
   const delMes = useMemo(() => viajes.filter((v) => viajeEnMes(v.resumen, mes)).sort((a, b) => a.resumen.fecha.localeCompare(b.resumen.fecha)), [viajes, mes])
   const lista = dia ? delMes.filter((v) => viajeEnDia(v.resumen, dia)) : delMes
-  const irA = (n: number) => { const m = sumarMeses(mes, n); if (m >= limites.desde && m <= limites.hasta) { setMes(m); setDia("") } }
+  // Mes y día en UNA sola actualización de la URL (dos setters seguidos se pisaban y el mes no cambiaba)
+  const irA = (n: number) => {
+    const m = sumarMeses(mes, n)
+    if (m < limites.desde || m > limites.hasta) return
+    setSp((prev) => { const x = new URLSearchParams(prev); x.set("mes", m); x.delete("dia"); return x }, { replace: true })
+  }
 
   return (
     <Pantalla titulo="Mis Viajes" dataset={DS.viajes}>

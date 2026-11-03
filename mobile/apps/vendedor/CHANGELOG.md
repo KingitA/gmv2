@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.9 (versionCode 18) — 2026-11-03
+
+- Mis Viajes: calendario de los viajes que programa la oficina, con chofer; cargar pedidos al viaje; ver entregas, cobros y comprobantes de cada viaje
+
 ## v0.4.8 (versionCode 17) — 2026-10-30
 
 - La devolución se descuenta solo si se cobra su comprobante (dice contra cuál va); nombre del cliente nuevo en mayúsculas; teclado detectado aunque la app arranque con él abierto
