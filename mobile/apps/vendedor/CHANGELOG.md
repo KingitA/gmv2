@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.11 (versionCode 20) — 2026-11-03
+
+- Descuentos del cliente en el catálogo; lista y facturación solo este pedido (por segmento) en Confirmar pedido; ficha sin segmentos cuando no hace falta y con la lista del viajante
+
 ## v0.4.10 (versionCode 19) — 2026-11-03
 
 - Mis Viajes: el calendario cambia de mes con las flechas
