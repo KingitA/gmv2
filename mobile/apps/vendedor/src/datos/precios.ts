@@ -20,6 +20,7 @@ import {
   type ReglaPrecioRow,
 } from "@gm/pricing"
 import { DS, DS_PRECIOS, type CondPedido } from "../datasets"
+import { segsAOverrides } from "./segmentos"
 
 type FilaArticuloPrecio = ArticuloMotor & { id: string }
 interface FilaClientePrecio {
@@ -39,6 +40,7 @@ export function overridesDe(c: CondPedido): OverridesPedido {
   return {
     ...(c.metodo ? { metodo_facturacion_pedido: c.metodo } : {}),
     ...(c.lista ? { lista_precio_pedido_id: c.lista } : {}),
+    ...segsAOverrides(c.segs),
     ...(hayBonif ? { bonif_pedido: b as OverridesPedido["bonif_pedido"] } : {}),
     // Condiciones por proveedor/marca del pedido: lista completa (el motor reemplaza las de la ficha)
     ...(Array.isArray(c.condProv) ? { condiciones_proveedor: c.condProv } : {}),

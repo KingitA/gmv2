@@ -113,6 +113,22 @@ export function cuposDelPedido(
   return [...cupos.values()].map((k) => ({ ...k, base: Math.round(k.base * 100) / 100, monto: Math.round(k.base * k.pct) / 100 }))
 }
 
+/**
+ * % de mercadería bonificada de cada artículo (mismo resolver que los cupos): para mostrar en
+ * el catálogo los descuentos del cliente (Juan, 03/11/2026). Se arma una vez por pedido.
+ */
+export function mercaderiaPctDe(ficha: CondicionesFicha | null, cond: CondPedido): (art: ArticuloMotor) => number {
+  if (!ficha) return () => 0
+  const condProv = new Map((cond.condProv ?? ficha.condProv).map((c) => [c.proveedor_id, c]))
+  const condMarca = new Map((cond.condMarca ?? ficha.condMarca).map((c) => [c.marca_id, c]))
+  const bonifPedido = normalizarBonifPedido(cond.bonif as never)
+  return (art) => {
+    const { cond: c, segKey } = resolverCondSegmento(art, condProv, condMarca)
+    const m = resolverMercaderiaItem(c, segKey, bonifPedido, null, ficha.filas as never, detectarSegmento(art), false)
+    return m.pct > 0 ? m.pct : 0
+  }
+}
+
 function nombreCupo(origen: string, nombres: { proveedor: (id: string) => string; marca: (id: string) => string }): string {
   if (origen === "todo") return "Todo el pedido"
   if (origen.startsWith("seg:")) {

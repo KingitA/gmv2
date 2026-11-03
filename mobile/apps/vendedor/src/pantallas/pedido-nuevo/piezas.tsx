@@ -4,7 +4,7 @@ import { numero, parseMonto } from "@gm/formato"
 import type { Articulo } from "../../datasets"
 import type { Precio } from "../../datos/precios"
 import { formatCurrency } from "../../ui"
-import { useAbiertos } from "./contexto"
+import { useAbiertos, type DescuentosArticulo } from "./contexto"
 
 // Piezas visuales del catálogo, portadas 1:1 de la web (app/vendedor/pedido/nuevo/page.tsx,
 // components/vendedor/CatalogoArbol.tsx y OrdenSelector.tsx). Única diferencia: los
@@ -14,10 +14,14 @@ import { useAbiertos } from "./contexto"
  * Fila compacta del catálogo: miniatura (tap = foto grande) · descripción · -oferta% ·
  * sku · marca · x u/bulto · CC / Ctdo, y a la derecha la casilla de cantidad con
  * "bultos" + botón agregar. Verde = ya está en el pedido (muestra unidades).
+ * Con descuentos del cliente (general / viajante / mercadería) se ve el precio de lista y
+ * debajo cada descuento con el precio que le queda: "CC $2.000 · Ctdo $1.800" →
+ * "−10% viajante  CC $1.800 · Ctdo $1.620" (Juan, 03/11/2026).
  */
-export function FilaArticulo({ a, precio, enCarrito, onAbrir, onZoom, onAgregar, onActualizar, onQuitar }: {
+export function FilaArticulo({ a, precio, descuentos, enCarrito, onAbrir, onZoom, onAgregar, onActualizar, onQuitar }: {
   a: Articulo
   precio: Precio | null
+  descuentos?: DescuentosArticulo | null
   enCarrito?: number
   onAbrir: () => void
   onZoom: () => void
@@ -86,6 +90,8 @@ export function FilaArticulo({ a, precio, enCarrito, onAbrir, onZoom, onAgregar,
             <span className="text-gray-400">Sin precio en este equipo</span>
           ) : precio.especial ? (
             <span className="font-bold text-gray-700">{formatCurrency(precio.precioNeto)} <span className="text-orange-500">+IVA</span></span>
+          ) : descuentos ? (
+            <PreciosConDescuento precio={precio} d={descuentos} />
           ) : (
             <>
               <span className="font-bold text-gray-700">CC {formatCurrency(precio.precio)}</span>
@@ -123,6 +129,38 @@ export function FilaArticulo({ a, precio, enCarrito, onAbrir, onZoom, onAgregar,
         )}
       </div>
     </div>
+  )
+}
+
+const CHIP_DESC: Record<keyof DescuentosArticulo, { label: string; cls: string }> = {
+  general: { label: "general", cls: "bg-slate-100 text-slate-700" },
+  viajante: { label: "viajante", cls: "bg-orange-100 text-orange-700" },
+  mercaderia: { label: "mercadería", cls: "bg-green-100 text-green-800" },
+}
+const r2 = (n: number) => Math.round(n * 100) / 100
+
+/**
+ * Precio de lista arriba (gris) y, debajo, los descuentos del cliente y lo que paga.
+ * General y viajante ya vienen en el precio del motor (se muestra el de lista sin ellos);
+ * la mercadería va aparte, por cupo: acá se muestra como el % que le queda de regalo.
+ */
+function PreciosConDescuento({ precio, d }: { precio: Precio; d: DescuentosArticulo }) {
+  const enPrecio = (1 - d.general / 100) * (1 - d.viajante / 100)
+  const merc = 1 - d.mercaderia / 100
+  const pct = (n: number) => numero(n, 0, 2)
+  return (
+    <>
+      <span className="font-medium text-gray-400">CC {formatCurrency(r2(precio.precio / enPrecio))} · Ctdo {formatCurrency(r2(precio.contado / enPrecio))}</span>
+      <span className="mt-0.5 flex flex-wrap gap-0.5 whitespace-normal">
+        {(["general", "viajante", "mercaderia"] as const).filter((k) => d[k] > 0).map((k) => (
+          <span key={k} className={`rounded px-[3px] text-[10px] font-bold leading-4 tracking-tight ${CHIP_DESC[k].cls}`}>−{pct(d[k])}% {CHIP_DESC[k].label}</span>
+        ))}
+      </span>
+      <span className="block font-bold">
+        <span className="text-gray-900">CC {formatCurrency(r2(precio.precio * merc))}</span>
+        <span className="text-emerald-700"> · Ctdo {formatCurrency(r2(precio.contado * merc))}</span>
+      </span>
+    </>
   )
 }
 

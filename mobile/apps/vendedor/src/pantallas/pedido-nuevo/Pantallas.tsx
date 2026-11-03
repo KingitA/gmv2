@@ -6,7 +6,7 @@ import { localMatch } from "@gm/vendedor"
 import { fecha, redondear } from "@gm/formato"
 import { DS, type Articulo, type CatalogoRubro, type OpPedido } from "../../datasets"
 import { buscarCatalogo, filtrarLocal, vistaHabituales, vistaNovedades, vistaOfertas } from "../../datos/busqueda"
-import { useCatalogosFicha, useClientes, useCuenta, useEncolar, useProveedores, useTaxonomia } from "../../datos/hooks"
+import { useClientes, useCuenta, useEncolar, useProveedores, useTaxonomia } from "../../datos/hooks"
 import { preciosAl, usePreciosVencidos } from "../../datos/precios"
 import { formatCurrency, HojaConfirmar, Pantalla, SinDescargar, useBusqueda, useFotoZoom, useVolver, Vacio } from "../../ui"
 import { IconoCategoria, TINTE_HABITUALES, TINTE_NOVEDADES, TINTE_OFERTAS, tinteRubro, type Tinte } from "./catalogo-ui"
@@ -14,8 +14,10 @@ import { usePedidoEnCurso, useVer } from "./contexto"
 import { condParaServidor, fmtSeg } from "./Marco"
 import { mensajeFaltaListaMetodo } from "@gm/pricing"
 import { CuadroSegmentos, textoSegmentos } from "../segmentos-ui"
+import { haySegsPedido } from "../../datos/segmentos"
 import { BarraComparar, CeldasComparar } from "./VentaNueva"
 import { MercaderiaCupo } from "./MercaderiaCupo"
+import { ListaMetodoPedido } from "./ListaMetodoPedido"
 import { agruparEnArbol, BuscadorLocal, CatalogoArbol, claveSubcategoria, FilaArticulo, OrdenSelector, posicionSubcategorias } from "./piezas"
 
 type Filtro = "novedades" | "ofertas" | "habituales"
@@ -94,7 +96,7 @@ function PantallaCatalogo({ titulo, subtitulo, children }: { titulo: string; sub
       derecha={
         <>
           {/* Chip lista + método vigentes (cortito: NECO FINAL). Ámbar = "solo este pedido" */}
-          <button onClick={() => abrir("cliente")} className={`mr-1 min-h-9 max-w-[38vw] shrink-0 truncate rounded-xl border px-2.5 text-[11px] font-bold ${p.segmentos?.incompleto ? "border-red-300 bg-red-600 text-white" : p.cond.metodo || p.cond.lista ? "border-amber-300 bg-amber-400 text-amber-950" : "border-white/30 bg-white/10 text-white"}`}>{chip}</button>
+          <button onClick={() => abrir("cliente")} className={`mr-1 min-h-9 max-w-[38vw] shrink-0 truncate rounded-xl border px-2.5 text-[11px] font-bold ${p.segmentos?.incompleto ? "border-red-300 bg-red-600 text-white" : p.cond.metodo || p.cond.lista || haySegsPedido(p.cond.segs) ? "border-amber-300 bg-amber-400 text-amber-950" : "border-white/30 bg-white/10 text-white"}`}>{chip}</button>
           <button onClick={() => abrir("cliente")} className="mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/30 bg-white/10 text-lg" aria-label="Cliente: ficha, cuenta corriente y método">👤</button>
         </>
       }
@@ -120,6 +122,7 @@ function useFilaDe() {
     <FilaArticulo
       a={a}
       precio={p.motor.precio(a.id)}
+      descuentos={p.descuentos(a.id)}
       enCarrito={p.enCarrito(a.id)}
       onAbrir={() => abrir(`articulo:${a.id}`)}
       onZoom={() => foto.abrir(a.imagen_url)}
@@ -449,7 +452,6 @@ export function Carrito() {
   const navigate = useNavigate()
   const volver = useVolver()
   const encolar = useEncolar()
-  const catFicha = useCatalogosFicha()
   const descartar = useOverlay("descartar")
   const [confirmando, setConfirmando] = useState(false)
   const vencidos = usePreciosVencidos()
@@ -573,26 +575,19 @@ export function Carrito() {
           <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
             <div>
 {p.prospecto ? (
-                <p className="text-sm font-bold text-gray-700">Lista y facturación del cliente nuevo <span className="font-normal text-gray-400">(se cambian en 👤)</span></p>
-              ) : (<>
-                            <label className="mb-1 block text-sm text-gray-500">Método de facturación</label>
-              <select value={p.cond.metodo} onChange={(e) => p.setCond({ ...p.cond, metodo: e.target.value })} className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3">
-                <option value="">Como la ficha (por segmento, ver abajo)</option>
-                <option value="Factura">Factura</option>
-                <option value="Final">Final (Mixto)</option>
-                <option value="Presupuesto">Presupuesto</option>
-              </select>
-              </>)}
-              {!p.prospecto && <p className="mt-1 text-xs text-gray-400">Elegir un método acá lo aplica a TODO el pedido (todos los segmentos) y recalcula los precios al instante.</p>}
-              {p.segmentos && <div className="mt-2"><CuadroSegmentos resumen={p.segmentos} titulo="Cómo se factura este pedido" /></div>}
-              {(p.cond.lista || (bonif && (["general", "viajante", "mercaderia", "contado"] as const).some((k) => Object.keys(bonif[k] || {}).length))) ? (
+                <>
+                  <p className="text-sm font-bold text-gray-700">Lista y facturación del cliente nuevo <span className="font-normal text-gray-400">(se cambian en 👤)</span></p>
+                  {p.segmentos && <div className="mt-2"><CuadroSegmentos resumen={p.segmentos} titulo="Cómo se factura este pedido" /></div>}
+                </>
+              ) : (
+                // Lista y método SOLO este pedido, general o por segmento (03/11/2026)
+                <ListaMetodoPedido />
+              )}
+              {((bonif && (["general", "viajante", "mercaderia", "contado"] as const).some((k) => Object.keys(bonif[k] || {}).length))) ? (
                 <p className="mt-2 text-xs font-medium text-amber-700">
-                  Solo este pedido:
-                  {p.cond.lista ? ` lista ${catFicha?.listas_precio.find((l) => l.id === p.cond.lista)?.nombre || "—"}` : ""}
-                  {bonif?.general && Object.keys(bonif.general).length ? ` · general ${fmtSeg(bonif.general)}` : ""}
-                  {bonif?.viajante && Object.keys(bonif.viajante).length ? ` · viajante ${fmtSeg(bonif.viajante)}` : ""}
-                  {bonif?.mercaderia && Object.keys(bonif.mercaderia).length ? ` · mercadería ${fmtSeg(bonif.mercaderia)}` : ""}
-                  {bonif?.contado && Object.keys(bonif.contado).length ? ` · contado ${fmtSeg(bonif.contado)}` : ""} (se cambia desde 👤)
+                  Descuentos solo este pedido: {(["general", "viajante", "mercaderia", "contado"] as const)
+                    .filter((k) => bonif?.[k] && Object.keys(bonif[k]!).length)
+                    .map((k) => `${k === "mercaderia" ? "mercadería" : k} ${fmtSeg(bonif![k]!)}`).join(" · ")} (se cambian desde 👤)
                 </p>
               ) : null}
             </div>

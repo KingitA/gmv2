@@ -3,26 +3,39 @@ import { metodoCorto, metodoLabel, type ResumenSegmentos } from "../datos/segmen
 /**
  * Cuadro "Lista y facturación por segmento": lo que de verdad se usa para cotizar y
  * facturar cada mercadería del cliente. Un dato que falta se marca en rojo (con eso
- * el pedido no se puede cerrar).
+ * el pedido no se puede cerrar). Si los tres segmentos van igual, una sola línea
+ * ("Neco · Presupuesto"): sin segmentar no se muestran segmentos (Juan, 03/11/2026).
  */
 export function CuadroSegmentos({ resumen, titulo = "Lista y facturación por segmento", nota }: { resumen: ResumenSegmentos; titulo?: string; nota?: string }) {
+  const listaMetodo = (f: ResumenSegmentos["filas"][number]) => (
+    <>
+      {f.listaNombre ? <span className="text-gray-900">{f.listaNombre}</span> : <span className="text-red-600">SIN LISTA</span>}
+      <span className="text-gray-400"> · </span>
+      {f.metodo ? <span className="text-gray-900">{metodoLabel(f.metodo)}</span> : <span className="text-red-600">SIN MÉTODO</span>}
+    </>
+  )
   return (
     <div className="rounded-xl border border-gray-200 bg-white">
-      <p className="border-b border-gray-100 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-gray-500">{titulo}</p>
-      <div className="divide-y divide-gray-100">
-        {resumen.filas.map((f) => (
-          <div key={f.seg} className="flex items-center justify-between gap-2 px-3 py-2">
-            <span className="text-sm text-gray-600">{f.label}</span>
-            <span className="text-right text-sm font-bold">
-              {f.listaNombre ? <span className="text-gray-900">{f.listaNombre}</span> : <span className="text-red-600">SIN LISTA</span>}
-              <span className="text-gray-400"> · </span>
-              {f.metodo ? <span className="text-gray-900">{metodoLabel(f.metodo)}</span> : <span className="text-red-600">SIN MÉTODO</span>}
-            </span>
+      {resumen.uniforme ? (
+        <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+          <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-gray-500">{titulo.replace(/ por segmento$/, "")}</span>
+          <span className="text-right text-base font-bold">{listaMetodo(resumen.filas[0]!)}</span>
+        </div>
+      ) : (
+        <>
+          <p className="border-b border-gray-100 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-gray-500">{titulo}</p>
+          <div className="divide-y divide-gray-100">
+            {resumen.filas.map((f) => (
+              <div key={f.seg} className="flex items-center justify-between gap-2 px-3 py-2">
+                <span className="text-sm text-gray-600">{f.label}</span>
+                <span className="text-right text-sm font-bold">{listaMetodo(f)}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
       {resumen.filas.some((f) => f.delPedido) && (
-        <p className="border-t border-gray-100 px-3 py-2 text-xs font-medium text-amber-700">Incluye lo elegido solo para este pedido.</p>
+        <p className="border-t border-gray-100 px-3 py-2 text-xs font-medium text-amber-700">Cambiado solo para este pedido: la ficha del cliente sigue igual.</p>
       )}
       {resumen.condicionesExtra > 0 && (
         <p className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500">

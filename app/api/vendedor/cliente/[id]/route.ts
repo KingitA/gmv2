@@ -61,7 +61,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const { data: cliente } = await supabase
       .from("clientes")
-      .select("id")
+      .select("id, vendedor_id, lista_precio_id")
       .eq("id", id)
       .in("vendedor_id", session.vendedorIds)
       .maybeSingle()
@@ -75,9 +75,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     // Lista y método, general o POR SEGMENTO (como la ficha del ERP). La lista solo la
     // cambian los viajantes habilitados y solo a las listas del vendedor (Neco + las de
     // sus viajantes; la Especial nunca): lib/vendedor/ficha-listas.ts
-    const errListas = validarListasMetodos(body, session)
+    // Lista que impone el viajante del cliente (ej. "LISTA NECO" → Neco): la app la manda
+    // al guardar la ficha de un cliente que todavía no tiene lista (03/11/2026, caso GRECO).
+    // Esa sí se acepta sin permiso de cambiar listas: es la que le corresponde.
+    const listaViajante = listaDelViajante(session, cliente.vendedor_id)
+    const conImpuesta = !!listaViajante && body.lista_precio_id === listaViajante
+    const errListas = validarListasMetodos(conImpuesta ? { ...body, lista_precio_id: undefined } : body, session)
     if (errListas) return NextResponse.json({ error: errListas }, { status: 403 })
     Object.assign(patch, patchListasMetodos(body))
+    // Cliente sin lista cuyo viajante impone una: cualquier guardado de la ficha la completa
+    if (listaViajante && !cliente.lista_precio_id && patch.lista_precio_id === undefined) patch.lista_precio_id = listaViajante
 
     // Datos de la ficha (solo whitelist)
     for (const campo of CAMPOS_EDITABLES) {

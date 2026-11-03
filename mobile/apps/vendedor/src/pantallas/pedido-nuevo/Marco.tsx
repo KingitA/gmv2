@@ -9,7 +9,7 @@ import { buscarPorCodigo, eansDe, matchExacto } from "../../datos/busqueda"
 import { useCatalogosFicha, useEncolar, usePedidos, useViajes } from "../../datos/hooks"
 import { formatCurrency, useFotoZoom, useToast, ZoomFoto } from "../../ui"
 import { ProveedorPedido, usePedidoEnCurso, useVer } from "./contexto"
-import { clienteListasDe, fichaListasDe, metodoLabel, useSegmentosCliente } from "../../datos/segmentos"
+import { clienteListasDe, fichaListasDe, haySegsPedido, metodoLabel, segsDesdeServidor, segsParaServidor, useSegmentosCliente } from "../../datos/segmentos"
 import { CuadroSegmentos } from "../segmentos-ui"
 import { PanelProspecto } from "./VentaNueva"
 import { TIPOS_DESC, useCondicionesFicha } from "../../datos/condiciones"
@@ -380,9 +380,11 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
     ...(esNuevo && !provIgualFicha ? { condProv: condProvSel } : {}),
     ...(esNuevo && !marcaIgualFicha ? { condMarca: condMarcaSel } : {}),
     ...(cond.mercaderia ? { mercaderia: cond.mercaderia } : {}),
+    // Cambiar lo general acá deja sin efecto lo elegido por segmento en "Confirmar pedido"
+    ...(cond.segs !== undefined ? { segs: haySegsPedido(cond.segs) && (metodoOv !== cond.metodo || listaOv !== cond.lista) ? {} : cond.segs } : {}),
   }
   const hayCambios = JSON.stringify(nuevaCond) !== JSON.stringify({ ...cond, bonif: bonifVacia(cond.bonif) && ctdoTodo === undefined ? null : cond.bonif })
-  const hayOverride = !!cond.metodo || !!cond.lista || !bonifVacia(cond.bonif) || !!cond.condProv || !!cond.condMarca
+  const hayOverride = !!cond.metodo || !!cond.lista || haySegsPedido(cond.segs) || !bonifVacia(cond.bonif) || !!cond.condProv || !!cond.condMarca
   const selCls = "w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
 
   // "Guardar en la ficha": escribe la FICHA (queda para futuros pedidos). Sin señal la
@@ -686,6 +688,7 @@ export function condDesdePayload(c: OpPedido["cond"] | null | undefined): CondPe
     ...(Array.isArray(c?.condiciones_proveedor) ? { condProv: c!.condiciones_proveedor } : {}),
     ...(Array.isArray(c?.condiciones_marca) ? { condMarca: c!.condiciones_marca } : {}),
     ...(Object.keys(merc).length ? { mercaderia: merc } : {}),
+    ...(segsDesdeServidor(c) ? { segs: segsDesdeServidor(c) } : {}),
   }
 }
 
@@ -701,5 +704,7 @@ export function condParaServidor(cond: CondPedido) {
     ...(Array.isArray(cond.condProv) ? { condiciones_proveedor: cond.condProv } : {}),
     ...(Array.isArray(cond.condMarca) ? { condiciones_marca: cond.condMarca } : {}),
     ...(merc.length ? { mercaderia_bonificada: merc } : {}),
+    // Lista/método por segmento solo este pedido (03/11/2026): viajan si se tocaron
+    ...segsParaServidor(cond.segs),
   }
 }
