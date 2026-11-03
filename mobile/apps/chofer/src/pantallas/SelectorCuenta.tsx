@@ -4,10 +4,11 @@ import { ESTADO_LABEL } from "@gm/vendedor"
 import type { ComprobanteCobro, PedidoCobro } from "../datasets"
 import {
   agruparCuenta, alternarAnticipo, comprobantesDeDevolucion, devolucionAplica, etiquetaComprobante, alternarComprobante, alternarContadoPedido, alternarContadoTodo, alternarGrupo, alternarTodo, clavesDeLaCuenta,
-  fijarMonto, montoAnticipo, resumenCuenta, saldoCobrable, separarPorViaje, valorDeDevolucion, type DatosCuenta, type EstadoCuenta,
+  fijarMonto, montoAnticipo, resumenComprobante, resumenCuenta, saldoCobrable, separarPorViaje, valorDeDevolucion, type DatosCuenta, type EstadoCuenta,
 } from "../datos/cuenta-cobro"
 import { moneda, redondear } from "@gm/formato"
 const r2 = (n: number) => redondear(n)
+import { tipoComprobanteLargo } from "../datos/comprobantes-pdf"
 import { formatDateAR, MontoInput } from "../ui"
 
 // La cuenta de UN cliente dentro del cobro: pedidos y comprobantes seleccionables, devoluciones
@@ -53,8 +54,11 @@ export function SelectorCuenta({ datos, estado, onChange, pedidosViaje = [], onA
   // Fila de comprobante (función de render, no componente: los inputs no pierden el foco)
   const filaComprobante = (cp: ComprobanteCobro) => {
     const checked = sel[cp.id] !== undefined
+    // 03/11 (Juan): la cuenta del comprobante, no un saldo suelto
+    const resumen = resumenComprobante(cp, datos.cuenta_comprobantes?.[cp.id], checked ? r.bonificacionPorComprobante[cp.id] ?? 0 : 0, `${tipoComprobanteLargo(cp.tipo_comprobante)} ${cp.numero_comprobante}`)
     return (
-      <div key={cp.id} className={`flex items-center gap-2 border-t border-gray-100 px-3 py-1.5 text-sm ${checked ? "bg-blue-50" : ""}`}>
+      <div key={cp.id}>
+        <div className={`flex items-center gap-2 border-t border-gray-100 px-3 py-1.5 text-sm ${checked ? "bg-blue-50" : ""}`}>
         <input type="checkbox" checked={checked} onChange={() => onChange(alternarComprobante(estado, cp))} className="h-5 w-5 shrink-0" aria-label={`Cobrar ${cp.tipo_comprobante} ${cp.numero_comprobante}`} />
         <button onClick={() => onAbrirComprobante?.(cp)} className="flex min-h-11 min-w-0 flex-1 flex-wrap items-center gap-x-2 text-left">
           <span className="text-sky-700">📄 {cp.tipo_comprobante} <span className="font-mono text-xs underline">{cp.numero_comprobante}</span></span>
@@ -69,6 +73,17 @@ export function SelectorCuenta({ datos, estado, onChange, pedidosViaje = [], onA
             className="min-h-10 w-28 rounded-lg border border-gray-300 px-2 text-right text-sm"
           />
         )}
+      </div>
+      {resumen && (
+        <div className="mb-1 ml-10 mr-3 rounded-lg bg-gray-50 px-3 py-1.5 text-sm">
+          {resumen.map((x, n) => (
+            <div key={n} className={`flex justify-between gap-2 ${x.total ? "border-t border-gray-200 font-bold text-gray-800" : "text-gray-600"}`}>
+              <span className="min-w-0">{x.concepto}</span>
+              <span className="shrink-0 font-mono">{moneda(x.monto)}</span>
+            </div>
+          ))}
+        </div>
+      )}
       </div>
     )
   }

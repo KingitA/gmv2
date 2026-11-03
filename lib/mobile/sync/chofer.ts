@@ -23,6 +23,7 @@ import { GET as billeteraGET } from "@/app/api/chofer/billetera/route"
 import { GET as cuentasGET } from "@/app/api/chofer/cuentas-bancarias/route"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { cargarComprados } from "@/lib/vendedor/comprados"
+import { movimientosDeComprobantes } from "./cuenta-comprobantes"
 import { contextoDevolucion } from "@/lib/cobranzas/origen-devolucion"
 import { HEADER_SIN_INICIAR, viajesDelChofer } from "@/lib/viajes/chofer"
 import { cargarClienteViaje, cargarCuentaCobro } from "@/lib/viajes/cliente-viaje"
@@ -124,6 +125,11 @@ export async function filaClienteViaje(ctx: CtxSync, viajeId: string, clienteId:
     // P2-31 / P2-29: contra qué comprobante va cada renglón devuelto (y cuál es el respaldo "sistema viejo")
     comprobantes_ref: await comprobantesRefDe(ctx.supabase, ficha).catch((e) => {
       console.error("[sync/chofer_viaje_clientes] comprobantes_ref:", e?.message || e)
+      return null
+    }),
+    // 03/11: resumen de cuenta de cada comprobante que se cobra (pagos, devoluciones, 10 %)
+    cuenta_comprobantes: await movimientosDeComprobantes(ctx.supabase, cobro.comprobantes.map((c: { id: string }) => c.id)).catch((e) => {
+      console.error("[sync/chofer_viaje_clientes] cuenta_comprobantes:", e?.message || e)
       return null
     }),
     // 03/11: el detalle de cada pedido que todavía se cobra (desde el cobro se abre y se devuelve)
