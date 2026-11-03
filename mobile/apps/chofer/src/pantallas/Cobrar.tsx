@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router"
-import { indiceHistorial, useOnline, useOverlay, useParamEstado, useRuntime } from "@gm/core"
+import { indiceHistorial, useOnline, useOverlay, useRuntime } from "@gm/core"
 import {
   aplicarOcr, cuitValido, editarCampo, faltantes, filaDesdeFoto, filaVacia, marcarFalloOcr, marcarFotoAdjunta, marcarSinDatos, resultadoConDatos, urlsDeFotos,
   type CampoCheque, type ConsultaBcraPayload, type FilaCheque, type ResultadoOcr,
@@ -11,10 +11,12 @@ import { borradorVacio, borrarBorradorCobro, guardarBorradorCobro, leerBorradorC
 import { montoDelPrincipal, validarCobroConjunto } from "@gm/cobro/conjunto"
 import { DS, ESTADOS_COBRABLES, idClienteViaje, nombreCliente, type ClienteBusqueda, type MetodoPayload, type OpCobrar } from "../datasets"
 import { estadoCuentaVacio, resumenCuenta, type EstadoCuenta, type ResumenCuenta } from "../datos/cuenta-cobro"
+import { pdfComprobante, usePdf } from "../datos/comprobantes-pdf"
 import { buscarClientes, useClienteViaje, useClientesTodos, useCuentasBancarias, useEncolar, useRefrescarFilas, useViaje, uuidv4 } from "../datos/hooks"
+import { HojaPedido } from "./PedidoDetalle"
 import { SelectorCuenta } from "./SelectorCuenta"
 import { normalizarCuit } from "@gm/formato"
-import { AvisosBcra, CuitInput, dejarAviso, dejarAvisoSinCuit, FechaInput, formatCurrency, formatDateAR, GRACIA_TECLADO_MS, MontoInput, Pantalla, round2, SinDescargar, useBloqueoSalida, useBusqueda, useToast } from "../ui"
+import { AvisosBcra, CuitInput, dejarAviso, dejarAvisoSinCuit, FechaInput, formatCurrency, formatDateAR, GRACIA_TECLADO_MS, MontoInput, Pantalla, round2, SinDescargar, useBloqueoSalida, useBusqueda, useOverlayDinamico, useToast } from "../ui"
 
 // Cobro en el reparto (= el sheet "Registrar Cobro" de la ficha web, ahora ruta propia).
 //  · Pedidos / comprobantes a cobrar (incluye anticipos a pedidos sin facturar): lo que
@@ -104,11 +106,17 @@ export function Cobrar() {
   const borradorInicial = useMemo(() => leerBorradorCobro<MetodoPago>(viajeId, clienteId), [viajeId, clienteId])
   const [cuenta, setCuenta] = useState<EstadoCuenta>(() => borradorInicial?.cuenta ?? estadoCuentaVacio())
   const [restaurado, setRestaurado] = useState(!!borradorInicial)
-  const [expandido, setExpandido] = useParamEstado("abierto")
   // ── Clientes agregados (cobro conjunto): cada uno con su propia cuenta ──
   const [agregados, setAgregados] = useState<Agregado[]>(() => borradorInicial?.agregados ?? [])
   const [resumenes, setResumenes] = useState<Record<string, ResumenCuenta>>({})
   const [busqCli, setBusqCli] = useBusqueda("cli")
+  const [buscandoCli, setBuscandoCli] = useState(false)
+  // Pedido abierto (?ver=pedido:<clienteId>|<pedidoId>) y PDF de un comprobante (03/11, Juan)
+  const hojaPedido = useOverlayDinamico("pedido")
+  const [pedCli = "", pedId = ""] = (hojaPedido.valor ?? "").split("|")
+  const pdf = usePdf(mostrar)
+  const abrirPedido = useCallback((cli: string) => (pedidoId: string) => hojaPedido.abrir(`${cli}|${pedidoId}`), [hojaPedido])
+  const abrirComprobante = useCallback((cp: Parameters<typeof pdfComprobante>[0]) => void pdf.abrir(pdfComprobante(cp)), [pdf])
   // ── Cómo paga ──
   const [metodosPago, setMetodosPago] = useState<MetodoPago[]>(() => (borradorInicial ? sanearMetodosRestaurados(borradorInicial.metodosPago) : [{ id: "1", tipo: "efectivo", monto: 0 }]))
   const fotosLocales = useRef(new Map<string, { b64: string; mime: string; nombre: string }>())
@@ -138,7 +146,7 @@ export function Cobrar() {
 
   const sucio = !listo && (totalMetodos > 0 || r.haySeleccion || agregados.length > 0 || metodosPago.some(esFila))
   const graciaTeclado = useRef(0)
-  const { hoja: hojaDescartar } = useBloqueoSalida(sucio, { titulo: "¿Descartar el cobro?", detalle: "Lo cargado en esta pantalla no se registró todavía.", confirmar: "Descartar" }, { onDescartar: () => borrarBorradorCobro(viajeId, clienteId), ignorarHasta: graciaTeclado })
+  const { hoja: hojaDescartar } = useBloqueoSalida(sucio, { titulo: "¿Descartar el cobro?", detalle: "Lo cargado en esta pantalla no se registró todavía.", confirmar: "Descartar" }, { onDescartar: () => borrarBorradorCobro(viajeId, clienteId), ignorarHasta: graciaTeclado, permitir: (p) => p.endsWith("/devolucion") })
   // Cada cambio queda en el equipo; registrado o vacío, se borra
   useEffect(() => {
     if (listo) return
@@ -170,6 +178,7 @@ export function Cobrar() {
   )
   const agregarCliente = (cli: ClienteBusqueda) => {
     setBusqCli("")
+    setBuscandoCli(false)
     graciaTeclado.current = Date.now() + GRACIA_TECLADO_MS
     setAgregados((prev) => (prev.some((a) => a.cliente.id === cli.id) ? prev : [...prev, { cliente: cli, estado: estadoCuentaVacio() }]))
   }
@@ -340,7 +349,7 @@ export function Cobrar() {
           {Math.abs(diff) > 0.01 && (r.totalImputado > 0 || diff > 0) && (
             <p className={`mb-2 rounded-xl px-4 py-2 text-center text-sm font-medium ${diff < 0 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
               {diff < 0 ? `Faltan ${formatCurrency(Math.abs(diff))}` : `Sobran ${formatCurrency(diff)}`}
-              <span className="block text-xs font-normal opacity-80">{diff < 0 ? "Al registrar elegís: ajuste por redondeo o dejar el saldo pendiente." : "Al registrar elegís: dejarlo a cuenta del cliente o, si es chico, ajuste por redondeo."}{agregados.length ? ` La diferencia es de ${clienteNombre}.` : ""}</span>
+              {agregados.length > 0 && <span className="block text-xs font-normal opacity-80">La diferencia es de {clienteNombre}.</span>}
             </p>
           )}
           <button onClick={() => void guardarCobro()} disabled={guardando || totalMetodos <= 0 || !puedeCobrar} className="min-h-14 w-full rounded-2xl bg-blue-600 py-4 text-xl font-bold text-white active:scale-95 disabled:opacity-50">
@@ -369,19 +378,22 @@ export function Cobrar() {
       <div className="space-y-5 p-4">
         {/* ══ Pedidos y comprobantes a cobrar (cliente de la parada) ══ */}
         <section>
-          <h3 className="mb-3 font-bold text-gray-700">Pedidos / comprobantes a cobrar</h3>
+          <h3 className="mb-2 font-bold text-gray-700">A cobrar</h3>
           {!descargada && data.parcial ? (
             <SinDescargar que="la cuenta del cliente" />
           ) : (
-            <SelectorCuenta datos={data} estado={cuenta} onChange={setCuenta} expandido={expandido} onExpandir={setExpandido} pedidosViaje={data.pedido ? [data.pedido.id] : []} />
+            <SelectorCuenta datos={data} estado={cuenta} onChange={setCuenta} pedidosViaje={data.pedido ? [data.pedido.id] : []} onAbrirPedido={abrirPedido(clienteId)} onAbrirComprobante={abrirComprobante} />
           )}
         </section>
 
         {/* ══ Agregar cliente para cobrar (cobro conjunto en la calle) ══ */}
         <section>
-          <h3 className="mb-1 font-bold text-gray-700">Agregar cliente para cobrar</h3>
-          <p className="mb-2 text-xs text-gray-500">Un mismo pago (por ejemplo, un cheque) puede cubrir a más de un cliente: agregalo y elegí qué se le cobra.</p>
-          <input type="search" value={busqCli} onChange={(e) => setBusqCli(e.target.value)} placeholder="Buscar cliente por nombre o CUIT..." className="min-h-11 w-full rounded-xl border-2 border-gray-200 px-3 py-2.5 text-sm" />
+          {/* Cobro conjunto (un cheque que paga a dos clientes): un botón; el buscador aparece al tocarlo */}
+          {buscandoCli || busqCli ? (
+            <input type="search" autoFocus value={busqCli} onChange={(e) => setBusqCli(e.target.value)} onBlur={() => { if (!busqCli.trim()) setBuscandoCli(false) }} placeholder="Buscar cliente por nombre o CUIT..." className="min-h-12 w-full rounded-xl border-2 border-blue-300 px-3 py-2.5 text-base" />
+          ) : (
+            <button onClick={() => setBuscandoCli(true)} className="min-h-12 w-full rounded-xl border-2 border-dashed border-gray-300 py-2 font-medium text-gray-600 active:scale-95">+ Agregar cliente para cobrar</button>
+          )}
           {busqCli.trim().length >= 2 && clientesTodos.length === 0 && <p className="mt-1 text-xs text-amber-700">La lista de clientes todavía no se descargó en este equipo.</p>}
           {resCli.length > 0 && (
             <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border">
@@ -394,7 +406,7 @@ export function Cobrar() {
             </div>
           )}
           {agregados.map((a) => (
-            <CuentaAgregada key={a.cliente.id} viajeId={viajeId} agregado={a} online={online} onEstado={cambiarAgregado} onResumen={informarResumen} onQuitar={quitarCliente} />
+            <CuentaAgregada key={a.cliente.id} viajeId={viajeId} agregado={a} online={online} onEstado={cambiarAgregado} onResumen={informarResumen} onQuitar={quitarCliente} onAbrirPedido={abrirPedido(a.cliente.id)} onAbrirComprobante={abrirComprobante} />
           ))}
         </section>
 
@@ -417,11 +429,7 @@ export function Cobrar() {
             📷 Sacar foto a cheques / transferencias
           </button>
           <input ref={fileInputRef} type="file" accept="image/*" multiple capture="environment" className="hidden" onChange={(e) => { leerFotos(e.target.files); e.target.value = "" }} />
-          <p className="text-center text-xs text-gray-500">
-            {online
-              ? "La foto abre el cheque al instante; los datos se completan solos en unos segundos y siempre se pueden corregir."
-              : "📡 Sin señal: la foto queda guardada en el equipo y sube con el cobro. Cargá los datos a mano."}
-          </p>
+          {!online && <p className="text-center text-xs text-gray-500">📡 Sin señal: la foto sube con el cobro. Cargá los datos a mano.</p>}
         </div>
 
         <div className="space-y-3">
@@ -440,6 +448,8 @@ export function Cobrar() {
           </button>
         </div>
       </div>
+
+      <HojaPedido viajeId={viajeId} clienteId={pedCli} pedidoId={pedId} onCerrar={hojaPedido.cerrar} mostrar={mostrar} />
 
       {/* ══ Diálogo diferencia (overlay con historial: atrás lo cierra) ══ */}
       {dialogo.abierto && dialogoDiff !== null && (
@@ -472,13 +482,15 @@ export function Cobrar() {
 // Su cuenta COMPLETA, igual que la del principal. Sale de la misma réplica (chofer_viaje_clientes):
 // si el cliente es otra parada del viaje ya está en el equipo y se cobra sin señal; si es de afuera
 // del viaje, se pide al servidor al agregarlo y hace falta señal (queda dicho en pantalla).
-function CuentaAgregada({ viajeId, agregado, online, onEstado, onResumen, onQuitar }: {
+function CuentaAgregada({ viajeId, agregado, online, onEstado, onResumen, onQuitar, onAbrirPedido, onAbrirComprobante }: {
   viajeId: string
   agregado: Agregado
   online: boolean
   onEstado: (id: string, e: EstadoCuenta) => void
   onResumen: (id: string, r: ResumenCuenta) => void
   onQuitar: (id: string) => void
+  onAbrirPedido: (pedidoId: string) => void
+  onAbrirComprobante: (cp: Parameters<typeof pdfComprobante>[0]) => void
 }) {
   const id = agregado.cliente.id
   const { cliente: enReplica } = useClienteViaje(viajeId, id)
@@ -489,7 +501,6 @@ function CuentaAgregada({ viajeId, agregado, online, onEstado, onResumen, onQuit
   useEffect(() => { if (enReplica && !enReplica.parcial) setGuardada(enReplica) }, [enReplica])
   const datos = enReplica && !enReplica.parcial ? enReplica : guardada ?? enReplica
   useRefrescarFilas(DS.clientesViaje, [enReplica && !enReplica.parcial ? undefined : idClienteViaje(viajeId, id)])
-  const [abierto, setAbierto] = useState("")
   const completa = !!datos && !datos.parcial
   const res = useMemo(() => resumenCuenta(completa ? datos : null, agregado.estado), [completa, datos, agregado.estado])
   useEffect(() => { onResumen(id, res) }, [id, res, onResumen])
@@ -505,7 +516,7 @@ function CuentaAgregada({ viajeId, agregado, online, onEstado, onResumen, onQuit
       </div>
       <div className="mt-2">
         {completa ? (
-          <SelectorCuenta datos={datos} estado={agregado.estado} onChange={(e) => onEstado(id, e)} expandido={abierto} onExpandir={setAbierto} pedidosViaje={datos.pedido ? [datos.pedido.id] : []} />
+          <SelectorCuenta datos={datos} estado={agregado.estado} onChange={(e) => onEstado(id, e)} pedidosViaje={datos.pedido ? [datos.pedido.id] : []} onAbrirPedido={onAbrirPedido} onAbrirComprobante={onAbrirComprobante} />
         ) : (
           <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
             {online

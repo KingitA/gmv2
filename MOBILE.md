@@ -1704,6 +1704,20 @@ Detalle en `docs/PENDIENTES-APPS-SALIDA.md`, sección "Segunda prueba integral (
 - Teclado: lo maneja el core (`instalarTeclado`, `--gm-teclado`); la app no tiene arreglos propios
   aparte de "Enter cierra el teclado" (`useEnterCierraTeclado`), que el core no hace.
 
+### v0.3.9 (03/11/2026): cobro más limpio y comprobantes para compartir (pedido de Juan)
+
+- **Cobro** (`SelectorCuenta.tsx`): "Seleccionar todo" es un botón chico; "10 % contado" y "Descontar devoluciones" son
+  un renglón con su interruptor y el monto. "Agregar cliente para cobrar" es un botón: el buscador aparece al tocarlo.
+  Los pedidos ya saldados no se muestran. Los comprobantes se ven siempre debajo de su pedido.
+- **Tocar el pedido** abre su detalle (`PedidoDetalle.tsx`, hoja `?ver=pedido:<cliente>|<pedido>`) con "deslizá para
+  devolver" (`RenglonesPedido.tsx`, también lo usa la ficha) y "📄 Comprobantes". Los renglones de los pedidos de antes
+  llegan en `detalle_pedidos` (`detallePedidosDe` en `lib/mobile/sync/chofer.ts`, una consulta, hasta 10 pedidos).
+  Ir a la devolución desde el cobro no pregunta "¿Descartar?": el borrador del cobro queda (`useBloqueoSalida` → `permitir`).
+- **Tocar un comprobante** baja su PDF (`/api/comprobantes-venta/:id/pdf`) y lo abre con el visor del equipo, que trae
+  "compartir" (`datos/comprobantes-pdf.ts`, plugin `@gm/capacitor-archivos` como la app vendedor; necesita señal).
+- **Ficha**: "📄 Comprobantes" junta en un PDF lo valorizado del pedido (facturas, presupuestos, NC y reversas:
+  `/api/comprobantes-venta/pedido/:id/pdf`); el remito queda como link chico.
+
 ### Probar sin backend
 `cd mobile && node scripts/fixture-vendedor.mjs` (una vez; solo lectura; el JSON tiene datos reales
 de clientes y está en `.gitignore`) → `node scripts/mock-vendedor.mjs` (3998) →

@@ -380,9 +380,9 @@ export function HojaConfirmar({ abierta, onCerrar, titulo, children, confirmar, 
 export function useBloqueoSalida(
   sucio: boolean,
   textos: { titulo: string; detalle: string; confirmar: string },
-  opciones: { onDescartar?: () => void; ignorarHasta?: { current: number } } = {},
+  opciones: { onDescartar?: () => void; ignorarHasta?: { current: number }; permitir?: (pathname: string) => boolean } = {},
 ) {
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => sucio && currentLocation.pathname !== nextLocation.pathname)
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => sucio && currentLocation.pathname !== nextLocation.pathname && !opciones.permitir?.(nextLocation.pathname))
   const bloqueado = blocker.state === "blocked"
   const tragar = bloqueado && (opciones.ignorarHasta?.current ?? 0) > Date.now()
   useEffect(() => {

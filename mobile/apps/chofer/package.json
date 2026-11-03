@@ -15,6 +15,7 @@
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "8.5.2",
     "@capacitor/network": "^8.0.1",
+    "@gm/capacitor-archivos": "*",
     "@gm/capacitor-lector": "*",
     "@gm/core": "*",
     "react": "^19.2.7",

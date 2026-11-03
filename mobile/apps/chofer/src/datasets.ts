@@ -265,6 +265,8 @@ export interface ClienteViajeRow {
   devolvible?: Array<{ comprobante_venta_id: string; articulo_id: string; vendido: number; devuelto: number; presupuesto?: boolean }> | null
   /** P2-31: tipo y número de los comprobantes de origen de las devoluciones. Ausente = réplica vieja */
   comprobantes_ref?: ComprobanteRef[] | null
+  /** 03/11: renglones de cada pedido que se puede cobrar (tocar el pedido en el cobro abre su detalle). Ausente = réplica vieja */
+  detalle_pedidos?: Record<string, DetallePedido[]> | null
 }
 export interface ComprobanteRef { id: string; tipo_comprobante: string; numero_comprobante: string }
 
