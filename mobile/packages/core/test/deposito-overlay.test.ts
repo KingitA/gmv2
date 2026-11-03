@@ -79,9 +79,10 @@ describe("Depósito · overlay de picking", () => {
     ])
     // base = 10 × 100 (la lista especial no entra) → 10 % = 100 → 100 / 50 = 2 unidades
     const b = v.pedidos_detalle.find((d) => d.id === "b")!
-    expect([b.cantidad, b.cantidad_preparada, b.estado_item]).toEqual([2, 2, "COMPLETO"])
-    expect(v.progreso.pendientes).toBe(0)
-    expect(calcularBonificados(10, v.pedidos_detalle).find((x) => x.id === "b")).toEqual({ id: "b", cantidad: 2, cambia: false })
+    // 03/11: la cantidad se calcula, pero el bonificado queda PENDIENTE: se prepara al final
+    expect([b.cantidad, b.cantidad_preparada, b.estado_item]).toEqual([2, 0, "PENDIENTE"])
+    expect(v.progreso.pendientes).toBe(1)
+    expect(calcularBonificados(10, v.pedidos_detalle).find((x) => x.id === "b")?.cantidad).toBe(2)
   })
 
   it("mercadería por cupo: cada cupo por separado, igual que el servidor (no el % único viejo)", () => {
@@ -101,7 +102,7 @@ describe("Depósito · overlay de picking", () => {
       op("picking.item", { pedido_id: "p1", pedido_detalle_id: "2", cantidad_preparada: 5, es_faltante: false }),
     ])
     const b = v.pedidos_detalle.find((d) => d.id === "b")!
-    expect([b.cantidad, b.cantidad_preparada, b.estado_item]).toEqual([2, 2, "COMPLETO"])
+    expect([b.cantidad, b.cantidad_preparada, b.estado_item]).toEqual([2, 0, "PENDIENTE"])
   })
 
   it("sin % de bonificación no se toca lo que cargó el usuario", () => {

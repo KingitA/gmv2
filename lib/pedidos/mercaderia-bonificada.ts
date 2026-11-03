@@ -7,6 +7,7 @@
 // Cálculo puro: lib/deposito/bonificados.ts (calcularBonificadosPorCupo).
 
 import {
+  estadoBonificadoPicking,
   calcularBonificados,
   calcularBonificadosPorCupo,
   usaCupos,
@@ -29,8 +30,9 @@ async function cargar(supabase: any, pedidoId: string) {
 
 /**
  * Recalcula las unidades de los renglones bonificados del pedido. Durante el
- * picking (o `enPicking`) además los deja preparados (COMPLETO), como hacía el
- * recálculo de depósito. Devuelve [{ id, cantidad }] de los bonificados.
+ * picking (o `enPicking`) además fija su estado con `estadoBonificadoPicking`
+ * (03/11: el depósito los prepara al final, ya no quedan preparados solos; lo que
+ * marcó un operario no se pisa). Devuelve [{ id, cantidad }] de los bonificados.
  */
 export async function recalcularBonificadosPedido(
   supabase: any,
@@ -54,13 +56,25 @@ export async function recalcularBonificadosPedido(
   }
 
   const porId = new Map(lineas.map((l) => [l.id, l]))
+  // Bonificados que ya marcó un operario en la app/web del depósito (picking_items)
+  let tomados = new Set<string>()
+  if (enPicking && calc.length) {
+    const { data: pi, error: piErr } = await supabase.from("picking_items").select("pedido_detalle_id").in("pedido_detalle_id", calc.map((b) => b.id))
+    if (piErr) throw new Error(piErr.message)
+    tomados = new Set(((pi || []) as Array<{ pedido_detalle_id: string }>).map((r) => r.pedido_detalle_id))
+  }
+  const preparando = ["pendiente", "impreso", "en_preparacion"].includes(pedido.estado)
   for (const b of calc) {
     const actual = porId.get(b.id)
     const upd: Record<string, unknown> = {}
     if (Number(actual?.cantidad) !== b.cantidad) upd.cantidad = b.cantidad
     if (enPicking) {
-      if (Number(actual?.cantidad_preparada) !== b.cantidad) upd.cantidad_preparada = b.cantidad
-      if (actual?.estado_item !== "COMPLETO") upd.estado_item = "COMPLETO"
+      const e = estadoBonificadoPicking(
+        { cantidad: b.cantidad, cantidad_preparada: actual?.cantidad_preparada ?? 0, estado_item: actual?.estado_item ?? null },
+        { tomado: tomados.has(b.id), preparando },
+      )
+      if (Number(actual?.cantidad_preparada) !== e.cantidad_preparada) upd.cantidad_preparada = e.cantidad_preparada
+      if (actual?.estado_item !== e.estado_item) upd.estado_item = e.estado_item
     }
     if (Object.keys(upd).length) {
       const { error } = await supabase.from("pedidos_detalle").update(upd).eq("id", b.id)

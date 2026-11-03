@@ -4,7 +4,7 @@ import { esQrOUrl, lecturaError, lecturaOk, useNoEnviados } from "@gm/core"
 import { DS, type DetallePedido, type OpPickingItem } from "../../datasets"
 import { buscarPorCodigo, eansDe, padEan13 } from "../../datos/busqueda"
 import { useArticulos, useEncolar, useYo } from "../../datos/hooks"
-import { estadoDe, tomadoPorOtro, type PedidoVista } from "../../datos/overlay"
+import { estadoDe, normalesSinResolver, tomadoPorOtro, type PedidoVista } from "../../datos/overlay"
 import { C, DESCRIPCION, META, SinEnviar, TarjetaSwipe } from "../../ui"
 
 export const DATASET = DS.pedidos
@@ -47,6 +47,18 @@ export function usePicking(pedido: PedidoVista | null, mostrar: (m: string, t?: 
   )
 
   /** Renglón del pedido para un código leído (EAN o código de bulto), o el motivo por el que no. */
+  /** La mercadería bonificada va al final: avisa y frena si todavía hay artículos normales sin resolver. */
+  const bonificadoTodaviaNo = useCallback(
+    (det: DetallePedido) => {
+      const faltan = pedido && det.es_bonificado && estadoDe(det) === "PENDIENTE" ? normalesSinResolver(pedido) : 0
+      if (!faltan) return false
+      lecturaError()
+      mostrar(`🎁 La mercadería bonificada se prepara al final: ${faltan > 1 ? `faltan ${faltan} artículos` : "falta 1 artículo"}`, "err")
+      return true
+    },
+    [pedido, mostrar],
+  )
+
   const resolverCodigo = useCallback(
     (codigo: string): DetallePedido | null => {
       if (!pedido) return null
@@ -62,14 +74,16 @@ export function usePicking(pedido: PedidoVista | null, mostrar: (m: string, t?: 
         mostrar(art ? `"${art.descripcion}" no está en este pedido` : `No se encontró el código ${codigo}`, "err")
         return null
       }
-      // Mismo artículo en más de un renglón (ej. normal + bonificado): primero el que falta resolver
-      const det = lineas.find((d) => estadoDe(d) === "PENDIENTE" && !tomadoPorOtro(pedido, d.id, yo)) ?? lineas[0]!
+      // Mismo artículo en más de un renglón (normal + bonificado): primero el normal sin resolver
+      const libre = (d: DetallePedido) => estadoDe(d) === "PENDIENTE" && !tomadoPorOtro(pedido, d.id, yo)
+      const det = lineas.find((d) => libre(d) && !d.es_bonificado) ?? lineas.find(libre) ?? lineas[0]!
       const otro = tomadoPorOtro(pedido, det.id, yo)
       if (otro) { lecturaError(); mostrar(`🔒 Ya lo preparó ${otro}`, "err"); return null }
+      if (bonificadoTodaviaNo(det)) return null
       lecturaOk()
       return det
     },
-    [pedido, indice, yo, mostrar],
+    [pedido, indice, yo, mostrar, bonificadoTodaviaNo],
   )
 
   /** Renglones que preparó OTRA persona: con eso, reiniciar o soltar es cosa de un admin (P2-18). */
@@ -93,7 +107,7 @@ export function usePicking(pedido: PedidoVista | null, mostrar: (m: string, t?: 
     [pedido, navigate],
   )
 
-  return { yo, marcar, resolverCodigo, abrirItem, reiniciar, soltar, deOtros }
+  return { yo, marcar, resolverCodigo, abrirItem, reiniciar, soltar, deOtros, bonificadoTodaviaNo }
 }
 
 /**

@@ -27,6 +27,12 @@ function FilaPedido({ pedido, ultimo, color }: { pedido: PedidoVista; ultimo: bo
           <div style={{ fontSize: 16, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {pedido.clientes?.razon_social || pedido.clientes?.nombre}
           </div>
+          {/* Dirección y localidad (pedido de Juan, 03/11): a dónde va sin abrir el pedido */}
+          {[pedido.clientes?.direccion, pedido.clientes?.localidad].some(Boolean) && (
+            <div style={{ fontSize: 13, color: C.sub, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              📍 {[pedido.clientes?.direccion, pedido.clientes?.localidad].filter(Boolean).join(" · ")}
+            </div>
+          )}
           <div style={{ fontSize: 12, color: C.light, fontFamily: "monospace", marginTop: 2 }}>
             {pedido.numero_pedido} · {fechaAR(pedido.fecha)}
           </div>

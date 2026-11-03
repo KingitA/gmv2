@@ -7,7 +7,7 @@
 // ya actualizada (parche de réplica) y el overlay de esa operación desaparece.
 
 import type { ItemOutbox } from "@gm/core"
-import { calcularBonificados, calcularBonificadosPorCupo, estadoItemPicking, estadoLineaRecepcion, usaCupos } from "@gm/deposito"
+import { calcularBonificados, calcularBonificadosPorCupo, estadoBonificadoPicking, estadoItemPicking, estadoLineaRecepcion, usaCupos } from "@gm/deposito"
 import type {
   Articulo, DetallePedido, Devolucion, EstadoItem, EstadoLinea, OpDatos, OpPickingItem, OpRecepcionItem, OpStock,
   OrdenRecepcion, PedidoDeposito, Preparador,
@@ -80,12 +80,11 @@ export function vistaPedido(p: PedidoDeposito, ops: ItemOutbox[]): PedidoVista {
   // pedido con cupos (renglones con bonif_merc_origen) → un cálculo por cupo; pedido viejo → un solo %.
   if (recalcular) {
     const calculados = usaCupos(detalle) ? calcularBonificadosPorCupo(detalle).calculados : calcularBonificados(p.bonif_mercaderia_pct, detalle)
+    // 03/11: el bonificado NO queda preparado solo: se prepara al final (estadoBonificadoPicking)
     for (const b of calculados) {
-      if (!b.cambia) continue
       const d = porId.get(b.id)!
       d.cantidad = b.cantidad
-      d.cantidad_preparada = b.cantidad
-      d.estado_item = "COMPLETO"
+      Object.assign(d, estadoBonificadoPicking(d, { tomado: !!preparadores[d.id], preparando: true }))
     }
   }
 
@@ -106,6 +105,26 @@ export function vistaPedido(p: PedidoDeposito, ops: ItemOutbox[]): PedidoVista {
     rechazos,
     progreso: { total, resueltos: completos + faltantes, pendientes: total - completos - faltantes, completos, faltantes },
   }
+}
+
+/**
+ * Mercadería bonificada AL FINAL (03/11): cuántos artículos normales faltan resolver.
+ * Mientras sea > 0, los renglones bonificados no se muestran ni se pueden preparar.
+ */
+export const normalesSinResolver = (v: PedidoVista) => v.pedidos_detalle.filter((d) => !d.es_bonificado && estadoDe(d) === "PENDIENTE").length
+
+/**
+ * Renglón del pedido para un artículo (escaneado o elegido en Buscar). El mismo artículo
+ * puede estar dos veces (normal + bonificado): primero el normal sin resolver, después
+ * cualquiera sin resolver, si no el primero.
+ */
+export function renglonDeArticulo(v: PedidoVista, articuloIds: (id: string) => boolean): DetallePedido | undefined {
+  const lineas = v.pedidos_detalle.filter((d) => articuloIds(d.articulo_id))
+  return (
+    lineas.find((d) => !d.es_bonificado && estadoDe(d) === "PENDIENTE") ??
+    lineas.find((d) => estadoDe(d) === "PENDIENTE") ??
+    lineas[0]
+  )
 }
 
 /** Nombre de quien tomó el renglón si NO soy yo (renglón bloqueado), o null. */

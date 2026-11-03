@@ -4,7 +4,7 @@ import { useLector, useOverlay } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
 import { marcaPicking } from "../../datos/cantidad"
 import { useEncolar, usePedido } from "../../datos/hooks"
-import { estadoDe, tomadoPorOtro } from "../../datos/overlay"
+import { estadoDe, normalesSinResolver, renglonDeArticulo, tomadoPorOtro } from "../../datos/overlay"
 import { BarraProgreso, C, Contadores, dejarAviso, Marco, Rechazos, TITULO_GRUPO, useAvisoEntrante, useTecladoAbierto, useToast, useVolver } from "../../ui"
 import { PanelBuscar } from "../comunes/Buscar"
 import { FichaArticulo, useAbrirFicha, useFichaAbierta, type DatosFicha } from "../comunes/FichaArticulo"
@@ -56,7 +56,12 @@ function useFinalizar(pedido: PedidoVista | null, mostrar: (m: string, t?: "ok" 
   }
   const pedir = () => {
     if (!pedido) return
-    if (pedido.progreso.pendientes > 0) { mostrar(`Faltan ${pedido.progreso.pendientes} artículos por resolver`, "err"); return }
+    const faltan = pedido.progreso.pendientes
+    if (faltan > 0) {
+      // Solo queda la mercadería bonificada (03/11): decirlo claro, es el último paso
+      mostrar(normalesSinResolver(pedido) === 0 ? "🎁 Falta preparar la mercadería bonificada" : faltan > 1 ? `Faltan ${faltan} artículos por resolver` : "Falta 1 artículo por resolver", "err")
+      return
+    }
     setCargando(false)
     setBultos("")
     setPallets("")
@@ -223,7 +228,10 @@ export function Pedido() {
     return <Marco titulo="Preparar Pedidos" dataset={DATASET}>{toast}<PedidoNoDisponible cargando={cargando} finalizado={pedido?.cierrePendiente} /></Marco>
   }
 
-  const pendientes = pedido.pedidos_detalle.filter((i) => estadoDe(i) === "PENDIENTE")
+  // Mercadería bonificada AL FINAL (03/11): sus renglones aparecen recién con todo lo demás resuelto
+  const faltanNormales = normalesSinResolver(pedido)
+  const pendientes = pedido.pedidos_detalle.filter((i) => estadoDe(i) === "PENDIENTE" && !i.es_bonificado)
+  const bonifPendientes = pedido.pedidos_detalle.filter((i) => estadoDe(i) === "PENDIENTE" && i.es_bonificado)
   const completos = pedido.pedidos_detalle.filter((i) => estadoDe(i) === "COMPLETO" || estadoDe(i) === "PARCIAL")
   const { progreso } = pedido
   const aFaltante = (item: (typeof pendientes)[number]) => ({
@@ -273,6 +281,18 @@ export function Pedido() {
             {pendientes.map((item) => <RenglonPedido key={item.id} pedido={pedido} item={item} accion={aFaltante(item)} onAbrir={() => abrirFicha(item.articulo_id)} />)}
           </>
         )}
+        {bonifPendientes.length > 0 && faltanNormales > 0 && (
+          <div style={{ background: "#fef3c7", border: "1px solid #fcd34d", color: "#b45309", borderRadius: 12, padding: "10px 12px", fontSize: 13, fontWeight: 600, margin: "4px 0 10px" }}>
+            🎁 Al final: {bonifPendientes.length} artículo{bonifPendientes.length > 1 ? "s" : ""} de mercadería bonificada (aparece{bonifPendientes.length > 1 ? "n" : ""} cuando termines lo demás)
+          </div>
+        )}
+        {bonifPendientes.length > 0 && faltanNormales === 0 && (
+          <>
+            <div style={{ ...TITULO_GRUPO, color: "#b45309" }}>🎁 Mercadería bonificada ({bonifPendientes.length})</div>
+            <div style={{ fontSize: 13, color: "#b45309", marginBottom: 8 }}>Último paso: escaneala y cargá la cantidad que separaste. Sin esto no se puede finalizar.</div>
+            {bonifPendientes.map((item) => <RenglonPedido key={item.id} pedido={pedido} item={item} accion={aFaltante(item)} onAbrir={() => abrirFicha(item.articulo_id)} />)}
+          </>
+        )}
         {completos.length > 0 && (
           <>
             <div style={{ ...TITULO_GRUPO, paddingTop: 8 }}>Preparados ({completos.length})</div>
@@ -301,7 +321,7 @@ export function PedidoBuscar() {
   const { id } = useParams()
   const { pedido, cargando } = usePedido(id)
   const { toast, mostrar } = useToast()
-  const { yo, resolverCodigo, abrirItem } = usePicking(pedido, mostrar)
+  const { yo, resolverCodigo, abrirItem, bonificadoTodaviaNo } = usePicking(pedido, mostrar)
   const fin = useFinalizar(pedido, mostrar)
   const volver = useVolver()
   // Con el teclado abierto la pantalla queda a la mitad: contadores y pie se esconden
@@ -310,7 +330,7 @@ export function PedidoBuscar() {
 
   if (!pedido || pedido.cierrePendiente) return <Marco titulo="Buscar artículo">{toast}<PedidoNoDisponible cargando={cargando} finalizado={pedido?.cierrePendiente} /></Marco>
   const { progreso } = pedido
-  const lineaDe = (articuloId: string) => pedido.pedidos_detalle.find((i) => i.articulo_id === articuloId)
+  const lineaDe = (articuloId: string) => renglonDeArticulo(pedido, (id) => id === articuloId)
   const enPedido = new Set(pedido.pedidos_detalle.map((i) => i.articulo_id))
 
   return (
@@ -341,6 +361,7 @@ export function PedidoBuscar() {
           if (!l) { mostrar(`"${art.descripcion}" no está en este pedido`, "err"); return }
           const otro = tomadoPorOtro(pedido, l.id, yo)
           if (otro) { mostrar(`🔒 Ya lo preparó ${otro}`, "err"); return }
+          if (bonificadoTodaviaNo(l)) return
           abrirItem(l, { replace: true }) // confirmar vuelve a la lista (como la web)
         }}
         onCodigo={(c) => { const det = resolverCodigo(c); if (det) abrirItem(det, { replace: true }) }}
@@ -381,7 +402,7 @@ export function PedidoItem() {
       {toast}
       <PanelCantidad
         articulo={item.articulos}
-        titulo="Artículo encontrado"
+        titulo={item.es_bonificado ? "🎁 Mercadería bonificada" : "Artículo encontrado"}
         etiquetaInput="Cantidad que separaste físicamente:"
         // P2-16: arranca VACÍA; el operario escribe lo que contó (0 = faltante)
         inicial=""
@@ -391,7 +412,7 @@ export function PedidoItem() {
         resumenTeclado={<div style={{ color: C.orange, fontSize: 14, fontWeight: 700, marginTop: 2 }}>Pedida: {item.cantidad}</div>}
         cabecera={
           <div style={{ background: C.orangeL, border: `1.5px solid ${C.orangeB}`, borderRadius: 16, padding: "16px 20px", textAlign: "center" }}>
-            <div style={{ color: C.orange, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>Cantidad pedida</div>
+            <div style={{ color: C.orange, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>{item.es_bonificado ? "Cantidad bonificada a entregar" : "Cantidad pedida"}</div>
             <div style={{ color: C.orange, fontWeight: 800, fontSize: 52, lineHeight: 1.1 }}>{item.cantidad}</div>
           </div>
         }

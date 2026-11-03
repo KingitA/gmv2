@@ -405,8 +405,8 @@ export async function cerrarPicking(supabase: any, pedido_id: string, carga: Car
   }
 
   // Mercadería bonificada: la cantidad queda FIJA sobre lo que realmente va
-  // (todos los renglones ya resueltos). Va antes del control de pendientes:
-  // deja preparados los renglones bonificados.
+  // (todos los renglones ya resueltos). Va antes del control de pendientes. Desde el
+  // 03/11 NO los deja preparados: el operario los prepara al final; si falta, no cierra.
   await recalcularBonificadosPedido(supabase, pedido_id, { enPicking: true })
 
   // Verificar que no haya items PENDIENTE

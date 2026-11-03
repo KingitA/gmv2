@@ -137,6 +137,28 @@ export function estadoItemPicking(cantidadPreparada: number, cantidadPedida: num
   return "PENDIENTE"
 }
 
+/**
+ * Renglón BONIFICADO durante el picking (pedido de Juan, 03/11/2026): la mercadería
+ * bonificada NO se marca sola. Se prepara AL FINAL, como cualquier artículo: el operario
+ * la escanea, escribe la cantidad y confirma; sin eso el pedido no se puede finalizar.
+ *  - `tomado` (ya lo marcó un operario): se respeta lo que separó; solo se recalcula el
+ *    estado contra la cantidad a entregar (que sigue cambiando con lo preparado).
+ *  - Sin unidades para regalar (cantidad 0): resuelto solo, no hay nada que juntar.
+ *  - `preparando` (pedido en la cola / en preparación): PENDIENTE hasta que lo marquen.
+ *  - Pedido ya cerrado y nunca marcado (cerrados antes de esta regla): queda como antes,
+ *    preparado con la cantidad calculada.
+ */
+export function estadoBonificadoPicking(
+  b: { cantidad: number; cantidad_preparada: number | null; estado_item: string | null },
+  opts: { tomado: boolean; preparando: boolean },
+): { cantidad_preparada: number; estado_item: "PENDIENTE" | "FALTANTE" | "COMPLETO" | "PARCIAL" } {
+  const prep = Number(b.cantidad_preparada) || 0
+  if (opts.tomado) return { cantidad_preparada: prep, estado_item: estadoItemPicking(prep, b.cantidad, b.estado_item === "FALTANTE") }
+  if (b.cantidad <= 0) return { cantidad_preparada: 0, estado_item: "COMPLETO" }
+  if (opts.preparando) return { cantidad_preparada: 0, estado_item: "PENDIENTE" }
+  return { cantidad_preparada: b.cantidad, estado_item: "COMPLETO" }
+}
+
 /** Estado de la línea de recepción (misma regla que PATCH recepciones). -1 = volver a pendiente. */
 export function estadoLineaRecepcion(cantidadFisica: number): { estado_linea: "pendiente" | "faltante" | "ok"; cantidad: number } {
   if (cantidadFisica === -1) return { estado_linea: "pendiente", cantidad: 0 }

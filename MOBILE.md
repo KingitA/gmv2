@@ -869,6 +869,14 @@ recorrido Anterior/Siguiente de Modificación de artículos (calculado sobre la 
   aparte. Finalizar sin señal saca el pedido de la cola ("N finalizados sin enviar").
 - **Bonificados**: se recalculan en el equipo con `lib/deposito/bonificados.ts`, la
   misma función que usa el servidor ⇒ offline se ven (y se confirman) las mismas unidades.
+  **Desde el 03/11 (v0.4.2, pedido de Juan) NO quedan preparados solos**: se calcula la
+  cantidad a entregar, pero el renglón bonificado queda PENDIENTE y se prepara AL FINAL
+  (aparece recién con todos los artículos normales resueltos; escanearlo antes avisa y no
+  abre). Se marca como cualquier artículo y sin eso `cerrarPicking` no cierra. Regla única
+  `estadoBonificadoPicking` (`lib/deposito/bonificados.ts`), usada por
+  `recalcularBonificadosPedido` y por el overlay: lo que marcó un operario no se pisa
+  (tampoco al facturar); sin unidades para regalar se resuelve solo; pedidos cerrados antes
+  de la regla quedan como estaban.
 - **Política (la del backend web, ahora blindada)**: un pedido lo preparan VARIOS
   operarios a la vez; **un renglón es de quien lo marca primero**. Otro operario lo ve
   con 🔒 y el nombre, y no puede tocarlo; devolverlo a pendiente lo libera. No hay lock

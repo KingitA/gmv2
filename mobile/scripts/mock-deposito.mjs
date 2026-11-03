@@ -115,7 +115,12 @@ function recalcularBonificados(p) {
   const neto = p.pedidos_detalle.filter((d) => !d.es_bonificado && !d.excluye_bonif).reduce((s, d) => s + d.precio_base * d.cantidad_preparada, 0)
   for (const b of bon) {
     const u = b.precio_base > 0 ? Math.round(((neto * p.bonif_mercaderia_pct) / 100 / bon.length) / b.precio_base) : 0
-    if (u !== b.cantidad || u !== b.cantidad_preparada) Object.assign(b, { cantidad: u, cantidad_preparada: u, estado_item: "COMPLETO" })
+    // 03/11: como el servidor (estadoBonificadoPicking): el bonificado se prepara al final
+    b.cantidad = u
+    const tomado = !!p.preparadores[b.id]
+    const prep = Number(b.cantidad_preparada) || 0
+    if (tomado) b.estado_item = b.estado_item === "FALTANTE" ? "FALTANTE" : prep >= u ? "COMPLETO" : prep > 0 ? "PARCIAL" : "PENDIENTE"
+    else Object.assign(b, u <= 0 ? { cantidad_preparada: 0, estado_item: "COMPLETO" } : { cantidad_preparada: 0, estado_item: "PENDIENTE" })
   }
 }
 const parchePedido = (id) => { const p = DATASETS.deposito_pedidos().find((x) => x.id === id); return { dataset: "deposito_pedidos", upserts: p ? [p] : [], deletes: p ? [] : [id] } }
