@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react"
-import { useOverlay } from "@gm/core"
 import type { SegsPedido } from "../../datasets"
 import { useCatalogosFicha } from "../../datos/hooks"
 import { clienteListasDe, fichaListasDe, haySegsPedido, metodoLabel, SEGMENTOS_PRECIO, segsAOverrides, useSegmentosCliente, type CondSegmento } from "../../datos/segmentos"
 import { CuadroSegmentos } from "../segmentos-ui"
-import { usePedidoEnCurso } from "./contexto"
+import { usePedidoEnCurso, useVer } from "./contexto"
 
 // Lista y facturación de ESTE pedido, en "Confirmar pedido" (Juan, 03/11/2026): general o
 // POR SEGMENTO, sin tocar la ficha del cliente. La ficha (este y los próximos pedidos) se
@@ -21,20 +20,20 @@ const textoFicha = (f: CondSegmento | undefined) => (f ? `${f.listaNombre ?? "si
 /** Tarjeta del carrito: cómo se factura el pedido + "Cambiar solo en este pedido". */
 export function ListaMetodoPedido() {
   const p = usePedidoEnCurso()
-  const hoja = useOverlay("lista-pedido")
+  // La hoja la pinta el marco del pedido (?ver=lista-pedido): se abre desde acá y desde el panel 👤
+  const { abrir } = useVer()
   if (!p.segmentos) return null
   return (
     <div className="space-y-2">
       <CuadroSegmentos resumen={p.segmentos} titulo="Cómo se factura este pedido" />
-      <button onClick={hoja.abrir} className="min-h-11 w-full rounded-xl border border-emerald-600 bg-white px-3 text-sm font-bold text-emerald-700">
-        ✏️ Cambiar solo en este pedido
+      <button onClick={() => abrir("lista-pedido")} className="min-h-11 w-full rounded-xl border border-emerald-600 bg-white px-3 text-sm font-bold text-emerald-700">
+        ✏️ Lista y facturación solo este pedido
       </button>
-      {hoja.abierto && <HojaListaPedido onCerrar={hoja.cerrar} />}
     </div>
   )
 }
 
-function HojaListaPedido({ onCerrar }: { onCerrar: () => void }) {
+export function HojaListaPedido({ onCerrar }: { onCerrar: () => void }) {
   const p = usePedidoEnCurso()
   const cat = useCatalogosFicha()
   const puedeLista = !!cat?.puede_cambiar_lista

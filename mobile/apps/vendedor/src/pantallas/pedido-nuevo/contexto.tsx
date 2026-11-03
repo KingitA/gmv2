@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router"
 import { ordenarArticulos, type OrdenArticulos } from "@gm/vendedor"
 import type { Segmento } from "@gm/pricing"
 import { COND_VACIA, type Articulo, type Cliente, type CondPedido } from "../../datasets"
-import { conArticulo, conCantidad, nuevoBorrador, sinArticulo, useBorrador, type Borrador, type ItemBorrador, type Prospecto } from "../../datos/borradores"
+import { aSumarConMinimo, conArticulo, conCantidad, minimoDe, nuevoBorrador, sinArticulo, useBorrador, type Borrador, type ItemBorrador, type Prospecto } from "../../datos/borradores"
 import type { IndiceCatalogo } from "../../datos/busqueda"
 import { useCatalogo, useCliente, useVentas } from "../../datos/hooks"
 import { faltaListaMetodo, type FaltaListaMetodo } from "@gm/pricing"
@@ -194,10 +194,12 @@ export function ProveedorPedido({ clienteId, children }: { clienteId: string; ch
         const p = motor.precio(a.id)
         // Mismas guardas que agregarRapido de la web: sin precio no se vende
         if (!(unidades > 0) || !p || p.precio <= 0) return false
-        cambiar((b) => conArticulo(b, { articuloId: a.id, cantidad: unidades, art: { descripcion: a.descripcion, sku: a.sku ?? null, unidades_por_bulto: a.unidades_por_bulto ?? null, imagen_url: a.imagen_url ?? null } }), base)
+        // Fracción = cantidad mínima: anotar 6 de un artículo de fracción 12 carga 12
+        const sumar = aSumarConMinimo(cantidades.get(a.id) ?? 0, unidades, minimoDe(a))
+        cambiar((b) => conArticulo(b, { articuloId: a.id, cantidad: sumar, art: { descripcion: a.descripcion, sku: a.sku ?? null, unidades_por_bulto: a.unidades_por_bulto ?? null, imagen_url: a.imagen_url ?? null } }), base)
         return true
       },
-      setCantidad: (id, u) => cambiar((b) => conCantidad(b, id, u), base),
+      setCantidad: (id, u) => cambiar((b) => conCantidad(b, id, u > 0 ? Math.max(u, minimoDe(indice.porId.get(id))) : u), base),
       quitar: (id) => cambiar((b) => sinArticulo(b, id), base),
       setCond: (c) => cambiar((b) => ({ ...b, cond: c }), base),
       setObs: (o) => cambiar((b) => ({ ...b, obs: o }), base),

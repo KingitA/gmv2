@@ -1282,6 +1282,11 @@ Medido con la cartera más grande (86 clientes) y el catálogo real (1.841 artí
   tocaron, así al editar no se pisan las que puso el ERP). Sin segmentar, el cuadro muestra una
   sola línea ("Neco · Presupuesto"). Cliente sin lista cuyo viajante impone una: al editar la
   ficha arranca con esa lista y el PATCH la acepta sin permiso de listas (y la completa sola).
+  v0.4.12: la misma hoja se abre también desde el panel 👤 ("✏️ Lista y facturación solo este
+  pedido"); el panel ya no tiene selectores generales ni guarda lista/método en la ficha.
+- **Fracción = cantidad mínima** (Juan, 03/11/2026): `cantidad_fraccion > 1` es el mínimo de la
+  línea. `agregar`/`setCantidad` del contexto completan hasta el mínimo (anotar 6 de fracción 12
+  carga 12; el "−" del carrito no baja de ahí). La fila muestra "mín. 12 u". Sin fracción, libre.
 - **Descuentos del cliente en el catálogo** (`piezas.tsx → PreciosConDescuento`): precio de lista
   en gris (sin general/viajante) y debajo los chips "−10% viajante", "−10% mercadería" con lo que
   le queda (mercadería = cupo aparte, se muestra como % del precio). Lista Especial: sin chips.

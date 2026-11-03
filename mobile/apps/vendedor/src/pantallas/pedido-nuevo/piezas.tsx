@@ -3,6 +3,7 @@ import { ORDENES, type OrdenArticulos } from "@gm/vendedor"
 import { numero, parseMonto } from "@gm/formato"
 import type { Articulo } from "../../datasets"
 import type { Precio } from "../../datos/precios"
+import { minimoDe } from "../../datos/borradores"
 import { formatCurrency } from "../../ui"
 import { useAbiertos, type DescuentosArticulo } from "./contexto"
 
@@ -82,6 +83,8 @@ export function FilaArticulo({ a, precio, descuentos, enCarrito, onAbrir, onZoom
         </p>
         <p className="truncate text-[11px] text-gray-400">
           <span className="font-mono">{a.sku || "—"}</span>
+          {/* Fracción = cantidad mínima: menos de eso se completa sola al cargar */}
+          {minimoDe(a) > 1 && <span className="font-bold text-amber-700"> · mín. {minimoDe(a)} u</span>}
           {a.marca ? ` · ${a.marca}` : ""}
           {a.unidades_por_bulto ? ` · x${a.unidades_por_bulto}` : ""}
         </p>

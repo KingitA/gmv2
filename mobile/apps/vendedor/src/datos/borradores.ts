@@ -194,4 +194,15 @@ export function conCantidad(b: Borrador, articuloId: string, cantidad: number): 
   return { ...b, items: b.items.map((i) => (i.articuloId === articuloId ? { ...i, cantidad } : i)) }
 }
 
+/**
+ * Cantidad mínima de un artículo = su FRACCIÓN (Juan, 03/11/2026: no es lo mismo, pero se usa
+ * así). Fracción 12 ⇒ anotar 6 sube a 12; sin fracción (o 1) cualquier cantidad.
+ */
+export const minimoDe = (a: { cantidad_fraccion?: number | null } | null | undefined): number =>
+  Number(a?.cantidad_fraccion) > 1 ? Math.trunc(Number(a!.cantidad_fraccion)) : 1
+
+/** Unidades a sumar para que la línea (lo que ya tenía + lo nuevo) llegue al mínimo. */
+export const aSumarConMinimo = (yaTenia: number, nuevas: number, minimo: number): number =>
+  Math.max(nuevas, minimo - yaTenia)
+
 export const sinArticulo = (b: Borrador, articuloId: string): Borrador => ({ ...b, items: b.items.filter((i) => i.articuloId !== articuloId) })

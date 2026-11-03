@@ -4,13 +4,14 @@ import { esQrOUrl, lecturaError, lecturaOk, useLector, useOnline, useRuntime } f
 import { esPedidoEditable } from "@gm/vendedor"
 import { numero, parseMonto } from "@gm/formato"
 import { SEGS, SEG_LABEL, type Articulo, type BonifSeg, type CondPedido, type OpPedido, COND_VACIA } from "../../datasets"
-import { nuevoBorrador, type Borrador } from "../../datos/borradores"
+import { aSumarConMinimo, minimoDe, nuevoBorrador, type Borrador } from "../../datos/borradores"
 import { buscarPorCodigo, eansDe, matchExacto } from "../../datos/busqueda"
 import { useCatalogosFicha, useEncolar, usePedidos, useViajes } from "../../datos/hooks"
 import { formatCurrency, useFotoZoom, useToast, ZoomFoto } from "../../ui"
 import { ProveedorPedido, usePedidoEnCurso, useVer } from "./contexto"
-import { clienteListasDe, fichaListasDe, haySegsPedido, metodoLabel, segsDesdeServidor, segsParaServidor, useSegmentosCliente } from "../../datos/segmentos"
+import { haySegsPedido, segsDesdeServidor, segsParaServidor } from "../../datos/segmentos"
 import { CuadroSegmentos } from "../segmentos-ui"
+import { HojaListaPedido } from "./ListaMetodoPedido"
 import { PanelProspecto } from "./VentaNueva"
 import { TIPOS_DESC, useCondicionesFicha } from "../../datos/condiciones"
 import { CondicionesProvMarca } from "./CondicionesProvMarca"
@@ -71,7 +72,7 @@ function Contenido() {
       {toast}
 
       {/* Barra del carrito (igual que la web: visible en todo el catálogo mientras haya ítems) */}
-      {p.lineas.length > 0 && !enCarrito && !articulo && ver !== "cliente" && (
+      {p.lineas.length > 0 && !enCarrito && !articulo && ver !== "cliente" && ver !== "lista-pedido" && (
         <div className="fixed inset-x-0 bottom-0 z-20 p-3">
           <button onClick={() => navigate(`/pedido/nuevo/${p.clienteId}/carrito`)} className="mx-auto flex w-full max-w-2xl items-center justify-between rounded-2xl bg-emerald-700 px-5 py-4 text-white shadow-lg">
             <span className="font-bold">🛒 {p.totalItems} ítems</span>
@@ -83,6 +84,7 @@ function Contenido() {
 
       {articulo && <HojaArticulo a={articulo} onCerrar={cerrar} onZoom={() => foto.abrir(articulo.imagen_url)} onAgregado={() => mostrar("Agregado al pedido")} />}
       {ver === "cliente" && <PanelCliente onCerrar={cerrar} />}
+      {ver === "lista-pedido" && <HojaListaPedido onCerrar={cerrar} />}
       {ver === "buscar-foto" && <BuscarPorFoto onCerrar={cerrar} onElegir={(a) => abrir(`articulo:${a.id}`, { replace: true })} />}
       {foto.src && <ZoomFoto src={foto.src} onCerrar={foto.cerrar} />}
     </>
@@ -175,6 +177,10 @@ function HojaArticulo({ a, onCerrar, onZoom, onAgregado }: { a: Articulo; onCerr
   if ((a.cantidad_fraccion || 0) > 1) modos.push({ key: "fraccion", label: `${labelFraccion()} ×${a.cantidad_fraccion}` })
   if ((a.unidades_por_bulto || 0) > 1) modos.push({ key: "bulto", label: `Bulto ×${a.unidades_por_bulto}` })
 
+  // Fracción = cantidad mínima (03/11/2026): lo que se va a cargar de verdad
+  const minimo = minimoDe(a)
+  const yaTenia = p.enCarrito(a.id) ?? 0
+  const aCargar = unidades > 0 ? aSumarConMinimo(yaTenia, unidades, minimo) : 0
   const agregar = () => {
     if (!precio || unidades <= 0) return
     if (p.agregar(a, unidades)) { onAgregado(); onCerrar() }
@@ -248,7 +254,12 @@ function HojaArticulo({ a, onCerrar, onZoom, onAgregado }: { a: Articulo; onCerr
         </div>
 
         {modo !== "unidad" && unidades > 0 && <p className="-mt-2 text-center text-sm text-gray-500">= <span className="font-bold text-gray-800">{unidades}</span> unidades</p>}
-        {precio && unidades > 0 && <p className="text-center text-gray-500">Subtotal: <span className="font-bold text-gray-900">{formatCurrency(precio.precio * unidades)}</span></p>}
+        {minimo > 1 && (
+          <p className={`-mt-2 text-center text-sm ${aCargar > unidades ? "font-bold text-amber-700" : "text-gray-500"}`}>
+            {aCargar > unidades ? `Mínimo ${minimo} u: se cargan ${aCargar} u` : `Mínimo ${minimo} u por pedido`}
+          </p>
+        )}
+        {precio && unidades > 0 && <p className="text-center text-gray-500">Subtotal: <span className="font-bold text-gray-900">{formatCurrency(precio.precio * aCargar)}</span></p>}
         {p.enCarrito(a.id) ? <p className="text-center text-sm font-medium text-emerald-700">Ya tenés {p.enCarrito(a.id)} u en el pedido: lo que agregues se suma.</p> : null}
 
         <button onClick={agregar} disabled={!precio || precio.precio <= 0 || unidades <= 0} className="w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold text-white disabled:bg-gray-300">
@@ -299,12 +310,7 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
   const cond = p.cond
   const bonifCliente = cliente?.bonificaciones ?? null
 
-  // "" = como la ficha (por segmento). Antes arrancaba en el método GENERAL de la ficha y,
-  // si el vendedor elegía ese mismo, no quedaba como "solo este pedido" aunque la ficha
-  // por segmento dijera otra cosa (caso Freije 09/10: eligió Factura y limpieza y
-  // perfumería 0 salieron en presupuesto).
-  const [metodoSel, setMetodoSel] = useState(cond.metodo || "")
-  const [listaSel, setListaSel] = useState(cond.lista || "")
+  const { abrir } = useVer()
   // Ficha comercial (réplica de precios): general/viajante/mercadería/contado y las condiciones
   // por proveedor/marca. Mercadería y viajante, si la réplica es vieja, salen de la cartera.
   const fichaCond = useCondicionesFicha(cliente?.id)
@@ -329,23 +335,10 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
   const esNuevo = !p.borrador?.pedidoId
   const [condProvSel, setCondProvSel] = useState<CondicionProveedor[] | null>(cond.condProv ?? null)
   const [condMarcaSel, setCondMarcaSel] = useState<CondicionMarca[] | null>(cond.condMarca ?? null)
-  const fichaLocal = useMemo(
-    () => (cliente?.sinEnviar ? clienteListasDe(fichaListasDe(cliente as unknown as Record<string, unknown>)) : null),
-    [cliente],
-  )
   const puedeLista = !!catFicha?.puede_cambiar_lista
-  // Ficha POR SEGMENTO (lo que se usa si no se elige nada para el pedido)
-  const segFicha = useSegmentosCliente(cliente?.id, {}, fichaLocal)
-  const todosLosSegmentos = (pred: (f: NonNullable<typeof segFicha>["filas"][number]) => boolean) => !!segFicha && segFicha.filas.every(pred)
-  // Lo elegido queda "solo este pedido" salvo que los TRES segmentos ya vayan así por la ficha
-  const metodoOv = metodoSel && !todosLosSegmentos((f) => metodoLabel(f.metodo) === metodoLabel(metodoSel)) ? metodoSel : ""
-  const listaOv = puedeLista ? (listaSel && !todosLosSegmentos((f) => f.listaId === listaSel) ? listaSel : "") : cond.lista
-  // Vista previa: cómo se va a facturar cada segmento con lo elegido
-  const preview = useSegmentosCliente(cliente?.id, { metodo_facturacion_pedido: metodoOv || null, lista_precio_pedido_id: listaOv || null }, fichaLocal)
+  // Lista y facturación de ESTE pedido (general o por segmento) se eligen en su hoja propia
+  // (ListaMetodoPedido.tsx, 03/11/2026): acá se ven y se abren; la ficha se cambia en la ficha.
   if (!cliente) return null
-
-  // Lista impuesta por el viajante del cliente: no se guarda en ficha; sí se puede pisar "solo este pedido" con permiso
-  const listaImpuesta = catFicha?.vendedores.find((v) => v.id === cliente.vendedor_id)?.lista_nombre || null
   const parsePct = (s: string | undefined) => {
     const t = (s ?? "").trim()
     if (t === "") return 0
@@ -364,8 +357,6 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
   const fichaViaj = fmtSeg(bonifCliente?.viajante)
   const fichaMerc = fmtSeg(bonifCliente?.mercaderia)
   // Lo que coincide con la ficha NO se guarda como override (queda "hereda de la ficha")
-  const fichaMetodo = cliente.metodo_facturacion || ""
-  const fichaLista = cliente.lista_precio_id || ""
   // Igual que el ERP (condicionesParaPedido): si nada cambió respecto de la ficha no viaja nada;
   // si cambió, viajan los cuatro tipos completos (con los 0 explícitos)
   const bonifIgualFicha = (["general", "viajante", "mercaderia", "contado"] as const).every((t) => SEGS.every((s) => (bonifParsed[t][s] ?? 0) === (fichaBonif[t]?.[s] ?? 0)))
@@ -374,14 +365,13 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
   // El checkbox de contado del carrito (V1) no se toca desde acá: se conserva
   const ctdoTodo = typeof cond.bonif?.contado_todo === "boolean" ? cond.bonif.contado_todo : undefined
   const nuevaCond: CondPedido = {
-    metodo: metodoOv,
-    lista: listaOv,
+    metodo: cond.metodo,
+    lista: cond.lista,
     bonif: ctdoTodo === undefined ? (bonifIgualFicha ? null : bonifParsed) : { ...(bonifIgualFicha ? {} : bonifParsed), contado_todo: ctdoTodo },
     ...(esNuevo && !provIgualFicha ? { condProv: condProvSel } : {}),
     ...(esNuevo && !marcaIgualFicha ? { condMarca: condMarcaSel } : {}),
     ...(cond.mercaderia ? { mercaderia: cond.mercaderia } : {}),
-    // Cambiar lo general acá deja sin efecto lo elegido por segmento en "Confirmar pedido"
-    ...(cond.segs !== undefined ? { segs: haySegsPedido(cond.segs) && (metodoOv !== cond.metodo || listaOv !== cond.lista) ? {} : cond.segs } : {}),
+    ...(cond.segs !== undefined ? { segs: cond.segs } : {}),
   }
   const hayCambios = JSON.stringify(nuevaCond) !== JSON.stringify({ ...cond, bonif: bonifVacia(cond.bonif) && ctdoTodo === undefined ? null : cond.bonif })
   const hayOverride = !!cond.metodo || !!cond.lista || haySegsPedido(cond.segs) || !bonifVacia(cond.bonif) || !!cond.condProv || !!cond.condMarca
@@ -393,10 +383,7 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
   // condiciones del pedido. Ver MOBILE.md → Vendedor → "Guardar en la ficha".
   const guardarEnFicha = async () => {
     if (!bonifValida) return
-    const cambios: Record<string, { antes: unknown; despues: unknown }> = {}
-    if (metodoSel && metodoSel !== fichaMetodo) cambios.metodo_facturacion = { antes: cliente.metodo_facturacion ?? null, despues: metodoSel }
-    if (puedeLista && !listaImpuesta && listaSel && listaSel !== fichaLista) cambios.lista_precio_id = { antes: cliente.lista_precio_id ?? null, despues: listaSel || null }
-    if (Object.keys(cambios).length) await encolar("cliente.editar", { cliente_id: cliente.id, cambios }, `Ficha de ${cliente.nombre}`)
+    // Lista y facturación de la ficha se cambian desde la ficha (regla de Juan 03/11/2026)
     if ((["viajante", "mercaderia"] as const).some((t) => SEGS.some((s) => (bonifParsed[t][s] ?? 0) !== (fichaBonif[t]?.[s] ?? 0)))) {
       const body: { viajante: BonifSeg; mercaderia: BonifSeg } = { viajante: {}, mercaderia: {} }
       for (const tipo of ["viajante", "mercaderia"] as const) for (const s of SEGS) body[tipo][s] = bonifParsed[tipo][s] ?? 0
@@ -422,38 +409,11 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
         </div>
 
         <div className="-mx-1 max-h-[56dvh] space-y-3 overflow-y-auto px-1">
-          <div className="space-y-3 rounded-xl bg-gray-50 p-4">
-            <div>
-              <p className="text-sm font-bold text-gray-700">Método de facturación</p>
-              <p className="text-xs text-gray-400">Elegido acá vale para TODO el pedido (los tres segmentos).</p>
-            </div>
-            <select value={metodoSel} onChange={(e) => setMetodoSel(e.target.value)} className={selCls}>
-              <option value="">Como la ficha (por segmento)</option>
-              <option value="Factura">Factura</option>
-              <option value="Final">Final (Mixto)</option>
-              <option value="Presupuesto">Presupuesto</option>
-            </select>
-          </div>
-
-          <div className="space-y-3 rounded-xl bg-gray-50 p-4">
-            <div>
-              <p className="text-sm font-bold text-gray-700">Lista de precios</p>
-              <p className="text-xs text-gray-400">Elegida acá vale para TODO el pedido (los tres segmentos).</p>
-            </div>
-            {puedeLista ? (
-              <>
-                <select value={listaSel} onChange={(e) => setListaSel(e.target.value)} className={selCls}>
-                  <option value="">Como la ficha (por segmento)</option>
-                  {(catFicha?.listas_precio || []).map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-                </select>
-                {listaImpuesta && <p className="text-xs text-gray-400">La ficha lleva lista <b>{listaImpuesta}</b> por el viajante asignado; para cambiarla de forma permanente, reasigná el viajante desde la ficha.</p>}
-              </>
-            ) : (
-              <p className="text-xs text-gray-400">No tenés permiso para cambiar la lista de precios.</p>
-            )}
-          </div>
-
-          {preview && <CuadroSegmentos resumen={preview} titulo="Así se factura este pedido" />}
+          {p.segmentos && <CuadroSegmentos resumen={p.segmentos} titulo="Cómo se factura este pedido" />}
+          <button onClick={() => abrir("lista-pedido", { replace: true })} className="min-h-11 w-full rounded-xl border border-emerald-600 bg-white px-3 text-sm font-bold text-emerald-700">
+            ✏️ Lista y facturación solo este pedido
+          </button>
+          <p className="-mt-1 text-[11px] text-gray-400">General o por segmento. Para que quede para los próximos pedidos, cambialo en la ficha del cliente.</p>
 
           <div className="space-y-3 rounded-xl bg-gray-50 p-4">
             <div>
@@ -522,10 +482,7 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
           <div className="sticky bottom-0 space-y-2 border-t border-gray-100 bg-white pb-1 pt-2">
             {!bonifValida && <p className="text-xs font-medium text-red-600">Revisá los porcentajes: hay un valor inválido.</p>}
             <button onClick={() => { if (!bonifValida || !hayCambios) return; p.setCond(nuevaCond); onCerrar() }} disabled={!bonifValida || !hayCambios} className="w-full rounded-xl bg-emerald-600 py-3.5 text-base font-bold text-white disabled:opacity-40">✅ Aplicar a este pedido</button>
-            <p className="text-center text-[11px] text-gray-400">Guarda método, lista y descuentos juntos y recalcula al instante todos los precios (de ahí sale la factura). Lo que coincide con la ficha no queda como "solo este pedido".</p>
-            {segFicha && !segFicha.uniforme && (
-              <p className="text-center text-[11px] text-gray-500">"Guardar en la ficha" cambia el método y la lista GENERALES; lo que la ficha tiene por segmento lo cambia la oficina desde el ERP.</p>
-            )}
+            <p className="text-center text-[11px] text-gray-400">Guarda los descuentos solo para este pedido y recalcula al instante todos los precios. "Guardar en la ficha" deja viajante y mercadería para los próximos pedidos.</p>
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => void guardarEnFicha()} disabled={!bonifValida} className="rounded-xl bg-gray-900 py-3 text-sm font-bold text-white disabled:opacity-40">Guardar en la ficha del cliente</button>
               <button onClick={() => { p.setCond(COND_VACIA); onCerrar() }} disabled={!hayOverride} className="rounded-xl border border-gray-300 bg-white py-3 text-sm font-bold text-gray-700 disabled:opacity-40">↩ Volver a lo del cliente</button>
