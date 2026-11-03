@@ -14,7 +14,6 @@ import { POST as clientesPOST } from "@/app/api/vendedor/clientes/route"
 import { errorCuit } from "@/lib/formato"
 import { PATCH as clientePATCH } from "@/app/api/vendedor/cliente/[id]/route"
 import { PUT as bonificacionesPUT } from "@/app/api/vendedor/cliente/[id]/bonificaciones/route"
-import { POST as viajesPOST } from "@/app/api/vendedor/viajes/route"
 import { PATCH as viajePATCH } from "@/app/api/vendedor/viajes/[id]/route"
 import { POST as cobroPOST } from "@/app/api/viajante/cobro/route"
 import { DELETE as cobroDELETE } from "@/app/api/viajante/cobro/[id]/route"
@@ -44,6 +43,7 @@ import { esUuid } from "../uuid"
 import { fechaISO } from "@/lib/formato"
 import { subirFotosPendientes } from "@/lib/cobranzas/fotos"
 import { ErrorRetiro, registrarRetiro } from "@/lib/cuenta-corriente/retiro"
+import { asignarPedidoAlViaje } from "@/lib/vendedor/viajes-reparto"
 import { llamarRuta } from "./rutas"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
 
@@ -157,6 +157,8 @@ interface PayloadPedido {
    * la web tampoco confirma ahí). Default true = "Confirmar pedido" / "Guardar cambios".
    */
   confirmar?: boolean
+  /** Viaje del calendario desde el que se levantó (03/11/2026): el pedido se sube a ese viaje */
+  viaje_id?: string | null
 }
 
 function validarPedido(p: PayloadPedido): string | null {
@@ -371,8 +373,18 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
    }
   })
 
+  // Levantado desde un viaje del calendario: queda en ese viaje. Si ya no se puede (salió,
+  // está en otro), el pedido queda suelto (la oficina lo asigna) y se avisa el motivo.
+  let viaje: { asignado: boolean; motivo?: string } | undefined
+  if (esUuid(p.viaje_id)) {
+    // ctx.admin: lectura del viaje y alta de viaje_id con los filtros de asignarPedidoAlViaje
+    const r = await asignarPedidoAlViaje(ctx.supabase, ctx.admin, sesion.vendedorIds, pedidoId!, p.viaje_id!)
+    viaje = r.ok ? { asignado: true } : { asignado: false, motivo: r.motivo }
+  }
+
   return {
     pedido_id: pedidoId,
+    ...(viaje ? { viaje } : {}),
     numero_pedido: resultado.numero_pedido,
     total: resultado.total,
     creado,
@@ -382,6 +394,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
     replica: await parches(
       () => parchePedido(ctx, pedidoId!),
       () => parcheCliente(ctx, p.cliente_id),
+      ...(viaje?.asignado ? [() => parcheViaje(ctx, p.viaje_id!)] : []),
     ),
   }
 }
@@ -546,8 +559,8 @@ const devolucionRegistrar: HandlerDef<Record<string, any>> = {
 
 async function parcheViaje(ctx: CtxOutbox, id: string): Promise<ParcheReplica> {
   const fila = await cargarViajeVendedor(ctx, id)
-  const viaje = (fila as any)?.viaje
-  const resumen = viaje && { id, nombre: viaje.nombre, estado: viaje.estado, fecha_inicio: viaje.fecha_inicio, fecha_fin_estimada: viaje.fecha_fin_estimada, zonas: viaje.zonas }
+  // El detalle del calendario trae el resumen del viaje en `viaje` (lib/vendedor/viajes-reparto.ts)
+  const resumen = (fila as any)?.viaje
   return { dataset: "vendedor_viajes", upserts: fila ? [{ ...fila, resumen }] : [], deletes: fila ? [] : [id] }
 }
 
@@ -557,7 +570,9 @@ const viajeCrear: HandlerDef<Record<string, any>> = {
   validar: (p) => (esUuid(p?.id) && p?.fecha_inicio && Array.isArray(p?.zona_ids) && p.zona_ids.length ? null : "Viaje incompleto"),
   async aplicar(ctx, m) {
     const { data: previo } = await ctx.admin.from("viajes").select("id").eq("id", m.payload.id).maybeSingle()
-    if (!previo) await llamarRuta(viajesPOST, ctx, { ruta: "/api/vendedor/viajes", method: "POST", body: m.payload })
+    // 03/11/2026: los viajes los programa la oficina (calendario). Una APK vieja que todavía
+    // crea un "levantamiento" recibe un rechazo claro; uno ya creado antes se completa igual.
+    if (!previo) throw new RechazoNegocio("Los viajes los programa la oficina: actualizá la app y cargá los pedidos desde el viaje del calendario.", "VIAJES_LOS_PROGRAMA_OFICINA")
     else {
       // Alta cortada entre el viaje y sus zonas: completar (viaje_zonas no es transaccional en la web)
       const { data: vz } = await ctx.admin.from("viaje_zonas").select("zona_id").eq("viaje_id", m.payload.id)

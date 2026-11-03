@@ -15,7 +15,7 @@ import { ClienteNuevo } from "./pantallas/clientes/ClienteNuevo"
 import { ClienteFicha } from "./pantallas/clientes/ClienteFicha"
 import { Cobrar } from "./pantallas/clientes/Cobrar"
 import { Devolucion, DevolucionCatalogo } from "./pantallas/clientes/Devolucion"
-import { ViajeDetalle, ViajeNuevo, Viajes } from "./pantallas/viajes/Viajes"
+import { ViajeDetalle, Viajes } from "./pantallas/viajes/Viajes"
 
 // Convención (MOBILE.md §8): cada pantalla que el vendedor percibe como pantalla es una
 // RUTA (entrada de historial). En la web /vendedor muchas eran vistas por useState +
@@ -72,6 +72,7 @@ export const rutas: RouteObject[] = [
   { path: "/clientes/:id/devolucion/catalogo", element: <DevolucionCatalogo /> },
 
   { path: "/viajes", element: <Viajes /> },
-  { path: "/viajes/nuevo", element: <ViajeNuevo /> },
+  // Los viajes los programa la oficina (03/11/2026): ya no se crean desde la app
+  { path: "/viajes/nuevo", loader: () => redirect("/viajes") },
   { path: "/viajes/:id", element: <ViajeDetalle /> },
 ]

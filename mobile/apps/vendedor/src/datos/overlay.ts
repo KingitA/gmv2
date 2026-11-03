@@ -6,7 +6,7 @@
 import type { ItemOutbox } from "@gm/core"
 import { redondear } from "@gm/formato"
 import type {
-  Cliente, ClienteViaje, CuentaCliente, OpBonificaciones, OpClienteEditar, OpCobroAnular, OpPedido, OpViajeEstado, OpViajeNoVa,
+  Cliente, ClienteViaje, CuentaCliente, OpBonificaciones, OpClienteEditar, OpCobroAnular, OpPedido, PedidoDelViaje,
   PedidoVendedor, ViajeVendedor,
 } from "../datasets"
 
@@ -220,34 +220,24 @@ export function cuentaVacia(c: Cliente): CuentaCliente {
 
 // ─── Viajes ──────────────────────────────────────────────────────────────────
 
+/**
+ * Pedidos levantados acá para un viaje del calendario y todavía sin enviar: ya se ven en el
+ * viaje (en su cliente) y suman a "mis pedidos" del resumen.
+ */
 export function viajesVisibles(filas: ViajeVendedor[], ops: ItemOutbox[]): ViajeVendedor[] {
-  const ids = new Set(filas.map((v) => v.id))
-  const estados = new Map(de<OpViajeEstado>(vivas(ops), "viaje.estado").map((x) => [x.p.viaje_id, x.p.estado]))
-  const noVa = de<OpViajeNoVa>(vivas(ops), "viaje.cliente_no_va")
-  // Pedidos tomados acá sin enviar: el cliente ya cuenta como "pedido levantado"
-  const levantados = new Map(de<OpPedido>(vivas(ops), "pedido.crear").map((x) => [x.p.cliente_id, x.p]))
-
-  const out = filas.map((v): ViajeVendedor => {
-    const estado = estados.get(v.id)
-    const resumen = estado ? { ...v.resumen, estado } : v.resumen
-    const marcas = new Map(noVa.filter((x) => x.p.viaje_id === v.id).map((x) => [x.p.cliente_id, x.p.no_va]))
+  const locales = de<OpPedido>(vivas(ops), "pedido.crear").filter((x) => !!x.p.viaje_id)
+  if (!locales.length) return filas
+  return filas.map((v): ViajeVendedor => {
+    const mios = locales.filter((x) => x.p.viaje_id === v.id)
+    if (!mios.length) return v
+    const nuevo = (x: (typeof mios)[number]): PedidoDelViaje => ({ id: `local:${x.p.local_id}`, numero_pedido: null, estado: "pendiente", total: x.p.vista?.total ?? 0, cliente_id: x.p.cliente_id, sinEnviar: true })
+    const total = mios.reduce((s, x) => s + (x.p.vista?.total ?? 0), 0)
+    const resumen = { ...v.resumen, mis_pedidos: v.resumen.mis_pedidos + mios.length, mis_total: r2(v.resumen.mis_total + total) }
     const clientes = v.clientes?.map((c): ClienteViaje => {
-      const local = levantados.get(c.id)
-      const pedido = c.pedido ?? (local && resumen.estado === "en_curso" ? { id: `local:${local.local_id}`, numero_pedido: null, total: local.vista.total, estado: "pendiente" } : null)
-      const va = marcas.has(c.id) ? !marcas.get(c.id) : c.estado_viaje !== "no_va"
-      // Misma regla que el servidor: "no va" gana aunque haya pedido
-      return { ...c, pedido, estado_viaje: !va ? "no_va" : pedido ? "pedido_levantado" : "pendiente" }
+      const suyos = mios.filter((x) => x.p.cliente_id === c.id)
+      return suyos.length ? { ...c, pedidos: [...c.pedidos, ...suyos.map(nuevo)] } : c
     })
-    return { ...v, resumen, viaje: v.viaje && estado ? { ...v.viaje, estado } : v.viaje, clientes }
+    const totales = v.totales && { ...v.totales, pedidos: v.totales.pedidos + mios.length, total: r2(v.totales.total + total) }
+    return { ...v, resumen, ...(v.viaje ? { viaje: { ...v.viaje, mis_pedidos: resumen.mis_pedidos, mis_total: resumen.mis_total } } : {}), clientes, totales }
   })
-  for (const { p } of de<any>(vivas(ops), "viaje.crear")) {
-    if (ids.has(p.id)) continue
-    const zonas = (p.vista?.zonas || []) as Array<{ id: string; nombre: string }>
-    out.unshift({
-      id: p.id,
-      sinEnviar: true,
-      resumen: { id: p.id, nombre: p.nombre || p.vista?.nombre || "Viaje nuevo", estado: estados.get(p.id) || "en_curso", fecha_inicio: p.fecha_inicio, fecha_fin_estimada: p.fecha_fin_estimada || null, zonas },
-    })
-  }
-  return out
 }

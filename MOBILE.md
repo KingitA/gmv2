@@ -1568,6 +1568,15 @@ Detalle y archivos en `docs/PENDIENTES-APPS-SALIDA.md` ("Hecho por la App Vended
 - **Saldo que se muestra (P2-42):** `saldoVisible(real, proyectado)`: con deuda real nunca se ve "a favor" (el 10 % en camino no es plata a favor).
 - **Core:** teclado (`ui/teclado.ts`, lo instala `montarApp`), `CampoMonto` (miles al escribir) y freno de la sincronización (P2-49, `sync/freno.ts`: respeta el 503 "esperá X s", re-sincroniza 60-90 s después de que se calman los cambios y espacia los reintentos tras fallos, tope 10 min; afecta a "Cuándo sincroniza" de §4). Detalle en `docs/PENDIENTES-APPS-SALIDA.md`, "Core para las 3 apps".
 
+### Mis Viajes = calendario de reparto de la oficina (03/11/2026)
+
+Decisión de Juan: **el vendedor ya no crea viajes** ("levantamiento"). La oficina arma el calendario del mes en `/viajes/planificar` (viajes `reparto`: fecha + días + zonas; chofer después) y el vendedor:
+- ve en un **calendario mensual** los viajes que tocan zonas donde tiene clientes (de 3 meses atrás a fin del mes que viene), con el **chofer** si ya está asignado;
+- entra al viaje: sus pedidos cargados ahí y los clientes de la zona con "🛒 Pedido". El pedido levantado desde el viaje sale con `viaje_id` (`pedido.crear` → `asignarPedidoAlViaje`: solo si el viaje sigue `programado` y el pedido no está en otro; si no, queda suelto y lo asigna la oficina). El carrito avisa "Va en el viaje …" y deja sacarlo;
+- cuando el viaje sale, ve cómo fue cada parada de SUS clientes (entregado / no entregado con motivo, cobrado, comprobantes en PDF), con la hoja de ruta del ERP (`armarHojaRuta`) recortada a sus clientes.
+
+Servidor: `lib/vendedor/viajes-reparto.ts` (`listarViajesVendedor`, `detalleViajeVendedor`, `asignarPedidoAlViaje`), rutas `/api/vendedor/viajes` y `/api/vendedor/viajes/[id]` (lecturas de viajes con el cliente admin y filtros explícitos). `POST /api/vendedor/viajes` y el outbox `viaje.crear` rechazan ("Los viajes los programa la oficina"). Réplica `vendedor_viajes`: detalle de todo lo programado de hoy a fin del mes que viene y de lo que está en la calle; el historial se baja al abrirlo. App: `pantallas/viajes/Viajes.tsx`, `datos/calendario.ts`; el inicio muestra los próximos 3 viajes.
+
 ### Resultados de las pruebas (21/09/2026)
 Mock del ERP (`mobile/scripts/mock-vendedor.mjs`, idempotencia real) con el **catálogo real** de
 solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos escritos en producción.

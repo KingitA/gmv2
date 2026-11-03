@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router"
 import { useContadoresOutbox, useOverlay, useParamEstado, useRuntime } from "@gm/core"
 import { ListaVirtual } from "@gm/core/ui"
 import { localMatch } from "@gm/vendedor"
-import { redondear } from "@gm/formato"
+import { fecha, redondear } from "@gm/formato"
 import { DS, type Articulo, type CatalogoRubro, type OpPedido } from "../../datasets"
 import { buscarCatalogo, filtrarLocal, vistaHabituales, vistaNovedades, vistaOfertas } from "../../datos/busqueda"
 import { useCatalogosFicha, useClientes, useCuenta, useEncolar, useProveedores, useTaxonomia } from "../../datos/hooks"
@@ -430,6 +430,8 @@ export function armarPedido(p: ReturnType<typeof usePedidoEnCurso>, rt: ReturnTy
     })),
     cond: condParaServidor(p.cond),
     observaciones: b.obs.trim() || null,
+    // Levantado desde un viaje del calendario: el servidor lo sube a ese viaje (solo pedidos nuevos)
+    ...(!b.pedidoId && b.viaje ? { viaje_id: b.viaje.id } : {}),
     // Vigencia de los precios que el vendedor tuvo a la vista (MOBILE.md → Vendedor → precios)
     precios_al: preciosAl(rt),
     vista: { cliente_nombre: cliente.nombre, total: Math.round(p.total * 100) / 100, numero_pedido: b.numeroPedido, estado: b.estadoPedido },
@@ -554,6 +556,18 @@ export function Carrito() {
             </div>
           </div>
         ))}
+
+        {/* Levantado desde un viaje del calendario (03/11/2026): sale con ese viaje */}
+        {p.borrador?.viaje && !p.borrador.pedidoId && (
+          <div className="flex items-center gap-3 rounded-xl border border-azul-200 bg-azul-50 px-4 py-3">
+            <span className="text-xl">🚚</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-azul-900">Va en el viaje {p.borrador.viaje.nombre}</p>
+              <p className="text-xs text-azul-700">Sale el {fecha(p.borrador.viaje.fecha)}. Si lo sacás, queda sin viaje y lo asigna la oficina.</p>
+            </div>
+            <button onClick={() => p.setViaje(null)} className="min-h-11 shrink-0 rounded-lg border border-azul-300 bg-white px-3 text-xs font-bold text-azul-800">Sacar</button>
+          </div>
+        )}
 
         {p.lineas.length > 0 && (
           <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">

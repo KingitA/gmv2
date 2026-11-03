@@ -463,7 +463,7 @@ export const ESTADO_BADGE: Record<string, string> = {
   sistema_viejo: "bg-neutro-100 text-neutro-700",
 }
 const ESTADO_TEXTO: Record<string, string> = { en_revision: "EN REVISIÓN", en_venta: "EN VENTA", pendiente: "PENDIENTE", impreso: "IMPRESO", en_preparacion: "EN PREPARACIÓN", en_viaje: "EN VIAJE", sistema_viejo: "SISTEMA VIEJO" }
-export const estadoTexto = (e: string) => ESTADO_TEXTO[e] || e.toUpperCase()
+export const estadoTexto = (e: string) => ESTADO_TEXTO[e] || e.replace(/_/g, " ").toUpperCase()
 export function BadgeEstado({ estado }: { estado: string }) {
   return (
     <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold ${ESTADO_BADGE[estado] || "bg-gray-100 text-gray-700"}`}>

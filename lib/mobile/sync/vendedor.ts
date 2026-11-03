@@ -403,9 +403,11 @@ const viajes: DatasetDef = {
   async cargar(ctx) {
     const lista = await llamarGET(viajesGET, ctx)
     const resumen: any[] = lista.viajes || []
-    // Detalle (clientes de la zona + pedido levantado) de los viajes en curso y los
-    // últimos cerrados; del resto queda el resumen del listado.
-    const conDetalle = [...resumen.filter((v) => v.estado === "en_curso"), ...resumen.filter((v) => v.estado !== "en_curso").slice(0, 5)]
+    // Calendario de reparto (03/11/2026, Juan): detalle (clientes de la zona, pedidos,
+    // paradas) de todo lo programado de hoy a fin del mes que viene y de lo que está en la
+    // calle; el historial (3 meses) se baja al abrirlo con señal (porIds).
+    const hoy = hoyISO()
+    const conDetalle = resumen.filter((v) => ["despachado", "en_curso", "en_rendicion"].includes(v.estado) || (v.estado === "programado" && v.fecha_fin >= hoy))
     const detalles = await enParalelo(conDetalle, 4, (v) => cargarViajeVendedor(ctx, v.id))
     const porId = new Map(detalles.filter(Boolean).map((d) => [d!.id, d!]))
     return resumen.map((v) => ({ id: v.id, resumen: v, ...(porId.get(v.id) || {}) }))

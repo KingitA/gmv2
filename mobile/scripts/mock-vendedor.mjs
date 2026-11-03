@@ -30,6 +30,7 @@ const AQUI = dirname(fileURLToPath(import.meta.url))
 const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`
 const r2 = (n) => Math.round(n * 100) / 100
 const hoy = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+const masDias = (iso, n) => { const [a, m, d] = iso.split("-").map(Number); return new Date(Date.UTC(a, m - 1, d + n)).toISOString().slice(0, 10) } // formato-ok: mock
 class Rechazo extends Error {}
 
 function fixtureSintetico() {
@@ -78,7 +79,22 @@ function reset() {
     comprados: f.articulos.slice(k * 3, k * 3 + 8).map((a) => ({ articulo_id: a.id, sku: a.sku, ean13: a.ean13, descripcion: a.descripcion, imagen_url: a.imagen_url, unidades_por_bulto: a.unidades_por_bulto, ultimo_precio: 1500, ultima_fecha: "2026-08-20", comprobante_venta_id: uid(40000 + k), numero_comprobante: `0001-${String(1000 + k).padStart(8, "0")}`, tipo_comprobante: "FA", cantidad_total: 12 })),
     habituales: f.articulos.slice(k * 5, k * 5 + 12).map((a, j) => ({ articulo_id: a.id, veces_pedido: 12 - j, cantidad_habitual: 6 })),
   }]))
-  S = { seq: 1, f, clientes, cc, pedidos: [], numero: 1600, viajes: [], claves: new Map(), red: true, log: [], alertas: [], retiros: [] }
+  const zona = { id: uid(300), nombre: "NECOCHEA" }
+  const cids = clientes.slice(0, 12).map((c) => c.id)
+  const h = hoy()
+  const viajes = [
+    { id: uid(901), nombre: "NECOCHEA (anterior)", estado: "completado", fecha: masDias(h, -14), dias: 1, zonas: [zona], choferes: ["Juan Cruz"], cliente_ids: cids, paradas: {} },
+    { id: uid(902), nombre: "NECOCHEA", estado: "programado", fecha: masDias(h, 2), dias: 1, zonas: [zona], choferes: [], cliente_ids: cids },
+    { id: uid(903), nombre: "NECOCHEA + QUEQUÉN", estado: "programado", fecha: masDias(h, 9), dias: 2, zonas: [zona, { id: uid(301), nombre: "QUEQUÉN" }], choferes: ["Pedro Gómez"], cliente_ids: cids },
+    { id: uid(904), nombre: "NECOCHEA", estado: "programado", fecha: masDias(h, 33), dias: 1, zonas: [zona], choferes: [], cliente_ids: cids },
+  ]
+  S = { seq: 1, f, clientes, cc, pedidos: [], numero: 1600, viajes, claves: new Map(), red: true, log: [], alertas: [], retiros: [] }
+  // El viaje terminado: un pedido entregado y cobrado, uno no entregado
+  const [c1, c2] = clientes
+  S.pedidos.push({ id: uid(911), local_id: "x1", numero_pedido: "001590", cliente_id: c1.id, fecha: viajes[0].fecha, estado: "entregado", total: 152000, viaje_id: viajes[0].id, detalle: [], creaciones: 1, created_at: viajes[0].fecha })
+  S.pedidos.push({ id: uid(912), local_id: "x2", numero_pedido: "001591", cliente_id: c2.id, fecha: viajes[0].fecha, estado: "listo_para_enviar", total: 48500, viaje_id: viajes[0].id, detalle: [], creaciones: 1, created_at: viajes[0].fecha })
+  viajes[0].paradas[c1.id] = { estado: "entregado", motivo_no_entrega: null, motivo_no_cobro: null, cobrado: 152000, comprobantes: [{ id: uid(921), tipo: "PRES", numero: "0001-00000040", total: 152000, saldo: 0 }] }
+  viajes[0].paradas[c2.id] = { estado: "no_entregado", motivo_no_entrega: "Cerrado", motivo_no_cobro: "No estaba", cobrado: 0, comprobantes: [] }
 }
 reset()
 
@@ -124,14 +140,23 @@ function filaPedido(p) {
     descuentos: { segmentos: ["limpieza_bazar", "perf0", "perf_plus"].map(seg), condiciones: [], solo_este_pedido: !!p.bonif_pedido },
   }
 }
+// Calendario de reparto de la oficina (03/11/2026) = lib/vendedor/viajes-reparto.ts
 const filaViaje = (v) => {
-  const clientes = S.clientes.filter((c) => v.cliente_ids.includes(c.id)).map((c) => {
-    const ped = S.pedidos.filter((p) => p.cliente_id === c.id && p.estado !== "eliminado" && p.fecha >= v.fecha_inicio).at(-1)
-    const noVa = v.no_va.has(c.id)
-    return { id: c.id, nombre: c.nombre, localidad: c.localidad, telefono: c.telefono, saldo_actual: c.saldo_actual, estado_viaje: noVa ? "no_va" : ped ? "pedido_levantado" : "pendiente", pedido: ped ? { id: ped.id, cliente_id: c.id, numero_pedido: ped.numero_pedido, total: ped.total, estado: ped.estado } : null }
+  const fecha_fin = masDias(v.fecha, v.dias - 1)
+  const peds = S.pedidos.filter((p) => p.viaje_id === v.id && p.estado !== "eliminado")
+  const resumen = { id: v.id, nombre: v.nombre, estado: v.estado, fecha: v.fecha, dias: v.dias, fecha_fin, zonas: v.zonas, choferes: v.choferes, mis_pedidos: peds.length, mis_total: r2(peds.reduce((s, p) => s + p.total, 0)) }
+  const clientes = S.clientes.filter((c) => v.cliente_ids.includes(c.id) || peds.some((p) => p.cliente_id === c.id)).map((c) => {
+    const suyos = peds.filter((p) => p.cliente_id === c.id)
+    const pa = v.paradas?.[c.id]
+    return {
+      id: c.id, nombre: c.nombre, localidad: c.localidad, direccion: c.direccion || null, telefono: c.telefono, saldo_actual: c.saldo_actual, saldo_proyectado: c.saldo_proyectado,
+      pedidos: suyos.map((p) => ({ id: p.id, numero_pedido: p.numero_pedido, estado: p.estado, total: p.total, cliente_id: c.id })),
+      parada: pa ? { ...pa, total_viaje: r2(suyos.reduce((s, p) => s + p.total, 0)) } : null,
+    }
   })
-  const resumen = { id: v.id, nombre: v.nombre, estado: v.estado, fecha_inicio: v.fecha_inicio, fecha_fin_estimada: v.fecha_fin_estimada, zonas: v.zonas }
-  return { id: v.id, resumen, viaje: resumen, clientes }
+  const conPa = clientes.filter((c) => c.parada)
+  const totales = { pedidos: peds.length, total: resumen.mis_total, entregados: conPa.filter((c) => c.parada.estado.startsWith("entregado")).length, no_entregados: conPa.filter((c) => c.parada.estado === "no_entregado").length, cobrado: r2(conPa.reduce((s, c) => s + c.parada.cobrado, 0)) }
+  return { id: v.id, resumen, viaje: resumen, admite_pedidos: v.estado === "programado", clientes, totales }
 }
 const billetera = () => {
   const pagos = [...S.cc.values()].flatMap((k) => k.pagos).filter((p) => p.estado === "pendiente_rendicion")
@@ -211,7 +236,13 @@ function aplicarPedido(p, capturadoAt) {
   // = lib/vendedor/vigencia-precios.ts: precios de más de 24 hs al capturar ⇒ no garantizados
   ped.precios_garantizados = !(p.precios_al && Date.parse(capturadoAt) - Date.parse(p.precios_al) > 24 * 3600e3)
   ped.capturado_at = capturadoAt
-  return { pedido_id: ped.id, numero_pedido: ped.numero_pedido, total: ped.total, creado, ...(creado ? { estado: ped.estado } : {}), precios_verificados: true, replica: [parchePedido(ped.id), ...parcheCliente(p.cliente_id)] }
+  let viaje
+  if (p.viaje_id) {
+    const v = S.viajes.find((x) => x.id === p.viaje_id)
+    if (v && v.estado === "programado" && (!ped.viaje_id || ped.viaje_id === v.id)) { ped.viaje_id = v.id; viaje = { asignado: true } }
+    else viaje = { asignado: false, motivo: !v ? "el viaje ya no está en tu calendario" : "el viaje ya salió: el pedido quedó sin viaje y lo asigna la oficina" }
+  }
+  return { pedido_id: ped.id, ...(viaje ? { viaje } : {}), numero_pedido: ped.numero_pedido, total: ped.total, creado, ...(creado ? { estado: ped.estado } : {}), precios_verificados: true, replica: [parchePedido(ped.id), ...parcheCliente(p.cliente_id), ...(viaje?.asignado ? [parcheViaje(p.viaje_id)] : [])] }
 }
 
 const COLS_LISTAS = ["lista_precio_id", "metodo_facturacion", "lista_limpieza_id", "metodo_limpieza", "lista_perf0_id", "metodo_perf0", "lista_perf_plus_id", "metodo_perf_plus"]
@@ -330,6 +361,7 @@ const HANDLERS = {
     return { devolucion_id: d.id, numero_devolucion: d.numero_devolucion, replica: parcheCliente(p.cliente_id) }
   },
   "viaje.crear": (u, p) => {
+    if (!S.viajes.find((v) => v.id === p.id)) throw new Rechazo("Los viajes los programa la oficina: actualizá la app y cargá los pedidos desde el viaje del calendario.")
     if (!S.viajes.find((v) => v.id === p.id)) {
       const zonas = S.f.zonas.filter((z) => p.zona_ids.includes(z.id)).map(({ id, nombre }) => ({ id, nombre }))
       if (zonas.length !== p.zona_ids.length) throw new Rechazo("Alguna de las zonas no existe.")
@@ -388,7 +420,7 @@ createServer(async (req, res) => {
       pedidos: S.pedidos.map((p) => ({ numero: p.numero_pedido, local_id: p.local_id, estado: p.estado, cliente: clienteDe(p.cliente_id)?.nombre, total: p.total, creaciones: p.creaciones, precios_garantizados: p.precios_garantizados, precios_al: p.precios_al, capturado_at: p.capturado_at, renglones: p.detalle.map((d) => `${d.cantidad} x ${d.precio_final}`) })),
       cobros: [...S.cc.entries()].flatMap(([cid, k]) => k.pagos.map((p) => ({ cliente: clienteDe(cid)?.nombre, monto: p.monto, estado: p.estado, forma: p.forma_pago }))),
       devoluciones: [...S.cc.values()].flatMap((k) => k.devoluciones.map((d) => ({ numero: d.numero_devolucion, total: d.monto_total, restante: d.restante, altas: d.altas }))),
-      viajes: S.viajes.map((v) => ({ nombre: v.nombre, estado: v.estado, no_va: [...v.no_va].length })),
+      viajes: S.viajes.map((v) => ({ nombre: v.nombre, estado: v.estado, fecha: v.fecha, pedidos: S.pedidos.filter((p) => p.viaje_id === v.id).map((p) => p.numero_pedido) })),
       clientes_nuevos: S.clientes.length - FIX.clientes.length,
       claves: [...S.claves.values()].map((c) => ({ tipo: c.tipo, estado: c.body.estado, aplicaciones: c.aplicaciones, recibidas: c.recibidas })),
       ultimasOperaciones: S.log.slice(-20),

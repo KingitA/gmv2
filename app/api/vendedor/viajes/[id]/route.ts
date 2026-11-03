@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
-import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { detalleViajeVendedor } from "@/lib/vendedor/viajes-reparto"
 import { requireVendedor } from "@/lib/vendedor/session"
 
 async function getViajePropio(supabase: any, id: string, vendedorIds: string[]) {
@@ -14,9 +15,9 @@ async function getViajePropio(supabase: any, id: string, vendedorIds: string[]) 
   return viaje
 }
 
-// GET /api/vendedor/viajes/[id]
-// Detalle del viaje de levantamiento: clientes de las zonas del viaje con su
-// estado (pedido_levantado / pendiente / no_va), saldo y último pedido del viaje.
+// GET /api/vendedor/viajes/[id] — detalle de un viaje del calendario de reparto (03/11/2026):
+// sus clientes de la zona, sus pedidos en el viaje y, cuando ya salió, cómo fue cada parada
+// (entrega, cobro, comprobantes). lib/vendedor/viajes-reparto.ts
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireVendedor()
   if (session.error) return session.error
@@ -24,102 +25,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   try {
     const supabase = await createClient()
     const { id } = await params
-
-    const viaje = await getViajePropio(supabase, id, session.vendedorIds)
-    if (!viaje) {
-      return NextResponse.json({ error: "Viaje inexistente o no asignado a vos." }, { status: 404 })
-    }
-    const zonaIds = (viaje.viaje_zonas || []).map((vz: any) => vz.zona_id)
-
-    // Clientes de las zonas: por localidad y por asignación manual (clientes_zonas).
-    // SOLO los clientes del vendedor de la sesión.
-    const { data: locs } = await supabase.from("localidades").select("id, zona_id").in("zona_id", zonaIds)
-    const locIds = (locs || []).map((l: any) => l.id)
-
-    const clientesMap = new Map<string, any>()
-    if (locIds.length) {
-      const { data: porLocalidad } = await supabase
-        .from("clientes")
-        .select("id, nombre, localidad, telefono, localidad_id")
-        .eq("activo", true)
-        .in("vendedor_id", session.vendedorIds)
-        .in("localidad_id", locIds)
-      for (const c of porLocalidad || []) clientesMap.set(c.id, c)
-    }
-    const { data: cz } = await supabase.from("clientes_zonas").select("cliente_id").in("zona_id", zonaIds)
-    const czIds = (cz || []).map((x: any) => x.cliente_id).filter((cid: string) => !clientesMap.has(cid))
-    if (czIds.length) {
-      const { data: manuales } = await supabase
-        .from("clientes")
-        .select("id, nombre, localidad, telefono, localidad_id")
-        .eq("activo", true)
-        .in("vendedor_id", session.vendedorIds)
-        .in("id", czIds)
-      for (const c of manuales || []) clientesMap.set(c.id, c)
-    }
-    const clienteIds = [...clientesMap.keys()]
-
-    // Saldos, marcas no_va y pedidos del viaje (desde fecha_inicio) en batch
-    const chunk = <T,>(arr: T[], n: number) => {
-      const out: T[][] = []
-      for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n))
-      return out
-    }
-
-    // Saldos desde la fuente única (vendedor lee el PROYECTADO, regla del dueño 16/10)
-    const saldos = await getSaldosClientes(supabase, clienteIds)
-    const noVa = new Set<string>()
-    const pedidoDe = new Map<string, any>()
-    for (const ids of chunk(clienteIds, 150)) {
-      const [{ data: vc }, { data: peds }] = await Promise.all([
-        supabase.from("viajes_clientes").select("cliente_id, estado").eq("viaje_id", id).in("cliente_id", ids),
-        supabase
-          .from("pedidos")
-          .select("id, cliente_id, numero_pedido, total, estado, fecha, created_at")
-          .in("cliente_id", ids)
-          .gte("fecha", viaje.fecha_inicio)
-          .neq("estado", "eliminado")
-          .is("eliminado_at", null)
-          .order("created_at", { ascending: false }),
-      ])
-      for (const row of vc || []) if (row.estado === "no_va") noVa.add(row.cliente_id)
-      for (const p of peds || []) if (!pedidoDe.has(p.cliente_id)) pedidoDe.set(p.cliente_id, p)
-    }
-
-    const clientes = clienteIds
-      .map((cid) => {
-        const c = clientesMap.get(cid)
-        const pedido = pedidoDe.get(cid) || null
-        return {
-          id: c.id,
-          nombre: c.nombre,
-          localidad: c.localidad,
-          telefono: c.telefono,
-          saldo_actual: saldos.get(cid)?.saldo_real ?? 0,
-          saldo_proyectado: saldos.get(cid)?.saldo_proyectado ?? 0,
-          estado_viaje: noVa.has(cid) ? "no_va" : pedido ? "pedido_levantado" : "pendiente",
-          pedido,
-        }
-      })
-      .sort((a, b) => a.nombre.localeCompare(b.nombre))
-
-    return NextResponse.json({
-      viaje: {
-        id: viaje.id,
-        nombre: viaje.nombre,
-        estado: viaje.estado,
-        fecha_inicio: viaje.fecha_inicio,
-        fecha_fin_estimada: viaje.fecha_fin_estimada,
-        zonas: (viaje.viaje_zonas || []).map((vz: any) => vz.zonas).filter(Boolean),
-      },
-      clientes,
-    })
+    const detalle = await detalleViajeVendedor(supabase as any, createAdminClient() as any, session.vendedorIds, id)
+    if (!detalle) return NextResponse.json({ error: "Ese viaje no está en tu calendario." }, { status: 404 })
+    return NextResponse.json(detalle)
   } catch (error: any) {
     console.error("[vendedor] Error en GET /api/vendedor/viajes/[id]:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
 
+// PATCH (viajes de levantamiento viejos, APKs anteriores a 03/11/2026)
 // PATCH /api/vendedor/viajes/[id]
 // { accion: "cliente_no_va", cliente_id, no_va } — marcar/desmarcar cliente
 // { accion: "estado", estado: "completado" | "en_curso" } — cerrar/reabrir viaje

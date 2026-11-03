@@ -2,7 +2,8 @@ import { useNavigate } from "react-router"
 import { useContadoresOutbox, useNoEnviados, useOverlay, useRuntime } from "@gm/core"
 import { DS } from "../datasets"
 import { useBorradores } from "../datos/borradores"
-import { rechazosDe, useClientes, useMe, usePedidos, useRefrescarAlEntrar, useYo } from "../datos/hooks"
+import { rechazosDe, useClientes, useMe, usePedidos, useRefrescarAlEntrar, useViajes, useYo } from "../datos/hooks"
+import { hoyISO } from "@gm/formato"
 import { useBilletera } from "../datos/billetera"
 import { usePreciosVencidos } from "../datos/precios"
 import { AvisosBcra, BadgeEstado, fechaConDia, fechaCorta, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinEnviar, useEnterCierraTeclado, useToast } from "../ui"
@@ -19,6 +20,9 @@ interface Me {
 
 export function Inicio() {
   const navigate = useNavigate()
+  const { viajes } = useViajes()
+  const hoy = hoyISO()
+  const proximos = viajes.filter((v) => v.resumen.fecha_fin >= hoy && v.resumen.estado !== "completado").sort((a, b) => a.resumen.fecha.localeCompare(b.resumen.fecha)).slice(0, 3)
   const rt = useRuntime()
   const yo = useYo()
   const { fila: me } = useMe<Me>()
@@ -143,27 +147,28 @@ export function Inicio() {
           )}
         </section>
 
+        {/* Próximos viajes del calendario de la oficina (03/11/2026, misma fila que Mis Viajes) */}
         <section>
-          <h2 className="mb-3 text-lg font-bold text-gray-700">Próximas zonas</h2>
-          {me?.proximas_zonas?.length ? (
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-lg font-bold text-gray-700">Próximos viajes</h2>
+            <button onClick={() => navigate("/viajes")} className="min-h-11 text-sm font-bold text-emerald-700">Calendario →</button>
+          </div>
+          {proximos.length ? (
             <div className="space-y-3">
-              {me.proximas_zonas.map((z) => (
-                <div key={z.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center justify-between">
+              {proximos.map((v) => (
+                <button key={v.id} onClick={() => navigate(`/viajes/${v.id}`)} className="w-full rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm active:bg-gray-50">
+                  <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate font-bold text-gray-900">📍 {z.zonas?.nombre || z.nombre}</p>
-                      <p className="text-sm text-gray-500">{fechaConDia(z.fecha)}{z.zonas?.descripcion ? ` · ${z.zonas.descripcion}` : ""}</p>
+                      <p className="truncate font-bold text-gray-900">📍 {v.resumen.zonas.map((z) => z.nombre).join(" + ") || v.resumen.nombre}</p>
+                      <p className="text-sm text-gray-500">{fechaConDia(v.resumen.fecha)}{v.resumen.choferes.length ? ` · ${v.resumen.choferes.join(", ")}` : ""}</p>
                     </div>
-                    <div className="ml-3 shrink-0 text-right">
-                      {z.estado === "en_curso" && <span className="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">EN CURSO</span>}
-                      {z.mis_clientes_en_zona > 0 && <p className="mt-1 text-sm font-bold text-emerald-700">{z.mis_clientes_en_zona} clientes tuyos</p>}
-                    </div>
+                    {v.resumen.mis_pedidos > 0 && <p className="shrink-0 text-sm font-bold text-emerald-700">{v.resumen.mis_pedidos} {v.resumen.mis_pedidos === 1 ? "pedido" : "pedidos"}</p>}
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           ) : (
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 text-center text-gray-500 shadow-sm">No hay viajes programados.</div>
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 text-center text-gray-500 shadow-sm">No hay viajes programados a tus zonas.</div>
           )}
         </section>
 
