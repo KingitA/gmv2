@@ -105,7 +105,12 @@ export function ClienteFicha() {
   const fichaActual: FichaListas | null = fichaReplica ?? (enCartera?.sinEnviar ? fichaListasDe(enCartera as unknown as Record<string, unknown>) : null)
   const bonif = { viajante: (enCartera?.bonificaciones?.viajante ?? {}) as BonifSeg, mercaderia: (enCartera?.bonificaciones?.mercaderia ?? {}) as BonifSeg }
   // ¿El viajante actual del cliente impone la lista? → no se elige a mano
-  const listaImpuesta = vendedores.find((v) => v.id === cliente?.vendedor_id)?.lista_nombre || null
+  const viajanteCliente = vendedores.find((v) => v.id === cliente?.vendedor_id)
+  const listaImpuesta = viajanteCliente?.lista_nombre || null
+  // Cliente sin lista cuyo viajante impone una (caso GRECO, 03/11/2026): al editar la
+  // ficha ya arranca con esa lista y al guardar queda en el sistema.
+  const conListaDelViajante = (f: FichaListas | null): FichaListas | null =>
+    f && !f.lista_precio_id && listaImpuesta && viajanteCliente?.lista_precio_id ? { ...f, lista_precio_id: viajanteCliente.lista_precio_id } : f
 
   const formInicial = (): Record<string, string> => {
     const c = (cliente ?? {}) as unknown as Record<string, string | null>
@@ -130,7 +135,7 @@ export function ClienteFicha() {
 
   // Se entró directo con el overlay abierto (recarga): armar el formulario con lo que se ve
   useEffect(() => {
-    if (edicion.abierto && !form && cliente) { setForm(formInicial()); setFichaEdit(fichaActual) }
+    if (edicion.abierto && !form && cliente) { setForm(formInicial()); setFichaEdit(conListaDelViajante(fichaActual)) }
     if (edicionBonif.abierto && !bonifEdit && enCartera) setBonifEdit(bonifInicial())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edicion.abierto, edicionBonif.abierto, !!cliente, !!enCartera])
@@ -172,7 +177,7 @@ export function ClienteFicha() {
 
   const empezarEdicion = () => {
     setForm(formInicial())
-    setFichaEdit(fichaActual)
+    setFichaEdit(conListaDelViajante(fichaActual))
     edicion.abrir()
   }
 
@@ -483,7 +488,9 @@ export function ClienteFicha() {
                 ) : (
                   <p className="text-sm text-gray-500">Se pueden cambiar cuando se descarguen los precios en este equipo.</p>
                 )}
-                <p className="mt-2 text-xs text-gray-400">Rige para los pedidos que tomes después de que el cambio llegue al sistema (con señal, enseguida).</p>
+                <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                  <b>Cambia la ficha:</b> rige para este y los próximos pedidos (con señal, enseguida). Para cambiarlo en un solo pedido, hacelo desde <b>Confirmar pedido</b>.
+                </p>
               </div>
 
 
@@ -521,7 +528,11 @@ export function ClienteFicha() {
                 <div className="py-1.5">
                   <CuadroSegmentos
                     resumen={condSeg}
-                    nota={listasSinEnviar ? "Hay un cambio de lista/facturación guardado en el equipo que todavía no llegó al sistema: rige desde que llegue." : undefined}
+                    nota={listasSinEnviar
+                      ? "Hay un cambio de lista/facturación guardado en el equipo que todavía no llegó al sistema: rige desde que llegue."
+                      : listaImpuesta && !fichaActual?.lista_precio_id
+                        ? `Le corresponde la lista ${listaImpuesta} (la de su viajante): tocá Editar y Guardar para asignársela.`
+                        : undefined}
                   />
                 </div>
               ) : (

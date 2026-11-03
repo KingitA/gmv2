@@ -10,7 +10,7 @@
 import { useMemo } from "react"
 import { useDataset } from "@gm/core"
 import { limpiarCentinela, resolverListaSegmentoDefinido, type ClienteListas, type OverridesListaPedido, type Segmento } from "@gm/pricing"
-import { DS } from "../datasets"
+import { DS, type SegsPedido } from "../datasets"
 
 export const SEGMENTOS_PRECIO: Array<{ seg: Segmento; label: string; corto: string }> = [
   { seg: "limpieza", label: "Limpieza / Bazar", corto: "L/B" },
@@ -51,16 +51,16 @@ export function resumirSegmentos(
   nombreLista: (id: string) => string | null,
   condicionesExtra = 0,
 ): ResumenSegmentos {
-  const ovGeneralLista = !!limpiarCentinela(overrides.lista_precio_pedido_id)
-  const ovGeneralMetodo = !!limpiarCentinela(overrides.metodo_facturacion_pedido)
+  const ovGeneral = !!limpiarCentinela(overrides.lista_precio_pedido_id) || !!limpiarCentinela(overrides.metodo_facturacion_pedido)
   const filas = SEGMENTOS_PRECIO.map(({ seg, label, corto }) => {
     const r = resolverListaSegmentoDefinido(seg, overrides, cliente ?? {})
+    const [ovLista, ovMetodo] = COLS_OVERRIDE[seg]
     return {
       seg, label, corto,
       listaId: r.listaId,
       listaNombre: r.listaId ? nombreLista(r.listaId) : null,
       metodo: r.metodoRaw,
-      delPedido: ovGeneralLista || ovGeneralMetodo,
+      delPedido: ovGeneral || !!limpiarCentinela(overrides[ovLista]) || !!limpiarCentinela(overrides[ovMetodo]),
     }
   })
   const clave = (f: CondSegmento) => `${f.listaId}|${metodoLabel(f.metodo)}`
@@ -111,6 +111,53 @@ export function useSegmentosCliente(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fila, fichaLocal, nombreLista, clave])
 }
+
+// ─── Lista y método POR SEGMENTO solo este pedido ("Confirmar pedido", 03/11/2026) ───
+
+/** Columnas del pedido (= motor / tabla pedidos) por segmento: [lista, método] */
+export const COLS_OVERRIDE: Record<Segmento, [keyof OverridesListaPedido, keyof OverridesListaPedido]> = {
+  limpieza: ["lista_limpieza_pedido_id", "metodo_limpieza_pedido"],
+  perf0: ["lista_perf0_pedido_id", "metodo_perf0_pedido"],
+  perf_plus: ["lista_perf_plus_pedido_id", "metodo_perf_plus_pedido"],
+}
+
+/** Lo elegido por segmento → overrides del motor (solo lo que tiene valor). */
+export function segsAOverrides(segs: SegsPedido | null | undefined): OverridesListaPedido {
+  const out: OverridesListaPedido = {}
+  for (const { seg } of SEGMENTOS_PRECIO) {
+    const [l, m] = COLS_OVERRIDE[seg]
+    if (segs?.[seg]?.lista) out[l] = segs[seg]!.lista!
+    if (segs?.[seg]?.metodo) out[m] = segs[seg]!.metodo!
+  }
+  return out
+}
+
+/** Para el servidor: las 6 columnas (null = como la ficha), solo si se tocó la segmentación. */
+export function segsParaServidor(segs: SegsPedido | null | undefined): Record<string, string | null> {
+  if (segs == null) return {}
+  const out: Record<string, string | null> = {}
+  for (const { seg } of SEGMENTOS_PRECIO) {
+    const [l, m] = COLS_OVERRIDE[seg]
+    out[l] = segs[seg]?.lista || null
+    out[m] = segs[seg]?.metodo || null
+  }
+  return out
+}
+
+/** Payload del outbox → lo elegido por segmento (undefined = no se tocó). */
+export function segsDesdeServidor(c: Partial<Record<string, unknown>> | null | undefined): SegsPedido | undefined {
+  if (!c || !SEGMENTOS_PRECIO.some(({ seg }) => COLS_OVERRIDE[seg].some((k) => k in c))) return undefined
+  const out: SegsPedido = {}
+  for (const { seg } of SEGMENTOS_PRECIO) {
+    const [l, m] = COLS_OVERRIDE[seg]
+    const lista = typeof c[l] === "string" ? (c[l] as string) : ""
+    const metodo = typeof c[m] === "string" ? (c[m] as string) : ""
+    if (lista || metodo) out[seg] = { ...(lista ? { lista } : {}), ...(metodo ? { metodo } : {}) }
+  }
+  return out
+}
+
+export const haySegsPedido = (segs: SegsPedido | null | undefined) => !!segs && Object.values(segs).some((v) => !!v?.lista || !!v?.metodo)
 
 // ─── Ficha: lista y método general o POR SEGMENTO (como el ERP) ──────────────
 

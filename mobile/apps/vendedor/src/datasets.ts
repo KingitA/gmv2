@@ -270,7 +270,14 @@ export interface CondPedido {
   condMarca?: CondicionMarca[] | null
   /** Mercadería a regalar por cupo: origen ("todo" | "seg:x" | "prov:id" | "marca:id") → artículos. Solo pedidos nuevos */
   mercaderia?: Record<string, Array<{ id: string; descripcion: string; sku: string | null }>> | null
+  /**
+   * Lista y método POR SEGMENTO solo este pedido (03/11/2026, "Confirmar pedido"). Ausente =
+   * no se tocó (al editar, el servidor deja los del pedido); {} = volver a lo de la ficha.
+   * Le gana a lo general del pedido (metodo/lista) y a la ficha, igual que el motor.
+   */
+  segs?: SegsPedido | null
 }
+export type SegsPedido = Partial<Record<"limpieza" | "perf0" | "perf_plus", { lista?: string; metodo?: string }>>
 export const COND_VACIA: CondPedido = { metodo: "", lista: "", bonif: null }
 
 export interface ItemOpPedido {
@@ -297,6 +304,9 @@ export interface OpPedido {
     metodo_facturacion_pedido?: string | null; lista_precio_pedido_id?: string | null; bonif_pedido?: CondPedido["bonif"]
     condiciones_proveedor?: CondicionProveedor[]; condiciones_marca?: CondicionMarca[]
     mercaderia_bonificada?: Array<{ origen: string; articulo_ids: string[] }>
+    lista_limpieza_pedido_id?: string | null; metodo_limpieza_pedido?: string | null
+    lista_perf0_pedido_id?: string | null; metodo_perf0_pedido?: string | null
+    lista_perf_plus_pedido_id?: string | null; metodo_perf_plus_pedido?: string | null
   } | null
   observaciones: string | null
   precios_al: string | null

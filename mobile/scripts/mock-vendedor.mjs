@@ -397,6 +397,24 @@ createServer(async (req, res) => {
   if (url.pathname.startsWith("/__mock/")) {
     if (url.pathname === "/__mock/red") S.red = url.searchParams.get("on") !== "0"
     if (url.pathname === "/__mock/reset") reset()
+    // Descuentos del cliente y lista del viajante (03/11/2026): ?bonif=<n° de cliente>&sinlista=<n° de cliente>
+    // El viajante impone Neco; "sinlista" queda sin lista y en Presupuesto (caso GRECO);
+    // "bonif" lleva 10 % viajante y 10 % mercadería en perfumería plus.
+    if (url.pathname === "/__mock/escenario-descuentos") {
+      const neco = S.f.precios_listas.find((l) => l.codigo === "neco")
+      Object.assign(S.f.vendedor, { lista_precio_id: neco?.id ?? null, lista_nombre: neco ? "Neco" : null })
+      const pcSin = S.f.precios_clientes[Number(url.searchParams.get("sinlista") ?? 1)]
+      if (pcSin) {
+        for (const k of COLS_LISTAS) pcSin.cliente[k] = null
+        pcSin.cliente.metodo_facturacion = "Presupuesto"
+        const c = S.clientes.find((x) => x.id === pcSin.id)
+        if (c) Object.assign(c, { lista_precio_id: null, lista: null, metodo_facturacion: "Presupuesto" })
+      }
+      const pcB = S.f.precios_clientes[Number(url.searchParams.get("bonif") ?? 0)]
+      if (pcB) pcB.bonificaciones = [{ tipo: "viajante", segmento: "perf_plus", porcentaje: 10 }, { tipo: "mercaderia", segmento: "perf_plus", porcentaje: 10 }]
+      S.seq++
+      return json(200, { vendedor: S.f.vendedor.nombre, sin_lista: pcSin?.id, bonif: pcB?.id })
+    }
     if (url.pathname === "/__mock/rechazar-cobros") RECHAZAR_COBROS = url.searchParams.get("on") !== "0"
     if (url.pathname === "/__mock/bcra") MODO_BCRA = url.searchParams.get("modo") || "apto"
     if (url.pathname === "/__mock/ocr") MODO_OCR = url.searchParams.get("modo") || "ok"

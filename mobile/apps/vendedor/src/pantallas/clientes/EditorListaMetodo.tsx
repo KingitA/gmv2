@@ -5,8 +5,8 @@ import { CuadroSegmentos } from "../segmentos-ui"
 // Lista y método de facturación de la ficha: GENERAL o POR SEGMENTO (Limpieza/Bazar ·
 // Perfumería 0 · Perfumería plus), igual que la ficha del ERP (decisión del dueño,
 // 09/10/2026). Lo usan el alta de cliente, la edición de la ficha y la venta a cliente
-// nuevo. Abajo muestra cómo queda cada segmento: un segmento sin lista o sin método se
-// marca en rojo (con eso no se puede cerrar un pedido).
+// nuevo. Si va por segmento, abajo muestra cómo queda cada uno (sin lista o sin método
+// = rojo: con eso no se puede cerrar un pedido). Sin segmentar no se muestran segmentos.
 
 const METODOS = [
   { key: "Factura", label: "Factura (21% IVA)" },
@@ -64,7 +64,7 @@ export function EditorListaMetodo({ valor, onCambiar, listas, puedeLista, listaI
           {puedeLista && <Toggle porSegmento={listaSeg} onCambiar={cambiarListaSeg} />}
         </div>
         {!puedeLista ? (
-          <p className="rounded-xl bg-gray-50 px-3 py-3 text-sm text-gray-600">{listaGeneral || "Sin lista"} <span className="text-xs text-gray-400">(la asigna la oficina)</span></p>
+          <p className="rounded-xl bg-gray-50 px-3 py-3 text-sm text-gray-600">{listaGeneral || "Sin lista"} <span className="text-xs text-gray-400">{listaImpuesta ? "(por viajante)" : "(la asigna la oficina)"}</span></p>
         ) : listaSeg ? (
           <p className="text-xs text-gray-500">Se elige en cada segmento, más abajo.{listaGeneral ? ` Lo que quede en "como la general" va con ${listaGeneral}.` : ""}</p>
         ) : listaImpuesta ? (
@@ -116,8 +116,14 @@ export function EditorListaMetodo({ valor, onCambiar, listas, puedeLista, listaI
         </div>
       )}
 
-      <CuadroSegmentos resumen={resumen} titulo="Así queda cada segmento" />
-      {resumen.incompleto && <p className="text-xs font-bold text-red-600">Falta lista o método en algún segmento: así no se puede cerrar un pedido.</p>}
+      {(listaSeg || metodoSeg) && <CuadroSegmentos resumen={resumen} titulo="Así queda cada segmento" />}
+      {resumen.incompleto && (
+        <p className="text-xs font-bold text-red-600">
+          {listaSeg || metodoSeg
+            ? "Falta lista o método en algún segmento: así no se puede cerrar un pedido."
+            : `Falta ${!listaGeneral ? "la lista de precios" : "el método de facturación"}: así no se puede cerrar un pedido.`}
+        </p>
+      )}
     </div>
   )
 }

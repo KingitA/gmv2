@@ -1950,6 +1950,10 @@ export async function aplicarCondicionesPedidoVendedor(
     lista_precio_pedido_id?: string | null
     // { viajante?: {seg:%}, mercaderia?: {seg:%} } — null = heredar todo de la ficha
     bonif_pedido?: BonifPedido | null
+    // Lista/método por segmento "solo este pedido" (app ≥ 0.4.11); ausente = no se toca
+    lista_limpieza_pedido_id?: string | null; metodo_limpieza_pedido?: string | null
+    lista_perf0_pedido_id?: string | null; metodo_perf0_pedido?: string | null
+    lista_perf_plus_pedido_id?: string | null; metodo_perf_plus_pedido?: string | null
   },
   opts: { forzarReprecio?: boolean } = {}
 ) {
@@ -1974,6 +1978,11 @@ export async function aplicarCondicionesPedidoVendedor(
   if (cond.lista_precio_pedido_id !== undefined) {
     const v = limpiarCentinela(cond.lista_precio_pedido_id || "") || null
     if (v !== ((pedido as any).lista_precio_pedido_id || null)) patch.lista_precio_pedido_id = v
+  }
+  for (const k of ["lista_limpieza_pedido_id", "metodo_limpieza_pedido", "lista_perf0_pedido_id", "metodo_perf0_pedido", "lista_perf_plus_pedido_id", "metodo_perf_plus_pedido"] as const) {
+    if (cond[k] === undefined) continue
+    const v = limpiarCentinela(cond[k] || "") || null
+    if (v !== ((pedido as any)[k] || null)) patch[k] = v
   }
   if (cond.bonif_pedido !== undefined) {
     // MERGE por tipo, no reemplazo: la app (≤ 0.2.3) solo maneja viajante/mercadería;

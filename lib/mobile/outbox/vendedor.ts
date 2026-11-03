@@ -136,6 +136,22 @@ interface CondPedido {
   condiciones_marca?: CondicionMarca[] | null
   /** Mercadería a regalar por cupo (origen = "todo" | "seg:x" | "prov:id" | "marca:id"). Solo pedidos nuevos */
   mercaderia_bonificada?: Array<{ origen: string; articulo_ids: string[] }> | null
+  /** Lista/método POR SEGMENTO solo este pedido (v0.4.11, "Confirmar pedido"). Ausentes = no se tocan */
+  lista_limpieza_pedido_id?: string | null; metodo_limpieza_pedido?: string | null
+  lista_perf0_pedido_id?: string | null; metodo_perf0_pedido?: string | null
+  lista_perf_plus_pedido_id?: string | null; metodo_perf_plus_pedido?: string | null
+}
+
+/** Columnas de lista/método por segmento del pedido (mismo nombre en el payload y en la tabla) */
+const COLS_SEG_PEDIDO = [
+  "lista_limpieza_pedido_id", "metodo_limpieza_pedido",
+  "lista_perf0_pedido_id", "metodo_perf0_pedido",
+  "lista_perf_plus_pedido_id", "metodo_perf_plus_pedido",
+] as const
+const segsDelPayload = (c?: CondPedido | null): Partial<Record<(typeof COLS_SEG_PEDIDO)[number], string | null>> => {
+  const out: Partial<Record<(typeof COLS_SEG_PEDIDO)[number], string | null>> = {}
+  for (const k of COLS_SEG_PEDIDO) if (c && k in c) out[k] = limpiarCentinela(c[k]) || null
+  return out
 }
 
 interface PayloadPedido {
@@ -184,6 +200,7 @@ const overridesDe = (c?: CondPedido | null) => ({
   ...(c?.metodo_facturacion_pedido ? { metodo_facturacion_pedido: c.metodo_facturacion_pedido } : {}),
   ...(c?.lista_precio_pedido_id ? { lista_precio_pedido_id: c.lista_precio_pedido_id } : {}),
   ...(c?.bonif_pedido ? { bonif_pedido: c.bonif_pedido } : {}),
+  ...Object.fromEntries(Object.entries(segsDelPayload(c)).filter(([, v]) => !!v)),
   // Lista completa del pedido (igual que el ERP): el motor reemplaza las de la ficha
   ...(Array.isArray(c?.condiciones_proveedor) ? { condiciones_proveedor: c!.condiciones_proveedor } : {}),
   ...(Array.isArray(c?.condiciones_marca) ? { condiciones_marca: c!.condiciones_marca } : {}),
@@ -248,20 +265,25 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
     pedidoId = previo?.id ?? null
   }
   let listaActualPedido: string | null = null
+  let listasActualesPedido: string[] = []
   if (pedidoId) {
-    const { data: ped } = await ctx.supabase.from("pedidos").select("id, estado, vendedor_id, cliente_id, eliminado_at, lista_precio_pedido_id").eq("id", pedidoId).maybeSingle()
+    const { data: ped } = await ctx.supabase.from("pedidos").select("id, estado, vendedor_id, cliente_id, eliminado_at, lista_precio_pedido_id, lista_limpieza_pedido_id, lista_perf0_pedido_id, lista_perf_plus_pedido_id").eq("id", pedidoId).maybeSingle()
     if (!ped || ped.eliminado_at) throw new RechazoNegocio("El pedido fue eliminado: los cambios no se aplicaron.")
     if (ped.cliente_id !== p.cliente_id) throw new RechazoNegocio("El pedido es de otro cliente.")
     if (!esPedidoEditable(ped.estado)) throw new RechazoNegocio(motivoBloqueo(ped.estado) || "El pedido ya no se puede modificar.")
     listaActualPedido = ped.lista_precio_pedido_id ?? null
+    listasActualesPedido = [ped.lista_limpieza_pedido_id, ped.lista_perf0_pedido_id, ped.lista_perf_plus_pedido_id].filter(Boolean)
   }
 
   // Lista "solo este pedido": solo las del vendedor (Neco + las de sus viajantes).
   // La que el pedido ya tenía (p. ej. puesta desde el ERP) se acepta al editar.
   const listaPedida = limpiarCentinela(p.cond?.lista_precio_pedido_id) || null
-  if (listaPedida && listaPedida !== listaActualPedido) {
+  const segsPedido = segsDelPayload(p.cond)
+  const listasSeg = [segsPedido.lista_limpieza_pedido_id, segsPedido.lista_perf0_pedido_id, segsPedido.lista_perf_plus_pedido_id]
+    .filter((x): x is string => !!x && !listasActualesPedido.includes(x))
+  if ((listaPedida && listaPedida !== listaActualPedido) || listasSeg.length) {
     const permitidas = await listasPermitidasVendedor(ctx, sesion.vendedorIds)
-    if (!permitidas.includes(listaPedida)) {
+    if ((listaPedida && listaPedida !== listaActualPedido && !permitidas.includes(listaPedida)) || listasSeg.some((l) => !permitidas.includes(l))) {
       throw new RechazoNegocio("La lista elegida no está habilitada para vos: se asigna desde el ERP.")
     }
   }
@@ -277,7 +299,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
   if (faltan.length) throw new RechazoNegocio("Hay artículos del pedido que ya no existen en el catálogo.")
   // Nunca un pedido nuevo sin lista de precios (regla del dueño, 06/10/2026)
   const cli = reconstruido.insumos.cliente as Record<string, any>
-  const tieneLista = !!(listaPedida || cli?.lista_precio_id || cli?.lista_limpieza_id || cli?.lista_perf0_id || cli?.lista_perf_plus_id)
+  const tieneLista = !!(listaPedida || listasSeg.length || cli?.lista_precio_id || cli?.lista_limpieza_id || cli?.lista_perf0_id || cli?.lista_perf_plus_id)
   if (!pedidoId && !tieneLista) throw new RechazoNegocio(MSG_SIN_LISTA)
   const apkVieja = esApkVendedorVieja(m.app_version)
   const overrides = apkVieja ? compatOverridesApkVieja(overridesDe(p.cond), cli) : overridesDe(p.cond)
@@ -355,6 +377,8 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
       metodo_facturacion_pedido: p.cond?.metodo_facturacion_pedido || null,
       lista_precio_pedido_id: p.cond?.lista_precio_pedido_id || null,
       bonif_pedido: p.cond?.bonif_pedido || null,
+      // Por segmento: solo si la app los mandó (APK ≥ 0.4.11 y tocados en "Confirmar pedido")
+      ...segsPedido,
     })
     await reconciliarRenglones(ctx, pedidoId, p.items)
     if (p.confirmar === false) {

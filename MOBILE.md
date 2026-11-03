@@ -1275,6 +1275,16 @@ Medido con la cartera más grande (86 clientes) y el catálogo real (1.841 artí
   Y deja esos valores como condiciones del pedido en curso. Motivo: sin señal la ficha cambia
   recién al sincronizar, y el servidor reconstruye la ficha a `precios_al` (anterior): si no
   viajaran en el pedido, el pedido saldría con las condiciones viejas.
+- **Lista y facturación: ficha vs. pedido** (Juan, 03/11/2026, v0.4.11). Desde la FICHA rige
+  para este y los próximos pedidos; desde **Confirmar pedido** ("✏️ Cambiar solo en este
+  pedido", `ListaMetodoPedido.tsx`) solo para ese pedido, general o POR SEGMENTO
+  (`CondPedido.segs` → columnas `lista_*_pedido_id` / `metodo_*_pedido`; viajan solo si se
+  tocaron, así al editar no se pisan las que puso el ERP). Sin segmentar, el cuadro muestra una
+  sola línea ("Neco · Presupuesto"). Cliente sin lista cuyo viajante impone una: al editar la
+  ficha arranca con esa lista y el PATCH la acepta sin permiso de listas (y la completa sola).
+- **Descuentos del cliente en el catálogo** (`piezas.tsx → PreciosConDescuento`): precio de lista
+  en gris (sin general/viajante) y debajo los chips "−10% viajante", "−10% mercadería" con lo que
+  le queda (mercadería = cupo aparte, se muestra como % del precio). Lista Especial: sin chips.
 
 ### Precios: vigencia = lo que el vendedor tenía a la vista (decisión de esta sesión)
 `precios_al` = frescura (hora del SERVIDOR) más vieja de los 5 datasets `precios_*` al confirmar.

@@ -8,7 +8,7 @@ import type { IndiceCatalogo } from "../../datos/busqueda"
 import { useCatalogo, useCliente, useVentas } from "../../datos/hooks"
 import { faltaListaMetodo, type FaltaListaMetodo } from "@gm/pricing"
 import { overridesDe, useInsumosBase, useMotoresLista, useMotorCliente, type MotorLocal } from "../../datos/precios"
-import { contadoInicial, descuentoContado, useCondicionesFicha } from "../../datos/condiciones"
+import { contadoInicial, descuentoContado, mercaderiaPctDe, useCondicionesFicha } from "../../datos/condiciones"
 import { clienteListasDe, fichaListasDe, useSegmentosCliente, type ResumenSegmentos } from "../../datos/segmentos"
 
 // Estado COMPARTIDO por todas las pantallas del pedido en curso (/pedido/nuevo/:clienteId/*).
@@ -21,6 +21,8 @@ export interface LineaCarrito extends ItemBorrador {
   /** true = precio ya guardado del renglón (pedido confirmado, condiciones sin cambios) */
   fijo: boolean
 }
+
+export interface DescuentosArticulo { general: number; viajante: number; mercaderia: number }
 
 export interface PedidoEnCurso {
   clienteId: string
@@ -56,6 +58,8 @@ export interface PedidoEnCurso {
   /** Total con el 10 % contado ya descontado: lo que se ve en vivo */
   totalFinal: number
   totalItems: number
+  /** Descuentos del cliente sobre un artículo, en % (para mostrarlos en el catálogo; null = ninguno) */
+  descuentos(articuloId: string): DescuentosArticulo | null
   /** Unidades de un artículo ya en el pedido (undefined = no está) */
   enCarrito(articuloId: string): number | undefined
   agregar(a: Articulo, unidades: number): boolean
@@ -158,6 +162,15 @@ export function ProveedorPedido({ clienteId, children }: { clienteId: string; ch
     return { inicial: contadoInicial(ficha, cond), todo, descuento: descuentoContado(ls, ficha, cond) }
   }, [lineas, artsMotor, motor, ficha, cond])
   const totalFinal = Math.round((total - contado.descuento) * 100) / 100
+  // General y viajante ya están en el precio del motor; la mercadería va por cupo (aparte)
+  const mercDe = useMemo(() => mercaderiaPctDe(ficha, cond), [ficha, cond])
+  const descuentos = useCallback((id: string): DescuentosArticulo | null => {
+    const pr = motor.precio(id)
+    const art = artsMotor.get(id)
+    if (!pr || pr.especial || !art) return null
+    const d = { general: pr.bonifGeneralPct || 0, viajante: pr.bonifViajantePct || 0, mercaderia: mercDe(art) }
+    return d.general > 0 || d.viajante > 0 || d.mercaderia > 0 ? d : null
+  }, [motor, artsMotor, mercDe])
   const segmentos = useSegmentosCliente(clienteId, overridesDe(cond), fichaLocal)
   // Solo los renglones que cotiza el motor ahora (los de precio fijo ya los cerró el servidor)
   const falta = useMemo(
@@ -169,7 +182,7 @@ export function ProveedorPedido({ clienteId, children }: { clienteId: string; ch
   const valor = useMemo<PedidoEnCurso>(
     () => ({
       clienteId, cliente, cargandoCliente, borrador, cond, motor, indice, catalogoVacio, ventas, orden, setOrden, ordenar, prospecto, setProspecto, motoresComparar, segmentos, falta, lineas, total, totalItems,
-      contado, totalFinal,
+      contado, totalFinal, descuentos,
       // contado_todo vive en bonif_pedido (= servidor); null = quitarlo (cada artículo según su condición)
       setContadoTodo: (v) => cambiar((b) => {
         const { contado_todo: _, ...resto } = b.cond.bonif ?? {}
@@ -192,7 +205,7 @@ export function ProveedorPedido({ clienteId, children }: { clienteId: string; ch
       descartar,
       cargarBorrador: (b) => cambiar(() => b, () => b),
     }),
-    [clienteId, cliente, cargandoCliente, borrador, cond, motor, indice, catalogoVacio, ventas, orden, setOrden, ordenar, prospecto, setProspecto, motoresComparar, segmentos, falta, lineas, total, totalItems, contado, totalFinal, cantidades, cambiar, base, descartar],
+    [clienteId, cliente, cargandoCliente, borrador, cond, motor, indice, catalogoVacio, ventas, orden, setOrden, ordenar, prospecto, setProspecto, motoresComparar, segmentos, falta, lineas, total, totalItems, contado, totalFinal, descuentos, cantidades, cambiar, base, descartar],
   )
   return <Ctx.Provider value={valor}>{children}</Ctx.Provider>
 }
