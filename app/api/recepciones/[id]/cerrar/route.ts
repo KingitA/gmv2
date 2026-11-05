@@ -122,7 +122,7 @@ export async function POST(
                 if (accion === 'A') {
                     // Asumir: update precio_compra on articulo
                     const nuevoPrecio = precioFacturado || valor_real;
-                    await supabase.from('articulos').update({ precio_compra: nuevoPrecio }).eq('id', item.articulo_id);
+                    await supabase.from('articulos').update({ precio_compra: nuevoPrecio, actualizado_por: auth.user.id }).eq('id', item.articulo_id);
                     await supabase.from('recepciones_items').update({ precio_real: nuevoPrecio, precio_verificado: true }).eq('id', item_id);
                 } else if (accion === 'B' || accion === 'C') {
                     // Reclamo al proveedor: NC esperada por diferencia de precio

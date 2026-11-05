@@ -190,6 +190,7 @@ export async function POST(request: NextRequest) {
                     descuento2: item.descuento2 || 0,
                     descuento3: item.descuento3 || 0,
                     descuento4: item.descuento4 || 0,
+                    actualizado_por: auth.user.id,
                 })
                 .eq('id', item.articulo_id);
         }

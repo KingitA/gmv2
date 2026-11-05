@@ -7,7 +7,7 @@
 // La conversación se guarda en el servidor (quién preguntó qué): acá se guarda su id.
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from "react"
-import { ArrowUp, Pin, Search, Trash2 } from "lucide-react"
+import { ArrowUp, Maximize2, Minimize2, Pin, Search, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Bloque, RespuestaChat } from "@/lib/playroom/bloques"
 import { BloqueVista, tablaDesdeFilas } from "./bloque-vista"
@@ -40,8 +40,20 @@ export const JarvisPanel = forwardRef<JarvisPanelRef, { onFijar: (b: Bloque) => 
     const [texto, setTexto] = useState("")
     const [pensando, setPensando] = useState(false)
     const [fijados, setFijados] = useState<Set<string>>(new Set())
+    const [grande, setGrande] = useState(false)
     const finRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
+
+    // Pantalla completa: Esc vuelve al tamaño normal; la página de atrás no se mueve
+    useEffect(() => {
+      if (!grande) return
+      const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setGrande(false) }
+      const antes = document.body.style.overflow
+      document.body.style.overflow = "hidden"
+      window.addEventListener("keydown", onKey)
+      inputRef.current?.focus()
+      return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = antes }
+    }, [grande])
 
     useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }) }, [mensajes, pensando])
     // Mientras piensa, el mensaje va cambiando (las esperas nunca son un spinner mudo)
@@ -86,7 +98,18 @@ export const JarvisPanel = forwardRef<JarvisPanelRef, { onFijar: (b: Bloque) => 
     const sugerencias = mensajes.length === 0 ? SUGERENCIAS_INICIALES : ultimas ?? []
 
     return (
-      <aside className={cn("flex min-h-0 flex-col overflow-hidden rounded-2xl border border-neutro-200 bg-white", className)}>
+      <>
+      {/* Pantalla completa: para ver tablas y gráficos grandes y trabajar tranquilo (pedido de Juan 05/11) */}
+      {grande && <div className="fixed inset-0 z-40 bg-azul-900/40" onClick={() => setGrande(false)} aria-hidden />}
+      <aside
+        className={cn(
+          "flex min-h-0 flex-col overflow-hidden rounded-2xl border border-neutro-200 bg-white",
+          grande ? "fixed inset-2 z-50 shadow-2xl sm:inset-6" : className,
+        )}
+        role={grande ? "dialog" : undefined}
+        aria-modal={grande || undefined}
+        aria-label={grande ? "Jarvis en pantalla completa" : undefined}
+      >
         <header className="flex items-center gap-3 border-b border-neutro-100 px-4 py-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-azul-700 to-cian-500 text-sm font-extrabold text-white">J</div>
           <div className="min-w-0 flex-1">
@@ -99,9 +122,15 @@ export const JarvisPanel = forwardRef<JarvisPanelRef, { onFijar: (b: Bloque) => 
               <Trash2 className="h-4 w-4" />
             </button>
           )}
+          <button type="button" onClick={() => setGrande(g => !g)}
+            title={grande ? "Volver al tamaño normal (Esc)" : "Agrandar a pantalla completa"}
+            aria-label={grande ? "Volver al tamaño normal" : "Agrandar a pantalla completa"}
+            className="grid size-8 place-items-center rounded-lg text-neutro-400 hover:bg-neutro-100 hover:text-neutro-700">
+            {grande ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
         </header>
 
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-neutro-50 px-4 py-4">
+        <div className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto bg-neutro-50 px-4 py-4", grande && "sm:px-[max(1rem,calc((100%-72rem)/2))]")}>
           {mensajes.length === 0 && (
             <div className="rounded-xl border border-dashed border-neutro-200 bg-white px-4 py-5 text-center">
               <p className="text-sm font-semibold text-azul-900">Preguntale lo que quieras del negocio</p>
@@ -164,7 +193,7 @@ export const JarvisPanel = forwardRef<JarvisPanelRef, { onFijar: (b: Bloque) => 
             ))}
           </div>
         )}
-        <form className="px-4 pb-3 pt-3" onSubmit={e => { e.preventDefault(); enviar() }}>
+        <form className={cn("px-4 pb-3 pt-3", grande && "sm:px-[max(1rem,calc((100%-72rem)/2))]")} onSubmit={e => { e.preventDefault(); enviar() }}>
           <div className="flex items-end gap-2 rounded-2xl border-[1.5px] border-azul-100 bg-white p-1.5 pl-3 focus-within:border-azul-400">
             <textarea
               ref={inputRef}
@@ -183,6 +212,7 @@ export const JarvisPanel = forwardRef<JarvisPanelRef, { onFijar: (b: Bloque) => 
           <p className="mt-1.5 text-center text-[11px] text-neutro-400">Responde con datos reales del sistema · Enter envía, Shift+Enter baja de línea</p>
         </form>
       </aside>
+      </>
     )
   },
 )

@@ -124,7 +124,7 @@ export async function POST(
     if (body.nueva_descripcion && String(body.nueva_descripcion).trim()) attrs.descripcion = String(body.nueva_descripcion).trim()
     if (Number(body.unidades_por_bulto) > 0) attrs.unidades_por_bulto = Number(body.unidades_por_bulto)
     if (Object.keys(attrs).length) {
-      const { error: attrErr } = await supabase.from('articulos').update(attrs).eq('id', destino)
+      const { error: attrErr } = await supabase.from('articulos').update({ ...attrs, actualizado_por: auth.user.id }).eq('id', destino)
       if (attrErr) console.warn('[vincular-articulo] attrs:', attrErr.message)
     }
 

@@ -323,7 +323,7 @@ export async function POST(request: NextRequest) {
       const chunk = updateBatch.slice(i, i + BATCH)
       const results = await Promise.allSettled(
         chunk.map(({ id, campos }) =>
-          supabase.from("articulos").update(campos).eq("id", id)
+          supabase.from("articulos").update({ ...campos, actualizado_por: auth.user.id }).eq("id", id)
         )
       )
       for (let j = 0; j < results.length; j++) {

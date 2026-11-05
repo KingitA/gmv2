@@ -55,6 +55,16 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 
 ## Diario
 
+### 05/11/2026 (noche) — Que entienda como habla la gente (rama `jarvis-amplio`)
+Juan probó "¿se realizaron cambios en artículos entre ayer y hoy?" y Jarvis le pidió el código. Su pedido: lo van a usar personas de más de 60 años, que preguntan "¿quién cambió el precio del colgate de 70?"; no tiene que hacer falta ser específico. Y poder agrandar el chat a pantalla completa.
+- Búsqueda de artículos por palabras sueltas (`buscarArticulos`): cada palabra en descripción/marca/proveedor/categoría; los números como número suelto ("70" → "x70g", no un EAN). La usan facturación, historia del pedido y cambios; si coinciden varios, se trae lo de todos (ya no frena preguntando el código).
+- `cambios_articulo` → `cambios_articulos`: el artículo es opcional; lista todos los cambios de un período con resumen por persona y por dato; filtros dato (precio incluye costo), proveedor, persona. Antes del 05/11 usa el historial de precios (sin quién). Si el cambio lo aplicó un precio programado, dice quién lo programó.
+- Huecos cerrados: importar lista de proveedor, cerrar recepción, OC, vincular artículo, bulto, importación masiva y datos de depósito ahora anotan quién (`actualizado_por`); antes Jarvis iba a decir "el sistema".
+- Instrucciones: sección "Entender lo que te piden" (nunca pedir que sea más específico si puede buscarlo; artículos como los dice la gente; "la luz" = EDES).
+- Pantalla: botón ⤢ para agrandar Jarvis a pantalla completa y volver (Esc).
+- Examen: 3 preguntas nuevas (31). Las 6 de "cómo habla la gente": 8,5/10, 6/6 reglas, USD 0,35. Jarvis encontró que el 29/10 se cargaron packs y exhibidores Colgate x70 con precio base $ 1.
+
+
 ### 05/11/2026 (tarde) — Vencimientos y gastos: quién los pagó
 - Decisión de Juan: **quien arma la orden de pago es quien la autoriza**; no hace falta otra autorización. Lo mismo para gastos y vencimientos: marcarlo pagado = pagarlo/autorizarlo. Problema que planteó: si marca pagado el vencimiento de EDES (sale sin orden de pago), se perdía quién.
 - Revisado: `vencimientos` no guardaba NADA de quién (214 pagados, ninguno por orden de pago). Todo pasa por `/api/vencimientos` (POST/PUT/DELETE) y `/api/vencimientos/[id]/recalcular`.
