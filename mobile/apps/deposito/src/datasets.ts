@@ -11,6 +11,7 @@ export const DS = {
   devoluciones: "deposito_devoluciones",
   articulos: "deposito_articulos",
   catalogos: "deposito_catalogos",
+  clientes: "deposito_clientes",
 } as const
 
 export const DATASETS: DefDataset[] = [
@@ -19,6 +20,8 @@ export const DATASETS: DefDataset[] = [
   { nombre: DS.devoluciones, prioridad: 3, cadaMs: 2 * 60_000 },
   { nombre: DS.catalogos, prioridad: 4, cadaMs: 30 * 60_000 },
   { nombre: DS.articulos, prioridad: 5, invalidable: true, cadaMs: 5 * 60_000 },
+  // "Cargar pedido → Para un cliente" (05/11): clientes activos, liviano (snapshot con hash)
+  { nombre: DS.clientes, prioridad: 6, cadaMs: 30 * 60_000 },
 ]
 
 // ─── Formas de las filas ─────────────────────────────────────────────────────
@@ -160,3 +163,12 @@ export interface OpStock { articulo_id: string; tipo: "correccion" | "entrada" |
 export interface OpDatos { articulo_id: string; cambios: Record<string, { antes: unknown; despues: unknown }> }
 export interface RenglonRevisionOp { id: string; aceptar: boolean; cantidad_aceptada: number; es_vendible: boolean; motivo: string | null }
 export interface OpRevisionDevolucion { devolucion_id: string; renglones: RenglonRevisionOp[] }
+
+/** Cliente para "Cargar pedido" (deposito_clientes): lo justo para no equivocarse de cliente. */
+export interface ClienteDeposito {
+  id: string
+  codigo: string | null
+  nombre: string
+  localidad: string | null
+  direccion: string | null
+}

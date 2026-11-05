@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Link } from "react-router"
 import { useContadoresOutbox, useOverlay, useRuntime } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
+import { useBorradorCarga } from "../datos/borradorCarga"
 import { useDevoluciones, usePedidos, useRecepciones, useYo } from "../datos/hooks"
 import { C, Marco } from "../ui"
 
@@ -15,6 +16,7 @@ export function Inicio() {
   const { pedidos } = usePedidos()
   const { ordenes } = useRecepciones()
   const { devoluciones } = useDevoluciones()
+  const { borrador } = useBorradorCarga()
 
   const MODULOS = [
     { to: "/preparar", label: "Preparar Pedidos", icon: "📦", desc: "Picking de órdenes de venta", bg: C.orangeL, accent: C.orange, border: C.orangeB, n: pedidos.filter((p) => !p.cierrePendiente).length },
@@ -38,6 +40,17 @@ export function Inicio() {
           <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>Hola, {yo.nombre} 👋</div>
           <div style={{ color: C.sub, fontSize: 14, marginTop: 2 }}>¿Qué vas a hacer hoy?</div>
         </div>
+        {/* CARGAR PEDIDO (05/11): tarjeta propia, ancha y bien visible */}
+        <Link to="/cargar" style={{ textDecoration: "none", background: "#c2410c", borderRadius: 20, padding: "18px 18px", display: "flex", alignItems: "center", gap: 14, marginBottom: 12, boxShadow: "0 3px 10px rgba(194,65,12,0.3)" }}>
+          <div style={{ width: 48, height: 48, borderRadius: 14, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>🛒</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: "#fff", fontWeight: 900, fontSize: 19, letterSpacing: "0.03em" }}>CARGAR PEDIDO</div>
+            <div style={{ color: "#ffedd5", fontSize: 13, marginTop: 2 }}>
+              {borrador ? `Pedido en curso · ${borrador.items.length} artículo${borrador.items.length === 1 ? "" : "s"}` : "Para mí o para un cliente"}
+            </div>
+          </div>
+          <span style={{ color: "#fff", fontSize: 26, fontWeight: 700 }}>›</span>
+        </Link>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {MODULOS.map((m) => (
             <Link key={m.to} to={m.to} style={{ position: "relative", textDecoration: "none", background: m.bg, borderRadius: 20, padding: "20px 16px", display: "flex", flexDirection: "column", gap: 12, border: `1px solid ${m.border}`, minHeight: 140, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>

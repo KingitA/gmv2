@@ -43,8 +43,8 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | ~~C7 — Al anular un cobro, el servidor puede devolver `parada_reabierta: true` + `mensaje` (la parada "NO ENTREGAR SIN COBRAR" volvió a pendiente: refrescar la hoja y mostrar el mensaje) o 422 `PARADA_BLOQUEADA_ENTREGADA` con `reintentable: false` (viaje terminado: mostrar el error, no reintentar). R4 del 27/10~~ | App Chofer | **Hecho 27/10 — App Chofer v0.3.5**: aviso "volvió a pendiente" (también sin señal, con el overlay), 422 como rechazo sin reintento |
 | ~~C8 — Devolución: si el artículo vino en un PRESUPUESTO, NO frenar en el celular lo que pasa de lo comprado (`topeDevolucion` en `datos/devolucion-tope`): el servidor manda el excedente al respaldo 0002-00000001 como "sistema viejo" y la oficina lo controla. Mostrar un aviso tipo "Lo que pasa de lo comprado (N) va como sistema viejo: lo revisa la oficina". En FACTURA el tope sigue igual. Regla de Juan 27/10~~ | App Chofer | **Hecho 27/10 — App Chofer v0.3.6**: `devolvible.presupuesto` en la ficha; en PRES no frena y avisa "va como sistema viejo"; en factura el tope sigue |
 | D3 — Poner en 0 las devoluciones de prueba antes de producción (dato sucio) | Cuentas corrientes / oficina | Pendiente (día del corte) |
-| DP1 — Cargar pedido desde depósito: servidor y ERP (handler `pedido.cargar_deposito`, origen, cola web, Facturar varios, entregado al facturar, número de pedido seguro) | Listas de precios | Hecho 05/11 (rama `listas-deposito`), migración `20261105_pedidos_origen_numeracion.sql` **sin aplicar**: no se mergea antes de aplicarla — ver "Cargar pedido desde depósito" abajo |
-| DP2 — Cargar pedido desde depósito: botón "CARGAR PEDIDO" en la app (Para mí / Para un cliente) + filtro de la cola de la app (`lib/mobile/sync/deposito.ts`) | App Depósito | Pendiente — contrato abajo |
+| DP1 — Cargar pedido desde depósito: servidor y ERP (handler `pedido.cargar_deposito`, origen, cola web, Facturar varios, entregado al facturar, número de pedido seguro) | Listas de precios | **Hecho y en main 05/11**; migración `20261105_pedidos_origen_numeracion.sql` aplicada |
+| DP2 — CARGAR PEDIDO en la app Depósito: "Para mí" / "Para un cliente", sin precios ni lista + filtro de la cola de la app | App Depósito | **Hecho y en main 05/11**, APK v0.5.0 |
 
 ## Versiones instaladas hoy
 
@@ -172,6 +172,19 @@ Las devoluciones que hay hoy en la base son de prueba y están rotas (precios co
 Cambió `mobile/packages/core/src/sync/outbox.ts` (compartido). No hay que tocar nada en las pantallas; entra solo con la próxima APK. Qué cambia: una operación que el servidor rechaza con **5xx** 30 veces **y** durante más de 24 h pasa a "rechazado" (el usuario la ve y la descarta) en vez de frenar la fila para siempre; y ya con 30 fallos, el `forzar` del sondeo respeta el backoff (antes reenviaba cada 15 s). Los cortes de red **no** cuentan: nunca se rechaza trabajo hecho sin señal. Si una pantalla filtra rechazados por `tipo`, el mensaje nuevo empieza con "El servidor no pudo aplicarla…". MOBILE.md §4.2, O10.
 
 ---
+
+## App Depósito → v0.5.0 CARGAR PEDIDO (05/11/2026, rama `deposito-cargar`, sin instalar)
+
+Pedido NUEVO armado desde el depósito (no es picking). Inicio → tarjeta **CARGAR PEDIDO** → **PARA MÍ** (cuenta personal del usuario logueado; la resuelve el servidor) o **PARA UN CLIENTE** (buscador por código o nombre; cada resultado y el cliente fijo arriba muestran nombre, código, localidad y dirección). Se escanea o busca el artículo, se escribe la cantidad (arranca vacía), se cambia o se saca. **No se muestran ni eligen precios, lista ni método.**
+
+**Contrato con el servidor (lo implementa Listas de precios):**
+- Outbox `pedido.cargar_deposito`, payload `{ local_id, modo: "propio" | "cliente", cliente_id?, items: [{ articulo_id, cantidad }], observaciones? }` (`local_id` = id lógico: reenviar no duplica).
+- OK: `{ pedido_id, numero_pedido, cliente_nombre }` → cartel "Pedido finalizado, las facturas se envían luego desde oficina" con el número.
+- Rechazo (4xx con mensaje): la app lo muestra **tal cual** y deja el pedido abierto para corregirlo con el mismo `local_id` (`sin_cuenta_personal`, `sin_precio` — el mensaje tiene que nombrar los artículos —, `cliente_inactivo`, `articulo_dado_de_baja`, `sin_items`).
+- Al cerrar, la app manda el outbox enseguida y espera. Sin señal (o 5xx): "el pedido quedó guardado y se envía solo cuando vuelva"; el resultado aparece después en "Cargar pedido" (pendiente / rechazado con "Corregir" / "Cargados hoy" con el número).
+- Cola de picking: `lib/mobile/sync/deposito.ts` excluye los pedidos con `pedidos.origen` en `deposito_propio` / `deposito_cliente` (tolera que la columna no exista todavía). **Listas: si la columna se llama distinto, avisar** (`ORIGENES_CARGA_DEPOSITO`).
+- Dataset nuevo `deposito_clientes` (clientes activos sin las cuentas de empleado: id, código, nombre, localidad, dirección).
+- El borrador vive en el equipo (localStorage por usuario): atrás, cerrar la app o cambiar de pantalla no lo pierden.
 
 ## Servidor — arreglos que afectan a las apps (los hace quien tenga el OK)
 

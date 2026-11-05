@@ -105,6 +105,12 @@ const DATASETS = {
   deposito_devoluciones: () => S.devoluciones.filter((d) => d.estado === "pendiente"),
   deposito_articulos: () => S.articulos,
   deposito_catalogos: catalogos,
+  // Cargar pedido (05/11)
+  deposito_clientes: () => [
+    { id: uid(9101), codigo: "1190", nombre: "Distribuidora Urquiza", localidad: "Punta Alta", direccion: "Urquiza 120" },
+    { id: uid(9102), codigo: "199", nombre: "Almacén Don José", localidad: "Bahía Blanca", direccion: "Alsina 45" },
+    { id: uid(9103), codigo: "556", nombre: "Chen Songmei", localidad: "General Roca", direccion: "San Martín 900" },
+  ],
 }
 
 class Rechazo extends Error {}
@@ -147,7 +153,21 @@ function soltarOReiniciar(u, p, soltar) {
   if (soltar && ped.estado === "en_preparacion") ped.estado = ped.estadoAntes || "pendiente"
   return { ok: true, replica: [parchePedido(ped.id)] }
 }
+let numeroCarga = 2030
+const HANDLERS_CARGA = {
+  // Como el handler del servidor (agente Listas): el artículo con SKU 100099 no tiene precio
+  "pedido.cargar_deposito": (u, p) => {
+    if (!p.items?.length) throw new Rechazo("El pedido no tiene artículos.")
+    const sinPrecio = p.items.map((i) => S.articulos.find((a) => a.id === i.articulo_id)).filter((a) => a?.sku === "100099")
+    if (sinPrecio.length) throw new Rechazo(`Sin precio: ${sinPrecio.map((a) => a.descripcion).join(", ")}. Sacalo del pedido.`)
+    S.cargados ||= {}
+    S.cargados[p.local_id] ||= { pedido_id: randomUUID(), numero_pedido: String(++numeroCarga).padStart(6, "0") }
+    const cli = DATASETS.deposito_clientes().find((c) => c.id === p.cliente_id)
+    return { ...S.cargados[p.local_id], cliente_nombre: p.modo === "propio" ? u.nombre : cli?.nombre ?? "Cliente" }
+  },
+}
 const HANDLERS = {
+  ...HANDLERS_CARGA,
   "picking.abrir": (u, p) => { const x = S.pedidos.find((q) => q.id === p.pedido_id); if (x && PREPARABLES.includes(x.estado)) { if (x.estado !== "en_preparacion") x.estadoAntes = x.estado; x.estado = "en_preparacion" } return { replica: [parchePedido(p.pedido_id)] } },
   // P2-18 (como lib/deposito/picking.ts: renglones de otro ⇒ rechazo)
   "picking.reiniciar": (u, p) => soltarOReiniciar(u, p, false),
