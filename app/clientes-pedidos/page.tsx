@@ -53,6 +53,7 @@ import { Label } from "@/components/ui/label"
 import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import { NuevoPedidoDialog } from "@/components/pedidos/NuevoPedidoDialog"
 import { FacturarVariosDialog } from "@/components/pedidos/FacturarVariosDialog"
+import { ETIQUETA_CARGADO_EN_DEPOSITO, esCargadoEnDeposito, facturableEnLote } from "@/lib/pedidos/origen-deposito"
 import { ReviewPedidoDialog } from "@/components/pedidos/ReviewPedidoDialog"
 import { useOrderQueue } from "@/hooks/use-order-queue"
 import type { QueueItem } from "@/hooks/use-order-queue"
@@ -1356,7 +1357,7 @@ export default function ClientesPedidosPage() {
   }
   // P2-22: facturar los tildados (foto de la selección al abrir: la lista se recarga sola)
   const [aFacturar, setAFacturar] = useState<{ id: string; numero_pedido: string; estado: string; cliente: string }[] | null>(null)
-  const pedirFacturarSeleccion = () => setAFacturar(seleccionados.map(p => ({ id: p.id, numero_pedido: p.numero_pedido, estado: p.estado, cliente: p.clientes?.nombre_razon_social || "Sin cliente" })))
+  const pedirFacturarSeleccion = () => setAFacturar(seleccionados.map(p => ({ id: p.id, numero_pedido: p.numero_pedido, estado: p.estado, origen: (p as { origen?: string | null }).origen ?? null, cliente: p.clientes?.nombre_razon_social || "Sin cliente" })))
   const pedirEliminarSeleccion = () => {
     const elegibles = seleccionados.filter(p => puedeEliminarPedido(p.estado)).length
     setPropuesta({
@@ -1374,9 +1375,19 @@ export default function ClientesPedidosPage() {
     if (ok < ids.length) toast.error(`${ids.length - ok} no se pudieron actualizar`)
   }
 
-  const getEstadoBadge = (estado: string) => {
+  const getEstadoBadge = (estado: string, pedido?: { origen?: string | null }) => {
     const estadoConfig = ESTADOS_PEDIDO.find((e) => e.value === estado)
-    return <Badge className={`${estadoConfig?.color} text-white`}>{estadoConfig?.label || estado}</Badge>
+    const badge = <Badge className={`${estadoConfig?.color} text-white`}>{estadoConfig?.label || estado}</Badge>
+    // Cargado desde la app de Depósito (05/11): ya armado, no va a la cola; al facturar pasa a entregado
+    if (!esCargadoEnDeposito(pedido)) return badge
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1">
+        {badge}
+        <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-800" title="Lo cargó depósito con la mercadería ya armada: no va a la cola y al facturarlo pasa a Entregado">
+          {ETIQUETA_CARGADO_EN_DEPOSITO}
+        </Badge>
+      </span>
+    )
   }
 
   const handleSort = (column: string) => {
@@ -1709,8 +1720,8 @@ export default function ClientesPedidosPage() {
             <Truck className="h-4 w-4" /> Crear viaje
           </Button>
           <Button size="sm" variant="secondary" className="h-9 bg-white text-azul-900 hover:bg-azul-50" onClick={pedirFacturarSeleccion}
-            disabled={!seleccionados.some(p => p.estado === "pendiente_facturacion")}
-            title={seleccionados.some(p => p.estado === "pendiente_facturacion") ? "Factura los tildados que están en Pendiente Facturación" : "No se facturan: ninguno está preparado (Pendiente Facturación)"}>
+            disabled={!seleccionados.some(p => facturableEnLote(p as { estado: string; origen?: string | null }))}
+            title={seleccionados.some(p => facturableEnLote(p as { estado: string; origen?: string | null })) ? "Factura los tildados que están en Pendiente Facturación (y los cargados en depósito)" : "No se facturan: ninguno está preparado (Pendiente Facturación) ni cargado en depósito"}>
             <FileText className="h-4 w-4" /> Facturar
           </Button>
           <Select value="" onValueChange={(v) => cambiarPrioridadVarios(seleccionados.map(p => p.id), Number(v) as 1 | 2 | 3)}>
@@ -1802,7 +1813,7 @@ export default function ClientesPedidosPage() {
                     {formatDateAR(pedidoSeleccionado.fecha)} · {pedidoSeleccionado.clientes?.nombre_razon_social}
                   </SheetDescription>
                 </div>
-                <div className="shrink-0 mt-1">{getEstadoBadge(pedidoSeleccionado.estado)}</div>
+                <div className="shrink-0 mt-1">{getEstadoBadge(pedidoSeleccionado.estado, pedidoSeleccionado as { origen?: string | null })}</div>
               </div>
 
               {/* Stats */}

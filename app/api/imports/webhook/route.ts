@@ -123,9 +123,9 @@ export async function POST(req: NextRequest) {
 }
 
 async function createOrderAutomated(supabase: any, clienteId: string, items: any[], source: string) {
-    // 1. Generate Order Number
-    const { count } = await supabase.from("pedidos").select("*", { count: "exact", head: true })
-    const numeroPedido = `AUTO-${String((count || 0) + 1).padStart(6, "0")}`
+    // 1. Número de pedido: el mismo número seguro que todas las puertas (05/11/2026)
+    const { getNextOrderNumber } = await import("@/lib/utils/next-order-number")
+    const numeroPedido = await getNextOrderNumber(supabase)
 
     // 2. Get client info
     const { data: cliente, error: clienteError } = await supabase.from("clientes").select("*").eq("id", clienteId).single()

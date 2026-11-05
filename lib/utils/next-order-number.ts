@@ -1,11 +1,22 @@
 /**
- * Generates the next sequential numeric order number.
- * Queries the max existing numero_pedido and returns max + 1, padded to 6 digits.
- * 
+ * Próximo número de pedido (6 dígitos, p. ej. "000032"). Lo usan TODAS las
+ * puertas: ERP, vendedor, mostrador, depósito y mail.
+ *
+ * Número seguro (05/11/2026): sale de la base con pedido_numero_reservar()
+ * (supabase/migrations/20261105_pedidos_origen_numeracion.sql), una secuencia
+ * atómica que arranca después del número más alto y saltea los ya usados: dos
+ * pedidos a la vez nunca reciben el mismo. Antes se leía el máximo de los
+ * últimos 50 y se sumaba 1, y dos a la vez podían salir repetidos.
+ *
+ * Sin la migración aplicada (la función no existe) cae al cálculo viejo.
+ *
  * @param supabase - Supabase client instance (regular or admin)
- * @returns The next order number as a zero-padded string (e.g., "000032")
  */
 export async function getNextOrderNumber(supabase: any): Promise<string> {
+    const { data: reservado, error: rpcError } = await supabase.rpc("pedido_numero_reservar")
+    if (!rpcError && typeof reservado === "string" && reservado) return reservado
+    if (rpcError && !funcionInexistente(rpcError)) throw new Error(`No se pudo reservar el número de pedido: ${rpcError.message}`)
+
     // Get the maximum numeric order number
     const { data, error } = await supabase
         .from("pedidos")
@@ -36,4 +47,10 @@ export async function getNextOrderNumber(supabase: any): Promise<string> {
     }
 
     return String(maxNum + 1).padStart(6, "0")
+}
+
+/** La función de la base todavía no existe (migración sin aplicar). */
+function funcionInexistente(e: { code?: string; message?: string }): boolean {
+    const msg = e.message || ""
+    return e.code === "PGRST202" || e.code === "42883" || (/pedido_numero_reservar/.test(msg) && /not find|does not exist|no existe/i.test(msg))
 }

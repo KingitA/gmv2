@@ -27,6 +27,7 @@ import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { recalcularBonificadosPedido, cuposMercaderiaPedido, etiquetasCupos } from "@/lib/pedidos/mercaderia-bonificada"
 import { leerCondicionesCliente } from "@/lib/pedidos/condiciones-pedido"
 import { estadoAlFacturar } from "@/lib/pedidos/estados"
+import { esCargadoEnDeposito } from "@/lib/pedidos/origen-deposito"
 import { aplicarPagosDelPedidoRefacturado } from "@/lib/pedidos/refacturar"
 import { aplicarDevueltoAlDetalle } from "@/lib/pedidos/ajuste-devoluciones-refacturado"
 import { cuitDigitos, cuitValido, normalizarCuit } from "@/lib/formato"
@@ -665,10 +666,11 @@ async function generarPedido(body: any, auth: { user: { id: string } }) {
     // queda bloqueado sí o sí (lib/pedidos/estados.ts).
     // Refacturado (#19/#20, regla del dueño 27/10): si el pedido ya estaba más
     // adelante (listo, en viaje, entregado) se queda donde estaba (estadoAlFacturar).
+    // Cargado en depósito (05/11): la mercadería ya salió → directo a "entregado".
     let pagosRefacturado: Awaited<ReturnType<typeof aplicarPagosDelPedidoRefacturado>> | null = null
     if (comprobantesGenerados.length > 0) {
       const { error: estadoErr } = await supabase
-        .from("pedidos").update({ estado: estadoAlFacturar((pedido as any).estado) }).eq("id", pedido_id)
+        .from("pedidos").update({ estado: estadoAlFacturar((pedido as any).estado, { cargadoEnDeposito: esCargadoEnDeposito(pedido as any) }) }).eq("id", pedido_id)
       if (estadoErr) console.error("[generar] No se pudo marcar el pedido como facturado:", estadoErr)
 
       // Lo que el cliente había pagado contra los comprobantes anulados de ESTE

@@ -174,19 +174,9 @@ export async function POST(request: Request) {
       totalImpuestos += impuestos * item.cantidad
     }
 
-    // 4. Generar número de pedido
-    const { data: ultimoPedido } = await supabase
-      .from("pedidos")
-      .select("numero_pedido")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single()
-
-    let numeroPedido = "0001"
-    if (ultimoPedido?.numero_pedido) {
-      const ultimoNumero = Number.parseInt(ultimoPedido.numero_pedido)
-      numeroPedido = String(ultimoNumero + 1).padStart(4, "0")
-    }
+    // 4. Número de pedido: el mismo número seguro que todas las puertas (05/11/2026)
+    const { getNextOrderNumber } = await import("@/lib/utils/next-order-number")
+    const numeroPedido = await getNextOrderNumber(supabase)
 
     // 5. Crear el pedido
     const { data: pedido, error: pedidoError } = await supabase

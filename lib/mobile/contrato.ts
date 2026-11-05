@@ -80,4 +80,4 @@ export type ResultadoOutbox =
   /** La clave ya se había procesado: devuelve el resultado original */
   | { estado: "duplicado"; resultado: unknown }
   /** Regla de negocio: no se va a aplicar nunca; el usuario tiene que ver el motivo */
-  | { estado: "rechazado"; error: string; codigo?: string }
+  | { estado: "rechazado"; error: string; codigo?: string; datos?: Record<string, unknown> }

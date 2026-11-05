@@ -47,7 +47,8 @@ interface Props {
   onPrioridad: (p: PedidoFila, prioridad: 1 | 2 | 3) => void
   onEliminar?: (p: PedidoFila) => void
   puedeEliminar: (estado: string) => boolean
-  estadoBadge: (estado: string) => ReactNode
+  /** El pedido va para la etiqueta "Cargado en depósito" (origen) */
+  estadoBadge: (estado: string, pedido?: { origen?: string | null }) => ReactNode
   /** Barra de preparación del depósito, si hay alguien preparando ese pedido. */
   picking?: Record<string, { operario: string; progreso: { total: number; preparados: number; faltantes: number; pendientes: number } }>
   orden: Orden
@@ -154,7 +155,7 @@ export function TablaPedidos(p: Props) {
                     )}
                   </td>
                   <td className="hidden truncate px-2 text-[13px] uppercase text-neutro-600 lg:table-cell">{x.zona?.nombre || <span className="text-neutro-300">—</span>}</td>
-                                    <td className="px-2 normal-case">{p.estadoBadge(x.estado)}</td>
+                                    <td className="px-2 normal-case">{p.estadoBadge(x.estado, x as { origen?: string | null })}</td>
                   <td className="truncate px-2 text-[13px]">
                     {x.viajes?.nombre
                       ? <span className="flex min-w-0 items-center gap-1 font-medium uppercase text-azul-600" title={x.viajes.nombre}><Truck className="size-3.5 shrink-0" /><span className="truncate">{x.viajes.nombre}</span></span>
@@ -203,7 +204,7 @@ export function TablaPedidos(p: Props) {
                   <div className="shrink-0 text-right font-semibold tabular-nums text-azul-900">{x.total > 0 ? moneda(x.total || 0, 0) : '—'}</div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-                  {p.estadoBadge(x.estado)}
+                  {p.estadoBadge(x.estado, x as { origen?: string | null })}
                   {(x.prioridad || 3) < 3 && <span className={cn('rounded-full px-2 py-0.5 font-semibold', pr.fondo, pr.texto)}>{pr.label}</span>}
                   {x.zona?.nombre && <span className="rounded-full bg-neutro-100 px-2 py-0.5 uppercase text-neutro-600">{x.zona.nombre}</span>}
                   {x.viajes?.nombre && <span className="inline-flex items-center gap-1 rounded-full bg-azul-50 px-2 py-0.5 font-medium uppercase text-azul-600"><Truck className="size-3" />{x.viajes.nombre}</span>}
