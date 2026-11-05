@@ -17,7 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Bloque, Formato } from "@/lib/playroom/bloques"
 import { calcularIndicadores } from "@/lib/playroom/indicadores"
 import { CATALOGO_TABLERO } from "@/lib/playroom/catalogo-tablero"
-import { fetchAllRows } from "@/lib/playroom/queries"
+import { fetchAllRows, fetchByIds } from "@/lib/playroom/queries"
 import { fecha, fechaHora, finDiaAR, hoyISO, inicioDiaAR, sumarDiasISO } from "@/lib/formato"
 import { esAdmin as esAdminFinanzas, esTipoReservado, TIPOS_SOLO_ADMIN } from "@/lib/finanzas/tipos-reservados"
 import { PERIODOS, resolverPeriodo, type Rango } from "./periodos"
@@ -982,24 +982,53 @@ const cuando = (v: unknown) => (v ? fechaHora(v as string) : null)
 /** "1827.102269" → "1827.1" (los datos crudos de la base traen muchos decimales). */
 const valorLindo = (v: unknown) => (v == null ? null : /^-?\d+\.\d+$/.test(String(v)) ? String(red(Number(v), 2)) : String(v))
 
-async function resolverArticulo(db: SupabaseClient, texto: string) {
+type ArtBuscado = { id: string; sku: string; descripcion: string; proveedor_nombre: string | null; marca_nombre: string | null; activo: boolean | null }
+const SEL_ART = "id, sku, descripcion, proveedor_nombre, marca_nombre, activo"
+const PALABRAS_VACIAS = new Set(["de", "del", "la", "el", "los", "las", "x", "por", "en", "y", "con", "un", "una", "al", "que", "articulo", "articulos", "producto"])
+const sinTildes = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase()
+
+/**
+ * Busca artículos como habla la gente: "el colgate de 70", "lavandina ayudín 2 litros",
+ * un código o un EAN. Cada palabra tiene que aparecer (en la descripción, la marca,
+ * el proveedor o la categoría); los números se buscan como número suelto en la
+ * descripción ("70" encuentra "x70g", no un EAN que tenga 70 adentro).
+ */
+async function buscarArticulos(db: SupabaseClient, texto: string, max = 30): Promise<{ lista: ArtBuscado[]; total: number }> {
   const t = texto.trim()
-  const sel = "id, sku, descripcion, proveedor_nombre"
-  const { data: porCodigo } = await db.from("articulos").select(sel).eq("sku", t).limit(2)
-  if (porCodigo?.length === 1) return porCodigo[0] as { id: string; sku: string; descripcion: string; proveedor_nombre: string | null }
+  if (!t) return { lista: [], total: 0 }
+  const { data: porCodigo } = await db.from("articulos").select(SEL_ART).eq("sku", t).limit(2)
+  if (porCodigo?.length === 1) return { lista: porCodigo as ArtBuscado[], total: 1 }
   if (/^\d{8,14}$/.test(t)) {
-    const { data: porEan } = await db.from("articulos").select(sel).contains("ean13", [t]).limit(2)
-    if (porEan?.length === 1) return porEan[0] as { id: string; sku: string; descripcion: string; proveedor_nombre: string | null }
+    const { data: porEan } = await db.from("articulos").select(SEL_ART).contains("ean13", [t]).limit(2)
+    if (porEan?.length === 1) return { lista: porEan as ArtBuscado[], total: 1 }
   }
-  const limpio = t.replace(/[%_,()]/g, " ").trim()
-  const { data, error } = await db.from("articulos").select(sel).ilike("descripcion", `%${limpio}%`).limit(8)
-  if (error) throw new Error(error.message)
-  const filas = (data ?? []) as { id: string; sku: string; descripcion: string; proveedor_nombre: string | null }[]
-  if (!filas.length) throw new ErrorHerramienta(`No encontré ningún artículo "${texto}" (ni por código ni por descripción).`)
-  const exacto = filas.find((f) => f.descripcion?.toLowerCase() === limpio.toLowerCase())
+  const palabras = sinTildes(t).split(/[^a-z0-9ñ]+/).filter((w) => w && !PALABRAS_VACIAS.has(w))
+  if (!palabras.length) return { lista: [], total: 0 }
+  const consultar = async (numerosEnTodo: boolean) => {
+    let q = db.from("articulos").select(SEL_ART, { count: "exact" })
+    for (const w of palabras) {
+      q = /^\d+$/.test(w) && !numerosEnTodo ? q.filter("descripcion", "imatch", `(^|[^0-9])${w}([^0-9]|$)`) : q.ilike("search_text", `%${w}%`)
+    }
+    const { data, count, error } = await q.order("activo", { ascending: false }).order("descripcion").limit(max)
+    if (error) throw new Error(error.message)
+    return { lista: (data ?? []) as ArtBuscado[], total: count ?? (data ?? []).length }
+  }
+  const r = await consultar(false)
+  return r.total || !palabras.some((w) => /^\d+$/.test(w)) ? r : consultar(true)
+}
+
+const nombreArt = (a: { sku: string; descripcion: string; marca_nombre?: string | null }) =>
+  `${a.sku} ${a.descripcion}${a.marca_nombre && !a.descripcion.toLowerCase().includes(a.marca_nombre.toLowerCase()) ? ` (${a.marca_nombre})` : ""}`
+
+/** Un solo artículo: si hay varios, devuelve las opciones para que la IA pregunte. */
+async function resolverArticulo(db: SupabaseClient, texto: string) {
+  const { lista, total } = await buscarArticulos(db, texto, 8)
+  if (!lista.length) throw new ErrorHerramienta(`No encontré ningún artículo "${texto}" (ni por código ni por descripción).`)
+  if (lista.length === 1) return lista[0]
+  const limpio = sinTildes(texto.trim())
+  const exacto = lista.find((f) => sinTildes(f.descripcion ?? "") === limpio)
   if (exacto) return exacto
-  if (filas.length > 1) throw new ErrorHerramienta(`Hay varios artículos que coinciden con "${texto}": ${filas.map((f) => `${f.sku} ${f.descripcion}`).join("; ")}. Preguntá cuál (mejor por código).`)
-  return filas[0]
+  throw new ErrorHerramienta(`Hay ${total} artículos que coinciden con "${texto}"${total > 8 ? " (te muestro 8)" : ""}: ${lista.map(nombreArt).join("; ")}. Preguntá cuál, con palabras simples (no hace falta el código).`)
 }
 
 // ─── 23. Facturación ───────────────────────────────────────────────────────
@@ -1033,10 +1062,17 @@ const facturacion: Herramienta = {
   },
   async ejecutar(ctx, p) {
     const r = resolverPeriodo(p as never, "mes_actual", ctx.hoy)
-    const agrupar = (AGRUPAR_FACT as readonly string[]).includes(String(p.agrupar_por)) ? String(p.agrupar_por) : "total"
+    let agrupar = (AGRUPAR_FACT as readonly string[]).includes(String(p.agrupar_por)) ? String(p.agrupar_por) : "total"
     const filtros: string[] = []
-    let artId: string | null = null, provId: string | null = null, cliId: string | null = null
-    if (str(p.articulo)) { const a = await resolverArticulo(ctx.db, str(p.articulo)!); artId = a.id; filtros.push(`artículo ${a.sku} ${a.descripcion}`) }
+    let artIds: string[] | null = null, provId: string | null = null, cliId: string | null = null
+    if (str(p.articulo)) {
+      const b = await buscarArticulos(ctx.db, str(p.articulo)!, 60)
+      if (!b.lista.length) throw new ErrorHerramienta(`No encontré ningún artículo "${str(p.articulo)}".`)
+      if (b.total > 60) throw new ErrorHerramienta(`"${str(p.articulo)}" coincide con ${b.total} artículos; algunos: ${b.lista.slice(0, 6).map(nombreArt).join("; ")}. Preguntá con una palabra más (marca, medida, tipo).`)
+      artIds = b.lista.map((a) => a.id)
+      filtros.push(b.lista.length === 1 ? `artículo ${nombreArt(b.lista[0])}` : `"${str(p.articulo)}" (${b.lista.length} artículos)`)
+      if (b.lista.length > 1 && agrupar === "total") agrupar = "articulo"
+    }
     if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); provId = pr.id; filtros.push(`proveedor ${pr.nombre}`) }
     if (str(p.cliente)) { const c = await resolverCliente(ctx.db, str(p.cliente)!); cliId = c.id; filtros.push(`cliente ${c.nombre}`) }
 
@@ -1044,7 +1080,7 @@ const facturacion: Herramienta = {
       let q = ctx.db.from("comprobantes_venta_detalle")
         .select("id, cantidad, precio_total, descripcion, articulo_id, comprobantes_venta!inner(tipo_comprobante, fecha, cliente_id, clientes(nombre)), articulos!inner(sku, descripcion, proveedor_id, proveedor_nombre)")
         .gte("comprobantes_venta.fecha", r.desde).lte("comprobantes_venta.fecha", r.hasta)
-      if (artId) q = q.eq("articulo_id", artId)
+      if (artIds) q = q.in("articulo_id", artIds)
       if (provId) q = q.eq("articulos.proveedor_id", provId)
       if (cliId) q = q.eq("comprobantes_venta.cliente_id", cliId)
       return q
@@ -1092,7 +1128,7 @@ const facturacion: Herramienta = {
     const nota = "Facturas, presupuestos y notas de débito suman; notas de crédito y reversas restan. Montos sin IVA. Las bonificaciones de contado cuentan en plata, no en unidades. No incluye los saldos migrados del sistema anterior (no tienen renglones)."
     const recalcular = { herramienta: "facturacion", parametros: { ...p } }
     const bloque = agrupar === "total"
-      ? ({ tipo: "numero", titulo: `Facturado ${r.etiqueta}${filtroTxt}`, valor: red(tot.i), formato: "pesos", nota: artId ? `${red(tot.u, 2)} unidades facturadas` : undefined, recalcular } as Bloque)
+      ? ({ tipo: "numero", titulo: `Facturado ${r.etiqueta}${filtroTxt}`, valor: red(tot.i), formato: "pesos", nota: artIds ? `${red(tot.u, 2)} unidades facturadas` : undefined, recalcular } as Bloque)
       : { ...tabla(
           `Facturación por ${agrupar === "tipo" ? "tipo de comprobante" : agrupar} — ${r.etiqueta}${filtroTxt}`,
           [
@@ -1142,8 +1178,12 @@ const historiaPedido: Herramienta = {
     if (!ped) throw new ErrorHerramienta(`No encontré el pedido ${crudo}.`)
     const pd = ped as any
 
-    let artFiltro: { id: string; sku: string; descripcion: string } | null = null
-    if (str(p.articulo)) artFiltro = await resolverArticulo(ctx.db, str(p.articulo)!)
+    let artFiltro: { ids: string[]; texto: string } | null = null
+    if (str(p.articulo)) {
+      const b = await buscarArticulos(ctx.db, str(p.articulo)!, 300)
+      if (!b.lista.length) throw new ErrorHerramienta(`No encontré ningún artículo "${str(p.articulo)}".`)
+      artFiltro = { ids: b.lista.map((a) => a.id), texto: b.lista.length === 1 ? nombreArt(b.lista[0]) : `"${str(p.articulo)}"` }
+    }
 
     const [estadosR, sesionesR, comprobantesR, cobrosR, kardexR] = await Promise.all([
       ctx.db.from("pedidos_estados_historial").select("estado_anterior, estado_nuevo, usuario_id, via, cambiado_at").eq("pedido_id", pd.id).order("cambiado_at"),
@@ -1158,7 +1198,7 @@ const historiaPedido: Herramienta = {
       let q = ctx.db.from("picking_items")
         .select("sesion_id, cantidad_pedida, cantidad_preparada, estado, usuario_id, usuario_nombre, fecha_escaneo, observaciones, articulos(sku, descripcion)")
         .in("sesion_id", sesiones.map((s) => s.id))
-      if (artFiltro) q = q.eq("articulo_id", artFiltro.id)
+      if (artFiltro) q = q.in("articulo_id", artFiltro.ids)
       const { data } = await q.order("fecha_escaneo", { ascending: true, nullsFirst: false })
       items = (data ?? []) as any[]
     }
@@ -1215,7 +1255,7 @@ const historiaPedido: Herramienta = {
       ], { nota: sinPrep ?? undefined }),
     ]
     if (renglones.length) {
-      bloques.push(tabla(`${titulo}: picking${artFiltro ? ` de ${artFiltro.sku}` : ""}`, [
+      bloques.push(tabla(`${titulo}: picking${artFiltro ? ` de ${artFiltro.texto}` : ""}`, [
         { clave: "articulo", titulo: "Artículo" }, { clave: "pedida", titulo: "Pedida", formato: "numero" },
         { clave: "preparada", titulo: "Preparada", formato: "numero" }, { clave: "pickeo", titulo: "Pickeó" }, { clave: "cuando", titulo: "Cuándo" },
       ], renglones))
@@ -1227,7 +1267,7 @@ const historiaPedido: Herramienta = {
         cargo: { quien: quien(pd.creado_por), cuando: cuando(pd.created_at), viajante: pd.vendedores?.nombre ?? null },
         cambios_de_estado: estados.length ? estados : "Sin historial de estados (se anota desde el 29/10/2026).",
         preparacion: preparacion.length ? preparacion : sinPrep,
-        picking: artFiltro && !renglones.length ? `No hay picking registrado de ${artFiltro.sku} ${artFiltro.descripcion} en este pedido.` : renglones,
+        picking: artFiltro && !renglones.length ? `No hay picking registrado de ${artFiltro.texto} en este pedido.` : renglones,
         facturacion: comprobantes.length ? comprobantes : "Sin comprobantes emitidos.",
         viaje: v ? { nombre: v.nombre, fecha: fechaSola(v.fecha), estado: v.estado, chofer: v.chofer_id ? quien(v.chofer_id) : v.chofer ?? "sin chofer asignado" } : "No está en un viaje.",
         cobros: cobros.length ? cobros : "Sin cobros asociados a este pedido (puede haberse cobrado a cuenta del cliente).",
@@ -1381,7 +1421,7 @@ const ordenesDePago: Herramienta = {
   },
 }
 
-// ─── 27. Cambios de un artículo: qué cambió, cuándo y quién ────────────────
+// ─── 27. Cambios en artículos: qué cambió, cuándo y quién (general o puntual) ────────────────
 const NOMBRE_CAMPO: Record<string, string> = {
   precio_compra: "costo (precio de compra)", precio_base: "precio base", precio_base_contado: "precio base contado",
   porcentaje_ganancia: "% de ganancia", descuento_propio: "descuento propio", bonif_recargo: "bonificación/recargo",
@@ -1390,67 +1430,188 @@ const NOMBRE_CAMPO: Record<string, string> = {
   activo: "activo", unidades_por_bulto: "unidades por bulto", proveedor_nombre: "proveedor", marca_nombre: "marca",
   categoria: "categoría", rubro: "rubro", subcategoria: "subcategoría", segmento_precio: "segmento de precio",
   precio_lista_especial: "precio lista especial", oferta_lista_especial: "oferta lista especial", ultimo_costo: "último costo",
+  proveedor_id: "proveedor", marca_id: "marca", rubro_id: "rubro", margen_ganancia_custom: "margen propio", codigo_bulto: "código de bulto",
 }
+/** Para filtrar "¿quién cambió el PRECIO…?" sin saber el nombre técnico de la columna. */
+const GRUPO_CAMPO: Record<string, string[]> = {
+  precio: ["precio_base", "precio_base_contado", "precio_lista_especial", "oferta_lista_especial", "porcentaje_ganancia", "bonif_recargo", "descuento_propio", "margen_ganancia_custom", "segmento_precio"],
+  costo: ["precio_compra", "ultimo_costo", "descuento1", "descuento2", "descuento3", "descuento4"],
+  impuestos: ["iva_compras", "iva_ventas"],
+  estado: ["activo"],
+}
+const grupoDe = (campo: string) => Object.entries(GRUPO_CAMPO).find(([, cs]) => cs.includes(campo))?.[0] ?? "datos"
+
 const cambiosArticulo: Herramienta = {
-  nombre: "cambios_articulo",
+  nombre: "cambios_articulos",
   descripcion:
-    "Historial de cambios de UN artículo: qué dato cambió (costo, precio, descuentos, descripción, proveedor, alta/baja…), cómo estaba, cómo quedó, CUÁNDO y QUIÉN lo cambió. Usala para '¿quién le cambió el precio / los datos al artículo X?'.",
+    "Cambios en los ARTÍCULOS: qué dato cambió (precio, costo, descuentos, IVA, descripción, proveedor, bulto, altas y bajas…), cómo estaba, cómo quedó, CUÁNDO y QUIÉN. Sirve para preguntas generales ('¿qué artículos se cambiaron ayer?', '¿quién tocó precios esta semana?') y puntuales ('¿quién le cambió el precio al colgate de 70?'). El artículo es OPCIONAL y se busca como lo dice la gente (palabras sueltas, marca, medida); si coincide con varios, trae los cambios de todos. Si piden 'el precio', usá dato='precio' (incluye costo).",
   esquema: {
     type: "object",
-    properties: { articulo: { type: "string", description: "Código (sku), EAN o descripción" }, dias: { type: "integer", description: "Hacia atrás (por defecto 180)" } },
-    required: ["articulo"],
+    properties: {
+      ...P_PERIODO,
+      articulo: { type: "string", description: "Opcional. Como lo dijo el usuario: 'colgate de 70', 'ayudin 2 litros', un código o EAN" },
+      proveedor: { type: "string", description: "Opcional: solo artículos de este proveedor" },
+      dato: { type: "string", enum: ["cualquiera", "precio", "costo", "impuestos", "estado", "datos"], description: "'precio' incluye también costo y descuentos de compra" },
+      persona: { type: "string", description: "Opcional: solo los cambios que hizo esta persona" },
+      ...P_LIMITE,
+    },
   },
   async ejecutar(ctx, p) {
-    const a = await resolverArticulo(ctx.db, String(p.articulo ?? ""))
-    const dias = Math.max(1, Math.min(730, Number(p.dias) || 180))
-    const desde = inicioDiaAR(sumarDiasISO(ctx.hoy, -dias))
-    const [infoR, cambiosR, estadoR, preciosR] = await Promise.all([
-      ctx.db.from("articulos").select("created_at, updated_at, actualizado_por, activo").eq("id", a.id).maybeSingle(),
-      ctx.db.from("articulos_cambios").select("campo, antes, despues, usuario_id, via, cambiado_at").eq("articulo_id", a.id).gte("cambiado_at", desde).order("cambiado_at", { ascending: false }).limit(200),
-      ctx.db.from("articulos_estado_historial").select("activo, usuario_id, origen, created_at").eq("articulo_id", a.id).gte("created_at", desde).order("created_at", { ascending: false }).limit(50),
-      ctx.db.from("precio_insumos_historial").select("datos, vigente_desde").eq("tabla", "articulos").eq("registro_id", a.id).order("vigente_desde", { ascending: true }).limit(400),
-    ])
-    const hayRegistroNuevo = !(cambiosR.error && faltaEnLaBase(cambiosR.error))
-    if (cambiosR.error && hayRegistroNuevo) throw new Error(cambiosR.error.message)
-    const info = (infoR.data ?? {}) as any
-    const nom = await nombresDeUsuarios(ctx.db, [
-      info.actualizado_por, ...((cambiosR.data ?? []) as any[]).map((c) => c.usuario_id), ...((estadoR.data ?? []) as any[]).map((e) => e.usuario_id),
-    ])
-    const q = (id: unknown, via?: string | null) => (id ? nom.get(String(id)) ?? "usuario desconocido" : via === "service_role" ? "el sistema (no anotó persona)" : "no quedó registrado")
-    const cambios = ((cambiosR.data ?? []) as any[]).map((c) => ({
-      cuando: cuando(c.cambiado_at), dato: NOMBRE_CAMPO[c.campo] ?? c.campo, antes: valorLindo(c.antes), despues: valorLindo(c.despues), quien: q(c.usuario_id, c.via),
-    }))
-    const altasBajas = ((estadoR.data ?? []) as any[]).map((e) => ({ cuando: cuando(e.created_at), dato: "estado", antes: e.activo ? "baja" : "activo", despues: e.activo ? "activo (reactivado)" : "dado de baja", quien: q(e.usuario_id), origen: e.origen ?? null }))
-    // Historial de precios (desde el 18/09/2026): qué cambió y cuándo, SIN quién.
-    const versiones = ((preciosR.data ?? []) as any[])
-    const preciosSinQuien: { cuando: string | null; dato: string; antes: string | null; despues: string | null; quien: string; _desde: string }[] = []
-    for (let i = 1; i < versiones.length; i++) {
-      const ant = versiones[i - 1].datos ?? {}, act = versiones[i].datos ?? {}
-      if (String(versiones[i].vigente_desde) < desde) continue
-      for (const k of Object.keys(act)) {
-        if (k === "id" || JSON.stringify(ant[k]) === JSON.stringify(act[k])) continue
-        preciosSinQuien.push({ cuando: cuando(versiones[i].vigente_desde), dato: NOMBRE_CAMPO[k] ?? k, antes: valorLindo(ant[k]), despues: valorLindo(act[k]), quien: "no se registraba quién (historial de precios)", _desde: String(versiones[i].vigente_desde) })
+    // Sin período: si preguntan por UN artículo, se mira bien atrás; si es general, la última semana
+    const sinPeriodo = !p.periodo && !p.desde
+    const r = sinPeriodo
+      ? { desde: sumarDiasISO(ctx.hoy, str(p.articulo) ? -180 : -6), hasta: ctx.hoy, etiqueta: str(p.articulo) ? "últimos 180 días" : "últimos 7 días" }
+      : resolverPeriodo(p as never, "ultimos_7_dias" as never, ctx.hoy)
+    const desde = inicioDiaAR(r.desde), hasta = finDiaAR(r.hasta)
+    const filtros: string[] = []
+    let ids: string[] | null = null
+    let encontrados: ArtBuscado[] = []
+    if (str(p.articulo)) {
+      const b = await buscarArticulos(ctx.db, str(p.articulo)!, 40)
+      if (!b.lista.length) throw new ErrorHerramienta(`No encontré ningún artículo "${str(p.articulo)}".`)
+      if (b.total > 40) throw new ErrorHerramienta(`"${str(p.articulo)}" coincide con ${b.total} artículos; algunos: ${b.lista.slice(0, 6).map(nombreArt).join("; ")}. Preguntá con una palabra más (marca, medida, tipo).`)
+      encontrados = b.lista
+      ids = b.lista.map((a) => a.id)
+      filtros.push(b.lista.length === 1 ? nombreArt(b.lista[0]) : `"${str(p.articulo)}" (${b.lista.length} artículos)`)
+    }
+    let provId: string | null = null
+    if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); provId = pr.id; filtros.push(`proveedor ${pr.nombre}`) }
+    const dato = String(p.dato || "cualquiera")
+    const camposDato = dato === "precio" ? [...GRUPO_CAMPO.precio, ...GRUPO_CAMPO.costo] : GRUPO_CAMPO[dato] ?? null
+    if (dato !== "cualquiera") filtros.push(dato === "precio" ? "precios y costos" : dato)
+
+    type Fila = { _t: string; cuando: string | null; articulo: string; dato: string; antes: string | null; despues: string | null; quien: string; _uid: string | null; _art: string; _campo: string; _via: string | null }
+    const filas: Fila[] = []
+    const artSel = provId ? "articulos!inner(sku, descripcion, marca_nombre, proveedor_id)" : "articulos(sku, descripcion, marca_nombre)"
+
+    // 1) Registro nuevo (desde el 05/11/2026): con quién
+    let hayRegistro = true
+    let primeroRegistro: string | null = null
+    if (dato !== "estado") {
+      try {
+        const cambios = await fetchAllRows<any>(() => {
+          let q = ctx.db.from("articulos_cambios").select(`id, articulo_id, campo, antes, despues, usuario_id, via, cambiado_at, ${artSel}`)
+            .gte("cambiado_at", desde).lte("cambiado_at", hasta)
+          if (ids) q = q.in("articulo_id", ids)
+          if (provId) q = q.eq("articulos.proveedor_id", provId)
+          if (camposDato) q = q.in("campo", camposDato)
+          return q
+        }, "id")
+        for (const c of cambios) filas.push({ _t: c.cambiado_at, cuando: cuando(c.cambiado_at), articulo: c.articulos ? nombreArt(c.articulos) : "—", dato: NOMBRE_CAMPO[c.campo] ?? c.campo, antes: valorLindo(c.antes), despues: valorLindo(c.despues), quien: "", _uid: c.usuario_id, _art: c.articulo_id, _campo: c.campo, _via: c.via })
+        const { data: pr } = await ctx.db.from("articulos_cambios").select("cambiado_at").order("cambiado_at").limit(1)
+        primeroRegistro = (pr?.[0] as any)?.cambiado_at ?? null
+      } catch (e) {
+        if (!faltaEnLaBase(e)) throw e
+        hayRegistro = false
       }
     }
-    // Si ya hay registro nuevo, los cambios de precio también están ahí (con quién): no duplicar.
-    const primeroNuevo = cambios.length ? ((cambiosR.data ?? []) as any[]).at(-1)?.cambiado_at : null
-    const viejos = (primeroNuevo ? preciosSinQuien.filter((x) => x._desde < String(primeroNuevo)) : preciosSinQuien).map(({ _desde: _x, ...v }) => v)
-    const todo = [...cambios, ...altasBajas, ...viejos.reverse()].slice(0, 60)
+
+    // 2) Altas y bajas (con quién)
+    if (dato === "cualquiera" || dato === "estado") {
+      const est = await fetchAllRows<any>(() => {
+        let q = ctx.db.from("articulos_estado_historial").select(`id, articulo_id, activo, usuario_id, origen, created_at, ${artSel}`)
+          .gte("created_at", desde).lte("created_at", hasta)
+        if (ids) q = q.in("articulo_id", ids)
+        if (provId) q = q.eq("articulos.proveedor_id", provId)
+        return q
+      }, "id")
+      for (const e of est) filas.push({ _t: e.created_at, cuando: cuando(e.created_at), articulo: e.articulos ? nombreArt(e.articulos) : "—", dato: "estado", antes: e.activo ? "dado de baja" : "activo", despues: e.activo ? "reactivado" : "dado de baja", quien: "", _uid: e.usuario_id, _art: e.articulo_id, _campo: "activo", _via: null })
+    }
+
+    // 3) Antes del registro nuevo: historial de precios (qué y cuándo, sin quién)
+    const corte = primeroRegistro && primeroRegistro < hasta ? primeroRegistro : hasta
+    if (dato !== "estado" && dato !== "impuestos" && desde < corte && (dato === "cualquiera" || dato === "precio" || dato === "costo" || dato === "datos")) {
+      const versiones = await fetchAllRows<any>(() => {
+        let q = ctx.db.from("precio_insumos_historial").select("id, registro_id, datos, vigente_desde, vigente_hasta")
+          .eq("tabla", "articulos").lte("vigente_desde", corte).or(`vigente_hasta.gte.${desde},vigente_desde.gte.${desde}`)
+        if (ids) q = q.in("registro_id", ids)
+        return q
+      }, "id")
+      const porArt = new Map<string, any[]>()
+      for (const v of versiones) porArt.set(v.registro_id, [...(porArt.get(v.registro_id) ?? []), v])
+      const nombres = new Map<string, string>(encontrados.map((a) => [a.id, nombreArt(a)]))
+      const faltan = [...porArt.keys()].filter((k) => !nombres.has(k))
+      if (faltan.length) {
+        const arts = await fetchByIds<any>((chunk) => ctx.db.from("articulos").select("id, sku, descripcion, marca_nombre, proveedor_id").in("id", chunk), faltan)
+        for (const a of arts) if (!provId || a.proveedor_id === provId) nombres.set(a.id, nombreArt(a))
+      }
+      for (const [art, vs] of porArt) {
+        if (!nombres.has(art)) continue
+        vs.sort((a, b) => String(a.vigente_desde).localeCompare(String(b.vigente_desde)))
+        for (let i = 1; i < vs.length; i++) {
+          const t0 = String(vs[i].vigente_desde)
+          if (t0 < desde || t0 > corte) continue
+          const ant = vs[i - 1].datos ?? {}, act = vs[i].datos ?? {}
+          for (const k of Object.keys(act)) {
+            if (k === "id" || JSON.stringify(ant[k]) === JSON.stringify(act[k])) continue
+            if (camposDato && !camposDato.includes(k)) continue
+            if (dato === "datos" && grupoDe(k) !== "datos") continue
+            filas.push({ _t: t0, cuando: cuando(t0), articulo: nombres.get(art)!, dato: NOMBRE_CAMPO[k] ?? k, antes: valorLindo(ant[k]), despues: valorLindo(act[k]), quien: "no se registraba quién (antes del 05/11/2026)", _uid: null, _art: art, _campo: k, _via: null })
+          }
+        }
+      }
+    }
+    // "datos" = lo que no es precio/costo/impuestos/estado
+    const filasDato = dato === "datos" ? filas.filter((f) => grupoDe(f._campo) === "datos") : filas
+
+    // El historial viejo guarda proveedor/marca/rubro como id: se muestra el nombre del proveedor
+    const idsProv = [...new Set(filasDato.filter((f) => f._campo === "proveedor_id").flatMap((f) => [f.antes, f.despues]).filter((x): x is string => !!x))]
+    if (idsProv.length) {
+      const { data: provs } = await ctx.db.from("proveedores").select("id, nombre").in("id", idsProv.slice(0, 200))
+      const nomProv = new Map(((provs ?? []) as { id: string; nombre: string }[]).map((x) => [x.id, x.nombre]))
+      for (const f of filasDato) if (f._campo === "proveedor_id") { f.antes = f.antes ? nomProv.get(f.antes) ?? "otro" : null; f.despues = f.despues ? nomProv.get(f.despues) ?? "otro" : null }
+    }
+    for (const f of filasDato) if (f._campo === "marca_id" || f._campo === "rubro_id") { f.antes = null; f.despues = "cambió" }
+
+    // Quién: nombres + precios programados (el cambio lo aplicó el sistema, pero lo PROGRAMÓ una persona)
+    const nom = await nombresDeUsuarios(ctx.db, filasDato.map((f) => f._uid))
+    const sinQuien = filasDato.filter((f) => !f._uid && !f.quien)
+    if (sinQuien.length) {
+      const { data: progs } = await ctx.db.from("precios_programados").select("registro_id, creado_por, aplicado_at")
+        .eq("tabla", "articulos").gte("aplicado_at", desde).lte("aplicado_at", hasta).limit(5000)
+      const nomProg = await nombresDeUsuarios(ctx.db, ((progs ?? []) as any[]).map((x) => x.creado_por))
+      for (const f of sinQuien) {
+        const pg = ((progs ?? []) as any[]).find((x) => x.registro_id === f._art && Math.abs(new Date(x.aplicado_at).getTime() - new Date(f._t).getTime()) < 10 * 60_000)
+        if (pg?.creado_por) f.quien = `${nomProg.get(pg.creado_por) ?? "alguien"} (lo dejó programado)`
+        else f.quien = f._via === "service_role" || f._via === "postgres" ? "el sistema (no anotó persona)" : "no quedó registrado"
+      }
+    }
+    for (const f of filasDato) if (!f.quien) f.quien = f._uid ? nom.get(f._uid) ?? "usuario desconocido" : "no quedó registrado"
+
+    let lista = filasDato
+    const persona = str(p.persona)?.toLowerCase()
+    if (persona) { lista = lista.filter((f) => f.quien.toLowerCase().includes(persona)); filtros.push(`hechos por ${str(p.persona)}`) }
+    lista.sort((a, b) => String(b._t).localeCompare(String(a._t)))
+
+    const articulos = new Set(lista.map((f) => f.articulo))
+    const porQuien = new Map<string, { cambios: number; articulos: Set<string> }>()
+    for (const f of lista) {
+      const x = porQuien.get(f.quien) ?? { cambios: 0, articulos: new Set<string>() }
+      x.cambios++; x.articulos.add(f.articulo); porQuien.set(f.quien, x)
+    }
+    const porDato = new Map<string, number>()
+    for (const f of lista) porDato.set(f.dato, (porDato.get(f.dato) ?? 0) + 1)
+    const lim = limite(p.limite, 40, 50)
+    const limpio = lista.slice(0, lim).map(({ _t, _uid, _art, _campo, _via, ...f }) => f)
+    const filtroTxt = filtros.length ? ` (${filtros.join(", ")})` : ""
     const bloque = tabla(
-      `Cambios de ${a.sku} ${a.descripcion} (últimos ${dias} días)`,
-      [{ clave: "cuando", titulo: "Cuándo" }, { clave: "dato", titulo: "Dato" }, { clave: "antes", titulo: "Antes" }, { clave: "despues", titulo: "Después" }, { clave: "quien", titulo: "Quién" }],
-      todo.map(({ origen: _o, ...f }: any) => f),
-      { nota: hayRegistroNuevo ? "Quién cambió cada dato se anota desde el 05/11/2026. Antes solo hay historial de precios (sin quién)." : "Todavía no se anota quién cambia cada dato (falta aplicar la migración 20261105). Se muestra el historial de precios (sin quién)." },
+      `Cambios en artículos — ${r.etiqueta}${filtroTxt}`,
+      [{ clave: "cuando", titulo: "Cuándo" }, { clave: "articulo", titulo: "Artículo" }, { clave: "dato", titulo: "Dato" }, { clave: "antes", titulo: "Antes" }, { clave: "despues", titulo: "Después" }, { clave: "quien", titulo: "Quién" }],
+      limpio,
+      { nota: `${lista.length > lim ? `Se muestran ${lim} de ${lista.length} cambios. ` : ""}${hayRegistro ? "Quién cambió cada dato se anota desde el 05/11/2026; antes solo hay historial de precios (sin quién)." : "Todavía no se anota quién (falta la migración 20261105)."}` },
     )
     return {
-      consultado: `Historial de cambios del artículo ${a.sku} ${a.descripcion} (últimos ${dias} días)`,
+      consultado: `Cambios en artículos ${r.etiqueta}${filtroTxt}`,
       datos: {
-        articulo: `${a.sku} ${a.descripcion}`, proveedor: a.proveedor_nombre, activo: info.activo ?? null,
-        alta: cuando(info.created_at), ultima_modificacion: cuando(info.updated_at), ultimo_que_lo_toco: info.actualizado_por ? q(info.actualizado_por) : "no quedó registrado",
-        cambios: todo, registro_de_quien_desde: hayRegistroNuevo ? "05/11/2026" : "todavía no se registra (falta la migración)",
-        sin_cambios: todo.length === 0 ? `No hay cambios registrados en los últimos ${dias} días.` : undefined,
+        periodo: { desde: r.desde, hasta: r.hasta, etiqueta: r.etiqueta },
+        cambios: lista.length, articulos_cambiados: articulos.size,
+        articulos_encontrados: encontrados.length > 1 ? encontrados.map(nombreArt) : undefined,
+        por_quien: [...porQuien.entries()].map(([quien, x]) => ({ quien, cambios: x.cambios, articulos: x.articulos.size })).sort((a, b) => b.cambios - a.cambios),
+        por_dato: [...porDato.entries()].map(([d, n]) => ({ dato: d, cambios: n })).sort((a, b) => b.cambios - a.cambios),
+        filas: limpio,
+        sin_cambios: lista.length === 0 ? `No hay cambios registrados ${r.etiqueta}${filtroTxt}.` : undefined,
       },
-      bloques: [{ ...bloque, recalcular: { herramienta: "cambios_articulo", parametros: { ...p } } }],
+      bloques: [{ ...bloque, recalcular: { herramienta: "cambios_articulos", parametros: { ...p } } }],
     }
   },
 }

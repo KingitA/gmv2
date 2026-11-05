@@ -35,7 +35,7 @@ export async function PATCH(
         // Update article packaging
         const { data, error } = await supabase
             .from("articulos")
-            .update({ unidades_por_bulto })
+            .update({ unidades_por_bulto, actualizado_por: auth.user.id })
             .eq("id", id)
             .select()
             .single();

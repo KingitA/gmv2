@@ -1,0 +1,124 @@
+{
+  "modelo": "claude-opus-5-5",
+  "juez": "claude-opus-5-5",
+  "promedio": 8.5,
+  "costo_usd": 0.3502062,
+  "resultados": [
+    {
+      "id": "fact-unidades-codigo",
+      "pregunta": "¿Cuánto facturamos del código 39165 en los últimos 90 días?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Cifras correctas: neto 0 unidades, 288 en débitos y 288 en créditos, $ 584.614 que se cancelan. Respuesta breve, sin tablas en el texto ni preguntas de relleno. No usa literalmente la forma 'Se facturaron N unidades', pero deja claro el neto de 0.",
+      "segundos": 11,
+      "respuesta": "Del código 39165 (**Crema dental Odolito x50g**), en los últimos 90 días (08/08/2026 al 05/11/2026) la facturación neta da **cero: 0 unidades y $ 0**.\n\nHubo una Factura A por 288 unidades ($ 584.614 sin IVA), pero después se hizo una Nota de crédito A por esas mismas 288 unidades y por el mismo importe. Las dos se cancelan.",
+      "consultado": [
+        "Comprobantes emitidos últimos 90 días (artículo 39165 CREMA DENTAL ODOLITO x50g) (renglón por renglón)"
+      ],
+      "bloques": [
+        "Facturación por tipo de comprobante — últimos 90 días (artículo 39165 CREMA DENTAL ODOLITO x50g)"
+      ],
+      "costo_usd": 0.12381419999999999,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "quien-pickeo",
+      "pregunta": "¿Quién pickeó el artículo 100874 en el pedido 2022 y cuántas unidades?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Correcto: Juan Cruz, 28/10/2026 11:36, 6 pedidas y 6 preparadas. Breve y sin relleno; la marca Dermaglos no figura en el dato y el comentario sobre el pedido de prueba sobra un poco.",
+      "segundos": 9,
+      "respuesta": "El artículo 100874 (Crema facial hidratante Dermaglos 50 g) lo pickeó **Juan Cruz** el 28/10/2026 a las 11:36. Preparó **6 unidades**, las mismas 6 que se habían pedido.\n\nEl cliente del pedido 2022 se llama \"PRUEBA 3\", así que parece ser un pedido de prueba.",
+      "consultado": [
+        "Historia del pedido 002022: alta, estados, preparación, picking, comprobantes, viaje y cobros"
+      ],
+      "bloques": [
+        "Pedido 002022 — PRUEBA 3: picking de 100874 CREMA FACIAL HIDRATANTE TODO TIPO PIEL 50gr (DERMAGLOS)"
+      ],
+      "costo_usd": 0.028548399999999998,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "quien-cambio-articulo",
+      "pregunta": "¿Quién le cambió el precio al 39165?",
+      "nota": 10,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Fecha, montos y artículo correctos; aclara que no quedó registrado quién sin inventar nombre; respuesta corta, sin tablas en el texto ni preguntas de relleno.",
+      "segundos": 9,
+      "respuesta": "El último cambio de precio de la **Crema dental Odolito x50g (39165)** fue el **01/10/2026 a las 13:09**, pero **no quedó registrado quién lo hizo**: el sistema empezó a anotar la persona recién desde hoy, 05/11/2026.\n\n- Precio base: de $ 2.029,91 a **$ 2.255,46**\n- Precio base contado: de $ 1.827,10 a $ 2.029,91\n\nNo hubo otros cambios de precio ni de costo en los últimos 180 días.",
+      "consultado": [
+        "Cambios en artículos últimos 180 días (39165 CREMA DENTAL ODOLITO x50g, precios y costos)"
+      ],
+      "bloques": [
+        "Cambios en artículos — últimos 180 días (39165 CREMA DENTAL ODOLITO x50g, precios y costos)"
+      ],
+      "costo_usd": 0.0268764,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "cambios-general",
+      "pregunta": "Se realizaron cambios en articulos entre ayer y hoy?",
+      "nota": 7,
+      "numeros_ok": false,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Totales, desglose por dato, precios y aclaración de quién son correctos, pero llama 'shampoo' al ACONDICIONADOR Oleo Extraordinario de Elvive y describe como 'centavos' bajas de hasta ~$10.",
+      "segundos": 24,
+      "respuesta": "Sí, hubo **454 cambios en 217 artículos** entre el 04/11 y hoy. **Quién los hizo no quedó registrado:** el sistema dice \"no se registraba quién (antes del 05/11/2026)\".\n\nQué se tocó:\n- **Precio base contado:** 215 cambios. Casi todos son ajustes de centavos para abajo (Fiorentina, Francisco Salzano, Facilim, Eveready, Hebra Dorada). Por ejemplo, el cabo extensible Gulliver pasó de $ 10.204,44 a $ 10.194,24.\n- **Precio base:** 195 cambios. Elvive subió (shampoo Oleo Extraordinario 200 ml: de $ 4.416,92 a $ 4.495,79) y **Fructis bajó** (Hydra Liss 200 ml: de $ 3.886,04 a $ 3.643,17).\n- **Descuento propio:** 32 cambios.\n- **Proveedor:** 12 artículos de Fiorentina pasaron a **GLAM DISTRIBUCIONES S.R.L.** Antes figuraban como BARACK o no tenían proveedor cargado.",
+      "consultado": [
+        "Cambios en artículos del 04/11/2026 al 05/11/2026"
+      ],
+      "bloques": [
+        "Cambios en artículos — del 04/11/2026 al 05/11/2026"
+      ],
+      "costo_usd": 0.06768539999999999,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "cambios-como-habla",
+      "pregunta": "quien cambio el precio del colgate de 70?",
+      "nota": 7,
+      "numeros_ok": false,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Dice bien que no se registró quién y los cambios del Triple Acción y del Herbal son correctos, pero el 29/10 se cargaron al menos 16 artículos a $ 1 (14 a las 11:15, más Neutrazúcar y Total 12 Clean Mint), no 13.",
+      "segundos": 23,
+      "respuesta": "**No quedó registrado quién fue**: el sistema empezó a anotar la persona hoy (05/11/2026) y todos los cambios del colgate de 70 son anteriores.\n\nLo que sí se sabe es cuándo y qué cambió:\n- **Triple Acción 70 g**, el **04/11/2026 a las 08:07**: precio base de $ 1.855,61 a **$ 1.953,28**, contado de $ 1.670,05 a $ 1.757,95, y el descuento propio bajó del 25 % al 20 %.\n- El **01/10/2026** también se tocaron el Triple Acción (de $ 1.709,12 a $ 1.855,61) y el **Herbal 70 g**, que bajó de $ 1.910,42 a $ 1.845,30.\n- El **Clásico 70 g** no tuvo cambios de precio en los últimos 180 días.\n\nOjo: el 29/10/2026 se cargaron 13 packs y exhibidores con colgate de 70 con **precio base de $ 1**. Parece un precio provisorio, pero si alguno se vende así, sale a $ 1.",
+      "consultado": [
+        "Cambios en artículos últimos 180 días (\"colgate de 70\" (23 artículos), precios y costos)"
+      ],
+      "bloques": [
+        "Cambios en artículos — últimos 180 días (\"colgate de 70\" (23 artículos), precios y costos)"
+      ],
+      "costo_usd": 0.0608574,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "pagaron-la-luz",
+      "pregunta": "pagaron la luz este mes?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Identifica la luz como EDES y dice correctamente que no hay pago en noviembre. Aclara que el registro de quién paga existe recién desde hoy. El dato de octubre ($ 430.000) no figura en el dato correcto, pero está respaldado por la tabla mostrada.",
+      "segundos": 12,
+      "respuesta": "**No, en noviembre todavía no hay ningún pago de la luz (EDES) marcado como pagado.** Tampoco hay ninguna factura de EDES cargada como pendiente para los próximos 60 días, así que puede ser que la de este mes todavía no se haya cargado.\n\nEl último pago fue la factura que vencía el 16/10/2026: **$ 430.000**, pagada por transferencia. Se marcó como pagada el 15/10/2026 a las 07:33. No quedó registrado quién la pagó, porque el sistema anota quién lo hace recién desde hoy.",
+      "consultado": [
+        "Vencimientos pagados noviembre (hasta hoy) que coinciden con \"EDES\", con quién los pagó",
+        "Vencimientos pagados últimos 90 días que coinciden con \"EDES\", con quién los pagó",
+        "Vencimientos a proveedores hasta el 04/01 de EDES S.A"
+      ],
+      "bloques": [
+        "Vencimientos pagados últimos 90 días — \"EDES\""
+      ],
+      "costo_usd": 0.0424244,
+      "modelo": "claude-opus-5-5"
+    }
+  ]
+}

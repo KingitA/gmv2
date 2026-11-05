@@ -149,7 +149,9 @@ export async function actualizarDatosArticulo(id: string, datos: {
 }) {
   const sb = createAdminClient()
   const normalized = normalizarDatosArticulo(datos)
-  const { error } = await sb.from("articulos").update(normalized).eq("id", id)
+  // Quién lo cambió (historial de artículos, Jarvis)
+  const { data: { user } } = await (await createClient()).auth.getUser()
+  const { error } = await sb.from("articulos").update({ ...normalized, ...(user ? { actualizado_por: user.id } : {}) }).eq("id", id)
   if (error) throw new Error(error.message)
   return { success: true }
 }

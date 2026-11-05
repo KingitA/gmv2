@@ -57,7 +57,7 @@ export async function POST(
             } catch (e: any) { console.warn('[Aplicar Lista] historial insert skipped:', e.message); }
 
             // Update articulo
-            const updateData: any = {};
+            const updateData: any = { actualizado_por: auth.user.id };
             if (item.precio_compra) updateData.precio_compra = item.precio_compra;
             if (item.descuento1 !== null) updateData.descuento1 = item.descuento1;
             if (item.descuento2 !== null) updateData.descuento2 = item.descuento2;
