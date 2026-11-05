@@ -990,7 +990,7 @@ un segundo escaneo dejaba la cantidad en 0). Cantidades de 7+ cifras se rechazan
 ### Navegación — matriz del botón atrás (verificada en navegador y con el botón físico del NuStar)
 | Pantalla | Ruta | Atrás va a |
 |---|---|---|
-| Inicio | `/` | minimiza (el proceso y el outbox siguen vivos) |
+| Inicio | `/` (05/11: ordenado por uso — PREPARAR PEDIDOS grande arriba con la cola y los urgentes; Recibir y Devoluciones medianos; Modificar artículos y Cargar pedido chicos abajo; sin scroll) | minimiza (el proceso y el outbox siguen vivos) |
 | Cambiar de usuario (hoja) | `/?ver=salir` | cierra la hoja |
 | Cola de pedidos | `/preparar` (`?plegados=` replace) | Inicio |
 | Pedido (lista) | `/preparar/:id` | Cola — **el progreso queda "en curso"** |

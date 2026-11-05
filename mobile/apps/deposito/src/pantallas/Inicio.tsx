@@ -6,7 +6,7 @@ import { useBorradorCarga } from "../datos/borradorCarga"
 import { useDevoluciones, usePedidos, useRecepciones, useYo } from "../datos/hooks"
 import { C, Marco } from "../ui"
 
-/** / — home del módulo (misma grilla que /deposito en la web). Atrás acá minimiza la app. */
+/** / — home del módulo, ordenado por uso (05/11: Preparar domina). Atrás acá minimiza la app. */
 export function Inicio() {
   const yo = useYo()
   const rt = useRuntime()
@@ -18,12 +18,30 @@ export function Inicio() {
   const { devoluciones } = useDevoluciones()
   const { borrador } = useBorradorCarga()
 
-  const MODULOS = [
-    { to: "/preparar", label: "Preparar Pedidos", icon: "📦", desc: "Picking de órdenes de venta", bg: C.orangeL, accent: C.orange, border: C.orangeB, n: pedidos.filter((p) => !p.cierrePendiente).length },
-    { to: "/recibir", label: "Recibir Mercadería", icon: "🚚", desc: "Recepción contra OC", bg: C.greenL, accent: C.green, border: C.greenB, n: ordenes.filter((o) => !o.cierrePendiente).length },
-    { to: "/articulos", label: "Modificación de Artículos", icon: "🔧", desc: "Datos y stock de artículos", bg: C.yellowL, accent: C.yellow, border: C.yellowB, n: 0 },
-    { to: "/devoluciones", label: "Devoluciones", icon: "↩️", desc: "Recibir devoluciones", bg: C.purpleL, accent: C.purple, border: C.purpleB, n: devoluciones.length },
-  ]
+  // Uso real del menú (Juan, 05/11): Preparar ≈ 90 %; Recibir y Devoluciones ≈ 3 % cada uno;
+  // Modificar artículos y Cargar pedido ≈ 2 %. Preparar domina (grande, arriba, con la cola a
+  // la vista); los dos secundarios iguales entre sí; los terciarios chicos abajo. Sin scroll.
+  const cola = pedidos.filter((p) => !p.cierrePendiente)
+  const urgentes = cola.filter((p) => p.prioridad === 1).length
+  const enCurso = cola.filter((p) => p.progreso.resueltos > 0).length
+  const nOrdenes = ordenes.filter((o) => !o.cierrePendiente).length
+
+  const secundario = (to: string, icono: string, label: string, n: number, color: { bg: string; borde: string; acento: string }) => (
+    <Link to={to} style={{ position: "relative", textDecoration: "none", background: color.bg, border: `1.5px solid ${color.borde}`, borderRadius: 20, padding: "16px 14px", display: "flex", flexDirection: "column", justifyContent: "space-between", minHeight: 130, boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+      <div style={{ width: 42, height: 42, borderRadius: 13, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 23, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>{icono}</div>
+      {n > 0 && <span style={{ position: "absolute", top: 14, right: 14, minWidth: 30, textAlign: "center", background: color.acento, color: "#fff", fontWeight: 800, fontSize: 15, borderRadius: 999, padding: "3px 9px" }}>{n}</span>}
+      <div style={{ color: C.text, fontWeight: 800, fontSize: 16, lineHeight: 1.2, marginTop: 10 }}>{label}</div>
+    </Link>
+  )
+  const terciario = (to: string, icono: string, label: string, nota?: string) => (
+    <Link to={to} style={{ textDecoration: "none", background: C.white, border: `1px solid ${C.border}`, borderRadius: 16, padding: "0 12px", minHeight: 58, display: "flex", alignItems: "center", gap: 10 }}>
+      <span style={{ fontSize: 20 }}>{icono}</span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: "block", color: C.text, fontWeight: 700, fontSize: 14, lineHeight: 1.15 }}>{label}</span>
+        {nota && <span style={{ display: "block", color: C.orange, fontWeight: 700, fontSize: 11, marginTop: 2 }}>{nota}</span>}
+      </span>
+    </Link>
+  )
 
   return (
     <Marco
@@ -35,37 +53,39 @@ export function Inicio() {
         </button>
       }
     >
-      <div style={{ padding: "24px 16px" }}>
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>Hola, {yo.nombre} 👋</div>
-          <div style={{ color: C.sub, fontSize: 14, marginTop: 2 }}>¿Qué vas a hacer hoy?</div>
-        </div>
-        {/* CARGAR PEDIDO (05/11): tarjeta propia, ancha y bien visible */}
-        <Link to="/cargar" style={{ textDecoration: "none", background: "#c2410c", borderRadius: 20, padding: "18px 18px", display: "flex", alignItems: "center", gap: 14, marginBottom: 12, boxShadow: "0 3px 10px rgba(194,65,12,0.3)" }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>🛒</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: "#fff", fontWeight: 900, fontSize: 19, letterSpacing: "0.03em" }}>CARGAR PEDIDO</div>
-            <div style={{ color: "#ffedd5", fontSize: 13, marginTop: 2 }}>
-              {borrador ? `Pedido en curso · ${borrador.items.length} artículo${borrador.items.length === 1 ? "" : "s"}` : "Para mí o para un cliente"}
+      <div style={{ padding: "16px 16px 12px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ fontSize: 19, fontWeight: 700, color: C.text }}>Hola, {yo.nombre} 👋</div>
+
+        {/* PREPARAR PEDIDOS: lo que se usa casi siempre */}
+        <Link to="/preparar" style={{ textDecoration: "none", background: C.orange, borderRadius: 24, padding: "20px 20px 18px", display: "flex", flexDirection: "column", gap: 14, minHeight: 260, justifyContent: "space-between", boxShadow: "0 4px 14px rgba(234,88,12,0.35)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 58, height: 58, borderRadius: 18, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, flexShrink: 0 }}>📦</div>
+            <div style={{ flex: 1, color: "#fff", fontWeight: 900, fontSize: 25, lineHeight: 1.1, letterSpacing: "0.01em" }}>PREPARAR PEDIDOS</div>
+            <span style={{ color: "#fff", fontSize: 34, fontWeight: 700, lineHeight: 1 }}>›</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
+            <div>
+              <div style={{ color: "#fff", fontWeight: 900, fontSize: 60, lineHeight: 1 }}>{cola.length}</div>
+              <div style={{ color: "#ffedd5", fontSize: 15, fontWeight: 600, marginTop: 4 }}>{cola.length === 1 ? "pedido en la cola" : "pedidos en la cola"}</div>
+            </div>
+            <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+              {urgentes > 0 && <span style={{ background: "#fff", color: C.red, fontWeight: 800, fontSize: 14, borderRadius: 999, padding: "4px 12px" }}>🔴 {urgentes} urgente{urgentes > 1 ? "s" : ""}</span>}
+              {enCurso > 0 && <span style={{ background: "rgba(255,255,255,0.22)", color: "#fff", fontWeight: 700, fontSize: 13, borderRadius: 999, padding: "4px 12px" }}>{enCurso} empezado{enCurso > 1 ? "s" : ""}</span>}
             </div>
           </div>
-          <span style={{ color: "#fff", fontSize: 26, fontWeight: 700 }}>›</span>
         </Link>
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {MODULOS.map((m) => (
-            <Link key={m.to} to={m.to} style={{ position: "relative", textDecoration: "none", background: m.bg, borderRadius: 20, padding: "20px 16px", display: "flex", flexDirection: "column", gap: 12, border: `1px solid ${m.border}`, minHeight: 140, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
-              <div style={{ width: 44, height: 44, borderRadius: 14, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>{m.icon}</div>
-              {m.n > 0 && (
-                <span style={{ position: "absolute", top: 14, right: 14, minWidth: 30, textAlign: "center", background: m.accent, color: "#fff", fontWeight: 800, fontSize: 15, borderRadius: 999, padding: "3px 9px" }}>{m.n}</span>
-              )}
-              <div>
-                <div style={{ color: C.text, fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>{m.label}</div>
-                <div style={{ color: C.sub, fontSize: 12, marginTop: 3 }}>{m.desc}</div>
-              </div>
-            </Link>
-          ))}
+          {secundario("/recibir", "🚚", "Recibir mercadería", nOrdenes, { bg: C.greenL, borde: C.greenB, acento: C.green })}
+          {secundario("/devoluciones", "↩️", "Devoluciones", devoluciones.length, { bg: C.purpleL, borde: C.purpleB, acento: C.purple })}
         </div>
-        <div style={{ marginTop: 28, textAlign: "center", color: C.light, fontSize: 12 }}>GM Distribuidora · Depósito v{rt.config.version}</div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {terciario("/articulos", "🔧", "Modificar artículos")}
+          {terciario("/cargar", "🛒", "Cargar pedido", borrador ? `En curso · ${borrador.items.length} art.` : undefined)}
+        </div>
+
+        <div style={{ marginTop: 4, textAlign: "center", color: C.light, fontSize: 12 }}>GM Distribuidora · Depósito v{rt.config.version}</div>
       </div>
 
       <Hoja abierta={salir.abierto} onCerrar={salir.cerrar} titulo="Cambiar de usuario">
