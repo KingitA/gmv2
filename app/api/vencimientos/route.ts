@@ -5,6 +5,7 @@ import { nowArgentina, todayArgentina } from '@/lib/utils'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { hoyISO, sumarDiasISO } from '@/lib/formato'
 import { esAdmin, esTipoReservado, TIPOS_SOLO_ADMIN } from '@/lib/finanzas/tipos-reservados'
+import { conResponsable } from '@/lib/vencimientos/responsable'
 
 // Sueldos y Socios: SOLO admin los ve / carga / edita. Para el resto no existen.
 const soloAdmin = () => NextResponse.json(
@@ -107,9 +108,11 @@ export async function POST(request: Request) {
     }
     if (esTipoReservado(tipo) && !esAdmin(await getUserRoles(auth.user.id))) return soloAdmin()
 
-    const { data, error } = await supabase
+    // Quién lo cargó (Jarvis: "¿quién cargó / pagó este gasto?")
+    const { data, error } = await conResponsable((quien) => supabase
         .from('vencimientos')
         .insert({
+            ...quien,
             proveedor_id: proveedor_id || null,
             tipo: tipo || 'factura',
             concepto,
@@ -130,7 +133,7 @@ export async function POST(request: Request) {
             estado: 'pendiente'
         })
         .select('*, proveedores(id, nombre, sigla)')
-        .single()
+        .single(), { creado_por: auth.user.id, actualizado_por: auth.user.id })
 
     if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
@@ -164,13 +167,15 @@ export async function PUT(request: Request) {
     }
 
     updateData.updated_at = nowArgentina()
+    for (const k of ['creado_por', 'actualizado_por', 'pagado_por', 'pagado_at']) delete updateData[k]
 
-    const { data, error } = await supabase
+    // Quién lo cambió: si lo marca pagado, la base lo anota como quien lo pagó
+    const { data, error } = await conResponsable((quien) => supabase
         .from('vencimientos')
-        .update(updateData)
+        .update({ ...updateData, ...quien })
         .eq('id', id)
         .select('*, proveedores(id, nombre, sigla)')
-        .single()
+        .single(), { actualizado_por: auth.user.id })
 
     if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
@@ -195,10 +200,10 @@ export async function DELETE(request: Request) {
     const { data: actual } = await supabase.from('vencimientos').select('tipo').eq('id', id).maybeSingle()
     if (esTipoReservado(actual?.tipo) && !esAdmin(await getUserRoles(auth.user.id))) return soloAdmin()
 
-    const { error } = await supabase
+    const { error } = await conResponsable((quien) => supabase
         .from('vencimientos')
-        .update({ estado: 'cancelado', updated_at: nowArgentina() })
-        .eq('id', id)
+        .update({ estado: 'cancelado', updated_at: nowArgentina(), ...quien })
+        .eq('id', id), { actualizado_por: auth.user.id })
 
     if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
@@ -243,6 +248,8 @@ async function generarRecurrencias(
         if (fecha > dosAnios) break
 
         inserts.push({
+            creado_por: base.creado_por ?? undefined,
+            actualizado_por: base.creado_por ?? undefined,
             proveedor_id: base.proveedor_id,
             tipo: base.tipo,
             concepto: base.concepto,

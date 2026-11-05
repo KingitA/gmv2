@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { requireAuth, getUserRoles } from '@/lib/auth'
 import { esAdmin, esTipoReservado } from '@/lib/finanzas/tipos-reservados'
 import { fechaISO, sumarDiasISO } from '@/lib/formato'
+import { conResponsable } from '@/lib/vencimientos/responsable'
 
 /**
  * POST /api/vencimientos/[id]/recalcular — re-aplica el acuerdo de pago de la
@@ -118,16 +119,17 @@ export async function POST(
       fechaValidez = sumarDiasISO(String(fechaVencimiento).slice(0, 10), Number(cfg.plazoCheque))
     }
 
-    const { error: updErr } = await supabase
+    const { error: updErr } = await conResponsable((quien) => supabase
       .from('vencimientos')
       .update({
+        ...quien,
         canal,
         forma_pago: formaPago,
         modalidad,
         fecha_vencimiento: fechaVencimiento,
         fecha_validez: fechaValidez,
       })
-      .eq('id', id)
+      .eq('id', id), { actualizado_por: auth.user.id })
     if (updErr) throw updErr
 
     if (comprobante && fechaVencimiento !== venc.fecha_vencimiento) {

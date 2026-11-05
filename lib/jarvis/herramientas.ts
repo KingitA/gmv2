@@ -18,10 +18,11 @@ import type { Bloque, Formato } from "@/lib/playroom/bloques"
 import { calcularIndicadores } from "@/lib/playroom/indicadores"
 import { CATALOGO_TABLERO } from "@/lib/playroom/catalogo-tablero"
 import { fetchAllRows } from "@/lib/playroom/queries"
-import { fecha, hoyISO, sumarDiasISO } from "@/lib/formato"
+import { fecha, fechaHora, finDiaAR, hoyISO, inicioDiaAR, sumarDiasISO } from "@/lib/formato"
+import { esAdmin as esAdminFinanzas, esTipoReservado, TIPOS_SOLO_ADMIN } from "@/lib/finanzas/tipos-reservados"
 import { PERIODOS, resolverPeriodo, type Rango } from "./periodos"
 import { ACCIONES, ACCION_PIDE } from "./acciones"
-import { agendaPendiente, crearPropuesta, crearRecordatorio, ErrorAgenda, historialDecisiones, usuariosOficina } from "./agenda"
+import { agendaPendiente, crearPropuesta, crearRecordatorio, ErrorAgenda, historialDecisiones, nombresDeUsuarios, usuariosOficina } from "./agenda"
 import { estadoIndicadores } from "./exterior"
 import { cobertura } from "./clasificador"
 import { estadoPlanMes, mesSiguiente } from "@/lib/viajes/plan-mes"
@@ -162,7 +163,7 @@ const AGRUPAR = ["total", "cliente", "articulo", "vendedor", "zona", "proveedor"
 const ventas: Herramienta = {
   nombre: "ventas",
   descripcion:
-    "Ventas (pedidos tomados, no eliminados) de un período, agrupadas como se pida, con margen y comparación contra el período anterior del mismo largo. 'total' = con IVA; 'neto' = sin IVA. Filtros opcionales por zona, vendedor (viajante), cliente, proveedor o categoría (por nombre).",
+    "VENTAS = lo que pidió el cliente (pedidos tomados, no eliminados), NO la facturación (para eso está 'facturacion'). De un período, agrupadas como se pida, con margen y comparación contra el período anterior del mismo largo. 'total' = con IVA; 'neto' = sin IVA. Filtros opcionales por zona, vendedor (viajante), cliente, proveedor o categoría (por nombre).",
   esquema: {
     type: "object",
     properties: {
@@ -430,7 +431,7 @@ const fichaCliente: Herramienta = {
 const articulosVendidos: Herramienta = {
   nombre: "articulos_vendidos",
   descripcion:
-    "Artículos vendidos en un período (venta sin IVA, unidades, margen, variación contra el período anterior). Orden: venta, unidades, crecimiento, caida o margen. Filtros por cliente, vendedor, proveedor o categoría.",
+    "Artículos VENDIDOS (pedidos, no facturación) en un período (venta sin IVA, unidades, margen, variación contra el período anterior). Orden: venta, unidades, crecimiento, caida o margen. Filtros por cliente, vendedor, proveedor o categoría.",
   esquema: {
     type: "object",
     properties: {
@@ -586,9 +587,11 @@ const pagosProveedores: Herramienta = {
     let nombre = ""
     let provId: string | null = null
     if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); provId = pr.id; nombre = pr.nombre }
+    const admin = await veReservados(ctx)
     const data = await fetchAllRows<any>(() => {
-      const q = ctx.db.from("vencimientos").select("id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)")
+      let q = ctx.db.from("vencimientos").select("id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)")
         .eq("estado", "pendiente").lte("fecha_vencimiento", hasta)
+      if (!admin) q = q.not("tipo", "in", filtroReservados)
       return provId ? q.eq("proveedor_id", provId) : q
     }, "id")
     data.sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)))
@@ -962,11 +965,611 @@ const ausenciasPersonal: Herramienta = {
 }
 
 // ─── Registro ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// QUIÉN HIZO QUÉ y FACTURACIÓN (05/11/2026, pedido de Juan)
+//   "Cada movimiento tiene un responsable": quién cargó / preparó / pickeó /
+//   facturó / cobró un pedido, quién cambió un artículo, quién cobró, quién
+//   pagó a un proveedor. Y: VENTA (lo que pidió el cliente) ≠ FACTURACIÓN (los
+//   comprobantes que le llegaron).
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Si una tabla/columna todavía no existe (migración sin aplicar), no es un error de la herramienta. */
+const faltaEnLaBase = (e: unknown) => {
+  const c = (e as { code?: string })?.code
+  return c === "PGRST205" || c === "42P01" || c === "42703" || c === "PGRST204"
+}
+const cuando = (v: unknown) => (v ? fechaHora(v as string) : null)
+/** "1827.102269" → "1827.1" (los datos crudos de la base traen muchos decimales). */
+const valorLindo = (v: unknown) => (v == null ? null : /^-?\d+\.\d+$/.test(String(v)) ? String(red(Number(v), 2)) : String(v))
+
+async function resolverArticulo(db: SupabaseClient, texto: string) {
+  const t = texto.trim()
+  const sel = "id, sku, descripcion, proveedor_nombre"
+  const { data: porCodigo } = await db.from("articulos").select(sel).eq("sku", t).limit(2)
+  if (porCodigo?.length === 1) return porCodigo[0] as { id: string; sku: string; descripcion: string; proveedor_nombre: string | null }
+  if (/^\d{8,14}$/.test(t)) {
+    const { data: porEan } = await db.from("articulos").select(sel).contains("ean13", [t]).limit(2)
+    if (porEan?.length === 1) return porEan[0] as { id: string; sku: string; descripcion: string; proveedor_nombre: string | null }
+  }
+  const limpio = t.replace(/[%_,()]/g, " ").trim()
+  const { data, error } = await db.from("articulos").select(sel).ilike("descripcion", `%${limpio}%`).limit(8)
+  if (error) throw new Error(error.message)
+  const filas = (data ?? []) as { id: string; sku: string; descripcion: string; proveedor_nombre: string | null }[]
+  if (!filas.length) throw new ErrorHerramienta(`No encontré ningún artículo "${texto}" (ni por código ni por descripción).`)
+  const exacto = filas.find((f) => f.descripcion?.toLowerCase() === limpio.toLowerCase())
+  if (exacto) return exacto
+  if (filas.length > 1) throw new ErrorHerramienta(`Hay varios artículos que coinciden con "${texto}": ${filas.map((f) => `${f.sku} ${f.descripcion}`).join("; ")}. Preguntá cuál (mejor por código).`)
+  return filas[0]
+}
+
+// ─── 23. Facturación ───────────────────────────────────────────────────────
+/** Suman: lo que se le cobra al cliente. Restan: lo que se le devuelve o anula. */
+const TIPOS_SUMAN = ["FA", "FB", "FC", "PRES", "NDA", "NDB", "NDC"]
+const TIPOS_RESTAN = ["NCA", "NCB", "NCC", "REV"]
+const NOMBRE_TIPO: Record<string, string> = {
+  FA: "Factura A", FB: "Factura B", FC: "Factura C", PRES: "Presupuesto",
+  NDA: "Nota de débito A", NDB: "Nota de débito B", NDC: "Nota de débito C",
+  NCA: "Nota de crédito A", NCB: "Nota de crédito B", NCC: "Nota de crédito C", REV: "Reversa",
+}
+/** Renglón que es solo plata (bonificación de contado, ajuste): no son unidades. */
+const esRenglonDePlata = (lineaDesc: unknown, artDesc: unknown) =>
+  /^BONIF\.\s/i.test(String(lineaDesc ?? "")) || /^BONIFICACI[OÓ]N\b/i.test(String(artDesc ?? ""))
+
+const AGRUPAR_FACT = ["total", "articulo", "proveedor", "cliente", "tipo", "mes"] as const
+
+const facturacion: Herramienta = {
+  nombre: "facturacion",
+  descripcion:
+    "FACTURACIÓN: los comprobantes que le llegaron al cliente (facturas, presupuestos, notas de débito SUMAN; notas de crédito y reversas RESTAN), con UNIDADES y montos sin IVA, por artículo/código, proveedor, cliente, tipo de comprobante o mes. Usala cuando pregunten 'cuánto facturamos', 'facturación de tal proveedor', 'cuántas unidades se facturaron del código X'. NO es lo mismo que 'ventas' (pedidos que tomó el viajante).",
+  esquema: {
+    type: "object",
+    properties: {
+      ...P_PERIODO,
+      agrupar_por: { type: "string", enum: [...AGRUPAR_FACT] },
+      articulo: { type: "string", description: "Código (sku), EAN o descripción" },
+      proveedor: { type: "string" }, cliente: { type: "string" },
+      ...P_LIMITE,
+    },
+  },
+  async ejecutar(ctx, p) {
+    const r = resolverPeriodo(p as never, "mes_actual", ctx.hoy)
+    const agrupar = (AGRUPAR_FACT as readonly string[]).includes(String(p.agrupar_por)) ? String(p.agrupar_por) : "total"
+    const filtros: string[] = []
+    let artId: string | null = null, provId: string | null = null, cliId: string | null = null
+    if (str(p.articulo)) { const a = await resolverArticulo(ctx.db, str(p.articulo)!); artId = a.id; filtros.push(`artículo ${a.sku} ${a.descripcion}`) }
+    if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); provId = pr.id; filtros.push(`proveedor ${pr.nombre}`) }
+    if (str(p.cliente)) { const c = await resolverCliente(ctx.db, str(p.cliente)!); cliId = c.id; filtros.push(`cliente ${c.nombre}`) }
+
+    const lineas = await fetchAllRows<any>(() => {
+      let q = ctx.db.from("comprobantes_venta_detalle")
+        .select("id, cantidad, precio_total, descripcion, articulo_id, comprobantes_venta!inner(tipo_comprobante, fecha, cliente_id, clientes(nombre)), articulos!inner(sku, descripcion, proveedor_id, proveedor_nombre)")
+        .gte("comprobantes_venta.fecha", r.desde).lte("comprobantes_venta.fecha", r.hasta)
+      if (artId) q = q.eq("articulo_id", artId)
+      if (provId) q = q.eq("articulos.proveedor_id", provId)
+      if (cliId) q = q.eq("comprobantes_venta.cliente_id", cliId)
+      return q
+    }, "id")
+
+    type Acum = { nombre: string; unidades_debitos: number; unidades_creditos: number; sin_cargo: number; importe: number; comprobantes: Set<string> }
+    const grupos = new Map<string, Acum>()
+    const porTipo = new Map<string, { unidades: number; importe: number }>()
+    let otrosTipos = 0
+    for (const l of lineas) {
+      const c = l.comprobantes_venta ?? {}
+      const tipo = String(c.tipo_comprobante ?? "")
+      const signo = TIPOS_SUMAN.includes(tipo) ? 1 : TIPOS_RESTAN.includes(tipo) ? -1 : 0
+      if (!signo) { otrosTipos++; continue }
+      const plata = esRenglonDePlata(l.descripcion, l.articulos?.descripcion)
+      const uds = plata ? 0 : Math.abs(n0(l.cantidad))
+      const imp = Math.abs(n0(l.precio_total)) * signo
+      const clave =
+        agrupar === "articulo" ? `${l.articulos?.sku ?? ""} ${l.articulos?.descripcion ?? ""}`.trim()
+        : agrupar === "proveedor" ? l.articulos?.proveedor_nombre ?? "(sin proveedor)"
+        : agrupar === "cliente" ? c.clientes?.nombre ?? "(sin nombre)"
+        : agrupar === "tipo" ? NOMBRE_TIPO[tipo] ?? tipo
+        : agrupar === "mes" ? String(c.fecha ?? "").slice(0, 7)
+        : "Total"
+      const g = grupos.get(clave) ?? { nombre: clave, unidades_debitos: 0, unidades_creditos: 0, sin_cargo: 0, importe: 0, comprobantes: new Set<string>() }
+      if (signo > 0) g.unidades_debitos += uds; else g.unidades_creditos += uds
+      if (signo > 0 && !plata && n0(l.precio_total) === 0) g.sin_cargo += uds
+      g.importe += imp
+      grupos.set(clave, g)
+      const t = porTipo.get(NOMBRE_TIPO[tipo] ?? tipo) ?? { unidades: 0, importe: 0 }
+      t.unidades += uds * signo
+      t.importe += imp
+      porTipo.set(NOMBRE_TIPO[tipo] ?? tipo, t)
+    }
+    const filas = [...grupos.values()].map((g) => ({
+      nombre: g.nombre,
+      unidades_facturadas: red(g.unidades_debitos - g.unidades_creditos, 2),
+      unidades_en_debitos: red(g.unidades_debitos, 2), unidades_en_creditos: red(g.unidades_creditos, 2),
+      unidades_sin_cargo: red(g.sin_cargo, 2), importe_sin_iva: red(g.importe),
+    }))
+    filas.sort(agrupar === "mes" ? (a, b) => a.nombre.localeCompare(b.nombre) : (a, b) => b.importe_sin_iva - a.importe_sin_iva)
+    const tot = filas.reduce((s, f) => ({ u: s.u + f.unidades_facturadas, d: s.d + f.unidades_en_debitos, c: s.c + f.unidades_en_creditos, i: s.i + f.importe_sin_iva }), { u: 0, d: 0, c: 0, i: 0 })
+    const lim = limite(p.limite, agrupar === "mes" ? 24 : 15)
+    const filtroTxt = filtros.length ? ` (${filtros.join(", ")})` : ""
+    const nota = "Facturas, presupuestos y notas de débito suman; notas de crédito y reversas restan. Montos sin IVA. Las bonificaciones de contado cuentan en plata, no en unidades. No incluye los saldos migrados del sistema anterior (no tienen renglones)."
+    const recalcular = { herramienta: "facturacion", parametros: { ...p } }
+    const bloque = agrupar === "total"
+      ? ({ tipo: "numero", titulo: `Facturado ${r.etiqueta}${filtroTxt}`, valor: red(tot.i), formato: "pesos", nota: artId ? `${red(tot.u, 2)} unidades facturadas` : undefined, recalcular } as Bloque)
+      : { ...tabla(
+          `Facturación por ${agrupar === "tipo" ? "tipo de comprobante" : agrupar} — ${r.etiqueta}${filtroTxt}`,
+          [
+            { clave: "nombre", titulo: agrupar === "articulo" ? "Artículo" : agrupar === "proveedor" ? "Proveedor" : agrupar === "cliente" ? "Cliente" : agrupar === "tipo" ? "Comprobante" : "Mes" },
+            { clave: "unidades_facturadas", titulo: "Unidades", formato: "numero" },
+            { clave: "importe_sin_iva", titulo: "Importe sin IVA", formato: "pesos" },
+          ],
+          filas.slice(0, lim),
+          { total: { unidades_facturadas: red(tot.u, 2), importe_sin_iva: red(tot.i) }, nota },
+        ), recalcular }
+    return {
+      consultado: `Comprobantes emitidos ${r.etiqueta}${filtroTxt} (renglón por renglón)`,
+      datos: {
+        periodo: r, regla: nota,
+        total: { unidades_facturadas: red(tot.u, 2), unidades_en_debitos: red(tot.d, 2), unidades_en_creditos: red(tot.c, 2), importe_sin_iva: red(tot.i) },
+        por_tipo_de_comprobante: [...porTipo.entries()].map(([tipo, v]) => ({ tipo, unidades: red(v.unidades, 2), importe_sin_iva: red(v.importe) })),
+        filas: agrupar === "total" ? undefined : filas.slice(0, lim),
+        resto: filas.length > lim && agrupar !== "total" ? filas.length - lim : 0,
+        renglones_de_otros_tipos_ignorados: otrosTipos,
+        sin_datos: lineas.length === 0 ? "No hay comprobantes con renglones en ese período / filtro." : undefined,
+      },
+      bloques: [bloque],
+    }
+  },
+}
+
+// ─── 24. Historia de un pedido: quién hizo cada cosa ───────────────────────
+const historiaPedido: Herramienta = {
+  nombre: "historia_pedido",
+  descripcion:
+    "Todo lo que pasó con UN pedido y QUIÉN lo hizo: quién lo cargó y cuándo, cada cambio de estado (quién/cuándo), quién lo preparó en depósito y quién pickeó cada artículo (cantidad pedida vs. preparada), quién lo facturó (comprobantes), en qué viaje salió y con qué chofer, y los cobros asociados. Usala para '¿quién preparó / cargó / facturó el pedido 2015?' o '¿quién pickeó el artículo X del pedido Y?'.",
+  esquema: {
+    type: "object",
+    properties: {
+      pedido: { type: "string", description: "Número de pedido (ej. 2015 o 002015)" },
+      articulo: { type: "string", description: "Opcional: solo el renglón de este artículo (código o descripción)" },
+    },
+    required: ["pedido"],
+  },
+  async ejecutar(ctx, p) {
+    const crudo = String(p.pedido ?? "").replace(/\D/g, "")
+    if (!crudo) throw new ErrorHerramienta("Decime el número de pedido.")
+    const { data: ped, error } = await ctx.db.from("pedidos")
+      .select("id, numero_pedido, fecha, estado, total, created_at, creado_por, actualizado_por, viaje_id, clientes(nombre), vendedores(nombre), viajes(nombre, fecha, estado, chofer_id, chofer)")
+      .in("numero_pedido", [...new Set([crudo, crudo.padStart(6, "0")])]).limit(1).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!ped) throw new ErrorHerramienta(`No encontré el pedido ${crudo}.`)
+    const pd = ped as any
+
+    let artFiltro: { id: string; sku: string; descripcion: string } | null = null
+    if (str(p.articulo)) artFiltro = await resolverArticulo(ctx.db, str(p.articulo)!)
+
+    const [estadosR, sesionesR, comprobantesR, cobrosR, kardexR] = await Promise.all([
+      ctx.db.from("pedidos_estados_historial").select("estado_anterior, estado_nuevo, usuario_id, via, cambiado_at").eq("pedido_id", pd.id).order("cambiado_at"),
+      ctx.db.from("picking_sesiones").select("id, usuario_id, usuario_email, estado, inicio_at, fin_at, created_at").eq("pedido_id", pd.id).order("created_at"),
+      ctx.db.from("comprobantes_venta").select("tipo_comprobante, numero_comprobante, fecha, total_factura, creado_por, created_at").eq("pedido_id", pd.id).order("created_at"),
+      ctx.db.from("pagos_clientes").select("fecha_pago, monto, estado, cobrador_tipo, creado_por, confirmado_por, fecha_confirmacion, vendedores(nombre), pagos_detalle(tipo_pago, monto)").eq("pedido_id", pd.id).order("created_at"),
+      ctx.db.from("kardex").select("preparadores_ids, facturador_id, entregador_id").eq("pedido_id", pd.id).limit(300),
+    ])
+    const sesiones = (sesionesR.data ?? []) as any[]
+    let items: any[] = []
+    if (sesiones.length) {
+      let q = ctx.db.from("picking_items")
+        .select("sesion_id, cantidad_pedida, cantidad_preparada, estado, usuario_id, usuario_nombre, fecha_escaneo, observaciones, articulos(sku, descripcion)")
+        .in("sesion_id", sesiones.map((s) => s.id))
+      if (artFiltro) q = q.eq("articulo_id", artFiltro.id)
+      const { data } = await q.order("fecha_escaneo", { ascending: true, nullsFirst: false })
+      items = (data ?? []) as any[]
+    }
+    const kx = (kardexR.data ?? []) as any[]
+    const prepKardex = [...new Set(kx.flatMap((k) => (Array.isArray(k.preparadores_ids) ? k.preparadores_ids : [])))]
+    const ids = [
+      pd.creado_por, pd.actualizado_por, pd.viajes?.chofer_id,
+      ...((estadosR.data ?? []) as any[]).map((e) => e.usuario_id),
+      ...sesiones.map((s) => s.usuario_id), ...items.map((i) => i.usuario_id),
+      ...((comprobantesR.data ?? []) as any[]).map((c) => c.creado_por),
+      ...((cobrosR.data ?? []) as any[]).flatMap((c) => [c.creado_por, c.confirmado_por]),
+      ...prepKardex, ...kx.map((k) => k.facturador_id), ...kx.map((k) => k.entregador_id),
+    ]
+    const nom = await nombresDeUsuarios(ctx.db, ids as string[])
+    const quien = (id: unknown, porDefecto = "no quedó registrado") => (id ? nom.get(String(id)) ?? "usuario desconocido" : porDefecto)
+
+    const estados = ((estadosR.data ?? []) as any[]).map((e) => ({
+      cuando: cuando(e.cambiado_at), de: e.estado_anterior ?? "(alta)", a: e.estado_nuevo,
+      quien: e.usuario_id ? quien(e.usuario_id) : e.via === "service_role" ? "el sistema (no anotó persona)" : "no quedó registrado",
+    }))
+    const preparacion = sesiones.map((s) => ({
+      preparo: s.usuario_id ? quien(s.usuario_id) : s.usuario_email ?? "no quedó registrado",
+      estado: s.estado, desde: cuando(s.inicio_at ?? s.created_at), hasta: cuando(s.fin_at),
+    }))
+    const renglones = items.map((i) => ({
+      articulo: `${i.articulos?.sku ?? ""} ${i.articulos?.descripcion ?? ""}`.trim(),
+      pedida: num(i.cantidad_pedida), preparada: num(i.cantidad_preparada), estado: i.estado,
+      pickeo: i.usuario_id ? quien(i.usuario_id) : i.usuario_nombre ?? "no quedó registrado", cuando: cuando(i.fecha_escaneo), nota: i.observaciones ?? null,
+    }))
+    const comprobantes = ((comprobantesR.data ?? []) as any[]).map((c) => ({
+      comprobante: `${NOMBRE_TIPO[c.tipo_comprobante] ?? c.tipo_comprobante} ${c.numero_comprobante ?? ""}`.trim(),
+      fecha: fechaSola(c.fecha), total: red(n0(c.total_factura)), facturo: quien(c.creado_por, "el sistema (comprobante automático, no anotó persona)"), cuando: cuando(c.created_at),
+    }))
+    const cobros = ((cobrosR.data ?? []) as any[]).map((c) => ({
+      fecha: fechaSola(c.fecha_pago), monto: red(n0(c.monto)), estado: c.estado,
+      forma: [...new Set(((c.pagos_detalle ?? []) as any[]).map((d) => d.tipo_pago))].join(" + ") || null,
+      cobro: c.cobrador_tipo === "viajante" ? `${c.vendedores?.nombre ?? "el viajante"} (viajante)` : `${quien(c.creado_por)}${c.cobrador_tipo ? ` (${c.cobrador_tipo})` : ""}`,
+      confirmo: c.confirmado_por ? quien(c.confirmado_por) : null, confirmado: cuando(c.fecha_confirmacion),
+    }))
+    const sinPrep = !sesiones.length
+      ? prepKardex.length
+        ? `No hay sesión de la app de depósito; según el kardex lo prepararon: ${prepKardex.map((x) => quien(x)).join(", ")}.`
+        : "No quedó registrado quién lo preparó: no se preparó con la app de depósito (la app anota quién prepara y quién pickea cada artículo)."
+      : null
+    const v = pd.viajes
+    const titulo = `Pedido ${pd.numero_pedido} — ${pd.clientes?.nombre ?? ""}`
+    const bloques: Bloque[] = [
+      tabla(`${titulo}: quién hizo qué`, [{ clave: "cuando", titulo: "Cuándo" }, { clave: "que", titulo: "Qué" }, { clave: "quien", titulo: "Quién" }], [
+        { cuando: cuando(pd.created_at), que: "Lo cargó", quien: quien(pd.creado_por) },
+        ...estados.filter((e) => e.de !== "(alta)").map((e) => ({ cuando: e.cuando, que: `${e.de} → ${e.a}`, quien: e.quien })),
+        ...preparacion.map((s) => ({ cuando: s.desde, que: `Preparación (${s.estado})`, quien: s.preparo })),
+        ...comprobantes.map((c) => ({ cuando: c.cuando, que: `Emitió ${c.comprobante}`, quien: c.facturo })),
+        ...cobros.map((c) => ({ cuando: c.fecha ? fecha(c.fecha) : null, que: `Cobro ${c.forma ?? ""}`.trim(), quien: c.cobro })),
+      ], { nota: sinPrep ?? undefined }),
+    ]
+    if (renglones.length) {
+      bloques.push(tabla(`${titulo}: picking${artFiltro ? ` de ${artFiltro.sku}` : ""}`, [
+        { clave: "articulo", titulo: "Artículo" }, { clave: "pedida", titulo: "Pedida", formato: "numero" },
+        { clave: "preparada", titulo: "Preparada", formato: "numero" }, { clave: "pickeo", titulo: "Pickeó" }, { clave: "cuando", titulo: "Cuándo" },
+      ], renglones))
+    }
+    return {
+      consultado: `Historia del pedido ${pd.numero_pedido}: alta, estados, preparación, picking, comprobantes, viaje y cobros`,
+      datos: {
+        pedido: pd.numero_pedido, cliente: pd.clientes?.nombre ?? null, fecha: fechaSola(pd.fecha), estado_actual: pd.estado, total: red(n0(pd.total)),
+        cargo: { quien: quien(pd.creado_por), cuando: cuando(pd.created_at), viajante: pd.vendedores?.nombre ?? null },
+        cambios_de_estado: estados.length ? estados : "Sin historial de estados (se anota desde el 29/10/2026).",
+        preparacion: preparacion.length ? preparacion : sinPrep,
+        picking: artFiltro && !renglones.length ? `No hay picking registrado de ${artFiltro.sku} ${artFiltro.descripcion} en este pedido.` : renglones,
+        facturacion: comprobantes.length ? comprobantes : "Sin comprobantes emitidos.",
+        viaje: v ? { nombre: v.nombre, fecha: fechaSola(v.fecha), estado: v.estado, chofer: v.chofer_id ? quien(v.chofer_id) : v.chofer ?? "sin chofer asignado" } : "No está en un viaje.",
+        cobros: cobros.length ? cobros : "Sin cobros asociados a este pedido (puede haberse cobrado a cuenta del cliente).",
+      },
+      bloques,
+    }
+  },
+}
+
+// ─── 25. Cobros: quién cobró, cómo y cuándo ────────────────────────────────
+const cobrosRealizados: Herramienta = {
+  nombre: "cobros_realizados",
+  descripcion:
+    "Cobros a clientes de un período: fecha, cliente, monto, FORMA de pago (efectivo, transferencia, cheque…), QUIÉN cobró (oficina, chofer o viajante), quién lo confirmó y si se anuló (quién). Filtros: cliente, persona (quién cobró o cargó), forma de pago.",
+  esquema: {
+    type: "object",
+    properties: {
+      ...P_PERIODO, cliente: { type: "string" },
+      persona: { type: "string", description: "Nombre de quien cobró, cargó o confirmó" },
+      forma: { type: "string", enum: ["efectivo", "transferencia", "cheque"] },
+      ...P_LIMITE,
+    },
+  },
+  async ejecutar(ctx, p) {
+    const r = resolverPeriodo(p as never, "mes_actual", ctx.hoy)
+    const filtros: string[] = []
+    let cliId: string | null = null
+    if (str(p.cliente)) { const c = await resolverCliente(ctx.db, str(p.cliente)!); cliId = c.id; filtros.push(`cliente ${c.nombre}`) }
+    const data = await fetchAllRows<any>(() => {
+      const q = ctx.db.from("pagos_clientes")
+        .select("id, fecha_pago, monto, estado, cobrador_tipo, creado_por, confirmado_por, fecha_confirmacion, verificado_por, anulado_por, anulado_at, motivo_anulacion, created_at, clientes(nombre), vendedores(nombre), viajes(nombre), pagos_detalle(tipo_pago, monto, banco, numero_cheque)")
+        .gte("fecha_pago", r.desde).lte("fecha_pago", r.hasta)
+      return cliId ? q.eq("cliente_id", cliId) : q
+    }, "id")
+    const nom = await nombresDeUsuarios(ctx.db, data.flatMap((c) => [c.creado_por, c.confirmado_por, c.verificado_por, c.anulado_por]))
+    const n = (id: unknown) => (id ? nom.get(String(id)) ?? "usuario desconocido" : null)
+    let filas = data.map((c) => {
+      const formas = ((c.pagos_detalle ?? []) as any[])
+      const cobro = c.cobrador_tipo === "viajante" ? `${c.vendedores?.nombre ?? "viajante"} (viajante)` : `${n(c.creado_por) ?? "no quedó registrado"}${c.cobrador_tipo ? ` (${c.cobrador_tipo})` : ""}`
+      return {
+        fecha: fechaSola(c.fecha_pago), cliente: c.clientes?.nombre ?? "—", monto: red(n0(c.monto)),
+        forma: [...new Set(formas.map((d) => d.tipo_pago))].join(" + ") || "sin detalle",
+        detalle_formas: formas.map((d) => ({ forma: d.tipo_pago, monto: red(n0(d.monto)), banco: d.banco ?? null, cheque: d.numero_cheque ?? null })),
+        cobro, cargo: n(c.creado_por), cargado: cuando(c.created_at),
+        confirmo: n(c.confirmado_por), confirmado: cuando(c.fecha_confirmacion), verifico: n(c.verificado_por),
+        estado: c.estado, anulo: n(c.anulado_por), anulado: cuando(c.anulado_at), motivo_anulacion: c.motivo_anulacion ?? null,
+        viaje: c.viajes?.nombre ?? null,
+      }
+    })
+    const persona = str(p.persona)?.toLowerCase()
+    if (persona) {
+      filas = filas.filter((f) => [f.cobro, f.cargo, f.confirmo].some((x) => x?.toLowerCase().includes(persona)))
+      filtros.push(`persona ${str(p.persona)}`)
+    }
+    if (str(p.forma)) { filas = filas.filter((f) => f.forma.includes(String(p.forma))); filtros.push(`forma ${p.forma}`) }
+    filas.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
+    const vigentes = filas.filter((f) => f.estado !== "anulado")
+    const total = red(vigentes.reduce((s, f) => s + f.monto, 0))
+    const porForma = new Map<string, number>()
+    for (const f of vigentes) for (const d of f.detalle_formas) porForma.set(d.forma, (porForma.get(d.forma) ?? 0) + d.monto)
+    const porPersona = new Map<string, number>()
+    for (const f of vigentes) porPersona.set(f.cobro, (porPersona.get(f.cobro) ?? 0) + f.monto)
+    const lim = limite(p.limite, 20)
+    const filtroTxt = filtros.length ? ` (${filtros.join(", ")})` : ""
+    const bloque = tabla(
+      `Cobros ${r.etiqueta}${filtroTxt}`,
+      [
+        { clave: "fecha", titulo: "Fecha", formato: "fecha" }, { clave: "cliente", titulo: "Cliente" },
+        { clave: "monto", titulo: "Monto", formato: "pesos" }, { clave: "forma", titulo: "Forma" },
+        { clave: "cobro", titulo: "Cobró" }, { clave: "confirmo", titulo: "Confirmó" }, { clave: "estado", titulo: "Estado" },
+      ],
+      filas.slice(0, lim).map(({ detalle_formas: _d, ...f }) => f),
+      { total: { monto: total }, nota: "El total no suma los anulados." },
+    )
+    return {
+      consultado: `Cobros ${r.etiqueta}${filtroTxt}, con forma de pago y responsables`,
+      datos: {
+        periodo: r, cantidad: filas.length, total_vigente: total, anulados: filas.length - vigentes.length,
+        por_forma: [...porForma.entries()].map(([forma, monto]) => ({ forma, monto: red(monto) })),
+        por_quien_cobro: [...porPersona.entries()].map(([quien, monto]) => ({ quien, monto: red(monto) })).sort((a, b) => b.monto - a.monto),
+        filas: filas.slice(0, lim),
+      },
+      bloques: [{ ...bloque, recalcular: { herramienta: "cobros_realizados", parametros: { ...p } } }],
+    }
+  },
+}
+
+// ─── 26. Pagos a proveedores hechos: quién pagó, cómo, quién autorizó ──────
+const ordenesDePago: Herramienta = {
+  nombre: "ordenes_de_pago",
+  descripcion:
+    "Pagos HECHOS (u órdenes de pago armadas) a proveedores en un período: número de OP, proveedor, monto, retenciones, neto, CÓMO se pagó (efectivo, transferencia, cheque), quién la ARMÓ (= quién AUTORIZÓ el pago), quién la confirmó y quién la anuló. Gastos y vencimientos pagados sin orden de pago (EDES, impuestos…): 'gastos_pagados'. Para lo que FALTA pagar usá 'pagos_proveedores'.",
+  esquema: { type: "object", properties: { ...P_PERIODO, proveedor: { type: "string" }, ...P_LIMITE } },
+  async ejecutar(ctx, p) {
+    const r = resolverPeriodo(p as never, "mes_actual", ctx.hoy)
+    let provId: string | null = null
+    let nombreProv = ""
+    if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); provId = pr.id; nombreProv = pr.nombre }
+    const base = "id, numero_op, fecha, estado, monto_total, total_retenciones, neto_a_pagar, usuario_creador, created_at, observaciones, proveedores(nombre), ordenes_pago_detalle(medio, monto, cheque_numero, cheque_banco, banco_destino, numero_transferencia)"
+    const traer = (sel: string) => fetchAllRows<any>(() => {
+      const q = ctx.db.from("ordenes_pago").select(sel).gte("fecha", r.desde).lte("fecha", r.hasta)
+      return provId ? q.eq("proveedor_id", provId) : q
+    }, "id")
+    let data: any[]
+    let conResponsables = true
+    try {
+      data = await traer(`${base}, confirmado_por, confirmado_at, anulado_por, anulado_at`)
+    } catch (e) {
+      if (!faltaEnLaBase(e)) throw e
+      conResponsables = false
+      data = await traer(base)
+    }
+    // usuario_creador guarda el MAIL de quien armó la OP
+    const mails = [...new Set(data.map((o) => o.usuario_creador).filter((x: unknown) => typeof x === "string" && x.includes("@")))]
+    const { data: us } = mails.length ? await ctx.db.from("usuarios").select("email, nombre").in("email", mails) : { data: [] }
+    const porMail = new Map(((us ?? []) as { email: string; nombre: string | null }[]).map((u) => [u.email, u.nombre || u.email]))
+    const nom = await nombresDeUsuarios(ctx.db, data.flatMap((o) => [o.confirmado_por, o.anulado_por]))
+    const filas = data.map((o) => {
+      const medios = (o.ordenes_pago_detalle ?? []) as any[]
+      return {
+        op: o.numero_op ?? null, fecha: fechaSola(o.fecha), proveedor: o.proveedores?.nombre ?? "—", estado: o.estado,
+        monto: red(n0(o.monto_total)), retenciones: red(n0(o.total_retenciones)), neto: red(n0(o.neto_a_pagar)),
+        como: [...new Set(medios.map((m) => m.medio))].join(" + ") || "sin detalle",
+        medios: medios.map((m) => ({ medio: m.medio, monto: red(n0(m.monto)), cheque: m.cheque_numero ?? null, banco: m.cheque_banco ?? m.banco_destino ?? null, transferencia: m.numero_transferencia ?? null })),
+        armo: porMail.get(o.usuario_creador) ?? o.usuario_creador ?? "no quedó registrado", armada: cuando(o.created_at),
+        confirmo: !conResponsables ? "todavía no se registra (falta aplicar la migración 20261105)" : o.confirmado_por ? nom.get(o.confirmado_por) ?? "usuario desconocido" : o.estado === "pagada" ? "no quedó registrado (confirmada antes de que se anotara)" : null,
+        confirmada: cuando(o.confirmado_at), anulo: o.anulado_por ? nom.get(o.anulado_por) ?? "usuario desconocido" : null, anulada: cuando(o.anulado_at),
+      }
+    }).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
+    const pagadas = filas.filter((f) => f.estado === "pagada")
+    const lim = limite(p.limite, 20)
+    const bloque = tabla(
+      `Órdenes de pago ${r.etiqueta}${nombreProv ? ` — ${nombreProv}` : ""}`,
+      [
+        { clave: "fecha", titulo: "Fecha", formato: "fecha" }, { clave: "op", titulo: "OP" }, { clave: "proveedor", titulo: "Proveedor" },
+        { clave: "neto", titulo: "Neto pagado", formato: "pesos" }, { clave: "como", titulo: "Cómo" }, { clave: "estado", titulo: "Estado" },
+        { clave: "armo", titulo: "Autorizó (armó)" }, { clave: "confirmo", titulo: "Confirmó" },
+      ],
+      filas.slice(0, lim).map(({ medios: _m, ...f }) => f),
+      { total: { neto: red(pagadas.reduce((s, f) => s + f.neto, 0)) }, nota: "El total suma solo las pagadas." },
+    )
+    return {
+      consultado: `Órdenes de pago ${r.etiqueta}${nombreProv ? ` de ${nombreProv}` : ""}, con medios y responsables`,
+      datos: {
+        periodo: r, cantidad: filas.length, pagadas: pagadas.length, neto_pagado: red(pagadas.reduce((s, f) => s + f.neto, 0)),
+        filas: filas.slice(0, lim),
+        aviso: "Los pagos viejos cargados directo en 'pagos a proveedores' (antes de las órdenes de pago) no guardan quién los hizo.",
+      },
+      bloques: [{ ...bloque, recalcular: { herramienta: "ordenes_de_pago", parametros: { ...p } } }],
+    }
+  },
+}
+
+// ─── 27. Cambios de un artículo: qué cambió, cuándo y quién ────────────────
+const NOMBRE_CAMPO: Record<string, string> = {
+  precio_compra: "costo (precio de compra)", precio_base: "precio base", precio_base_contado: "precio base contado",
+  porcentaje_ganancia: "% de ganancia", descuento_propio: "descuento propio", bonif_recargo: "bonificación/recargo",
+  descuento1: "descuento 1", descuento2: "descuento 2", descuento3: "descuento 3", descuento4: "descuento 4",
+  iva_compras: "IVA compras", iva_ventas: "IVA ventas", descripcion: "descripción", sku: "código", ean13: "EAN",
+  activo: "activo", unidades_por_bulto: "unidades por bulto", proveedor_nombre: "proveedor", marca_nombre: "marca",
+  categoria: "categoría", rubro: "rubro", subcategoria: "subcategoría", segmento_precio: "segmento de precio",
+  precio_lista_especial: "precio lista especial", oferta_lista_especial: "oferta lista especial", ultimo_costo: "último costo",
+}
+const cambiosArticulo: Herramienta = {
+  nombre: "cambios_articulo",
+  descripcion:
+    "Historial de cambios de UN artículo: qué dato cambió (costo, precio, descuentos, descripción, proveedor, alta/baja…), cómo estaba, cómo quedó, CUÁNDO y QUIÉN lo cambió. Usala para '¿quién le cambió el precio / los datos al artículo X?'.",
+  esquema: {
+    type: "object",
+    properties: { articulo: { type: "string", description: "Código (sku), EAN o descripción" }, dias: { type: "integer", description: "Hacia atrás (por defecto 180)" } },
+    required: ["articulo"],
+  },
+  async ejecutar(ctx, p) {
+    const a = await resolverArticulo(ctx.db, String(p.articulo ?? ""))
+    const dias = Math.max(1, Math.min(730, Number(p.dias) || 180))
+    const desde = inicioDiaAR(sumarDiasISO(ctx.hoy, -dias))
+    const [infoR, cambiosR, estadoR, preciosR] = await Promise.all([
+      ctx.db.from("articulos").select("created_at, updated_at, actualizado_por, activo").eq("id", a.id).maybeSingle(),
+      ctx.db.from("articulos_cambios").select("campo, antes, despues, usuario_id, via, cambiado_at").eq("articulo_id", a.id).gte("cambiado_at", desde).order("cambiado_at", { ascending: false }).limit(200),
+      ctx.db.from("articulos_estado_historial").select("activo, usuario_id, origen, created_at").eq("articulo_id", a.id).gte("created_at", desde).order("created_at", { ascending: false }).limit(50),
+      ctx.db.from("precio_insumos_historial").select("datos, vigente_desde").eq("tabla", "articulos").eq("registro_id", a.id).order("vigente_desde", { ascending: true }).limit(400),
+    ])
+    const hayRegistroNuevo = !(cambiosR.error && faltaEnLaBase(cambiosR.error))
+    if (cambiosR.error && hayRegistroNuevo) throw new Error(cambiosR.error.message)
+    const info = (infoR.data ?? {}) as any
+    const nom = await nombresDeUsuarios(ctx.db, [
+      info.actualizado_por, ...((cambiosR.data ?? []) as any[]).map((c) => c.usuario_id), ...((estadoR.data ?? []) as any[]).map((e) => e.usuario_id),
+    ])
+    const q = (id: unknown, via?: string | null) => (id ? nom.get(String(id)) ?? "usuario desconocido" : via === "service_role" ? "el sistema (no anotó persona)" : "no quedó registrado")
+    const cambios = ((cambiosR.data ?? []) as any[]).map((c) => ({
+      cuando: cuando(c.cambiado_at), dato: NOMBRE_CAMPO[c.campo] ?? c.campo, antes: valorLindo(c.antes), despues: valorLindo(c.despues), quien: q(c.usuario_id, c.via),
+    }))
+    const altasBajas = ((estadoR.data ?? []) as any[]).map((e) => ({ cuando: cuando(e.created_at), dato: "estado", antes: e.activo ? "baja" : "activo", despues: e.activo ? "activo (reactivado)" : "dado de baja", quien: q(e.usuario_id), origen: e.origen ?? null }))
+    // Historial de precios (desde el 18/09/2026): qué cambió y cuándo, SIN quién.
+    const versiones = ((preciosR.data ?? []) as any[])
+    const preciosSinQuien: { cuando: string | null; dato: string; antes: string | null; despues: string | null; quien: string; _desde: string }[] = []
+    for (let i = 1; i < versiones.length; i++) {
+      const ant = versiones[i - 1].datos ?? {}, act = versiones[i].datos ?? {}
+      if (String(versiones[i].vigente_desde) < desde) continue
+      for (const k of Object.keys(act)) {
+        if (k === "id" || JSON.stringify(ant[k]) === JSON.stringify(act[k])) continue
+        preciosSinQuien.push({ cuando: cuando(versiones[i].vigente_desde), dato: NOMBRE_CAMPO[k] ?? k, antes: valorLindo(ant[k]), despues: valorLindo(act[k]), quien: "no se registraba quién (historial de precios)", _desde: String(versiones[i].vigente_desde) })
+      }
+    }
+    // Si ya hay registro nuevo, los cambios de precio también están ahí (con quién): no duplicar.
+    const primeroNuevo = cambios.length ? ((cambiosR.data ?? []) as any[]).at(-1)?.cambiado_at : null
+    const viejos = (primeroNuevo ? preciosSinQuien.filter((x) => x._desde < String(primeroNuevo)) : preciosSinQuien).map(({ _desde: _x, ...v }) => v)
+    const todo = [...cambios, ...altasBajas, ...viejos.reverse()].slice(0, 60)
+    const bloque = tabla(
+      `Cambios de ${a.sku} ${a.descripcion} (últimos ${dias} días)`,
+      [{ clave: "cuando", titulo: "Cuándo" }, { clave: "dato", titulo: "Dato" }, { clave: "antes", titulo: "Antes" }, { clave: "despues", titulo: "Después" }, { clave: "quien", titulo: "Quién" }],
+      todo.map(({ origen: _o, ...f }: any) => f),
+      { nota: hayRegistroNuevo ? "Quién cambió cada dato se anota desde el 05/11/2026. Antes solo hay historial de precios (sin quién)." : "Todavía no se anota quién cambia cada dato (falta aplicar la migración 20261105). Se muestra el historial de precios (sin quién)." },
+    )
+    return {
+      consultado: `Historial de cambios del artículo ${a.sku} ${a.descripcion} (últimos ${dias} días)`,
+      datos: {
+        articulo: `${a.sku} ${a.descripcion}`, proveedor: a.proveedor_nombre, activo: info.activo ?? null,
+        alta: cuando(info.created_at), ultima_modificacion: cuando(info.updated_at), ultimo_que_lo_toco: info.actualizado_por ? q(info.actualizado_por) : "no quedó registrado",
+        cambios: todo, registro_de_quien_desde: hayRegistroNuevo ? "05/11/2026" : "todavía no se registra (falta la migración)",
+        sin_cambios: todo.length === 0 ? `No hay cambios registrados en los últimos ${dias} días.` : undefined,
+      },
+      bloques: [{ ...bloque, recalcular: { herramienta: "cambios_articulo", parametros: { ...p } } }],
+    }
+  },
+}
+
+// ─── 28. Vencimientos pagados (gastos, servicios, impuestos…): quién pagó ──
+/** Sueldos y socios: solo los ve un admin (lib/finanzas/tipos-reservados). */
+async function veReservados(ctx: Contexto): Promise<boolean> {
+  if (!ctx.usuarioId) return false
+  const { data } = await ctx.db.from("usuarios_roles").select("roles(nombre)").eq("usuario_id", ctx.usuarioId)
+  return esAdminFinanzas(((data ?? []) as any[]).map((r) => r.roles?.nombre).filter(Boolean))
+}
+const filtroReservados = `(${TIPOS_SOLO_ADMIN.join(",")})`
+
+const gastosPagados: Herramienta = {
+  nombre: "gastos_pagados",
+  descripcion:
+    "Vencimientos PAGADOS (gastos, servicios como EDES, impuestos, cargas sociales, honorarios, facturas de proveedor…) en un período: qué, cuánto, QUIÉN lo marcó pagado y cuándo. Si se pagó con orden de pago: el número y quién la armó (= quién lo autorizó). Con 'buscar' (concepto o proveedor) trae además el historial de cada uno: quién lo cargó, quién le cambió monto o fecha, quién lo pasó a pagado o lo volvió a pendiente.",
+  esquema: {
+    type: "object",
+    properties: {
+      ...P_PERIODO,
+      buscar: { type: "string", description: "Texto del concepto o nombre del proveedor (ej. EDES)" },
+      tipo: { type: "string", enum: ["factura", "servicios", "impuestos", "cargas_sociales", "honorarios", "sueldos", "socios", "seguros", "vehiculos", "otro"] },
+      ...P_LIMITE,
+    },
+  },
+  async ejecutar(ctx, p) {
+    const r = resolverPeriodo(p as never, "mes_actual", ctx.hoy)
+    const desde = inicioDiaAR(r.desde), hasta = finDiaAR(r.hasta)
+    const admin = await veReservados(ctx)
+    const tipo = str(p.tipo)
+    if (tipo && esTipoReservado(tipo) && !admin) throw new ErrorHerramienta("Los vencimientos de sueldos y socios solo los puede consultar un administrador.")
+    const base = "id, concepto, tipo, monto, fecha_vencimiento, forma_pago, orden_pago_id, updated_at, proveedores(nombre)"
+    const traer = (conQuien: boolean) => fetchAllRows<any>(() => {
+      let q = ctx.db.from("vencimientos").select(conQuien ? `${base}, creado_por, pagado_por, pagado_at` : base).eq("estado", "pagado")
+      q = conQuien
+        ? q.or(`and(pagado_at.gte.${desde},pagado_at.lte.${hasta}),and(pagado_at.is.null,updated_at.gte.${desde},updated_at.lte.${hasta})`)
+        : q.gte("updated_at", desde).lte("updated_at", hasta)
+      if (tipo) q = q.eq("tipo", tipo)
+      if (!admin) q = q.not("tipo", "in", filtroReservados)
+      return q
+    }, "id")
+    let conQuien = true
+    let data: any[]
+    try { data = await traer(true) } catch (e) { if (!faltaEnLaBase(e)) throw e; conQuien = false; data = await traer(false) }
+    const buscar = str(p.buscar)?.toLowerCase()
+    if (buscar) data = data.filter((v) => `${v.concepto ?? ""} ${v.proveedores?.nombre ?? ""}`.toLowerCase().includes(buscar))
+
+    // Órdenes de pago de los que se pagaron con OP: quién la armó (= autorizó)
+    const opIds = [...new Set(data.map((v) => v.orden_pago_id).filter(Boolean))]
+    const { data: ops } = opIds.length ? await ctx.db.from("ordenes_pago").select("id, numero_op, usuario_creador, created_at").in("id", opIds) : { data: [] }
+    const mails = [...new Set(((ops ?? []) as any[]).map((o) => o.usuario_creador).filter((x) => typeof x === "string" && x.includes("@")))]
+    const { data: us } = mails.length ? await ctx.db.from("usuarios").select("email, nombre").in("email", mails) : { data: [] }
+    const porMail = new Map(((us ?? []) as any[]).map((u) => [u.email, u.nombre || u.email]))
+    const opDe = new Map(((ops ?? []) as any[]).map((o) => [o.id, { numero: o.numero_op, armo: porMail.get(o.usuario_creador) ?? o.usuario_creador ?? "no quedó registrado", cuando: cuando(o.created_at) }]))
+
+    // Historial (solo si buscó algo puntual: puede ser largo)
+    const historial = new Map<string, any[]>()
+    if (buscar && conQuien && data.length && data.length <= 30) {
+      const { data: h, error } = await ctx.db.from("vencimientos_historial")
+        .select("vencimiento_id, estado_anterior, estado_nuevo, monto_anterior, monto_nuevo, fecha_anterior, fecha_nueva, usuario_id, via, cambiado_at")
+        .in("vencimiento_id", data.map((v) => v.id)).order("cambiado_at")
+      if (error && !faltaEnLaBase(error)) throw new Error(error.message)
+      for (const x of (h ?? []) as any[]) historial.set(x.vencimiento_id, [...(historial.get(x.vencimiento_id) ?? []), x])
+    }
+    const nom = await nombresDeUsuarios(ctx.db, [
+      ...data.flatMap((v) => [v.pagado_por, v.creado_por]),
+      ...[...historial.values()].flat().map((x) => x.usuario_id),
+    ])
+    const q = (id: unknown, via?: string | null) => (id ? nom.get(String(id)) ?? "usuario desconocido" : via === "service_role" ? "el sistema (no anotó persona)" : "no quedó registrado")
+    data.sort((a, b) => String(b.pagado_at ?? b.updated_at ?? "").localeCompare(String(a.pagado_at ?? a.updated_at ?? "")))
+    const filas = data.map((v) => {
+      const op = v.orden_pago_id ? opDe.get(v.orden_pago_id) : null
+      const pagadoAntes = conQuien && !v.pagado_at
+      return {
+        concepto: v.concepto ?? "—", proveedor: v.proveedores?.nombre ?? null, tipo: v.tipo, monto: red(n0(v.monto)),
+        vencia: fechaSola(v.fecha_vencimiento), forma: v.forma_pago ?? null,
+        pago: op ? `orden de pago ${op.numero ?? ""}`.trim() : !conQuien || pagadoAntes ? "no quedó registrado (se marcó pagado antes de que se anotara)" : q(v.pagado_por),
+        cuando: op ? op.cuando : v.pagado_at ? cuando(v.pagado_at) : `${cuando(v.updated_at)} (última modificación)`,
+        autorizo: op ? op.armo : null,
+        cargo: conQuien ? (v.creado_por ? q(v.creado_por) : "no quedó registrado") : null,
+        historial: (historial.get(v.id) ?? []).map((x) => ({
+          cuando: cuando(x.cambiado_at), quien: q(x.usuario_id, x.via),
+          que: x.estado_anterior == null ? `lo cargó (${x.estado_nuevo})`
+            : x.estado_anterior !== x.estado_nuevo ? `${x.estado_anterior} → ${x.estado_nuevo}`
+            : n0(x.monto_anterior) !== n0(x.monto_nuevo) ? `monto ${red(n0(x.monto_anterior))} → ${red(n0(x.monto_nuevo))}`
+            : `fecha ${x.fecha_anterior ? fecha(x.fecha_anterior) : "—"} → ${x.fecha_nueva ? fecha(x.fecha_nueva) : "—"}`,
+        })),
+      }
+    })
+    const total = red(filas.reduce((s, f) => s + f.monto, 0))
+    const lim = limite(p.limite, 20)
+    const bloque = tabla(
+      `Vencimientos pagados ${r.etiqueta}${buscar ? ` — "${str(p.buscar)}"` : ""}`,
+      [
+        { clave: "concepto", titulo: "Concepto" }, { clave: "proveedor", titulo: "Proveedor" },
+        { clave: "monto", titulo: "Monto", formato: "pesos" }, { clave: "pago", titulo: "Lo pagó" }, { clave: "cuando", titulo: "Cuándo" },
+      ],
+      filas.slice(0, lim).map(({ historial: _h, ...f }) => f),
+      { total: { monto: total }, nota: conQuien ? "Quién lo pagó se anota desde el 05/11/2026; lo pagado con orden de pago lo autorizó quien armó la orden." : "Todavía no se anota quién marca pagado un vencimiento (falta aplicar la migración 20261105)." },
+    )
+    return {
+      consultado: `Vencimientos pagados ${r.etiqueta}${buscar ? ` que coinciden con "${str(p.buscar)}"` : ""}, con quién los pagó`,
+      datos: {
+        periodo: r, cantidad: filas.length, total, filas: filas.slice(0, lim),
+        registro_de_quien: conQuien ? "se anota desde el 05/11/2026" : "todavía no se registra (falta la migración)",
+        sin_datos: filas.length === 0 ? "No hay vencimientos marcados pagados en ese período / búsqueda." : undefined,
+      },
+      bloques: [{ ...bloque, recalcular: { herramienta: "gastos_pagados", parametros: { ...p } } }],
+    }
+  },
+}
+
 export const HERRAMIENTAS: Herramienta[] = [
   indicadoresTablero, ventas, deudaClientes, clientesHabitos, fichaCliente, articulosVendidos,
   coberturaStock, proveedores, pagosProveedores, cheques, operacion, comisiones,
   agendarRecordatorio, proponerDecision, verAgenda, historialDecisionesH, clientesRetenidos,
   indicadoresExternos, insumosProveedor, clasificacionArticulos, calendarioViajes, ausenciasPersonal,
+  facturacion, historiaPedido, cobrosRealizados, ordenesDePago, cambiosArticulo, gastosPagados,
 ]
 
 /** Las que escriben en la agenda: /recalcular NUNCA las corre. */

@@ -1,0 +1,141 @@
+{
+  "modelo": "claude-opus-5-5",
+  "juez": "claude-opus-5-5",
+  "promedio": 8.857142857142858,
+  "costo_usd": 0.2872994,
+  "resultados": [
+    {
+      "id": "fact-unidades-codigo",
+      "pregunta": "¿Cuánto facturamos del código 39165 en los últimos 90 días?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Números exactos (0 netas, 288 en débitos y 288 en créditos, $ 584.614) y respuesta corta; no usa la forma literal 'Se facturaron N unidades', pero el contenido es correcto.",
+      "segundos": 10,
+      "respuesta": "Del **39165 (Crema dental Odolito x50g)** la facturación neta de los últimos 90 días (08/08/2026 al 05/11/2026) da **0 unidades y $ 0**.\n\nHubo 288 unidades en Factura A ($ 584.614 sin IVA), pero una Nota de crédito A las anuló completas: mismas 288 unidades, mismo importe.",
+      "consultado": [
+        "Comprobantes emitidos últimos 90 días (artículo 39165 CREMA DENTAL ODOLITO x50g) (renglón por renglón)"
+      ],
+      "bloques": [
+        "Facturación por tipo de comprobante — últimos 90 días (artículo 39165 CREMA DENTAL ODOLITO x50g)"
+      ],
+      "costo_usd": 0.11322979999999999,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "fact-vs-venta-proveedor",
+      "pregunta": "Mostrame la facturación de Colgate de los últimos 90 días",
+      "nota": 8,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Total ($ 734.926 sin IVA, 360 u. netas) y desglose por tipo correctos; usa facturación y respeta las reglas, pero ubica los comprobantes en septiembre y noviembre sin que el dato traiga apertura mensual.",
+      "segundos": 12,
+      "respuesta": "De Colgate se facturaron **$ 734.926 sin IVA** en los últimos 90 días (08/08 al 05/11/2026), con un neto de **360 unidades**.\n\n- **Septiembre: quedó en cero.** Hubo una Factura A por 288 unidades ($ 584.614) y una Nota de crédito A que la anuló entera.\n- **Noviembre:** todo lo facturado sale de presupuestos (PRES, comprobante interno, no fiscal): 360 unidades por $ 734.926.\n\nEn agosto y octubre no hay nada facturado de Colgate.",
+      "consultado": [
+        "Comprobantes emitidos últimos 90 días (proveedor COLGATE-PALMOLIVE ARGENTINA) (renglón por renglón)"
+      ],
+      "bloques": [
+        "Facturación por tipo de comprobante — últimos 90 días (proveedor COLGATE-PALMOLIVE ARGENTINA)"
+      ],
+      "costo_usd": 0.0345016,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "venta-proveedor",
+      "pregunta": "¿Cuánto vendimos de Colgate en los últimos 90 días?",
+      "nota": 10,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Usa ventas (pedidos), los totales, pedidos y clientes coinciden con el dato correcto, y advierte con razón sobre la variación y el margen sin preguntas de relleno.",
+      "segundos": 16,
+      "respuesta": "De Colgate-Palmolive vendimos **$ 201,9 M con IVA** ($ 170,2 M sin IVA) en los últimos 90 días (08/08 al 05/11/2026). Son 340 pedidos a 189 clientes. Esto es lo que se pidió, no lo que se facturó.\n\n- **No te fíes de la suba de +171,7 %:** se compara contra el 10/05 al 07/08, y las ventas recién están cargadas desde junio. Ese período tiene datos solo en una parte.\n- **El margen de 85,8 % parece mal:** es demasiado alto para la reventa. Seguramente hay artículos de Colgate sin costo cargado o con costo viejo.",
+      "consultado": [
+        "Ventas últimos 90 días (proveedor COLGATE-PALMOLIVE ARGENTINA), comparadas con 10/05–07/08"
+      ],
+      "bloques": [
+        "Ventas últimos 90 días (proveedor COLGATE-PALMOLIVE ARGENTINA)"
+      ],
+      "costo_usd": 0.0277536,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "quien-preparo",
+      "pregunta": "Hubo un error en el pedido 2022, ¿quién lo preparó?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Dice bien quién preparó el pedido (Juan Cruz, 28/10/2026 11:36) y el picking 6/6, sin inventar; describe de forma algo confusa la secuencia de facturación (\"después de facturarse hubo un presupuesto…\") y agrega contexto de más.",
+      "segundos": 12,
+      "respuesta": "El pedido 002022 lo preparó **Juan Cruz**, el **28/10/2026 a las 11:36**. Pickeó los dos renglones completos (6 de 6 en cada uno): la crema facial hidratante 100874 y la crema nutritiva de noche 757.\n\nJuan Cruz también cargó el pedido, lo facturó y fue el chofer del viaje. El cliente es \"PRUEBA 3\", así que parece un pedido de prueba. Después de facturarse hubo un presupuesto, una reversa y otro presupuesto. Más tarde salió una reversa automática por $ 15.972 (el sistema, no anotó persona).",
+      "consultado": [
+        "Historia del pedido 002022: alta, estados, preparación, picking, comprobantes, viaje y cobros"
+      ],
+      "bloques": [
+        "Pedido 002022 — PRUEBA 3: picking"
+      ],
+      "costo_usd": 0.028433600000000003,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "quien-pickeo",
+      "pregunta": "¿Quién pickeó el artículo 100874 en el pedido 2022 y cuántas unidades?",
+      "nota": 10,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Nombra a Juan Cruz, la fecha y hora (28/10/2026 11:36) y las 6 unidades pedidas y preparadas; es corta, sin tablas en el texto y sin preguntas de relleno.",
+      "segundos": 16,
+      "respuesta": "Lo pickeó **Juan Cruz** el 28/10/2026 a las 11:36: **6 unidades** de la Crema facial hidratante todo tipo de piel 50 gr (100874), las mismas 6 que se habían pedido. El renglón quedó como preparado.",
+      "consultado": [
+        "Historia del pedido 002022: alta, estados, preparación, picking, comprobantes, viaje y cobros"
+      ],
+      "bloques": [
+        "Pedido 002022 — PRUEBA 3: picking de 100874"
+      ],
+      "costo_usd": 0.026144599999999997,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "quien-cobro",
+      "pregunta": "¿Quién le cobró a DISTRIBUIDORA URQUIZA el 04/11 y cómo pagó?",
+      "nota": 7,
+      "numeros_ok": true,
+      "reglas_ok": false,
+      "cumple_esperado": true,
+      "comentario": "Datos correctos: Juan Cruz (chofer), $800.000 en efectivo, autoconfirmado y sin verificación. Pero la sugerencia final cierra con una pregunta de relleno ('¿Lo revisamos?'), que las reglas prohíben, aunque la observación sobre la fecha del viaje es útil.",
+      "segundos": 17,
+      "respuesta": "El cobro lo hizo **Juan Cruz (chofer)**: fueron **$ 800.000 en efectivo** el 04/11/2026, asociados al viaje PUNTA ALTA · 05/11. Es el único cobro de ese día y no está anulado.\n\nOjo: Juan Cruz lo cargó a las 14:30 y él mismo lo confirmó a las 14:31. No figura que nadie de oficina o Finanzas lo haya verificado.",
+      "consultado": [
+        "Cobros del 04/11/2026 al 04/11/2026 (cliente DISTRIBUIDORA URQUIZA), con forma de pago y responsables"
+      ],
+      "bloques": [
+        "Cobros del 04/11/2026 al 04/11/2026 (cliente DISTRIBUIDORA URQUIZA)"
+      ],
+      "costo_usd": 0.0317186,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "quien-cambio-articulo",
+      "pregunta": "¿Quién le cambió el precio al 39165?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Fecha, precios y artículo correctos; dice que no quedó registrado quién sin inventar nombre. Breve, sin tablas en el texto ni preguntas de relleno; la aclaración final sobre la migración es útil aunque algo redundante.",
+      "segundos": 9,
+      "respuesta": "El último cambio de precio del **39165 CREMA DENTAL ODOLITO x50g** (Colgate) fue el **01/10/2026 a las 13:09**, pero **quién lo hizo no quedó registrado**: en esa fecha el sistema todavía no guardaba quién cambiaba los precios.\n\nEn ese cambio:\n- El precio base pasó de $ 2.029,91 a **$ 2.255,46**.\n- El precio base contado pasó de $ 1.827,10 a $ 2.029,91.\n\nTodavía no se guarda quién cambia los precios, porque falta una actualización del sistema. Mientras no se haga, los próximos cambios tampoco van a decir quién fue.",
+      "consultado": [
+        "Historial de cambios del artículo 39165 CREMA DENTAL ODOLITO x50g (últimos 180 días)"
+      ],
+      "bloques": [
+        "Cambios de 39165 CREMA DENTAL ODOLITO x50g (últimos 180 días)"
+      ],
+      "costo_usd": 0.0255176,
+      "modelo": "claude-opus-5-5"
+    }
+  ]
+}

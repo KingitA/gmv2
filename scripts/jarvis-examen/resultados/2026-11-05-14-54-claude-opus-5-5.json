@@ -1,0 +1,27 @@
+{
+  "modelo": "claude-opus-5-5",
+  "juez": "claude-opus-5-5",
+  "promedio": 10,
+  "costo_usd": 0.11682300000000001,
+  "resultados": [
+    {
+      "id": "quien-pago-edes",
+      "pregunta": "¿Quién pagó EDES el mes pasado?",
+      "nota": 10,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Da monto ($ 430.000), vencimiento, forma de pago y fecha de última modificación correctos; aclara que no quedó registrado quién pagó sin inventar nombre, sin relleno ni promesas.",
+      "segundos": 9,
+      "respuesta": "EDES de octubre (**$ 430.000**, vencía el 16/10/2026, pagado por transferencia): **no quedó registrado quién lo pagó**. Se marcó pagado antes de que el sistema empezara a guardar quién lo hace. Lo último que se modificó fue el **15/10/2026 a las 07:33**.\n\nTampoco figura quién lo cargó ni hay historial de cambios: todavía no se está guardando quién hace cada cosa en estos vencimientos.",
+      "consultado": [
+        "Vencimientos pagados octubre que coinciden con \"EDES\", con quién los pagó"
+      ],
+      "bloques": [
+        "Vencimientos pagados octubre — \"EDES\""
+      ],
+      "costo_usd": 0.11682300000000001,
+      "modelo": "claude-opus-5-5"
+    }
+  ]
+}
