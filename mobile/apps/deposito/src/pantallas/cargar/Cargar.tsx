@@ -9,7 +9,8 @@ import {
   borradorDesdePayload, buscarClientes, cantidadDe, faltaParaCerrar, nuevoBorrador, OP_CARGAR, payloadCarga, ponerCantidad, quitarRenglon,
   resultadoCierre, type BorradorCarga, type ModoCarga, type PayloadCarga,
 } from "../../datos/cargar"
-import { useArticulos, useClientes, useEncolar } from "../../datos/hooks"
+import { useArticulos, useClientes, useEncolar, useRefrescarAlEntrar } from "../../datos/hooks"
+import { DS } from "../../datasets"
 import { C, dejarAviso, Marco, useAvisoEntrante, useCampoSinRafaga, useToast, useVolver } from "../../ui"
 import { PanelBuscar } from "../comunes/Buscar"
 import { PanelCantidad } from "../comunes/Cantidad"
@@ -54,6 +55,7 @@ export function CargarInicio() {
   useAvisoEntrante(mostrar)
   const { borrador, guardar } = useBorradorCarga()
   const { clientes } = useClientes()
+  useRefrescarAlEntrar(DS.clientes) // así "Para un cliente" ya los tiene al entrar
   const { outbox } = useRuntime()
   const ops = useNoEnviados()
   const c = useContadoresOutbox()
@@ -184,6 +186,11 @@ export function CargarCliente() {
   const cambiarDelPedido = sp.get("cambiar") === "1"
   const { clientes, cargando, meta } = useClientes()
   const { borrador, guardar, cambiar } = useBorradorCarga()
+  // Si la descarga falló antes (ej. servidor sin publicar), al entrar se pide de nuevo:
+  // la lista aparece sola apenas llega, sin reinstalar ni cerrar sesión
+  useRefrescarAlEntrar(DS.clientes)
+  const { sync } = useRuntime()
+  const [reintentando, setReintentando] = useState(false)
   const [qUrl, setQUrl] = useParamEstado("q")
   const { valor: q, cambiar: setQ } = useCampoSinRafaga(qUrl)
   useEffect(() => {
@@ -213,6 +220,13 @@ export function CargarCliente() {
         {!cargando && !meta?.generadoAt && clientes.length === 0 && (
           <div style={{ background: C.yellowL, border: `1px solid ${C.yellowB}`, borderRadius: 14, padding: 14, color: C.yellow, fontWeight: 600, fontSize: 14 }}>
             Todavía no se descargaron los clientes. Acercate a una zona con WiFi.
+            <button
+              disabled={reintentando}
+              onClick={async () => { setReintentando(true); try { await sync.dataset(DS.clientes) } finally { setReintentando(false) } }}
+              style={{ display: "block", marginTop: 10, minHeight: 44, padding: "0 16px", borderRadius: 12, border: `1.5px solid ${C.yellowB}`, background: C.white, color: C.text, fontWeight: 700, fontSize: 14 }}
+            >
+              {reintentando ? "Descargando…" : "Reintentar descarga"}
+            </button>
           </div>
         )}
         {q.trim().length > 0 && resultados.length === 0 && clientes.length > 0 && (

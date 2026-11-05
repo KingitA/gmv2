@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.5.1 (versionCode 15) — 2026-11-05
+
+- Inicio ordenado por uso: Preparar pedidos grande arriba con la cola; clientes de Cargar pedido se descargan al entrar
+
 ## v0.5.0 (versionCode 14) — 2026-11-05
 
 - CARGAR PEDIDO: para mi o para un cliente (buscador con codigo, localidad y direccion), sin precios; cierre con confirmacion del servidor
