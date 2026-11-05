@@ -31,7 +31,8 @@ export function PanelCantidad({ articulo, titulo, cabecera, resumenTeclado, etiq
   inicial: string
   exigirCantidad?: boolean
   onConfirmar: (cantidad: number) => void
-  onFaltante: () => void
+  /** Sin esto no hay botón Faltante (Cargar pedido: no hay nada que faltar) */
+  onFaltante?: () => void
   onVolverBuscar: () => void
   mostrar: (m: string, t?: "ok" | "err") => void
 }) {
@@ -118,14 +119,14 @@ export function PanelCantidad({ articulo, titulo, cabecera, resumenTeclado, etiq
         />
         {ayudaInput && !teclado && <div style={{ color: C.light, fontSize: 13, marginTop: 8, textAlign: "center" }}>{ayudaInput}</div>}
       </div>
-      <div ref={botones} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div ref={botones} style={{ display: "grid", gridTemplateColumns: onFaltante ? "1fr 1fr" : "1fr", gap: 12 }}>
         <button
           onClick={confirmar} disabled={bloqueado}
           style={{ background: bloqueado ? "#e5e7eb" : C.green, color: bloqueado ? C.light : "#fff", fontWeight: 800, fontSize: 20, padding: teclado ? 16 : 20, borderRadius: 20, border: "none" }}
         >
           ✓ Confirmar
         </button>
-        <button onClick={una(onFaltante)} style={{ background: C.red, color: "#fff", fontWeight: 800, fontSize: 20, padding: teclado ? 16 : 20, borderRadius: 20, border: "none" }}>✕ Faltante</button>
+        {onFaltante && <button onClick={una(onFaltante)} style={{ background: C.red, color: "#fff", fontWeight: 800, fontSize: 20, padding: teclado ? 16 : 20, borderRadius: 20, border: "none" }}>✕ Faltante</button>}
       </div>
       {!teclado && (
         <button onClick={onVolverBuscar} style={{ background: C.white, color: C.sub, fontWeight: 600, padding: 16, borderRadius: 18, border: `1.5px solid ${C.border}`, fontSize: 16 }}>

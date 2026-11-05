@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo } from "react"
 import { useDataset, useFila, useNoEnviados, useOnline, useRuntime, useSesion, type ItemOutbox } from "@gm/core"
 import {
-  DS, type Articulo, type CatProveedores, type CatTipos, type CatTransportes, type Devolucion, type OrdenRecepcion, type PedidoDeposito,
+  DS, type Articulo, type CatProveedores, type ClienteDeposito, type CatTipos, type CatTransportes, type Devolucion, type OrdenRecepcion, type PedidoDeposito,
 } from "../datasets"
 import { crearIndice, type Indice } from "./busqueda"
 import { articulosTocados, devolucionesVisibles, vistaArticulo, vistaPedido, vistaRecepcion, type ArticuloVista, type Yo } from "./overlay"
@@ -119,3 +119,9 @@ export function useCatalogos() {
 }
 
 export const rechazosDe = (ops: ItemOutbox[], prefijo: string) => ops.filter((o) => o.estado === "rechazado" && o.tipo.startsWith(prefijo))
+
+/** Clientes activos para "Cargar pedido → Para un cliente" (deposito_clientes). */
+export function useClientes() {
+  const { filas, cargando, meta } = useDataset<ClienteDeposito>(DS.clientes)
+  return { clientes: filas, cargando, meta }
+}

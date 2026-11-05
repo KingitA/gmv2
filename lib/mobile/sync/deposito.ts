@@ -5,6 +5,7 @@
 //   deposito_devoluciones  devoluciones pendientes de recibir (= GET web)
 //   deposito_articulos     catálogo para escanear/buscar/ajustar (delta: articulos)
 //   deposito_catalogos     proveedores, tipos de bulto/fracción, transportes
+//   deposito_clientes      clientes activos para "Cargar pedido → Para un cliente" (05/11)
 //
 // Ninguno depende del usuario: todos los operarios ven la misma cola, por eso la
 // app no limpia la réplica al cambiar de usuario (cambio de turno rápido).
@@ -46,6 +47,25 @@ const DETALLE_COLS =
  */
 export const DIAS_IMPRESO = 7
 
+/**
+ * Pedidos CARGADOS desde el depósito ("Cargar pedido", 05/11/2026): no van a la cola de
+ * picking (los arma el mismo que los cargó). La columna `pedidos.origen` la agrega la
+ * migración del servidor de "Cargar pedido" (agente Listas de precios): hasta que exista,
+ * la consulta falla y no se excluye nada.
+ */
+export const ORIGENES_CARGA_DEPOSITO = ["deposito_propio", "deposito_cliente"]
+
+async function idsCargadosDesdeDeposito(supabase: any): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("id")
+    .in("origen", ORIGENES_CARGA_DEPOSITO)
+    .in("estado", ESTADOS_PREPARABLES)
+    .limit(2000)
+  if (error) return new Set() // columna todavía sin crear
+  return new Set((data || []).map((p: any) => p.id))
+}
+
 async function idsConPickingEnCurso(supabase: any): Promise<string[]> {
   const { data } = await supabase.from("picking_sesiones").select("pedido_id").eq("estado", "EN_PROGRESO").limit(1000)
   return [...new Set<string>((data || []).map((s: any) => s.pedido_id).filter(Boolean))]
@@ -65,15 +85,16 @@ export async function cargarPedidosDeposito(supabase: any, ids?: string[]): Prom
     if (enCurso.length) partes.push(`id.in.(${enCurso.join(",")})`)
     return q.in("estado", ESTADOS_PREPARABLES).or(partes.join(","))
   }
-  const [leidos, empleados] = await Promise.all([
+  const [leidos, empleados, cargados] = await Promise.all([
     ids
       ? fetchByIds((chunk) => alcance(supabase.from("pedidos").select(PEDIDO_COLS)).in("id", chunk), ids, 100)
       : fetchAllRows(() => alcance(supabase.from("pedidos").select(PEDIDO_COLS))),
     idsClientesEmpleados(supabase),
+    idsCargadosDesdeDeposito(supabase),
   ])
-  // Pedidos de cuentas de empleados (clientes.es_empleado): no van a la cola,
-  // se los preparan ellos mismos. En delta llegan como borrados.
-  const pedidos: any[] = (leidos as any[]).filter((p) => !empleados.has(p.clientes?.id))
+  // Pedidos de cuentas de empleados (clientes.es_empleado) y los cargados desde el depósito:
+  // no van a la cola, se los preparan ellos mismos. En delta llegan como borrados.
+  const pedidos: any[] = (leidos as any[]).filter((p) => !empleados.has(p.clientes?.id) && !cargados.has(p.id))
   if (pedidos.length === 0) return []
 
   const { data: especial } = await supabase.from("listas_precio").select("id").eq("codigo", "especial").maybeSingle()
@@ -191,10 +212,38 @@ const depositoCatalogos: DatasetDef = {
   },
 }
 
+// ─── Clientes para "Cargar pedido → Para un cliente" (05/11/2026) ─────────────
+
+/** Liviano: solo lo que hace falta para no equivocarse de cliente (nombre, código, localidad, dirección). */
+export async function cargarClientesDeposito(db: any): Promise<FilaReplica[]> {
+  const [filas, empleados] = await Promise.all([
+    fetchAllRows<any>(() => db.from("clientes").select("id, nombre, razon_social, codigo_cliente, direccion, localidad").eq("activo", true)),
+    idsClientesEmpleados(db),
+  ])
+  // Las cuentas de empleado (es_empleado) no son clientes: "Para mí" va a la cuenta personal
+  return filas
+    .filter((c) => !empleados.has(c.id))
+    .map((c) => ({
+      id: c.id,
+      codigo: c.codigo_cliente ?? null,
+      nombre: c.razon_social || c.nombre || "Sin nombre",
+      localidad: c.localidad ?? null,
+      direccion: c.direccion ?? null,
+    }))
+}
+
+const depositoClientes: DatasetDef = {
+  nombre: "deposito_clientes",
+  roles: ROLES,
+  // service role, como los catálogos: el operario de depósito no tiene RLS sobre clientes
+  cargar: (ctx) => cargarClientesDeposito(ctx.admin),
+}
+
 export const DATASETS_DEPOSITO: DatasetDef[] = [
   depositoPedidos,
   depositoRecepciones,
   depositoDevoluciones,
   depositoArticulos,
   depositoCatalogos,
+  depositoClientes,
 ]

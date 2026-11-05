@@ -5,6 +5,7 @@ import { Pedido, PedidoBuscar, PedidoFaltantes, PedidoItem } from "./pantallas/p
 import { Recepcion, RecepcionBuscar, RecepcionDocumentos, Recepciones, RecepcionFaltantes, RecepcionItem } from "./pantallas/recepcion/Recepcion"
 import { DevolucionConfirmar, Devoluciones, DevolucionesArticulo, DevolucionesBuscar } from "./pantallas/devoluciones/Devoluciones"
 import { ArticuloEditor, Articulos, ArticulosLista } from "./pantallas/articulos/Articulos"
+import { CargarBuscar, CargarCliente, CargarInicio, CargarItem, CargarListo, CargarPedido } from "./pantallas/cargar/Cargar"
 
 // Convención (MOBILE.md §8): cada pantalla que el operario percibe como pantalla es
 // una RUTA (entrada de historial). En la web /deposito eran vistas por useState.
@@ -35,4 +36,12 @@ export const rutas: RouteObject[] = [
   { path: "/articulos", element: <Articulos /> },
   { path: "/articulos/lista", element: <ArticulosLista /> },
   { path: "/articulos/:id", element: <ArticuloEditor /> },
+
+  // Cargar pedido (05/11): pedido nuevo para mí o para un cliente (no es picking)
+  { path: "/cargar", element: <CargarInicio /> },
+  { path: "/cargar/cliente", element: <CargarCliente /> },
+  { path: "/cargar/pedido", element: <CargarPedido /> },
+  { path: "/cargar/pedido/buscar", element: <CargarBuscar /> },
+  { path: "/cargar/pedido/item/:artId", element: <CargarItem /> },
+  { path: "/cargar/listo", element: <CargarListo /> },
 ]

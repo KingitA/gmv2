@@ -1014,6 +1014,11 @@ un segundo escaneo dejaba la cantidad en 0). Cantidades de 7+ cifras se rechazan
 | Enviar a INEXISTENTE (hoja) | `?ver=inexistente` | cierra la hoja |
 | Artículo dado de baja, ¿reactivar? (hoja) | `?ver=baja` (artículos, recepción, devoluciones) | cierra la hoja |
 | Operaciones pendientes | `/pendientes` | la pantalla anterior |
+| Cargar pedido (inicio) | `/cargar` (`?ver=descartar` · `?ver=reemplazar`) | Inicio — **el pedido a medio cargar queda guardado** |
+| Elegir cliente | `/cargar/cliente` (`?q=` replace; `?cambiar=1` cambia el del pedido) | Cargar pedido (elegir = replace al pedido) |
+| Pedido que se carga | `/cargar/pedido` (`?ver=cerrar`) | Cargar pedido, sin perder nada (borrador en el equipo) |
+| Agregar artículo / Cantidad | `/cargar/pedido/buscar` · `/cargar/pedido/item/:artId` | Pedido (mismas reglas que picking) |
+| Pedido finalizado / sin señal | `/cargar/listo` (replace del cierre) | Cargar pedido |
 
 ### Usuarios y turnos
 El módulo trabaja con **un usuario por operario** (el picking registra quién preparó
