@@ -117,6 +117,8 @@
     "components/playroom/reportes/PreparacionDeposito.tsx",
     "lib/jarvis/",
     "lib/ordenes-pago/",
+    "lib/vencimientos/",
+    "app/api/vencimientos/[id]/recalcular/",
     "app/api/ordenes-pago/[id]/confirmar/",
     "app/api/ordenes-pago/[id]/anular/",
     "app/api/playroom/chat/",

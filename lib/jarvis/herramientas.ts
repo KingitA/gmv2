@@ -18,7 +18,8 @@ import type { Bloque, Formato } from "@/lib/playroom/bloques"
 import { calcularIndicadores } from "@/lib/playroom/indicadores"
 import { CATALOGO_TABLERO } from "@/lib/playroom/catalogo-tablero"
 import { fetchAllRows } from "@/lib/playroom/queries"
-import { fecha, fechaHora, hoyISO, inicioDiaAR, sumarDiasISO } from "@/lib/formato"
+import { fecha, fechaHora, finDiaAR, hoyISO, inicioDiaAR, sumarDiasISO } from "@/lib/formato"
+import { esAdmin as esAdminFinanzas, esTipoReservado, TIPOS_SOLO_ADMIN } from "@/lib/finanzas/tipos-reservados"
 import { PERIODOS, resolverPeriodo, type Rango } from "./periodos"
 import { ACCIONES, ACCION_PIDE } from "./acciones"
 import { agendaPendiente, crearPropuesta, crearRecordatorio, ErrorAgenda, historialDecisiones, nombresDeUsuarios, usuariosOficina } from "./agenda"
@@ -586,9 +587,11 @@ const pagosProveedores: Herramienta = {
     let nombre = ""
     let provId: string | null = null
     if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); provId = pr.id; nombre = pr.nombre }
+    const admin = await veReservados(ctx)
     const data = await fetchAllRows<any>(() => {
-      const q = ctx.db.from("vencimientos").select("id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)")
+      let q = ctx.db.from("vencimientos").select("id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)")
         .eq("estado", "pendiente").lte("fecha_vencimiento", hasta)
+      if (!admin) q = q.not("tipo", "in", filtroReservados)
       return provId ? q.eq("proveedor_id", provId) : q
     }, "id")
     data.sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)))
@@ -1316,7 +1319,7 @@ const cobrosRealizados: Herramienta = {
 const ordenesDePago: Herramienta = {
   nombre: "ordenes_de_pago",
   descripcion:
-    "Pagos HECHOS (u órdenes de pago armadas) a proveedores en un período: número de OP, proveedor, monto, retenciones, neto, CÓMO se pagó (efectivo, transferencia, cheque), quién la ARMÓ, quién la CONFIRMÓ (autorizó / hizo salir la plata) y quién la anuló. Para lo que FALTA pagar usá 'pagos_proveedores'.",
+    "Pagos HECHOS (u órdenes de pago armadas) a proveedores en un período: número de OP, proveedor, monto, retenciones, neto, CÓMO se pagó (efectivo, transferencia, cheque), quién la ARMÓ (= quién AUTORIZÓ el pago), quién la confirmó y quién la anuló. Gastos y vencimientos pagados sin orden de pago (EDES, impuestos…): 'gastos_pagados'. Para lo que FALTA pagar usá 'pagos_proveedores'.",
   esquema: { type: "object", properties: { ...P_PERIODO, proveedor: { type: "string" }, ...P_LIMITE } },
   async ejecutar(ctx, p) {
     const r = resolverPeriodo(p as never, "mes_actual", ctx.hoy)
@@ -1361,7 +1364,7 @@ const ordenesDePago: Herramienta = {
       [
         { clave: "fecha", titulo: "Fecha", formato: "fecha" }, { clave: "op", titulo: "OP" }, { clave: "proveedor", titulo: "Proveedor" },
         { clave: "neto", titulo: "Neto pagado", formato: "pesos" }, { clave: "como", titulo: "Cómo" }, { clave: "estado", titulo: "Estado" },
-        { clave: "armo", titulo: "Armó" }, { clave: "confirmo", titulo: "Confirmó" },
+        { clave: "armo", titulo: "Autorizó (armó)" }, { clave: "confirmo", titulo: "Confirmó" },
       ],
       filas.slice(0, lim).map(({ medios: _m, ...f }) => f),
       { total: { neto: red(pagadas.reduce((s, f) => s + f.neto, 0)) }, nota: "El total suma solo las pagadas." },
@@ -1452,12 +1455,121 @@ const cambiosArticulo: Herramienta = {
   },
 }
 
+// ─── 28. Vencimientos pagados (gastos, servicios, impuestos…): quién pagó ──
+/** Sueldos y socios: solo los ve un admin (lib/finanzas/tipos-reservados). */
+async function veReservados(ctx: Contexto): Promise<boolean> {
+  if (!ctx.usuarioId) return false
+  const { data } = await ctx.db.from("usuarios_roles").select("roles(nombre)").eq("usuario_id", ctx.usuarioId)
+  return esAdminFinanzas(((data ?? []) as any[]).map((r) => r.roles?.nombre).filter(Boolean))
+}
+const filtroReservados = `(${TIPOS_SOLO_ADMIN.join(",")})`
+
+const gastosPagados: Herramienta = {
+  nombre: "gastos_pagados",
+  descripcion:
+    "Vencimientos PAGADOS (gastos, servicios como EDES, impuestos, cargas sociales, honorarios, facturas de proveedor…) en un período: qué, cuánto, QUIÉN lo marcó pagado y cuándo. Si se pagó con orden de pago: el número y quién la armó (= quién lo autorizó). Con 'buscar' (concepto o proveedor) trae además el historial de cada uno: quién lo cargó, quién le cambió monto o fecha, quién lo pasó a pagado o lo volvió a pendiente.",
+  esquema: {
+    type: "object",
+    properties: {
+      ...P_PERIODO,
+      buscar: { type: "string", description: "Texto del concepto o nombre del proveedor (ej. EDES)" },
+      tipo: { type: "string", enum: ["factura", "servicios", "impuestos", "cargas_sociales", "honorarios", "sueldos", "socios", "seguros", "vehiculos", "otro"] },
+      ...P_LIMITE,
+    },
+  },
+  async ejecutar(ctx, p) {
+    const r = resolverPeriodo(p as never, "mes_actual", ctx.hoy)
+    const desde = inicioDiaAR(r.desde), hasta = finDiaAR(r.hasta)
+    const admin = await veReservados(ctx)
+    const tipo = str(p.tipo)
+    if (tipo && esTipoReservado(tipo) && !admin) throw new ErrorHerramienta("Los vencimientos de sueldos y socios solo los puede consultar un administrador.")
+    const base = "id, concepto, tipo, monto, fecha_vencimiento, forma_pago, orden_pago_id, updated_at, proveedores(nombre)"
+    const traer = (conQuien: boolean) => fetchAllRows<any>(() => {
+      let q = ctx.db.from("vencimientos").select(conQuien ? `${base}, creado_por, pagado_por, pagado_at` : base).eq("estado", "pagado")
+      q = conQuien
+        ? q.or(`and(pagado_at.gte.${desde},pagado_at.lte.${hasta}),and(pagado_at.is.null,updated_at.gte.${desde},updated_at.lte.${hasta})`)
+        : q.gte("updated_at", desde).lte("updated_at", hasta)
+      if (tipo) q = q.eq("tipo", tipo)
+      if (!admin) q = q.not("tipo", "in", filtroReservados)
+      return q
+    }, "id")
+    let conQuien = true
+    let data: any[]
+    try { data = await traer(true) } catch (e) { if (!faltaEnLaBase(e)) throw e; conQuien = false; data = await traer(false) }
+    const buscar = str(p.buscar)?.toLowerCase()
+    if (buscar) data = data.filter((v) => `${v.concepto ?? ""} ${v.proveedores?.nombre ?? ""}`.toLowerCase().includes(buscar))
+
+    // Órdenes de pago de los que se pagaron con OP: quién la armó (= autorizó)
+    const opIds = [...new Set(data.map((v) => v.orden_pago_id).filter(Boolean))]
+    const { data: ops } = opIds.length ? await ctx.db.from("ordenes_pago").select("id, numero_op, usuario_creador, created_at").in("id", opIds) : { data: [] }
+    const mails = [...new Set(((ops ?? []) as any[]).map((o) => o.usuario_creador).filter((x) => typeof x === "string" && x.includes("@")))]
+    const { data: us } = mails.length ? await ctx.db.from("usuarios").select("email, nombre").in("email", mails) : { data: [] }
+    const porMail = new Map(((us ?? []) as any[]).map((u) => [u.email, u.nombre || u.email]))
+    const opDe = new Map(((ops ?? []) as any[]).map((o) => [o.id, { numero: o.numero_op, armo: porMail.get(o.usuario_creador) ?? o.usuario_creador ?? "no quedó registrado", cuando: cuando(o.created_at) }]))
+
+    // Historial (solo si buscó algo puntual: puede ser largo)
+    const historial = new Map<string, any[]>()
+    if (buscar && conQuien && data.length && data.length <= 30) {
+      const { data: h, error } = await ctx.db.from("vencimientos_historial")
+        .select("vencimiento_id, estado_anterior, estado_nuevo, monto_anterior, monto_nuevo, fecha_anterior, fecha_nueva, usuario_id, via, cambiado_at")
+        .in("vencimiento_id", data.map((v) => v.id)).order("cambiado_at")
+      if (error && !faltaEnLaBase(error)) throw new Error(error.message)
+      for (const x of (h ?? []) as any[]) historial.set(x.vencimiento_id, [...(historial.get(x.vencimiento_id) ?? []), x])
+    }
+    const nom = await nombresDeUsuarios(ctx.db, [
+      ...data.flatMap((v) => [v.pagado_por, v.creado_por]),
+      ...[...historial.values()].flat().map((x) => x.usuario_id),
+    ])
+    const q = (id: unknown, via?: string | null) => (id ? nom.get(String(id)) ?? "usuario desconocido" : via === "service_role" ? "el sistema (no anotó persona)" : "no quedó registrado")
+    data.sort((a, b) => String(b.pagado_at ?? b.updated_at ?? "").localeCompare(String(a.pagado_at ?? a.updated_at ?? "")))
+    const filas = data.map((v) => {
+      const op = v.orden_pago_id ? opDe.get(v.orden_pago_id) : null
+      const pagadoAntes = conQuien && !v.pagado_at
+      return {
+        concepto: v.concepto ?? "—", proveedor: v.proveedores?.nombre ?? null, tipo: v.tipo, monto: red(n0(v.monto)),
+        vencia: fechaSola(v.fecha_vencimiento), forma: v.forma_pago ?? null,
+        pago: op ? `orden de pago ${op.numero ?? ""}`.trim() : !conQuien || pagadoAntes ? "no quedó registrado (se marcó pagado antes de que se anotara)" : q(v.pagado_por),
+        cuando: op ? op.cuando : v.pagado_at ? cuando(v.pagado_at) : `${cuando(v.updated_at)} (última modificación)`,
+        autorizo: op ? op.armo : null,
+        cargo: conQuien ? (v.creado_por ? q(v.creado_por) : "no quedó registrado") : null,
+        historial: (historial.get(v.id) ?? []).map((x) => ({
+          cuando: cuando(x.cambiado_at), quien: q(x.usuario_id, x.via),
+          que: x.estado_anterior == null ? `lo cargó (${x.estado_nuevo})`
+            : x.estado_anterior !== x.estado_nuevo ? `${x.estado_anterior} → ${x.estado_nuevo}`
+            : n0(x.monto_anterior) !== n0(x.monto_nuevo) ? `monto ${red(n0(x.monto_anterior))} → ${red(n0(x.monto_nuevo))}`
+            : `fecha ${x.fecha_anterior ? fecha(x.fecha_anterior) : "—"} → ${x.fecha_nueva ? fecha(x.fecha_nueva) : "—"}`,
+        })),
+      }
+    })
+    const total = red(filas.reduce((s, f) => s + f.monto, 0))
+    const lim = limite(p.limite, 20)
+    const bloque = tabla(
+      `Vencimientos pagados ${r.etiqueta}${buscar ? ` — "${str(p.buscar)}"` : ""}`,
+      [
+        { clave: "concepto", titulo: "Concepto" }, { clave: "proveedor", titulo: "Proveedor" },
+        { clave: "monto", titulo: "Monto", formato: "pesos" }, { clave: "pago", titulo: "Lo pagó" }, { clave: "cuando", titulo: "Cuándo" },
+      ],
+      filas.slice(0, lim).map(({ historial: _h, ...f }) => f),
+      { total: { monto: total }, nota: conQuien ? "Quién lo pagó se anota desde el 05/11/2026; lo pagado con orden de pago lo autorizó quien armó la orden." : "Todavía no se anota quién marca pagado un vencimiento (falta aplicar la migración 20261105)." },
+    )
+    return {
+      consultado: `Vencimientos pagados ${r.etiqueta}${buscar ? ` que coinciden con "${str(p.buscar)}"` : ""}, con quién los pagó`,
+      datos: {
+        periodo: r, cantidad: filas.length, total, filas: filas.slice(0, lim),
+        registro_de_quien: conQuien ? "se anota desde el 05/11/2026" : "todavía no se registra (falta la migración)",
+        sin_datos: filas.length === 0 ? "No hay vencimientos marcados pagados en ese período / búsqueda." : undefined,
+      },
+      bloques: [{ ...bloque, recalcular: { herramienta: "gastos_pagados", parametros: { ...p } } }],
+    }
+  },
+}
+
 export const HERRAMIENTAS: Herramienta[] = [
   indicadoresTablero, ventas, deudaClientes, clientesHabitos, fichaCliente, articulosVendidos,
   coberturaStock, proveedores, pagosProveedores, cheques, operacion, comisiones,
   agendarRecordatorio, proponerDecision, verAgenda, historialDecisionesH, clientesRetenidos,
   indicadoresExternos, insumosProveedor, clasificacionArticulos, calendarioViajes, ausenciasPersonal,
-  facturacion, historiaPedido, cobrosRealizados, ordenesDePago, cambiosArticulo,
+  facturacion, historiaPedido, cobrosRealizados, ordenesDePago, cambiosArticulo, gastosPagados,
 ]
 
 /** Las que escriben en la agenda: /recalcular NUNCA las corre. */

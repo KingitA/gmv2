@@ -26,7 +26,7 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 ## Migraciones
 | Archivo | Qué hace | ¿Aplicada? |
 |---|---|---|
-| `20261105_jarvis_quien_hizo.sql` | `articulos_cambios`: cada dato de un artículo que cambia (antes, después, quién, cuándo; inborrable). `ordenes_pago.confirmado_por/_at` y `anulado_por/_at`. No cambia datos. | **No** (esperando OK de Juan) |
+| `20261105_jarvis_quien_hizo.sql` | `articulos_cambios`: cada dato de un artículo que cambia (antes, después, quién, cuándo; inborrable). `ordenes_pago.confirmado_por/_at` y `anulado_por/_at`. **Vencimientos**: `creado_por`, `actualizado_por`, `pagado_por`, `pagado_at` + `vencimientos_historial` (alta y cada cambio de estado/monto/fecha, inborrable). No cambia datos. | **No** (esperando OK de Juan) |
 | `20261014h_jarvis_revision.sql` | **Seguridad**: prende RLS en ai_agenda_events, ai_conversations y ai_messages (estaba apagada: la migración a no cerraba nada) y saca permisos a anon/authenticated. La bitácora pone siempre la hora real. Un solo aviso o propuesta vivo por clave. `viajes_paradas.retencion_puso_cobro`. Consultas corregidas. | Sí (14/10) |
 | `20261014g_jarvis_mundo_exterior.sql` | `ai_insumos` (catálogo de materias primas y qué indicadores las mueven), `ai_articulo_insumos` (de qué depende cada artículo: IA o persona; las correcciones van a la bitácora), `ai_indicadores_externos` (dólar, inflación, petróleo…, con fuente), RPC `jarvis_proveedor_insumos` y 3 reglas nuevas. No toca `articulos`. | Sí (14/10) |
 | `20261014f_jarvis_retencion_registro.sql` | Trigger: retener o liberar a un cliente queda SIEMPRE en la bitácora (quién y cuándo), venga de donde venga el cambio. | Sí (14/10) |
@@ -54,6 +54,13 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 05/11/2026 (tarde) — Vencimientos y gastos: quién los pagó
+- Decisión de Juan: **quien arma la orden de pago es quien la autoriza**; no hace falta otra autorización. Lo mismo para gastos y vencimientos: marcarlo pagado = pagarlo/autorizarlo. Problema que planteó: si marca pagado el vencimiento de EDES (sale sin orden de pago), se perdía quién.
+- Revisado: `vencimientos` no guardaba NADA de quién (214 pagados, ninguno por orden de pago). Todo pasa por `/api/vencimientos` (POST/PUT/DELETE) y `/api/vencimientos/[id]/recalcular`.
+- Migración `20261105` ampliada (sigue sin aplicar): columnas de quién + `vencimientos_historial`; los disparadores completan `pagado_por`/`pagado_at` al pasar a pagado y no dejan falsear el responsable desde la pantalla.
+- Rutas: mandan quién (`lib/vencimientos/responsable.ts`); si la migración todavía no está, reintentan sin esas columnas (nunca frenan un pago).
+- Jarvis: herramienta nueva `gastos_pagados` (quién lo marcó pagado, cuándo, con qué OP y quién la armó; con "buscar" trae el historial). Sueldos y socios solo para admin (también se cerró eso en `pagos_proveedores`, que los mostraba a todos). Examen "¿Quién pagó EDES?": 10/10.
 
 ### 05/11/2026 — Quién hizo qué y facturación (rama `jarvis-quien`)
 Pedido de Juan: que Jarvis diga quién hizo cada movimiento, y que sepa que VENTA (lo que pidió el cliente) no es FACTURACIÓN (los comprobantes: factura, presupuesto y débito suman; crédito y reversa restan).
