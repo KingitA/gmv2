@@ -13,6 +13,7 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 3. Las migraciones de base (archivos `supabase/migrations/2026…_jarvis_*.sql`) **las aplica Juan a mano** en Supabase → SQL Editor. En "Migraciones" dice cuáles faltan.
 
 ## Estado actual
+- **05/11: "quién hizo qué" + facturación — rama `jarvis-quien`, SIN pasar a main.** Falta: que Juan apruebe y aplique `20261105_jarvis_quien_hizo.sql`, pruebe, y dé el OK para main (veda de la 2ª prueba).
 - **15/10: Jarvis + calendario de viajes — EN MAIN** (merge `e570a2c`, OK de Juan después de probar). Rollback: `git revert -m 1 e570a2c`.
 - **Etapa 0 (cimientos): lista.** Migración aplicada (verificado 14/10).
 - **Etapa 1 (chat nuevo): lista, falta probarla con la IA** (en el preview, o el examen con la clave en `.env.local`). Migración aplicada; las 12 consultas responden contra la base real.
@@ -25,6 +26,7 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 ## Migraciones
 | Archivo | Qué hace | ¿Aplicada? |
 |---|---|---|
+| `20261105_jarvis_quien_hizo.sql` | `articulos_cambios`: cada dato de un artículo que cambia (antes, después, quién, cuándo; inborrable). `ordenes_pago.confirmado_por/_at` y `anulado_por/_at`. No cambia datos. | **No** (esperando OK de Juan) |
 | `20261014h_jarvis_revision.sql` | **Seguridad**: prende RLS en ai_agenda_events, ai_conversations y ai_messages (estaba apagada: la migración a no cerraba nada) y saca permisos a anon/authenticated. La bitácora pone siempre la hora real. Un solo aviso o propuesta vivo por clave. `viajes_paradas.retencion_puso_cobro`. Consultas corregidas. | Sí (14/10) |
 | `20261014g_jarvis_mundo_exterior.sql` | `ai_insumos` (catálogo de materias primas y qué indicadores las mueven), `ai_articulo_insumos` (de qué depende cada artículo: IA o persona; las correcciones van a la bitácora), `ai_indicadores_externos` (dólar, inflación, petróleo…, con fuente), RPC `jarvis_proveedor_insumos` y 3 reglas nuevas. No toca `articulos`. | Sí (14/10) |
 | `20261014f_jarvis_retencion_registro.sql` | Trigger: retener o liberar a un cliente queda SIEMPRE en la bitácora (quién y cuándo), venga de donde venga el cambio. | Sí (14/10) |
@@ -52,6 +54,23 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 05/11/2026 — Quién hizo qué y facturación (rama `jarvis-quien`)
+Pedido de Juan: que Jarvis diga quién hizo cada movimiento, y que sepa que VENTA (lo que pidió el cliente) no es FACTURACIÓN (los comprobantes: factura, presupuesto y débito suman; crédito y reversa restan).
+- **Revisión de la base (solo lectura), qué se anotaba:**
+  - Quién cargó un pedido: `pedidos.creado_por` (92 % de los pedidos). OK.
+  - Cambios de estado de un pedido, con quién: `pedidos_estados_historial` (P2-20, desde el 29/10). OK.
+  - Quién preparó y quién pickeó cada artículo: `picking_sesiones` / `picking_items` (app de depósito). OK desde que se usa la app; antes no quedaba (el kardex tiene preparadores en 49 de 59.695 renglones).
+  - Quién facturó: `comprobantes_venta.creado_por`. Las bonificaciones automáticas no anotan persona.
+  - Quién cobró, cómo y cuándo: `pagos_clientes` (cargó, confirmó, verificó, anuló, cobrador_tipo) + `pagos_detalle` (forma). OK.
+  - **Faltaba:** quién cambió un artículo (solo el último, y el historial de precios sin quién) y quién CONFIRMÓ / anuló una orden de pago (solo quién la armó, por mail). → migración `20261105`.
+  - Facturación por artículo: `comprobantes_venta_detalle`. Los 1.290 comprobantes migrados del sistema viejo (apertura) no tienen renglones: no cuentan en unidades. Las bonificaciones de contado (artículo BONIFICACION) cuentan en plata, no en unidades. Las cantidades de NC/REV vienen negativas y las de ND a veces también: se usa el valor absoluto y el signo sale del tipo de comprobante.
+- **5 herramientas nuevas** (`lib/jarvis/herramientas.ts`, solo lectura): `facturacion`, `historia_pedido`, `cobros_realizados`, `ordenes_de_pago`, `cambios_articulo`. Las dos que dependen de la migración funcionan igual sin ella (avisan que todavía no se registra).
+- Órdenes de pago: `lib/ordenes-pago/responsable.ts` + confirmar / anular / cancelar anotan quién (nunca hacen fallar el pago).
+- Instrucciones: secciones nuevas "Venta no es lo mismo que facturación" (con el ejemplo de las 110 unidades), "Quién hizo qué" (nunca adivinar) y "Calendario de trabajo y viajes" (lun-vie, feriado nunca se asume, vacaciones).
+- Examen: 7 preguntas nuevas (27 en total). Opus medium: **8,9/10**, 6/7 reglas, USD 0,29. La que falló: cerró con "¿Lo revisamos?".
+- typecheck:movil OK (base 64/64).
+
 
 ### 15/10/2026 — Calendario EN MAIN
 - Merge `e570a2c`, pase limpio (main no había cambiado). Deploy de producción OK. Migración `20261015b` aplicada.

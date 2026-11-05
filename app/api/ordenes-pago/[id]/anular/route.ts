@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
+import { anotarResponsableOP } from '@/lib/ordenes-pago/responsable'
 
 /**
  * POST /api/ordenes-pago/[id]/anular — reversa completa de una OP pagada
@@ -29,6 +30,7 @@ export async function POST(
         })
         if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
+        await anotarResponsableOP(supabase, opId, 'anulado', auth.user?.id)
         return NextResponse.json(data)
     } catch (error: any) {
         console.error('Error anulando OP:', error)

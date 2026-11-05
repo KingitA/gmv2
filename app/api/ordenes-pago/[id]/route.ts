@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
+import { anotarResponsableOP } from '@/lib/ordenes-pago/responsable'
 
 // GET /api/ordenes-pago/[id]
 export async function GET(
@@ -68,5 +69,6 @@ export async function DELETE(
         return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
+    await anotarResponsableOP(supabase, id, 'anulado', auth.user?.id)
     return NextResponse.json({ success: true })
 }

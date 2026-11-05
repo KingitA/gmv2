@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
+import { anotarResponsableOP } from '@/lib/ordenes-pago/responsable'
 
 /**
  * POST /api/ordenes-pago/[id]/confirmar — confirma la OP vía RPC atómica
@@ -46,6 +47,8 @@ export async function POST(
         })
         if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
+        // Quién hizo salir la plata (Jarvis: "¿quién pagó / autorizó este pago?")
+        await anotarResponsableOP(supabase, opId, 'confirmado', auth.user?.id)
         return NextResponse.json(data)
     } catch (error: any) {
         console.error('Error confirming OP:', error)
