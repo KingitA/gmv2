@@ -13,7 +13,7 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 3. Las migraciones de base (archivos `supabase/migrations/2026…_jarvis_*.sql`) **las aplica Juan a mano** en Supabase → SQL Editor. En "Migraciones" dice cuáles faltan.
 
 ## Estado actual
-- **05/11: "quién hizo qué" + facturación — rama `jarvis-quien`, SIN pasar a main.** Falta: que Juan apruebe y aplique `20261105_jarvis_quien_hizo.sql`, pruebe, y dé el OK para main (veda de la 2ª prueba).
+- **05/11: "quién hizo qué" + facturación + vencimientos pagados — EN MAIN** (merge `5b5f184`, OK de Juan). Migración 20261105 aplicada y verificada. Rollback: `git revert -m 1 5b5f184`.
 - **15/10: Jarvis + calendario de viajes — EN MAIN** (merge `e570a2c`, OK de Juan después de probar). Rollback: `git revert -m 1 e570a2c`.
 - **Etapa 0 (cimientos): lista.** Migración aplicada (verificado 14/10).
 - **Etapa 1 (chat nuevo): lista, falta probarla con la IA** (en el preview, o el examen con la clave en `.env.local`). Migración aplicada; las 12 consultas responden contra la base real.
@@ -26,7 +26,7 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 ## Migraciones
 | Archivo | Qué hace | ¿Aplicada? |
 |---|---|---|
-| `20261105_jarvis_quien_hizo.sql` | `articulos_cambios`: cada dato de un artículo que cambia (antes, después, quién, cuándo; inborrable). `ordenes_pago.confirmado_por/_at` y `anulado_por/_at`. **Vencimientos**: `creado_por`, `actualizado_por`, `pagado_por`, `pagado_at` + `vencimientos_historial` (alta y cada cambio de estado/monto/fecha, inborrable). No cambia datos. | **No** (esperando OK de Juan) |
+| `20261105_jarvis_quien_hizo.sql` | `articulos_cambios`: cada dato de un artículo que cambia (antes, después, quién, cuándo; inborrable). `ordenes_pago.confirmado_por/_at` y `anulado_por/_at`. **Vencimientos**: `creado_por`, `actualizado_por`, `pagado_por`, `pagado_at` + `vencimientos_historial` (alta y cada cambio de estado/monto/fecha, inborrable). No cambia datos. | Sí (05/11, verificado: columnas, tablas con RLS, 5 disparadores) |
 | `20261014h_jarvis_revision.sql` | **Seguridad**: prende RLS en ai_agenda_events, ai_conversations y ai_messages (estaba apagada: la migración a no cerraba nada) y saca permisos a anon/authenticated. La bitácora pone siempre la hora real. Un solo aviso o propuesta vivo por clave. `viajes_paradas.retencion_puso_cobro`. Consultas corregidas. | Sí (14/10) |
 | `20261014g_jarvis_mundo_exterior.sql` | `ai_insumos` (catálogo de materias primas y qué indicadores las mueven), `ai_articulo_insumos` (de qué depende cada artículo: IA o persona; las correcciones van a la bitácora), `ai_indicadores_externos` (dólar, inflación, petróleo…, con fuente), RPC `jarvis_proveedor_insumos` y 3 reglas nuevas. No toca `articulos`. | Sí (14/10) |
 | `20261014f_jarvis_retencion_registro.sql` | Trigger: retener o liberar a un cliente queda SIEMPRE en la bitácora (quién y cuándo), venga de donde venga el cambio. | Sí (14/10) |
