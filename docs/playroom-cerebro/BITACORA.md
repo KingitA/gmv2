@@ -55,7 +55,7 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 
 ## Diario
 
-### 05/11/2026 (noche) — Que entienda como habla la gente (rama `jarvis-amplio`)
+### 05/11/2026 (noche) — Que entienda como habla la gente — EN MAIN (merge `427d725`, OK de Juan; rollback `git revert -m 1 427d725`)
 Juan probó "¿se realizaron cambios en artículos entre ayer y hoy?" y Jarvis le pidió el código. Su pedido: lo van a usar personas de más de 60 años, que preguntan "¿quién cambió el precio del colgate de 70?"; no tiene que hacer falta ser específico. Y poder agrandar el chat a pantalla completa.
 - Búsqueda de artículos por palabras sueltas (`buscarArticulos`): cada palabra en descripción/marca/proveedor/categoría; los números como número suelto ("70" → "x70g", no un EAN). La usan facturación, historia del pedido y cambios; si coinciden varios, se trae lo de todos (ya no frena preguntando el código).
 - `cambios_articulo` → `cambios_articulos`: el artículo es opcional; lista todos los cambios de un período con resumen por persona y por dato; filtros dato (precio incluye costo), proveedor, persona. Antes del 05/11 usa el historial de precios (sin quién). Si el cambio lo aplicó un precio programado, dice quién lo programó.
