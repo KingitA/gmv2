@@ -43,6 +43,8 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | ~~C7 — Al anular un cobro, el servidor puede devolver `parada_reabierta: true` + `mensaje` (la parada "NO ENTREGAR SIN COBRAR" volvió a pendiente: refrescar la hoja y mostrar el mensaje) o 422 `PARADA_BLOQUEADA_ENTREGADA` con `reintentable: false` (viaje terminado: mostrar el error, no reintentar). R4 del 27/10~~ | App Chofer | **Hecho 27/10 — App Chofer v0.3.5**: aviso "volvió a pendiente" (también sin señal, con el overlay), 422 como rechazo sin reintento |
 | ~~C8 — Devolución: si el artículo vino en un PRESUPUESTO, NO frenar en el celular lo que pasa de lo comprado (`topeDevolucion` en `datos/devolucion-tope`): el servidor manda el excedente al respaldo 0002-00000001 como "sistema viejo" y la oficina lo controla. Mostrar un aviso tipo "Lo que pasa de lo comprado (N) va como sistema viejo: lo revisa la oficina". En FACTURA el tope sigue igual. Regla de Juan 27/10~~ | App Chofer | **Hecho 27/10 — App Chofer v0.3.6**: `devolvible.presupuesto` en la ficha; en PRES no frena y avisa "va como sistema viejo"; en factura el tope sigue |
 | D3 — Poner en 0 las devoluciones de prueba antes de producción (dato sucio) | Cuentas corrientes / oficina | Pendiente (día del corte) |
+| DP1 — Cargar pedido desde depósito: servidor y ERP (handler `pedido.cargar_deposito`, origen, cola web, Facturar varios, entregado al facturar, número de pedido seguro) | Listas de precios | Hecho 05/11 (rama `listas-deposito`), migración `20261105_pedidos_origen_numeracion.sql` **sin aplicar**: no se mergea antes de aplicarla — ver "Cargar pedido desde depósito" abajo |
+| DP2 — Cargar pedido desde depósito: botón "CARGAR PEDIDO" en la app (Para mí / Para un cliente) + filtro de la cola de la app (`lib/mobile/sync/deposito.ts`) | App Depósito | Pendiente — contrato abajo |
 
 ## Versiones instaladas hoy
 
@@ -189,3 +191,32 @@ Cambió `mobile/packages/core/src/sync/outbox.ts` (compartido). No hay que tocar
 - Migraciones de las apps (`20260918`, `20260919`, `20260921`), formatos, códigos, en_revisión y cuentas corrientes 1 a 3: **aplicadas**.
 - La rama local `apk-deposito` con "CAJA: sobrante en el cobro": ya está en `main` (8c7d3f1).
 - **Artículos dados de baja (20/10):** las réplicas de las 3 apps ya traen solo activos (en el delta un artículo dado de baja llega como borrado), y el matching del servidor ya los excluye. **No** agregar filtros propios ni "reactivar" en vendedor/chofer: reactivar es solo desde `/articulos`, el depósito web y la app Depósito, siempre por `cambiarEstadoArticulos` (registra quién). Migraciones `20261020_pedidos_articulo_real` y `20261020b_articulos_bajas`: **aplicadas**.
+
+## Cargar pedido desde depósito (05/11/2026) → DP1 (servidor, hecho) y DP2 (App Depósito)
+
+Decidido por Juan. En la app de depósito, un botón **CARGAR PEDIDO** con dos modos:
+- **Para mí:** el empleado logueado escanea artículos y cantidades, y el pedido va a **su cuenta personal**: la ficha de cliente con `clientes.empleado_usuario_id` = su usuario.
+- **Para un cliente:** el cliente se armó la mercadería solo; el empleado busca el cliente, escanea y cierra.
+
+En la app **no se elige lista, método ni precio**: todo sale de la ficha del cliente (createPedido, precios vigentes al recibirlo). La oficina lo edita después desde el ERP.
+
+### Qué hace el servidor (DP1, rama `listas-deposito`)
+- El pedido nace **"pendiente"** con `pedidos.origen` = `deposito_propio` / `deposito_cliente`, `condicion_entrega = retira_mostrador` y la etiqueta **"Cargado en depósito"** en el listado y en la ficha del pedido del ERP. Se edita como cualquier pedido pendiente.
+- **No va a la cola de preparación.** Filtro web: `lib/deposito/cola.ts`. El filtro de la app (`lib/mobile/sync/deposito.ts`) lo hace el agente Depósito (DP2), con `esCargadoEnDeposito` de `lib/pedidos/origen-deposito.ts`.
+- **"Facturar varios"** lo toma estando en "pendiente" (`facturableEnLote`). Al facturar pasa **directo a "entregado"**, sin remito ni cobro en mostrador. El stock baja y la deuda va a la cuenta corriente, como siempre.
+- Comisión del vendedor del cliente: la de cualquier pedido. No aplica la revisión del primer pedido (`en_revision`).
+- **Número de pedido seguro** para todas las puertas: `pedido_numero_reservar()` en la base (secuencia atómica, arranca después del más alto, saltea los usados). Sin la migración, cae al cálculo viejo.
+
+### Contrato con la app (DP2)
+- Outbox `pedido.cargar_deposito`, roles `["deposito"]` (admin también).
+- Payload: `{ local_id: uuid, modo: "propio" | "cliente", cliente_id?: uuid (solo en modo cliente), items: [{ articulo_id: uuid, cantidad: number }], observaciones?: string }`.
+- El mismo artículo dos veces se suma en un renglón.
+- Idempotente por `local_id`: un reintento devuelve el mismo pedido con `ya_existia: true`.
+- OK: `resultado = { pedido_id, numero_pedido, cliente_nombre }`.
+- Rechazos (422, `estado: "rechazado"`): mostrar `error` tal cual. `codigo`:
+  - `sin_cuenta_personal`: "Tu usuario no tiene cuenta personal. Pedile a la oficina que la vincule en Personal."
+  - `sin_precio`, con `datos.articulos: [{ articulo_id, descripcion }]`.
+  - `articulo_dado_de_baja`, con `datos.articulos`.
+  - `cliente_inactivo`.
+  - `sin_items`.
+- Novedad del outbox: un `RechazoNegocio` puede traer `datos` (también al repetir una clave ya rechazada).

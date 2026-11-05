@@ -52,7 +52,12 @@ export async function POST(request: Request) {
   if (reserva.tipo === "duplicado") {
     const body: ResultadoOutbox =
       reserva.estado === "rechazado"
-        ? { estado: "rechazado", error: String((reserva.resultado as any)?.error || "Rechazada") }
+        ? {
+            estado: "rechazado",
+            error: String((reserva.resultado as any)?.error || "Rechazada"),
+            ...((reserva.resultado as any)?.codigo ? { codigo: String((reserva.resultado as any).codigo) } : {}),
+            ...((reserva.resultado as any)?.datos ? { datos: (reserva.resultado as any).datos } : {}),
+          }
         : { estado: "duplicado", resultado: reserva.resultado }
     return NextResponse.json(body, { status: reserva.estado === "rechazado" ? 422 : 200 })
   }
@@ -69,8 +74,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ estado: "aplicado", resultado } satisfies ResultadoOutbox)
   } catch (e: any) {
     if (e instanceof RechazoNegocio) {
-      await completar(admin, m.idempotency_key, "rechazado", { error: e.message, codigo: e.codigo }).catch(() => {})
-      return NextResponse.json({ estado: "rechazado", error: e.message, codigo: e.codigo } satisfies ResultadoOutbox, { status: 422 })
+      const datos = e.datos ? { datos: e.datos } : {}
+      await completar(admin, m.idempotency_key, "rechazado", { error: e.message, codigo: e.codigo, ...datos }).catch(() => {})
+      return NextResponse.json({ estado: "rechazado", error: e.message, codigo: e.codigo, ...datos } satisfies ResultadoOutbox, { status: 422 })
     }
     console.error(`[mobile/outbox] ${m.tipo}:`, e)
     await liberar(admin, m.idempotency_key).catch(() => {})

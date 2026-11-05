@@ -75,10 +75,12 @@ export function puedeEditarCondiciones(estado: string | null | undefined, tieneF
  * "facturado"; si ya estaba más adelante (listo, en viaje, entregado, rechazado)
  * —refacturado después de anular, #19/#20— se queda donde estaba: refacturar
  * solo cambia los comprobantes, no la logística (regla del dueño 27/10/2026).
+ * Cargado en depósito (Juan 05/11/2026): la mercadería ya salió → "entregado".
  */
-export function estadoAlFacturar(estadoActual: string | null | undefined): string {
+export function estadoAlFacturar(estadoActual: string | null | undefined, opts: { cargadoEnDeposito?: boolean } = {}): string {
   const despues = ["facturado", "listo_para_retirar", "listo_para_enviar", "en_viaje", "entregado", "rechazado"]
-  return despues.includes(estadoActual || "") ? (estadoActual as string) : "facturado"
+  if (despues.includes(estadoActual || "")) return estadoActual as string
+  return opts.cargadoEnDeposito ? "entregado" : "facturado"
 }
 
 /**

@@ -5,7 +5,8 @@ import type { MutacionOutbox } from "../contrato"
 import type { SesionMobile } from "../sesion"
 
 export class RechazoNegocio extends Error {
-  constructor(message: string, public codigo?: string) {
+  /** datos: detalle para la app (p. ej. los artículos sin precio), viaja en la respuesta */
+  constructor(message: string, public codigo?: string, public datos?: Record<string, unknown>) {
     super(message)
   }
 }

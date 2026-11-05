@@ -15,8 +15,9 @@
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { ESTADOS_PREPARABLES } from "./picking"
 import { idsClientesEmpleados } from "@/lib/personal/empleados"
+import { esCargadoEnDeposito } from "@/lib/pedidos/origen-deposito"
 
-const PEDIDO_COLS = "id, numero_pedido, estado, fecha, prioridad, observaciones, created_at, clientes(id, nombre, razon_social, direccion, localidad)"
+const PEDIDO_COLS = "id, numero_pedido, estado, fecha, prioridad, observaciones, created_at, origen, clientes(id, nombre, razon_social, direccion, localidad)"
 
 export function enTandas<T>(items: T[], tam: number): T[][] {
   const out: T[][] = []
@@ -46,8 +47,9 @@ export async function cargarColaResumen(supabase: any) {
     idsClientesEmpleados(supabase),
   ])
   // Pedidos de cuentas de empleados: no van a la cola (se los preparan ellos
-  // mismos). Siguen siendo pedidos normales para stock y ventas.
-  const pedidos: any[] = (todos as any[]).filter((p) => !empleados.has(p.clientes?.id))
+  // mismos). Siguen siendo pedidos normales para stock y ventas. Los cargados
+  // en depósito tampoco (05/11/2026): ya están armados.
+  const pedidos: any[] = (todos as any[]).filter((p) => !empleados.has(p.clientes?.id) && !esCargadoEnDeposito(p))
   if (pedidos.length === 0) return []
 
   const totales = new Map<string, number>()

@@ -9,10 +9,11 @@ import { useEffect, useState } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Loader2, AlertTriangle, CheckCircle2, XCircle } from "lucide-react"
+import { facturableEnLote } from "@/lib/pedidos/origen-deposito"
 
 export const MAX_FACTURAR_JUNTOS = 30
 
-type PedidoAFacturar = { id: string; numero_pedido: string; estado: string; cliente: string }
+type PedidoAFacturar = { id: string; numero_pedido: string; estado: string; origen?: string | null; cliente: string }
 type Resultado = {
   pedido_id: string
   ok: boolean
@@ -40,9 +41,10 @@ export function FacturarVariosDialog({
   }, [open])
 
   // Solo los preparados: un pedido sin preparar (pendiente, impreso…) se facturaría por
-  // lo pedido y no por lo que salió del depósito. Esos no se mandan.
-  const aEnviar = pedidos.filter((p) => p.estado === "pendiente_facturacion")
-  const otroEstado = pedidos.filter((p) => p.estado !== "pendiente_facturacion")
+  // lo pedido y no por lo que salió del depósito. Esos no se mandan. Los cargados en
+  // depósito sí, estando pendientes (05/11): ya salieron armados.
+  const aEnviar = pedidos.filter((p) => facturableEnLote(p))
+  const otroEstado = pedidos.filter((p) => !facturableEnLote(p))
   const demasiados = aEnviar.length > MAX_FACTURAR_JUNTOS
   const pedidoDe = new Map(pedidos.map((p) => [p.id, p]))
 
