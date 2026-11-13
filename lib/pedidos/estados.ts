@@ -93,6 +93,15 @@ export function estadoTrasAnular(estadoActual: string | null | undefined): strin
   return estadoActual === "facturado" ? "pendiente_facturacion" : (estadoActual ?? null)
 }
 
+/**
+ * Estado con el que nace un pedido de la app del vendedor (Juan 09/10 y 14/11/2026):
+ * "en_revision" SOLO si es el primer pedido de un cliente que el vendedor dio de alta
+ * en la calle; los clientes de la cartera nunca, aunque no tengan pedidos en el sistema.
+ */
+export function estadoInicialPedidoVendedor(c: { altaDesdeLaApp: boolean; pedidosPrevios: number }): "pendiente" | "en_revision" {
+  return c.altaDesdeLaApp && c.pedidosPrevios === 0 ? "en_revision" : "pendiente"
+}
+
 /** Eliminar (baja lógica) sigue la misma regla que editar. */
 export function puedeEliminarPedido(estado: string | null | undefined): boolean {
   return esPedidoEditable(estado)

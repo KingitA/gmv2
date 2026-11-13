@@ -6,7 +6,7 @@
 // aplica "solo a este pedido" (overrides del pedido) o se guarda en la ficha.
 // Un 0 explícito en un descuento significa "sin ese descuento en este pedido".
 
-import type { CondRow, SegmentacionValue } from "@/components/pedidos/SegmentacionCondiciones"
+import type { CondRow, SegmentacionValue } from "./segmentacion-tipos"
 
 export const SEGS = ["limpieza_bazar", "perf0", "perf_plus"] as const
 export type Seg = (typeof SEGS)[number]

@@ -27,7 +27,7 @@ import {
   eliminarItemPedido,
   softDeletePedido,
 } from "@/lib/actions/pedidos"
-import { esPedidoEditable, motivoBloqueo } from "@/lib/pedidos/estados"
+import { esPedidoEditable, estadoInicialPedidoVendedor, motivoBloqueo } from "@/lib/pedidos/estados"
 import { esErrorReglaPedido, MSG_SIN_LISTA } from "@/lib/pedidos/errores"
 import { limpiarCentinela, type CondicionMarca, type CondicionProveedor } from "@/lib/pricing/resolver"
 import { faltaListaMetodo, mensajeFaltaListaMetodo, prepararMotorCliente } from "@/lib/pricing/motor"
@@ -243,6 +243,21 @@ async function reconciliarRenglones(ctx: CtxOutbox, pedidoId: string, items: Ite
   }
 }
 
+/**
+ * ¿El cliente lo dio de alta un vendedor desde la app (en la calle)? Queda registrado en
+ * el outbox: la mutación "cliente.crear" aplicada devuelve su cliente_id.
+ */
+async function altaDesdeLaApp(ctx: CtxOutbox, clienteId: string): Promise<boolean> {
+  const { data, error } = await ctx.admin
+    .from("mobile_idempotencia")
+    .select("idempotency_key")
+    .eq("tipo", "cliente.crear")
+    .eq("resultado->>cliente_id", clienteId)
+    .limit(1)
+  if (error) throw new Error(`alta del cliente: ${error.message}`)
+  return !!data?.length
+}
+
 async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; capturado_at: string; idempotency_key: string; device_id: string; tipo: string; app_version?: string }) {
   const p = m.payload
   const sesion = await sesionVendedor(ctx)
@@ -334,11 +349,14 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
   }
 
   const creado = !pedidoId
-  // Revisión de oficina (decisión del dueño, 09/10/2026): el PRIMER pedido de un cliente
-  // (en la práctica, el cliente que el vendedor dio de alta en la calle) nace "en_revision":
-  // depósito no lo ve hasta que la oficina revisa cliente y pedido y lo pasa a "pendiente".
+  // Revisión de oficina (decisión del dueño, 09/10/2026): el primer pedido de un cliente que
+  // el vendedor DIO DE ALTA EN LA CALLE nace "en_revision": depósito no lo ve hasta que la
+  // oficina revisa cliente y pedido y lo pasa a "pendiente".
+  // Juan 14/11/2026: SOLO esos. Antes entraba cualquier cliente sin pedidos vivos en el
+  // sistema: los de la cartera vieja (historial en "sistema viejo" eliminado, o sin pedidos
+  // todavía) caían en revisión siempre (002151, LI LIJUAN).
   let estadoInicial: "pendiente" | "en_revision" = "pendiente"
-  if (creado) {
+  if (creado && (await altaDesdeLaApp(ctx, p.cliente_id))) {
     const { count, error: eCount } = await ctx.admin
       .from("pedidos")
       .select("id", { count: "exact", head: true })
@@ -346,7 +364,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
       .is("eliminado_at", null)
       .neq("estado", "eliminado")
     if (eCount) throw new Error(`pedidos previos del cliente: ${eCount.message}`)
-    if (!count) estadoInicial = "en_revision"
+    estadoInicial = estadoInicialPedidoVendedor({ altaDesdeLaApp: true, pedidosPrevios: count ?? 0 })
   }
   const resultado = await conCaptura(captura, async () => {
    try {

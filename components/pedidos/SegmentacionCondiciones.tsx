@@ -17,18 +17,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Trash2 } from "lucide-react"
 import { InputMonto } from "@/components/ui/input-monto"
 
-export type CondRow = {
-  ref_id: string                       // proveedor_id | marca_id
-  nombre: string
-  lista_precio_id: string | null       // null = hereda la lista del pedido
-  metodo_facturacion: string | null    // 'Factura' | 'Final' | 'Presupuesto' · null = hereda
-  dto_general_pct: number | null
-  dto_viajante_pct: number | null
-  dto_mercaderia_pct: number | null
-  contado?: boolean | null             // true = sale con 10% contado · null = hereda
-}
-
-export type SegmentacionValue = { proveedor: CondRow[]; marca: CondRow[] }
+import type { CondRow, SegmentacionValue } from "@/lib/pedidos/segmentacion-tipos"
+export type { CondRow, SegmentacionValue }
 
 export const EMPTY_SEGMENTACION: SegmentacionValue = { proveedor: [], marca: [] }
 
