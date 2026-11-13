@@ -205,7 +205,7 @@ export function CondicionesPedidoPanel({ estado, exigirMercaderia = false }: { e
 
   const listaGeneral = form.lista
   const listaHeredar = listaGeneral ? `General (${nombreLista(listaGeneral)})` : "General (sin lista)"
-  const metodoHeredar = `General (${form.metodo || "Final"})`
+  const metodoHeredar = form.metodo ? `General (${form.metodo})` : "General (sin método)"
 
   return (
     <div className="space-y-3">
@@ -221,7 +221,7 @@ export function CondicionesPedidoPanel({ estado, exigirMercaderia = false }: { e
         <Label className="text-xs text-slate-600 w-20 shrink-0">Lista</Label>
         {!form.listaPorSegmento ? (
           <Select value={form.lista || "__none__"} onValueChange={(v) => set({ lista: v === "__none__" ? "" : v })}>
-            <SelectTrigger className="h-9 text-sm flex-1"><SelectValue /></SelectTrigger>
+            <SelectTrigger className={`h-9 text-sm flex-1 ${form.lista ? "" : "text-red-600 border-red-300"}`}><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__none__">Sin lista</SelectItem>
               {listasNormales.map((l) => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
@@ -231,13 +231,16 @@ export function CondicionesPedidoPanel({ estado, exigirMercaderia = false }: { e
         <SegToggle on={form.listaPorSegmento} set={(b) => set({ listaPorSegmento: b })} />
       </div>
 
-      {/* FACTURACIÓN */}
+      {/* FACTURACIÓN — sin método = vacío (Juan 13/11/2026): antes se mostraba "Final" sin estar cargado */}
       <div className="flex items-center gap-2">
         <Label className="text-xs text-slate-600 w-20 shrink-0">Facturación</Label>
         {!form.metodoPorSegmento ? (
-          <Select value={form.metodo || "Final"} onValueChange={(v) => set({ metodo: v })}>
-            <SelectTrigger className="h-9 text-sm flex-1"><SelectValue /></SelectTrigger>
-            <SelectContent>{METODOS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
+          <Select value={form.metodo || "__none__"} onValueChange={(v) => set({ metodo: v === "__none__" ? "" : v })}>
+            <SelectTrigger className={`h-9 text-sm flex-1 ${form.metodo ? "" : "text-red-600 border-red-300"}`}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">Sin método</SelectItem>
+              {METODOS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+            </SelectContent>
           </Select>
         ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1">Definida por segmento ↓</span>}
         <SegToggle on={form.metodoPorSegmento} set={(b) => set({ metodoPorSegmento: b })} />

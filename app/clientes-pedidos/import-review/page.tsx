@@ -83,13 +83,14 @@ export default function ImportReviewPage() {
     ])
     setSegmentacion({
       proveedor: ((prov.data || []) as any[]).map(r => ({
+        // Método vacío = hereda el del pedido (antes se mandaba "Factura" y la forzaba)
         ref_id: r.proveedor_id, nombre: r.proveedores?.nombre || "—",
-        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
+        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || null,
         dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
       })),
       marca: ((marca.data || []) as any[]).map(r => ({
         ref_id: r.marca_id, nombre: r.marcas?.descripcion || "—",
-        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
+        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || null,
         dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
       })),
     })

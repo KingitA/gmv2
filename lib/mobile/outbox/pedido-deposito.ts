@@ -18,7 +18,7 @@
 import { agregarItemPedido, createPedido } from "@/lib/actions/pedidos"
 import { cuentaPersonalDe } from "@/lib/cuenta-corriente/cuenta-personal"
 import { fechaISO } from "@/lib/formato"
-import { esErrorReglaPedido } from "@/lib/pedidos/errores"
+import { esErrorReglaPedido, MSG_SIN_METODO } from "@/lib/pedidos/errores"
 import {
   articulosSinPrecio,
   juntarItems,
@@ -108,6 +108,22 @@ const pedidoCargarDeposito: HandlerDef<PayloadPedidoDeposito> = {
     const reconstruido = await insumosAFecha(ctx.admin, clienteId, ids, ahora)
     const motor = prepararMotorCliente(reconstruido.insumos)
     const conPrecio = new Map<string, any>(reconstruido.articulos.map((a: any) => [a.id, a]))
+    // Sin método de facturación no se toma el pedido (Juan 13/11/2026: no se supone "Final")
+    const sinMetodo = ids.filter((id) => {
+      const a = conPrecio.get(id)
+      try {
+        return !!a && motor.precio(a).sinMetodo
+      } catch {
+        return false
+      }
+    })
+    if (sinMetodo.length) {
+      throw new RechazoNegocio(
+        `${nombreDe(cliente)} no tiene método de facturación cargado en su ficha. Pedile a la oficina que lo complete y volvé a enviar el pedido.`,
+        "sin_metodo",
+        { articulos: sinMetodo.map((id) => ({ articulo_id: id, descripcion: artDe.get(id)?.descripcion || "Artículo" })) },
+      )
+    }
     const sinPrecio = articulosSinPrecio(ids, (id) => {
       const a = conPrecio.get(id)
       if (!a) return null
@@ -147,7 +163,7 @@ const pedidoCargarDeposito: HandlerDef<PayloadPedidoDeposito> = {
         const otro = await pedidoExistente(ctx.admin, p.local_id)
         if (otro) return completarExistente(ctx.admin, otro, items, p.modo)
       }
-      if (esErrorReglaPedido(e)) throw new RechazoNegocio(e.message, "sin_precio")
+      if (esErrorReglaPedido(e)) throw new RechazoNegocio(e.message, e.message === MSG_SIN_METODO ? "sin_metodo" : "sin_precio")
       throw e
     }
 
