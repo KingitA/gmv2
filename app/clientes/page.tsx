@@ -23,6 +23,9 @@ import { History } from "lucide-react"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { moneda, entero, formatCuit } from "@/lib/formato"
+import { Download, FileSpreadsheet, Loader2 } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { exportarClientesExcel, exportarClientesPdf, type FilaClienteExport, type InfoExport } from "@/lib/clientes/exportar-clientes"
 
 interface Cliente {
   id: string
@@ -54,6 +57,7 @@ interface Cliente {
   vendedor_id: string | null
   activo: boolean
   condicion_entrega: string | null
+  created_at?: string | null
   localidades?: { nombre: string; zonas?: { nombre: string } }
 }
 
@@ -332,6 +336,49 @@ export default function ClientesPage() {
   const hayAlgo = chips.length > 0 || searchTerm.trim() !== "" || estado !== "activos" || orden !== null
   const limpiarTodo = () => { setFiltros({}); setSearchTerm(""); setEstado("activos"); setOrden(null) }
 
+  // ── Exportar: exactamente las filas de la tabla (estado + búsqueda + filtros + orden) ──
+  const [exportando, setExportando] = useState<"excel" | "pdf" | null>(null)
+  const exportar = async (formato: "excel" | "pdf") => {
+    const filas: FilaClienteExport[] = filteredClientes.map((c) => ({
+      codigo: c.codigo_cliente ?? null,
+      nombre: c.nombre || c.nombre_razon_social || null,
+      razon_social: c.razon_social ?? null,
+      cuit: c.cuit,
+      condicion_iva: c.condicion_iva,
+      direccion: c.direccion,
+      localidad: c.localidades?.nombre || c.localidad,
+      provincia: c.provincia,
+      zona: c.localidades?.zonas?.nombre ?? null,
+      vendedor: c.vendedor_id ? nombreVendedor.get(c.vendedor_id) ?? null : null,
+      telefono: c.telefono,
+      email: c.mail,
+      lista: c.lista_precio_id ? nombreLista.get(c.lista_precio_id) ?? null : null,
+      metodo_facturacion: c.metodo_facturacion,
+      condicion_pago: c.condicion_pago,
+      condicion_entrega: c.condicion_entrega ? ENTREGA[c.condicion_entrega] ?? c.condicion_entrega : null,
+      canal: c.tipo_canal,
+      nivel: c.nivel_puntaje,
+      activo: c.activo,
+      saldo: saldos.get(c.id)?.real ?? null,
+      alta: c.created_at ?? null,
+    }))
+    const textoFiltros = [
+      `Estado: ${estado === "activos" ? "Activos" : estado === "inactivos" ? "Inactivos" : "Todos"}`,
+      ...(searchTerm.trim() ? [`Búsqueda: "${searchTerm.trim()}"`] : []),
+      ...chips.map((c) => c.texto),
+    ]
+    const info: InfoExport = { filtros: textoFiltros, filtrado: chips.length > 0 || searchTerm.trim() !== "" || estado !== "activos" }
+    setExportando(formato)
+    try {
+      if (formato === "excel") exportarClientesExcel(filas, info)
+      else await exportarClientesPdf(filas, info)
+    } catch (e: any) {
+      alert(`No se pudo exportar: ${e?.message || e}`)
+    } finally {
+      setExportando(null)
+    }
+  }
+
 
   return (
     <div className="min-h-screen">
@@ -380,6 +427,26 @@ export default function ClientesPage() {
                   onOpenChange={setIsImportDialogOpen}
                   onImportComplete={loadClientes}
                 />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="gap-2" disabled={cargandoClientes || buscando || exportando !== null || filteredClientes.length === 0}>
+                      {exportando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      Exportar {entero(filteredClientes.length)} cliente{filteredClientes.length !== 1 ? "s" : ""}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                      {hayAlgo ? "Lo que se ve en la tabla, con sus filtros y orden" : "Todos los clientes activos"}
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => exportar("excel")}>
+                      <FileSpreadsheet className="h-4 w-4" /> Excel (.xlsx)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => exportar("pdf")}>
+                      <FileText className="h-4 w-4" /> PDF (listado)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button variant="outline" className="gap-2" onClick={() => setIsHistorialOpen(true)}>
                   <History className="h-4 w-4" />
                   Historial
