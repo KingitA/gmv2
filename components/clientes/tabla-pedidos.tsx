@@ -24,10 +24,16 @@ export type PedidoFila = {
   viaje_id: string | null
   /** Día previsto sin viaje (calendario). Si hay viaje, manda la fecha del viaje. */
   fecha_entrega?: string | null
-  clientes?: { nombre_razon_social: string; cuit?: string | null; direccion?: string | null; localidad?: string | null } | null
+  clientes?: { nombre_razon_social: string; codigo_cliente?: string | number | null; cuit?: string | null; direccion?: string | null; localidad?: string | null } | null
   vendedores?: { nombre: string } | null
   viajes?: { nombre: string; fecha: string } | null
   zona?: { id: string; nombre: string } | null
+}
+
+/** "(1101) - PISTONE GUSTAVO PABLO" (Juan 13/11/2026): el código del cliente adelante del nombre. */
+function nombreConCodigo(c: PedidoFila['clientes']): string {
+  if (!c?.nombre_razon_social) return '—'
+  return c.codigo_cliente != null && c.codigo_cliente !== '' ? `(${c.codigo_cliente}) - ${c.nombre_razon_social}` : c.nombre_razon_social
 }
 
 export const PRIORIDAD = {
@@ -143,7 +149,7 @@ export function TablaPedidos(p: Props) {
                   <td className="px-2 font-semibold tabular-nums text-azul-900">{x.numero_pedido}</td>
                   <td className="px-2 whitespace-nowrap tabular-nums text-neutro-600">{formatDateAR(x.fecha)}</td>
                   <td className="px-2 py-2">
-                    <div className="truncate font-semibold uppercase text-azul-900">{x.clientes?.nombre_razon_social || '—'}</div>
+                    <div className="truncate font-semibold uppercase text-azul-900">{nombreConCodigo(x.clientes)}</div>
                     {(x.clientes?.direccion?.trim() || x.clientes?.localidad || x.vendedores?.nombre) && <div className="truncate text-xs uppercase text-neutro-500">{[x.clientes?.direccion?.trim(), x.clientes?.localidad, x.vendedores?.nombre].filter(Boolean).join(" · ")}</div>}
                     {pk && (
                       <div className="mt-1 flex items-center gap-2 text-[11px] font-semibold text-exito-600">
@@ -196,7 +202,7 @@ export function TablaPedidos(p: Props) {
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="truncate font-semibold uppercase text-azul-900">{x.clientes?.nombre_razon_social || '—'}</div>
+                    <div className="truncate font-semibold uppercase text-azul-900">{nombreConCodigo(x.clientes)}</div>
                     <div className="text-xs text-neutro-500 tabular-nums">
                       N° {x.numero_pedido} · {formatDateAR(x.fecha)}
                     </div>
