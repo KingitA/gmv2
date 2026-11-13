@@ -16,3 +16,8 @@ export function esErrorReglaPedido(e: unknown): e is ErrorReglaPedido {
 
 export const MSG_SIN_LISTA =
   "El cliente no tiene lista de precios asignada. Asignale una lista antes de tomar el pedido."
+
+// Juan 13/11/2026: "No hay valor = vacío". Antes un pedido sin método se calculaba como
+// "Final" sin avisar (pedidos 002164/65/66/70, importados).
+export const MSG_SIN_METODO =
+  "El cliente no tiene método de facturación asignado. Asignale uno en la ficha (o elegilo para este pedido) antes de tomar el pedido."

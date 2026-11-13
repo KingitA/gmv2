@@ -312,7 +312,8 @@ export async function POST(req: NextRequest) {
                     nombre: nombreFinal,
                     nombre_razon_social: nombreFinal,
                     condicion_iva: cliente.condicion_iva || "Consumidor Final",
-                    metodo_facturacion: cliente.metodo_facturacion || "Factura",
+                    // Sin dato = vacío (Juan 13/11/2026): antes se grababa "Factura" sin que nadie lo eligiera
+                    metodo_facturacion: cliente.metodo_facturacion || null,
                     condicion_pago: cliente.condicion_pago || "Efectivo",
                     tipo_canal: cliente.tipo_canal || "Minorista",
                     exento_iibb: cliente.exento_iibb || false,

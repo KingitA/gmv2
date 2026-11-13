@@ -27,6 +27,9 @@ import { CuentaEmpleadoFicha } from "@/components/personal/cuenta-empleado-ficha
 import { limpiarNombreCliente } from "@/lib/clientes/nombre-cliente"
 import { RetenerEntregas } from "@/components/clientes/retener-entregas"
 
+/** Un desplegable sin valor cargado se ve vacío y en rojo (Juan 13/11/2026: "No hay valor = vacío"). */
+const vacioCls = (v: string | null | undefined) => (v ? "" : "text-red-600 border-red-300")
+
 function normalizeEnum(v: string | null | undefined, map: Record<string, string>, fallback: string): string {
   if (!v) return fallback
   return map[v.toLowerCase().trim()] ?? map[v.trim()] ?? v
@@ -117,7 +120,7 @@ export default function ClienteDetailPage() {
     direccion: "",
     cuit: "",
     condicion_iva: "Consumidor Final",
-    metodo_facturacion: "Factura",
+    metodo_facturacion: "",
     localidad_id: "",
     localidad: "",
     provincia: "",
@@ -216,21 +219,23 @@ export default function ClienteDetailPage() {
         nombre_razon_social: c.nombre_razon_social || c.razon_social || "",
         direccion: c.direccion || "",
         cuit: (cuitOriginal.current = c.cuit || ""),
-        condicion_iva: normalizeEnum(c.condicion_iva, IVA_MAP, "Consumidor Final"),
-        metodo_facturacion: normalizeEnum(c.metodo_facturacion, FACTURACION_MAP, "Factura"),
+        // Juan 13/11/2026: "No hay valor = vacío". Antes un campo sin cargar se mostraba
+        // con un valor inventado (método "Factura", IVA "Consumidor Final"...) y parecía cargado.
+        condicion_iva: normalizeEnum(c.condicion_iva, IVA_MAP, ""),
+        metodo_facturacion: normalizeEnum(c.metodo_facturacion, FACTURACION_MAP, ""),
         localidad_id: c.localidad_id || "",
         localidad: c.localidad || c.localidades?.nombre || "",
         provincia: c.provincia || "",
         telefono: c.telefono || "",
         mail: c.mail || "",
-        condicion_pago: normalizeEnum(c.condicion_pago, PAGO_MAP, "Efectivo"),
+        condicion_pago: normalizeEnum(c.condicion_pago, PAGO_MAP, ""),
         nro_iibb: c.nro_iibb || "",
         exento_iibb: c.exento_iibb || false,
         exento_iva: c.exento_iva || false,
         percepcion_iibb: c.percepcion_iibb || 0,
-        tipo_canal: normalizeEnum(c.tipo_canal, CANAL_MAP, "Minorista"),
+        tipo_canal: normalizeEnum(c.tipo_canal, CANAL_MAP, ""),
         vendedor_id: c.vendedor_id || "",
-        condicion_entrega: normalizeEnum(c.condicion_entrega, ENTREGA_MAP, "entregamos_nosotros"),
+        condicion_entrega: normalizeEnum(c.condicion_entrega, ENTREGA_MAP, ""),
         flete_pago: c.flete_pago || "",
         lista_precio_id: c.lista_precio_id || "",
         lista_limpieza_id: c.lista_limpieza_id || "",
@@ -250,7 +255,7 @@ export default function ClienteDetailPage() {
     setPedidosCliente(pedRes.data || [])
     if (clienteRes.data) {
       const c = clienteRes.data as any
-      const esSentinela = normalizeEnum(c.metodo_facturacion, FACTURACION_MAP, "Factura") === "PorSegmento"
+      const esSentinela = normalizeEnum(c.metodo_facturacion, FACTURACION_MAP, "") === "PorSegmento"
       setSegMetodo(esSentinela || !!(c.metodo_limpieza || c.metodo_perf0 || c.metodo_perf_plus))
       setListaPorSegmento(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_plus_id))
       // El método general no debe quedar con el centinela: si segmenta, queda vacío.
@@ -387,7 +392,7 @@ export default function ClienteDetailPage() {
     }
     setSaving(true)
     // P2-10: sin espacios en los costados; el alta además en mayúsculas, como el resto de la cartera
-    const limpiar = (v: string) => (esNuevo ? limpiarNombreCliente(v) : v.replace(/s+/g, " ").trim())
+    const limpiar = (v: string) => (esNuevo ? limpiarNombreCliente(v) : v.replace(/\s+/g, " ").trim())
     const razonLimpia = limpiar(formData.nombre_razon_social)
     const dataToSave = {
       ...formData,
@@ -403,6 +408,11 @@ export default function ClienteDetailPage() {
       localidad_id: formData.localidad_id || null,
       // P2-07: el flete en origen/destino solo vale con transporte
       flete_pago: formData.condicion_entrega === "transporte" ? formData.flete_pago || null : null,
+      // Sin cargar = null (no se inventa un valor al guardar)
+      condicion_iva: formData.condicion_iva || null,
+      condicion_pago: formData.condicion_pago || null,
+      tipo_canal: formData.tipo_canal || null,
+      condicion_entrega: formData.condicion_entrega || null,
     }
     // Lista/método/descuentos no van en este update: se guardan con los toggles
     // General / Por segmento por el camino único (guardarFichaComercial).
@@ -507,8 +517,8 @@ export default function ClienteDetailPage() {
     { label: "Perfumería Plus", listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus", segKey: "perf_plus" },
   ]
   const METODO_CORTO: Record<string, string> = { "Factura": "Factura", "Final": "Mixto", "Presupuesto": "Presupuesto" }
-  const metGen = formData.metodo_facturacion || "Final"
-  const metHeredar = `Como el general (${METODO_CORTO[metGen] ?? metGen})`
+  const metGen = formData.metodo_facturacion || null
+  const metHeredar = metGen ? `Como el general (${METODO_CORTO[metGen] ?? metGen})` : "Como el general (sin método)"
   const listaGenNombre = listasPrecio.find((l: any) => l.id === formData.lista_precio_id)?.nombre ?? ""
   const listaHeredar = listaGenNombre ? `Como la general (${listaGenNombre})` : "Como la general (sin lista)"
 
@@ -642,7 +652,7 @@ export default function ClienteDetailPage() {
             </Campo>
             <Campo label="Entrega" nota="obligatorio">
               <Select value={formData.condicion_entrega} onValueChange={(v) => set("condicion_entrega", v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger className={vacioCls(formData.condicion_entrega)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="retira_mostrador">Retira en mostrador</SelectItem>
                   <SelectItem value="transporte">Envío por transporte</SelectItem>
@@ -669,7 +679,7 @@ export default function ClienteDetailPage() {
             )}
             <Campo label="Condición de pago" nota="obligatorio">
               <Select value={formData.condicion_pago} onValueChange={(v) => set("condicion_pago", v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger className={vacioCls(formData.condicion_pago)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Efectivo">Efectivo</SelectItem>
                   <SelectItem value="Transferencia">Transferencia</SelectItem>
@@ -681,7 +691,7 @@ export default function ClienteDetailPage() {
             </Campo>
             <Campo label="Tipo de canal">
               <Select value={formData.tipo_canal} onValueChange={(v) => set("tipo_canal", v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger className={vacioCls(formData.tipo_canal)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Mayorista">Mayorista</SelectItem>
                   <SelectItem value="Minorista">Minorista</SelectItem>
@@ -702,7 +712,7 @@ export default function ClienteDetailPage() {
               </div>
               {!listaPorSegmento ? (
                 <Select value={formData.lista_precio_id || "__none__"} onValueChange={(v) => set("lista_precio_id", v === "__none__" ? "" : v)}>
-                  <SelectTrigger className="lg:max-w-md"><SelectValue placeholder="Sin lista" /></SelectTrigger>
+                  <SelectTrigger className={`lg:max-w-md ${vacioCls(formData.lista_precio_id)}`}><SelectValue placeholder="Sin lista" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Sin lista</SelectItem>
                     {listasVisibles.map((lp: any) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
@@ -717,9 +727,10 @@ export default function ClienteDetailPage() {
                 <SegToggle on={segMetodo} set={(b) => { setSegMetodo(b); if (b) setFormData(prev => ({ ...prev, metodo_facturacion: "" })) }} />
               </div>
               {!segMetodo ? (
-                <Select value={formData.metodo_facturacion || "Final"} onValueChange={(v) => set("metodo_facturacion", v)}>
-                  <SelectTrigger className="lg:max-w-md"><SelectValue /></SelectTrigger>
+                <Select value={formData.metodo_facturacion || "__none__"} onValueChange={(v) => set("metodo_facturacion", v === "__none__" ? "" : v)}>
+                  <SelectTrigger className={`lg:max-w-md ${vacioCls(formData.metodo_facturacion)}`}><SelectValue placeholder="Sin método" /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__none__">Sin método</SelectItem>
                     <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
                     <SelectItem value="Final">Final (mixto)</SelectItem>
                     <SelectItem value="Presupuesto">Presupuesto</SelectItem>
@@ -819,7 +830,7 @@ export default function ClienteDetailPage() {
           <Campos>
             <Campo label="Condición de IVA" nota="obligatorio" ancho={2}>
               <Select value={formData.condicion_iva} onValueChange={(v) => set("condicion_iva", v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger className={vacioCls(formData.condicion_iva)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Responsable Inscripto">Responsable inscripto</SelectItem>
                   <SelectItem value="Monotributo">Monotributo</SelectItem>

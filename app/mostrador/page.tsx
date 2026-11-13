@@ -130,7 +130,7 @@ export default function MostradorPage() {
       return
     }
     if (cond.errorLista) {
-      toast({ variant: "destructive", title: "Sin lista de precios", description: cond.errorLista })
+      toast({ variant: "destructive", title: "Falta lista o método de facturación", description: cond.errorLista })
       setVerCondiciones(true)
       return
     }

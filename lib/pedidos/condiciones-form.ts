@@ -85,8 +85,9 @@ export function formDesdeFicha(f: FichaComercial): CondicionesForm {
 export function listaEfectiva(form: CondicionesForm, seg: Seg): string {
   return (form.listaPorSegmento ? form.listas[seg] : "") || form.lista
 }
+/** "" = sin método (Juan 13/11/2026: "No hay valor = vacío"; antes se suponía "Final"). */
 export function metodoEfectivo(form: CondicionesForm, seg: Seg): string {
-  return (form.metodoPorSegmento ? form.metodos[seg] : "") || form.metodo || "Final"
+  return (form.metodoPorSegmento ? form.metodos[seg] : "") || form.metodo || ""
 }
 export function descEfectivo(form: CondicionesForm, seg: Seg, tipo: TipoDesc): number {
   return Number(form.desc[`${form.descPorSegmento ? seg : "todos"}__${tipo}`]) || 0
@@ -95,13 +96,25 @@ export function contadoEfectivo(form: CondicionesForm, seg: Seg): boolean {
   return !!form.contado[form.descPorSegmento ? seg : "todos"]
 }
 
-/** Regla del dueño: nunca se toma un pedido sin lista. null = OK; si no, el motivo. */
+/**
+ * Regla del dueño: nunca se toma un pedido sin lista NI sin método de facturación
+ * (09/10 y 13/11/2026). null = OK; si no, el motivo.
+ */
 export function faltaLista(form: CondicionesForm): string | null {
-  const sin = SEGS.filter((s) => !listaEfectiva(form, s))
-  if (!sin.length) return null
-  return sin.length === SEGS.length
-    ? "El cliente no tiene lista de precios asignada: elegí una antes de tomar el pedido."
-    : `Falta la lista de: ${sin.map((s) => SEG_LABEL[s]).join(", ")}.`
+  const sinLista = SEGS.filter((s) => !listaEfectiva(form, s))
+  const sinMetodo = SEGS.filter((s) => !metodoEfectivo(form, s))
+  const partes: string[] = []
+  if (sinLista.length) {
+    partes.push(sinLista.length === SEGS.length
+      ? "El cliente no tiene lista de precios asignada: elegí una antes de tomar el pedido."
+      : `Falta la lista de: ${sinLista.map((s) => SEG_LABEL[s]).join(", ")}.`)
+  }
+  if (sinMetodo.length) {
+    partes.push(sinMetodo.length === SEGS.length
+      ? "El cliente no tiene método de facturación asignado: elegí uno antes de tomar el pedido."
+      : `Falta el método de facturación de: ${sinMetodo.map((s) => SEG_LABEL[s]).join(", ")}.`)
+  }
+  return partes.length ? partes.join(" ") : null
 }
 
 // ── Comparación con la ficha (¿cambió algo?) ────────────────────────────────

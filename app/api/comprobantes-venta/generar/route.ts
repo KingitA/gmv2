@@ -26,6 +26,8 @@ import { generarRemitosParaPedido, type ResultadoRemitos } from "@/lib/remitos/g
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { recalcularBonificadosPedido, cuposMercaderiaPedido, etiquetasCupos } from "@/lib/pedidos/mercaderia-bonificada"
 import { leerCondicionesCliente } from "@/lib/pedidos/condiciones-pedido"
+import { limpiarCentinela, resolverListaSegmentoDefinido, type ClienteListas, type OverridesListaPedido } from "@/lib/pricing/resolver"
+import { detectarSegmento as segmentoDePrecio } from "@/lib/pricing/segmento"
 import { estadoAlFacturar } from "@/lib/pedidos/estados"
 import { esCargadoEnDeposito } from "@/lib/pedidos/origen-deposito"
 import { aplicarPagosDelPedidoRefacturado } from "@/lib/pedidos/refacturar"
@@ -122,7 +124,7 @@ async function generarPedido(body: any, auth: { user: { id: string } }) {
       .select(`
         *,
         cliente:clientes!pedidos_cliente_id_fkey(
-          id, nombre_razon_social, condicion_iva, metodo_facturacion,
+          id, nombre_razon_social, condicion_iva, metodo_facturacion, metodo_limpieza, metodo_perf0, metodo_perf_plus,
           cuit, direccion, exento_iva, exento_iibb, provincia, percepcion_iibb, vendedor_id
         ),
         detalle:pedidos_detalle(
@@ -286,6 +288,29 @@ async function generarPedido(body: any, auth: { user: { id: string } }) {
     // P2-43 (Juan 31/10): pedido refacturado → lo devuelto contra sus comprobantes
     // anulados (aplicado al anular: su REV quedó sin efecto) NO se vuelve a facturar
     await aplicarDevueltoAlDetalle(supabase as any, pedido_id, pedido.detalle, cantidadAFacturar)
+
+    // ─── Sin método de facturación no se factura (Juan 13/11/2026: "No hay valor = vacío") ───
+    // Antes un pedido sin método (ni en el pedido ni en la ficha con la que se tomó) se
+    // facturaba como "Final" sin avisar. El método guardado en el renglón no cuenta acá:
+    // los pedidos viejos lo tienen en "Final" justamente por ese supuesto.
+    {
+      const fichaMetodos = (fichaPedido ? fichaPedido.cliente : pedido.cliente) as ClienteListas
+      const sinMetodo: string[] = []
+      for (const det of pedido.detalle as any[]) {
+        const art = det.articulo
+        if (!art || cantidadAFacturar(det) <= 0) continue
+        const condItem = segCondDe(art.marca_id ?? null, art.proveedor_id ?? null).cond
+        const definido = limpiarCentinela(condItem?.metodo_facturacion) ||
+          resolverListaSegmentoDefinido(segmentoDePrecio(art), pedido as OverridesListaPedido, fichaMetodos || {}).metodoRaw
+        if (!definido) sinMetodo.push(art.descripcion || art.sku || "artículo")
+      }
+      if (sinMetodo.length) {
+        return NextResponse.json({
+          error: `El pedido no tiene método de facturación${sinMetodo.length < pedido.detalle.length ? ` para: ${sinMetodo.slice(0, 5).join(", ")}${sinMetodo.length > 5 ? "…" : ""}` : ""}. Elegilo en el pedido (Editar → Facturación) o completá la ficha del cliente y repreciá antes de facturar.`,
+          error_code: "PEDIDO_SIN_METODO",
+        }, { status: 422 })
+      }
+    }
 
     const itemsCalculados: ItemCalculado[] = []
     for (const det of pedido.detalle) {

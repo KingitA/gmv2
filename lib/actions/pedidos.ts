@@ -38,7 +38,7 @@ import {
   toMetodoFacturacion,
   limpiarCentinela,
   getDescuentoViajante,
-  resolverListaMetodoConCondicion,
+  resolverListaMetodoDefinido,
   resolverCondSegmento,
   mezclarOverride,
   resolverBonifItem,
@@ -51,7 +51,7 @@ import {
 } from "@/lib/pricing/resolver"
 import { conPreciosDelPedido, leerFichaComercial, TIPOS_BONIF_FICHA } from "@/lib/pedidos/condiciones-pedido"
 import { recalcularBonificadosPedido } from "@/lib/pedidos/mercaderia-bonificada"
-import { ErrorReglaPedido, MSG_SIN_LISTA } from "@/lib/pedidos/errores"
+import { ErrorReglaPedido, MSG_SIN_LISTA, MSG_SIN_METODO } from "@/lib/pedidos/errores"
 export type { CondicionSegmento, CondicionProveedor, CondicionMarca } from "@/lib/pricing/resolver"
 import { prepararMotorCliente, precioArticuloParaCliente, descuentosPorArticulo, formulasReglasDesdeFilas, datosListaDesdeFila, type ArticuloMotor } from "@/lib/pricing/motor"
 // Pedidos tomados en un dispositivo: insumos de precio vigentes a la captura
@@ -166,21 +166,6 @@ async function fetchListaDatos(
   return result
 }
 
-// ─── Helper legacy: fetch lista + metodo (usado en agregarItemPedido) ─────────
-async function fetchListaYMetodo(
-  supabase: any,
-  clienteInfo: any,
-  metodo_facturacion_pedido?: string,
-  lista_precio_pedido_id?: string,
-): Promise<{ listaDatos: DatosLista; metodo: MetodoFacturacion }> {
-  const listaId = lista_precio_pedido_id || clienteInfo.lista_precio_id
-  const [formulasReglas] = await Promise.all([fetchFormulasReglas(supabase)])
-  const listaDatos = await fetchListaDatos(supabase, listaId || null, {}, formulasReglas)
-  const metodoRaw = metodo_facturacion_pedido || clienteInfo.metodo_facturacion || "Final"
-  const metodo = toMetodoFacturacion(metodoRaw)
-  return { listaDatos, metodo }
-}
-
 /** "Sin precio base, sin precio" (regla del dueño 06/10/2026): el artículo no se puede vender. */
 const msgSinPrecio = (a: { sku?: string | null; descripcion?: string | null }) =>
   `${a.sku ? `${a.sku} · ` : ""}${a.descripcion || "Un artículo"} no tiene precio base cargado: no se puede vender hasta que la oficina le cargue el precio.`
@@ -213,9 +198,11 @@ async function resolverListaMetodoItem(
   formulasReglas: Record<string, Record<string, string>>,
 ): Promise<{ listaId: string | null; metodoRaw: string; metodo: MetodoFacturacion; listaDatos: DatosLista; cond: CondicionSegmento | null; segKey: string | null }> {
   const { cond, segKey } = resolverCondSegmento(articulo, condProvMap, condMarcaMap)
-  const { listaId, metodoRaw } = resolverListaMetodoConCondicion(segmento, cond, pedidoOverrides, clienteCapturado(clienteInfo))
-  // Regla del dueño: nunca se toma un pedido sin lista de precios
+  const { listaId, metodoRaw: metodoDefinido } = resolverListaMetodoDefinido(segmento, cond, pedidoOverrides, clienteCapturado(clienteInfo))
+  // Regla del dueño: nunca se toma un pedido sin lista de precios ni sin método (13/11)
   if (!listaId) throw new ErrorReglaPedido(MSG_SIN_LISTA)
+  if (!metodoDefinido) throw new ErrorReglaPedido(MSG_SIN_METODO)
+  const metodoRaw: string = metodoDefinido
   const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
   const metodo = toMetodoFacturacion(metodoRaw)
   return { listaId, metodoRaw, metodo, listaDatos, cond, segKey }
@@ -812,8 +799,11 @@ export async function createPedido(data: {
     // ¿Este artículo cae en un segmento (marca o proveedor)? Marca gana sobre proveedor.
     const { cond, segKey } = resolverCondSegmento(articulo, condicionesProveedor, condicionesMarca)
     // Lista/método: la condición define los suyos; lo que deja vacío hereda.
-    const { listaId, metodoRaw } = resolverListaMetodoConCondicion(segmento, cond, segmentoOverrides, clienteListas)
+    const { listaId, metodoRaw: metodoDefinido } = resolverListaMetodoDefinido(segmento, cond, segmentoOverrides, clienteListas)
     if (!listaId) throw new ErrorReglaPedido(MSG_SIN_LISTA)
+    // Sin método no se toma el pedido (antes se suponía "Final" sin avisar)
+    if (!metodoDefinido) throw new ErrorReglaPedido(MSG_SIN_METODO)
+    const metodoRaw: string = metodoDefinido
     // Descuentos que la condición define pisan; los que deja en null se heredan.
     const { generalPct, viajantePct } = resolverBonifItem(cond, bonifGeneral, bonificacionesViajante, segmento)
     const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)

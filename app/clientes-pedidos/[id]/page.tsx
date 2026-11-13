@@ -399,7 +399,7 @@ export default function PedidoEditPage() {
 
   // "Del cliente" = la ficha CONGELADA al tomar el pedido (si la tiene)
   const fc = (pedido as any)?.condiciones_cliente?.cliente || c
-  const defaultMetodo   = fc?.metodo_facturacion || "—"
+  const defaultMetodo   = fc?.metodo_facturacion || "Sin método"
   const defaultLista    = listaName(fc?.lista_precio_id) || "Sin lista"
   const defaultEntrega  = entregaLabel(c?.condicion_entrega) || "—"
   const defaultVendedor = vendedores.find(v => v.id === c?.vendedor_id)?.nombre || "Sin vendedor"
