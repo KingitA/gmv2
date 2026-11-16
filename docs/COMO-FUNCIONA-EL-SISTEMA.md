@@ -228,7 +228,7 @@ Cuando llega mercadería de un proveedor:
 ## Pagos
 - Registrar pago manual: `app/api/pagos/route.ts`
 - Confirmar pago: `app/api/pagos/[id]/confirmar/route.ts`
-- Imputar pago a proveedor: `app/api/proveedores/[id]/imputar-pago/route.ts`
+- Pago a proveedor: solo por Órdenes de pago (`imputar-pago` se retiró el 16/11/2026 y responde 410)
 
 ## Devoluciones
 - Registrar devolución: `app/api/devoluciones/route.ts`
@@ -240,7 +240,7 @@ Cuando llega mercadería de un proveedor:
 - Generar nota de crédito reversa: `app/api/comprobantes-venta/generar-nc-reversa/route.ts`
 
 ## Órdenes de pago
-- Crear/listar órdenes de pago: `app/api/ordenes-pago/route.ts`
+- Crear/listar órdenes de pago: `app/api/ordenes-pago/route.ts` (crea con la función SQL `op_crear`: todo o nada, valida saldos)
 - Confirmar orden de pago: `app/api/ordenes-pago/[id]/confirmar/route.ts`
 
 ## Viajes y logística

@@ -85,22 +85,22 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 
 | id | Problema | Verif. |
 |---|---|---|
-| E-50 | `ordenes_pago.monto_total` suma las retenciones dos veces. | C |
-| E-51 | Crear OP no es transaccional: puede quedar sin medios o sin imputaciones y devolver éxito. | C |
-| E-52 | Imputar por vencimiento no baja la factura en cuenta corriente: queda pagable otra vez; doble imputación posible. | C |
-| E-53 | "Generar OP" desde el calendario no preselecciona nada. | C |
-| E-54 | No se valida sobreimputación; dos OP sobre la misma factura confirman las dos. | C |
+| ~~E-50~~ | ~~`ordenes_pago.monto_total` suma las retenciones dos veces.~~ **Hecho (T0-B):** regla única escrita en `op_crear` y en la ruta: `monto_total` = lo que cancela de la deuda, `neto_a_pagar` = `monto_total` − `total_retenciones` = suma de medios. | C |
+| ~~E-51~~ | ~~Crear OP no es transaccional: puede quedar sin medios o sin imputaciones y devolver éxito.~~ **Hecho (T0-B):** función SQL `op_crear` (todo o nada, con clave contra el doble click). Migración `20261116p`. | C |
+| ~~E-52~~ | ~~Imputar por vencimiento no baja la factura en cuenta corriente: queda pagable otra vez; doble imputación posible.~~ **Hecho (T0-B):** el vencimiento con comprobante se imputa contra su movimiento de cuenta corriente (`op_movimiento_de`); el cargado a mano se sigue pagando contra el vencimiento. No se puede tildar la misma deuda por dos caminos. | C |
+| ~~E-53~~ | ~~"Generar OP" desde el calendario no preselecciona nada.~~ **Hecho (T0-B):** llegan proveedor, vencimiento y monto; queda tildado y a la vista (la Nueva OP ahora lista también los vencimientos sin comprobante). | C |
+| ~~E-54~~ | ~~No se valida sobreimputación; dos OP sobre la misma factura confirman las dos.~~ **Hecho (T0-B):** `op_validar_imputaciones` al crear (cuenta otras OP pendientes) y al confirmar (`op_confirmar` v6, migración `20261116q`): error claro en vez de absorber. | C |
 | E-55 | Pago parcial marca el vencimiento entero como pagado (no hay saldo en el vencimiento). | C |
 | E-56 | Dos fuentes de saldo (`comprobantes_compra.saldo_pendiente` e `imputaciones_proveedores`) que divergen; las NC quedan pendientes para siempre. | C |
 | E-57 | Ganancias: acumulado mensual con fechas cruzadas (fecha OP vs fecha de confirmación). | C |
 | E-58 | Comprobante sin OC: base de retención 0. | C |
 | E-59 | Valores de retención a confirmar con el contador (mínimo transporte, código de régimen, condición del proveedor). Sin pantalla de edición. | C |
 | E-60 | IIBB / IVA / SUSS fijos en 0: no hay motor. | C |
-| E-61 | `op_eliminar` borra certificados y reutiliza números sin mirar si el período ya se presentó. No hay botón "Anular". | C |
+| E-61 | `op_eliminar` borra certificados y reutiliza números sin mirar si el período ya se presentó. ~~No hay botón "Anular".~~ (T0-B agregó el botón Anular con confirmación; lo del período presentado sigue pendiente.) | C |
 | E-62 | Cheque propio: no baja el banco, banco en texto libre, no se puede marcar e-cheq desde la OP, valores por defecto `S/D`. | C |
 | E-63 | "Marcar pagado sin OP": sin cuenta corriente, kardex ni retención (es lo que se usa hoy a diario). | C, B |
-| E-64 | Pantalla y acciones viejas vivas: `/finanzas/proveedores/pagos`, `imputar-pago`. | C |
-| E-65 | Endpoints de OP y reportes de Playroom sin control de rol. | C |
+| ~~E-64~~ | ~~Pantalla y acciones viejas vivas: `/finanzas/proveedores/pagos`, `imputar-pago`.~~ **Hecho (T0-B):** la pantalla redirige a `/ordenes-pago`, `imputar-pago` responde 410, `crearPagoProveedor` ya no mueve plata y la RPC vieja queda sin permiso de ejecución (`20261116q`). | C |
+| ~~E-65~~ | ~~Endpoints de OP y reportes de Playroom sin control de rol.~~ **Hecho (T0-B):** permisos `ordenes_pago` (admin, administrativo), `ordenes_pago_confirmar` (admin) y `reportes_playroom` (admin, administrativo) en `lib/auth.ts`. A confirmar por Juan. | C |
 | E-66 | OP pendiente no reserva el cheque de tercero. | C |
 | E-67 | Dos pasos (crear y confirmar), sin pago parcial por comprobante, sin CBU/alias del proveedor a la vista. | C |
 | E-68 | Cuenta corriente del proveedor: sin saldo corrido, sin filtros, sin export, sin enlace a OP/certificado; retenciones sueltas. | C |
@@ -121,7 +121,7 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 
 **Tanda 0 — frenar daños (solo código, sin decisiones de negocio).** Dos agentes en paralelo, archivos disjuntos.
 - T0-A Compras/recepción: E-01, E-02, E-09 (CHECK), E-13, E-30, E-32, E-35, E-36 (dedupe), E-37, E-40, E-41.
-- T0-B Pagos: E-50, E-51, E-52, E-53, E-54, E-64, E-65.
+- ~~T0-B Pagos: E-50, E-51, E-52, E-53, E-54, E-64, E-65.~~ Hecho en la rama `entrada-t0b-ordenes-pago` (16/11). Migraciones a aplicar, en orden: `20261116p_op_crear.sql` y `20261116q_op_confirmar_v6.sql`. **Aplicarlas ANTES del merge**: sin `op_crear` la pantalla no deja crear órdenes de pago (avisa que falta la migración); las dos son compatibles con el código viejo.
 
 **Tanda 1 — el circuito completo como tiene que ser.**
 - T1-A OC: función SQL crear/editar (E-07, E-08), condición de pago y vencimiento estimado (E-04, E-05, E-06), estados y cancelar (E-09), envío por Gmail con PDF (E-03), diálogo nuevo (E-10, E-12, E-14, E-15), historial de costo (E-11, E-21).
