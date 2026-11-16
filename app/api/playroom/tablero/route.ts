@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { calcularIndicadores } from "@/lib/playroom/indicadores"
 
 // Tablero de Playroom: calcula SOLO las tarjetas pedidas (?ids=a,b,c), leyendo la base.
@@ -8,7 +8,7 @@ import { calcularIndicadores } from "@/lib/playroom/indicadores"
 export const maxDuration = 30
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso('reportes_playroom')
   if (auth.error) return auth.error
 
   const pedidos = new URL(req.url).searchParams.get("ids")?.split(",").map(s => s.trim()).filter(Boolean) ?? []

@@ -1,8 +1,12 @@
+import { requirePermiso } from '@/lib/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { fechaISO } from '@/lib/formato'
 
 export async function GET(req: NextRequest) {
+  // E-65: reportes de Playroom, solo admin y administrativo (lib/auth.ts → PERMISOS)
+  const auth = await requirePermiso('reportes_playroom')
+  if (auth.error) return auth.error
   try {
     const supabase = createAdminClient()
     const { searchParams } = new URL(req.url)

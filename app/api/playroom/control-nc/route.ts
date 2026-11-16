@@ -1,3 +1,4 @@
+import { requirePermiso } from '@/lib/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { getPreviousPeriod, getSameLastYear, fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
@@ -7,6 +8,9 @@ const TIPOS_NC = ['NCA', 'NCB', 'NCC']
 const TIPOS_VENTA = ['FA', 'FB', 'FC']
 
 export async function GET(req: NextRequest) {
+  // E-65: reportes de Playroom, solo admin y administrativo (lib/auth.ts → PERMISOS)
+  const auth = await requirePermiso('reportes_playroom')
+  if (auth.error) return auth.error
   try {
     const supabase = createAdminClient()
     const { searchParams } = new URL(req.url)

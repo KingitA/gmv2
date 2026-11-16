@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import React, { type JSXElementConstructor, type ReactElement } from 'react'
 import { OrdenPagoPDF, type OrdenPagoPDFData } from '@/lib/pdf/orden-pago-template'
@@ -26,7 +26,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso('ordenes_pago')
   if (auth.error) return auth.error
   const { id } = await params
   try {
