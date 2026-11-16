@@ -103,6 +103,12 @@ export const PERMISOS = {
   eliminar_clientes: ["admin"],
   /** Caja de ajustes (P2-03): ver todos los ajustes de plata — solo admin, como Finanzas */
   caja_ajustes: ["admin"],
+  /** Órdenes de pago a proveedores (E-65): ver, armar la orden (queda pendiente), PDF, certificado y retenciones para el contador */
+  ordenes_pago: ["admin", "administrativo"],
+  /** Órdenes de pago: confirmar (sale la plata), anular y eliminar — mueve plata: solo admin, como Caja */
+  ordenes_pago_confirmar: ["admin"],
+  /** Reportes de Playroom (ventas, comisiones, cuentas corrientes, fiscal, depósito) — los mismos roles que usan Jarvis */
+  reportes_playroom: ["admin", "administrativo"],
 } as const satisfies Record<string, readonly string[]>
 
 export type Permiso = keyof typeof PERMISOS
