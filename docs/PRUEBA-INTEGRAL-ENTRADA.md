@@ -100,7 +100,7 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 | E-62 | Cheque propio: no baja el banco, banco en texto libre, no se puede marcar e-cheq desde la OP, valores por defecto `S/D`. | C |
 | E-63 | "Marcar pagado sin OP": sin cuenta corriente, kardex ni retención (es lo que se usa hoy a diario). | C, B |
 | ~~E-64~~ | ~~Pantalla y acciones viejas vivas: `/finanzas/proveedores/pagos`, `imputar-pago`.~~ **Hecho (T0-B):** la pantalla redirige a `/ordenes-pago`, `imputar-pago` responde 410, `crearPagoProveedor` ya no mueve plata y la RPC vieja queda sin permiso de ejecución (`20261116q`). | C |
-| ~~E-65~~ | ~~Endpoints de OP y reportes de Playroom sin control de rol.~~ **Hecho (T0-B):** permisos `ordenes_pago` y `ordenes_pago_confirmar` (solo admin: Juan, 16/11, "administrativo no arma ni ejecuta pagos") y `reportes_playroom` (admin, administrativo; falta que Juan lo confirme) en `lib/auth.ts`. | C |
+| ~~E-65~~ | ~~Endpoints de OP y reportes de Playroom sin control de rol.~~ **Hecho (T0-B):** permisos `ordenes_pago` y `ordenes_pago_confirmar` (solo admin: Juan, 16/11, "administrativo no arma ni ejecuta pagos") y `reportes_playroom` (admin y administrativo, confirmado por Juan el 16/11) en `lib/auth.ts`. | C |
 | E-66 | OP pendiente no reserva el cheque de tercero. | C |
 | E-67 | Dos pasos (crear y confirmar), sin pago parcial por comprobante, sin CBU/alias del proveedor a la vista. | C |
 | E-68 | Cuenta corriente del proveedor: sin saldo corrido, sin filtros, sin export, sin enlace a OP/certificado; retenciones sueltas. | C |
