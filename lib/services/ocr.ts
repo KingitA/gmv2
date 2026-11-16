@@ -1,9 +1,15 @@
 import * as XLSX from "xlsx";
 import { parseFecha, parseMonto } from "@/lib/formato";
 
-// Native fetch to Gemini REST API — no SDK dependency, immune to SDK deprecations
-const GEMINI_MODEL = "gemini-2.5-flash";
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent`;
+import { GEMINI_MODEL, GEMINI_MODEL_FALLBACK } from "@/lib/ai/gemini-model";
+
+// Native fetch to Gemini REST API — no SDK dependency, immune to SDK deprecations.
+// El modelo sale de lib/ai/gemini-model.ts (env GEMINI_MODEL, sin deploy). E-37: si el
+// principal falla (Google lo dio de baja, cuota, error del servicio) se reintenta con el
+// de respaldo. El principal sigue por la API v1, como siempre; el respaldo es un alias
+// ("…-latest") y va por v1beta, que es la versión que usa el SDK en el resto del sistema.
+const urlGemini = (modelo: string, version: "v1" | "v1beta") =>
+    `https://generativelanguage.googleapis.com/${version}/models/${modelo}:generateContent`;
 
 export interface ExtractedItem {
     descripcion: string;
@@ -54,8 +60,11 @@ export function inferirTipoComprobante(parsed: ParseResult, tipoDocumento?: stri
     const meta = parsed.comprobante;
     const texto = (meta?.tipo_comprobante || '').toUpperCase().trim();
 
-    if (texto === 'NC' || texto.includes('NOTA DE CR')) return 'NC';
-    if (texto === 'ND' || texto.includes('NOTA DE D')) return 'NC';
+    // La letra (NCA/NDB…) no se infiere: queda el tipo genérico, que la base acepta.
+    if (texto === 'NC' || /^NC[ABC]$/.test(texto) || texto.includes('NOTA DE CR')) return 'NC';
+    // E-35: una nota de DÉBITO no es una nota de crédito. Antes devolvía 'NC' y al validar
+    // RESTABA deuda; una ND la SUMA (movimiento 'nota_debito' positivo + vencimiento).
+    if (texto === 'ND' || /^ND[ABC]$/.test(texto) || texto.includes('NOTA DE D')) return 'ND';
 
     const tienePrecios = meta?.tiene_precios ?? (parsed.items || []).some(i => Number(i.precio_unitario || 0) > 0 || Number(i.total_linea || 0) > 0);
     if (!tienePrecios) return 'Remito';
@@ -137,29 +146,47 @@ FORMATO JSON:
   ]
 }`;
 
-        const res = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{
-                    parts: [
-                        { inlineData: { mimeType, data: base64 } },
-                        { text: prompt }
-                    ]
-                }],
-                generationConfig: {
-                    temperature: 0.1,
-                }
-            }),
+        const cuerpo = JSON.stringify({
+            contents: [{
+                parts: [
+                    { inlineData: { mimeType, data: base64 } },
+                    { text: prompt }
+                ]
+            }],
+            generationConfig: {
+                temperature: 0.1,
+            }
         });
+        const llamar = async (modelo: string, version: "v1" | "v1beta") => {
+            const res = await fetch(`${urlGemini(modelo, version)}?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: cuerpo,
+            });
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Gemini API ${res.status} (${modelo}): ${errText.slice(0, 500)}`);
+            }
+            return res.json();
+        };
 
-        if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`Gemini API ${res.status}: ${errText}`);
+        let modeloUsado = GEMINI_MODEL;
+        let data: any;
+        try {
+            data = await llamar(GEMINI_MODEL, "v1");
+        } catch (e: any) {
+            if (!GEMINI_MODEL_FALLBACK || GEMINI_MODEL_FALLBACK === GEMINI_MODEL) throw e;
+            console.warn(`[OCR] ${GEMINI_MODEL} falló, se reintenta con ${GEMINI_MODEL_FALLBACK}:`, e?.message);
+            modeloUsado = GEMINI_MODEL_FALLBACK;
+            data = await llamar(GEMINI_MODEL_FALLBACK, "v1beta");
         }
 
-        const data = await res.json();
-        const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+        const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        if (!text.trim()) {
+            // Respuesta vacía (bloqueo de seguridad, corte): es un fallo de lectura, no "0 ítems"
+            const motivo = data.candidates?.[0]?.finishReason || data.promptFeedback?.blockReason || 'sin texto';
+            throw new Error(`La IA no devolvió ninguna lectura (${motivo})`);
+        }
 
         // responseMimeType: application/json should give clean JSON, strip markdown just in case
         const jsonStr = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
@@ -170,7 +197,7 @@ FORMATO JSON:
             items: saneado.items,
             comprobante: saneado.comprobante,
             raw_text: text,
-            metadata: { model: GEMINI_MODEL }
+            metadata: { model: modeloUsado }
         };
 
     } catch (error: any) {

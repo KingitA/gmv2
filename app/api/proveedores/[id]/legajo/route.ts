@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'
+import { conRespaldoGemini } from '@/lib/ai/gemini-model'
 
 export const maxDuration = 120
 
@@ -81,14 +82,16 @@ export async function POST(
 
     const buffer = Buffer.from(await file.arrayBuffer())
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      generationConfig: { responseMimeType: 'application/json', responseSchema: SCHEMA },
-    })
-    const result = await model.generateContent([
-      { inlineData: { mimeType: file.type || 'application/pdf', data: buffer.toString('base64') } },
-      PROMPT,
-    ])
+    // Modelo central (env GEMINI_MODEL) + respaldo si Google lo da de baja. E-37
+    const result = await conRespaldoGemini((modelo) =>
+      genAI
+        .getGenerativeModel({ model: modelo, generationConfig: { responseMimeType: 'application/json', responseSchema: SCHEMA } })
+        .generateContent([
+          { inlineData: { mimeType: file.type || 'application/pdf', data: buffer.toString('base64') } },
+          PROMPT,
+        ]),
+      'legajo-proveedor',
+    )
     let parsed: any
     try {
       parsed = JSON.parse(result.response.text())

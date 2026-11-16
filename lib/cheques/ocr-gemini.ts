@@ -11,6 +11,7 @@
 //     plano que solo pide esas dos cosas (foco = mejor lectura de dígitos chicos).
 
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai"
+import { conRespaldoGemini } from "@/lib/ai/gemini-model"
 
 export const OCR_SCHEMA: any = {
   type: SchemaType.OBJECT,
@@ -101,7 +102,7 @@ LINEA_TITULAR: ...
 FECHA_EMISION: ...
 FECHA_PAGO: ...`
 
-const MODELO = "gemini-2.5-flash"
+// El modelo sale de lib/ai/gemini-model.ts (env GEMINI_MODEL + respaldo si Google lo da de baja). E-37
 
 function cliente() {
   if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY no configurado")
@@ -110,11 +111,12 @@ function cliente() {
 
 /** Pasada 1: JSON estructurado con todos los comprobantes de la imagen. */
 export async function leerComprobantesConGemini(base64: string, mimeType: string, timeoutMs = 30_000): Promise<any[]> {
-  const model = cliente().getGenerativeModel({
-    model: MODELO,
-    generationConfig: { responseMimeType: "application/json", responseSchema: OCR_SCHEMA, temperature: 0 },
-  })
-  const result = await model.generateContent([{ inlineData: { mimeType: mimeType || "image/jpeg", data: base64 } }, PROMPT_OCR], { timeout: timeoutMs })
+  const result = await conRespaldoGemini((modelo) =>
+    cliente()
+      .getGenerativeModel({ model: modelo, generationConfig: { responseMimeType: "application/json", responseSchema: OCR_SCHEMA, temperature: 0 } })
+      .generateContent([{ inlineData: { mimeType: mimeType || "image/jpeg", data: base64 } }, PROMPT_OCR], { timeout: timeoutMs }),
+    "ocr-cheques",
+  )
   const text = result.response.text()
   let parsed: any
   try {
@@ -137,8 +139,12 @@ export interface LecturaTitular {
 /** Pasada 2 (texto plano): línea del titular + fechas. Nunca lanza: si falla devuelve nulls. */
 export async function leerTitularConGemini(base64: string, mimeType: string, timeoutMs = 20_000): Promise<LecturaTitular> {
   try {
-    const model = cliente().getGenerativeModel({ model: MODELO, generationConfig: { temperature: 0 } })
-    const result = await model.generateContent([{ inlineData: { mimeType: mimeType || "image/jpeg", data: base64 } }, PROMPT_TITULAR], { timeout: timeoutMs })
+    const result = await conRespaldoGemini((modelo) =>
+      cliente()
+        .getGenerativeModel({ model: modelo, generationConfig: { temperature: 0 } })
+        .generateContent([{ inlineData: { mimeType: mimeType || "image/jpeg", data: base64 } }, PROMPT_TITULAR], { timeout: timeoutMs }),
+      "ocr-cheques",
+    )
     const crudo = result.response.text()
     const campo = (k: string) => {
       const m = crudo.match(new RegExp(`${k}\\s*:\\s*(.+)`, "i"))
