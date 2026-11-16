@@ -375,3 +375,14 @@ REVOKE ALL ON FUNCTION public.op_normalizar_imputaciones(jsonb) FROM PUBLIC, ano
 GRANT EXECUTE ON FUNCTION public.op_normalizar_imputaciones(jsonb) TO service_role;
 REVOKE ALL ON FUNCTION public.op_movimiento_de(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.op_movimiento_de(uuid, uuid) TO service_role;
+
+-- ═══ E-64: el pago a proveedor viejo ya no se puede ejecutar desde afuera ═══
+-- fin_crear_pago_proveedor movía saldos y cheques sin kardex, sin cuenta
+-- corriente y sin retención. La pantalla que la usaba se retiró; la función
+-- queda en la base (no se borra nada) pero sin permiso de ejecución.
+DO $$
+BEGIN
+  REVOKE ALL ON FUNCTION public.fin_crear_pago_proveedor(uuid, money_color, jsonb, numeric, uuid) FROM PUBLIC, anon, authenticated;
+EXCEPTION WHEN undefined_function OR undefined_object THEN
+  NULL; -- no existe con esa firma: nada que quitar
+END $$;
