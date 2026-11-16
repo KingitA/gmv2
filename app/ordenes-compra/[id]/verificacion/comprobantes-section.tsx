@@ -15,8 +15,10 @@ import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { RevisarMatches } from "../comprobantes/revisar-matches"
 import { InputMonto } from "@/components/ui/input-monto"
 import { DateInputAR } from "@/components/ui/date-input-ar"
+import { toast } from "sonner"
 
-const TIPOS = ["FA", "FB", "FC", "Adquisicion", "Remito", "Reversa", "NC", "NCA", "NCB", "NCC"]
+// ND = nota de débito: SUMA deuda (E-35). NC / Reversa restan.
+const TIPOS = ["FA", "FB", "FC", "Adquisicion", "Remito", "Reversa", "NC", "NCA", "NCB", "NCC", "ND", "NDA", "NDB", "NDC"]
 
 interface UploadJob {
     id: number
@@ -71,8 +73,10 @@ export function ComprobantesSection({
                 .then(async res => {
                     const data = await res.json()
                     if (!res.ok) throw new Error(data.error || "Error al procesar")
+                    // no_leido (E-37): la IA no pudo leerlo, quedó guardado sin comprobante. aviso (E-36): sin número.
+                    const base = data.comprobante ? `${data.comprobante.tipo_comprobante} ${data.comprobante.numero_comprobante}` : "Documento cargado"
                     setUploads(prev => prev.map(u => u.id === jobId
-                        ? { ...u, estado: "ok", mensaje: data.comprobante ? `${data.comprobante.tipo_comprobante} ${data.comprobante.numero_comprobante}` : "Documento cargado" }
+                        ? { ...u, estado: data.no_leido ? "error" : "ok", mensaje: data.no_leido ? data.aviso : data.aviso ? `${base} — ${data.aviso}` : base }
                         : u))
                     refrescar()
                 })
@@ -122,8 +126,12 @@ export function ComprobantesSection({
     const validar = async (comp: any) => {
         if (!confirm(`¿Validar ${comp.tipo_comprobante} ${comp.numero_comprobante}?\n\nImputa la CC del proveedor, confirma el kardex y genera el vencimiento.`)) return
         const res = await fetch(`/api/comprobantes-compra/${comp.id}/validar`, { method: "POST" })
-        const data = await res.json()
-        if (!res.ok) { alert(data.error || "Error al validar"); return }
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) { toast.error(`No se validó ${comp.tipo_comprobante} ${comp.numero_comprobante}: ${data.error || `error ${res.status}`}`, { duration: 12000 }); return }
+        // El servidor avisa si ya estaba validado, si es un remito (sin deuda) o si quedó sin vencimiento
+        const avisos: string[] = data.avisos || []
+        if (avisos.length > 0) toast.warning(avisos.join(" "), { duration: 12000 })
+        else toast.success(`${comp.tipo_comprobante} ${comp.numero_comprobante} validado`)
         refrescar()
     }
 
@@ -191,8 +199,8 @@ export function ComprobantesSection({
                                     {u.estado === "procesando" ? <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
                                         : u.estado === "ok" ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
                                             : <XCircle className="h-3.5 w-3.5 text-red-500" />}
-                                    <span className="truncate flex-1">{u.nombre}</span>
-                                    <span className={u.estado === "error" ? "text-red-600" : "text-muted-foreground"}>
+                                    <span className="truncate shrink-0 max-w-[40%]">{u.nombre}</span>
+                                    <span className={`flex-1 text-right ${u.estado === "error" ? "text-red-600" : "text-muted-foreground"}`}>
                                         {u.estado === "procesando" ? "Procesando OCR…" : u.mensaje}
                                     </span>
                                 </div>

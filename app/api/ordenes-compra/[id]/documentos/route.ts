@@ -2,7 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { processWithGemini , inferirTipoComprobante } from '@/lib/services/ocr';
-import { todayArgentina } from '@/lib/utils';
+import { buscarComprobanteDuplicado, comprobanteDesdeOCR, datosNoLeido, mensajeDuplicado, motivoNoLeido } from '@/lib/services/documento-compra';
 
 
 // GET /api/ordenes-compra/[id]/documentos
@@ -146,27 +146,28 @@ export async function POST(
 
     const compMeta = ocrResult.comprobante;
     const numeroExtraido = compMeta?.numero_comprobante;
+    // E-37: la IA falló o no encontró renglones ⇒ el documento queda "no leído", sin comprobante
+    const noLeido = motivoNoLeido(ocrResult);
 
-    // Chequeo de duplicado en comprobantes_compra
-    if (numeroExtraido) {
-        const { data: dup } = await supabase
-            .from('comprobantes_compra')
-            .select('id, numero_comprobante')
-            .eq('orden_compra_id', ordenId)
-            .eq('numero_comprobante', numeroExtraido)
-            .maybeSingle();
-
+    // E-36: duplicado por proveedor + clase + número normalizado, en ESTA orden o en cualquier otra
+    // (antes solo miraba esta orden y comparaba el número tal cual lo leyó la IA).
+    if (!noLeido && numeroExtraido) {
+        const dup = await buscarComprobanteDuplicado(supabase, {
+            proveedor_id: oc.proveedor_id,
+            tipo: inferirTipoComprobante(ocrResult, tipo_documento),
+            numero: numeroExtraido,
+        });
         if (dup) {
             if (!uploadError) await supabase.storage.from('comprobantes').remove([storagePath]);
             return NextResponse.json(
-                { error: `El comprobante ${numeroExtraido} ya está cargado en esta orden` },
+                { error: mensajeDuplicado(dup, ordenId), codigo: 'comprobante_duplicado', comprobante_id: dup.id },
                 { status: 409 }
             );
         }
     }
 
     // Guardar documento en recepciones_documentos
-    const { data: doc } = await supabase
+    const { data: doc, error: docError } = await supabase
         .from('recepciones_documentos')
         .insert({
             recepcion_id: recepcion.id,
@@ -175,82 +176,55 @@ export async function POST(
             storage_path: uploadError ? null : storagePath,
             nombre_archivo: file.name,
             tipo_mime: file.type,
-            datos_ocr: ocrResult,
-            procesado: true,
+            datos_ocr: noLeido ? datosNoLeido(ocrResult, noLeido) : ocrResult,
+            procesado: !noLeido,
         })
         .select()
         .single();
+    if (docError) return NextResponse.json({ error: `No se pudo guardar el documento: ${docError.message}` }, { status: 500 });
 
-    // Auto-crear comprobante_compra desde los datos del OCR
-    const tipoComp = inferirTipoComprobante(ocrResult, tipo_documento);
-    const sinIva = tipoComp === 'Adquisicion' || tipoComp === 'Remito';
-    const numeroComp = numeroExtraido || `PENDIENTE-${Date.now()}`;
-    const fechaComp = compMeta?.fecha || todayArgentina();
-    const totalFactura = compMeta?.total_factura || 0;
-    const totalNeto = sinIva ? totalFactura : (compMeta?.subtotal_neto || (totalFactura > 0 ? totalFactura / 1.21 : 0));
-    const totalIva = sinIva ? 0 : (compMeta?.total_iva || (totalNeto > 0 && totalFactura > 0 ? totalFactura - totalNeto : 0));
-    const percIva = compMeta?.percepcion_iva || 0;
-    const percIibb = compMeta?.percepcion_iibb || 0;
-    const retGanancias = compMeta?.retencion_ganancias || 0;
-    const descGlobal = compMeta?.descuento_global || 0;
-
-    const { data: comprobante, error: compError } = await supabase
-        .from('comprobantes_compra')
-        .insert({
-            orden_compra_id: ordenId,
-            proveedor_id: oc.proveedor_id,
-            tipo_comprobante: tipoComp,
-            numero_comprobante: numeroComp,
-            fecha_comprobante: fechaComp,
-            total_factura_declarado: totalFactura,
-            total_neto: totalNeto,
-            total_iva: totalIva,
-            percepcion_iva_monto: percIva,
-            percepcion_iibb_monto: percIibb,
-            retencion_ganancias_monto: retGanancias,
-            total_calculado: totalNeto + totalIva + percIva + percIibb + retGanancias,
-            foto_url: publicUrl || signedUrl,
-            estado: 'pendiente_recepcion',
-            ajusta_stock: true,
-            descuento_fuera_factura: descGlobal,
-        })
-        .select()
-        .single();
-
-    if (compError) {
-        console.error('[Docs OC] Error creando comprobante:', compError.message);
-    }
-
-    // Vincular documento → comprobante (permite revertir al eliminar el doc)
-    if (comprobante && doc) {
-        await supabase.from('recepciones_documentos')
-            .update({ comprobante_id: comprobante.id })
-            .eq('id', doc.id);
-    }
-
-    // Matching de artículos OCR → comprobantes_compra_detalle + actualizar recepciones_items
-    const detalleCreado: any[] = [];
-    if (ocrResult.items.length > 0 && comprobante) {
-        const { matchAndCreateDetalle } = await import('@/lib/services/detalle');
-        const matches = await matchAndCreateDetalle(supabase, {
-            comprobante_id: comprobante.id,
+    if (noLeido) {
+        return NextResponse.json({
+            success: true,
+            no_leido: true,
+            aviso: `${noLeido} El archivo quedó guardado como "no leído" y NO generó comprobante: subilo de nuevo (más nítido, o el PDF original) o cargá el comprobante a mano.`,
+            documento: { ...doc, signed_url: signedUrl || publicUrl },
+            comprobante: null,
             recepcion_id: recepcion.id,
-            proveedor_id: oc.proveedor_id,
-            items: ocrResult.items,
-            documento_id: doc?.id,
+            ocr: { comprobante: compMeta ?? null, items_detectados: 0, items_vinculados: 0, items: [] },
         });
-        detalleCreado.push(...matches);
     }
+
+    // Comprobante de compra + detalle desde los datos del OCR (lógica compartida con depósito).
+    // Sin número legible no se crea otro "PENDIENTE-…": se suma al provisorio de la orden.
+    const r = await comprobanteDesdeOCR(supabase, {
+        orden_compra_id: ordenId,
+        proveedor_id: oc.proveedor_id,
+        recepcion_id: recepcion.id,
+        documento_id: doc?.id,
+        ocr: ocrResult,
+        tipo_documento,
+        foto_url: publicUrl || signedUrl,
+    });
+    const comprobante = r.comprobante;
+    const aviso = r.error
+        ? `El archivo se leyó pero no se pudo crear el comprobante (${r.error}).`
+        : r.sumado_a_provisorio
+            ? 'No se leyó el número del comprobante: los renglones se sumaron al comprobante provisorio de esta orden. Completale el número con el lápiz.'
+            : !numeroExtraido
+                ? 'No se leyó el número del comprobante: quedó como provisorio. Completale el número con el lápiz.'
+                : undefined;
 
     return NextResponse.json({
         success: true,
         documento: { ...doc, signed_url: signedUrl || publicUrl },
         comprobante,
         recepcion_id: recepcion.id,
+        ...(aviso ? { aviso } : {}),
         ocr: {
             comprobante: compMeta,
             items_detectados: ocrResult.items.length,
-            items_vinculados: detalleCreado.length,
+            items_vinculados: r.vinculados.length,
             items: ocrResult.items,
         },
     });

@@ -294,7 +294,9 @@ export default function RecibirMercaderiaDetallePage() {
       if (r.ok) {
         setDocumentos(prev=>[...prev, data.document])
         const cnt = data.ocr_processing_results?.length || 0
-        showToast(cnt > 0 ? `📷 OCR: ${cnt} artículo${cnt>1?"s":""} detectados` : "📷 Foto adjuntada","ok")
+        // aviso: la foto no se pudo leer (quedó adjunta sin comprobante) o no se leyó el número
+        if (data.aviso) showToast(data.aviso, data.no_leido ? "err" : "ok")
+        else showToast(cnt > 0 ? `📷 OCR: ${cnt} artículo${cnt>1?"s":""} detectados` : "📷 Foto adjuntada","ok")
       } else {
         showToast(data.error || "Error al procesar","err")
       }

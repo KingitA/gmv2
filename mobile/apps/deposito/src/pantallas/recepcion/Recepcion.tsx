@@ -557,7 +557,8 @@ interface Documento {
   url_imagen?: string | null
   nombre_archivo?: string | null
   procesado?: boolean
-  datos_ocr?: { comprobante?: { numero_comprobante?: string; total_factura?: number } } | null
+  /** no_leido: la lectura automática falló o no encontró renglones (queda adjunto, sin comprobante). E-37 */
+  datos_ocr?: { comprobante?: { numero_comprobante?: string; total_factura?: number } | null; no_leido?: boolean; motivo?: string } | null
 }
 
 export function RecepcionDocumentos() {
@@ -591,10 +592,13 @@ export function RecepcionDocumentos() {
       const fd = new FormData()
       fd.append("file", file)
       fd.append("tipo_documento", tipo)
-      const data = await api.postForm<{ document: Documento; ocr_processing_results?: unknown[] }>(`/api/recepciones/${recepcionId}/ocr`, fd)
+      const data = await api.postForm<{ document: Documento; ocr_processing_results?: unknown[]; no_leido?: boolean; aviso?: string }>(`/api/recepciones/${recepcionId}/ocr`, fd)
       setDocs((p) => [...(p || []), data.document])
       const cnt = data.ocr_processing_results?.length || 0
-      mostrar(cnt > 0 ? `📷 OCR: ${cnt} artículo${cnt > 1 ? "s" : ""} detectados` : "📷 Foto adjuntada")
+      // aviso del servidor: la foto no se pudo leer (quedó adjunta, sin comprobante) o no se leyó el número.
+      // Un comprobante que ya estaba cargado llega como error (409) y lo muestra el catch.
+      if (data.aviso) mostrar(data.aviso, data.no_leido ? "err" : "ok")
+      else mostrar(cnt > 0 ? `📷 OCR: ${cnt} artículo${cnt > 1 ? "s" : ""} detectados` : "📷 Foto adjuntada")
       void sync.dataset(DATASET)
     } catch (e) {
       mostrar(e instanceof ErrorHttp ? e.message : "Sin señal: la foto no se subió. Probá de nuevo cerca del WiFi.", "err")
@@ -656,6 +660,7 @@ export function RecepcionDocumentos() {
                     {nro && <span style={{ fontSize: 11, color: C.sub }}>{nro}</span>}
                     {total != null && parseMonto(total) != null && <span style={{ fontSize: 11, color: C.sub }}>{moneda(parseMonto(total))}</span>}
                     {doc.procesado && <span style={{ fontSize: 11, background: "#dcfce7", color: "#15803d", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>OCR ✓</span>}
+                    {!doc.procesado && doc.datos_ocr?.no_leido && <span style={{ fontSize: 11, background: C.redL, color: C.red, padding: "2px 8px", borderRadius: 999, fontWeight: 700 }}>NO LEÍDO</span>}
                   </div>
                 </div>
                 {doc.url_imagen && (
