@@ -72,7 +72,7 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 
 | id | Problema | Verif. |
 |---|---|---|
-| ~~E-30~~ | ~~**Bultos vs unidades**: la OC va en bultos, la app muestra "u" y el stock suma lo contado tal cual.~~ **Hecho T0-A: stock, kardex y movimientos en unidades; app y oficina dicen "2 bultos × 24 u = 48 u". Falta APK (PENDIENTES-APPS R1) y corregir el stock de OC-000010.** | C, B |
+| ~~E-30~~ | ~~**Bultos vs unidades**: la OC va en bultos, la app muestra "u" y el stock suma lo contado tal cual.~~ **Hecho T0-A: stock, kardex y movimientos en unidades; app y oficina dicen "2 bultos × 24 u = 48 u". Falta APK (PENDIENTES-APPS R1). El stock de OC-000010 no se corrige (decisión 2 de Juan).** | C, B |
 | E-31 | Kardex `compra` duplicado: el pendiente de la OC se confirma al validar y además queda el de la recepción. | C |
 | ~~E-32~~ | ~~`validar` sin control de estado ni transacción: doble click = doble deuda y doble vencimiento; valida remitos en $0; no bloquea líneas sin match; el primer comprobante borra toda la provisión.~~ **Hecho T0-A: función `comprobante_compra_validar` (migración 20261116c); sin ella, mismas reglas con compuerta de estado.** | C |
 | E-33 | `cerrar` (resolver diferencia) no es idempotente; "proveedor" resta stock que nunca entró; sobrante tratado como faltante; NC esperada sin IVA; precio neto comparado con lista. | C |

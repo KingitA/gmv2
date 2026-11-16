@@ -18,7 +18,7 @@
 -- No toca datos: solo columnas nuevas (vacías) y una función. Se puede correr más
 -- de una vez. El código funciona sin esta migración (convierte a unidades igual),
 -- pero la suma atómica y contar "en otra unidad" desde la app nueva la necesitan.
--- NO corrige el stock ya mal cargado (OC-000010): eso lo decide Juan aparte.
+-- NO corrige el stock ya mal cargado (OC-000010): es dato de prueba (decisión de Juan, 16/11).
 -- ─────────────────────────────────────────────────────────────────────────────
 
 ALTER TABLE public.recepciones_items
