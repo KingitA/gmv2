@@ -124,7 +124,9 @@ export async function POST(
         })),
     }
 
-    if (parsed.inscripto_ganancias === true && prov.condicion_ganancias !== 'inscripto') {
+    // Un proveedor cargado como exento no se propone pasarlo a inscripto: la constancia
+    // dice que está inscripto en el impuesto, la exención va por certificado aparte.
+    if (parsed.inscripto_ganancias === true && prov.condicion_ganancias !== 'inscripto' && prov.condicion_ganancias !== 'exento') {
       propuesta.cambios.push({ campo: 'condicion_ganancias', actual: prov.condicion_ganancias, nuevo: 'inscripto' })
     }
     if (parsed.inscripto_ganancias === false && prov.condicion_ganancias !== 'no_inscripto') {

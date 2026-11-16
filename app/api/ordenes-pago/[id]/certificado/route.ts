@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import React, { type JSXElementConstructor, type ReactElement } from 'react'
 import { RetencionPDF, type RetencionPDFData } from '@/lib/pdf/retencion-template'
@@ -21,7 +21,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso('ordenes_pago')
   if (auth.error) return auth.error
   const { id } = await params
   try {
@@ -46,6 +46,7 @@ export async function GET(
         vencimiento_id: i.vencimiento_id,
         comprobante_compra_id: i.comprobante_compra_id,
         monto_imputado: i.monto_imputado,
+        retiene_ganancias: i.retiene_ganancias ?? null,
       })),
     })
 

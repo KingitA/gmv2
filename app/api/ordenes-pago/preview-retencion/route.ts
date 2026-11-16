@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 
 /**
  * POST /api/ordenes-pago/preview-retencion — desglose de la retención de
@@ -14,7 +14,7 @@ import { requireAuth } from '@/lib/auth'
  *   mínimo, alícuota según condición, exclusiones, y la retención al centavo.
  */
 export async function POST(request: Request) {
-    const auth = await requireAuth()
+    const auth = await requirePermiso('ordenes_pago')
     if (auth.error) return auth.error
     try {
         const body = await request.json()

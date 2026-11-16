@@ -1,3 +1,4 @@
+import { requirePermiso } from '@/lib/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { fetchAllRows } from '@/lib/playroom/queries'
@@ -9,6 +10,9 @@ import { fetchAllRows } from '@/lib/playroom/queries'
 // Tramos: 0–29 / 30–59 / 60–89 / 90+ días desde la fecha del comprobante.
 // Las claves t0_30/t31_60/… se mantienen por compatibilidad con la pantalla.
 export async function GET() {
+  // E-65: reportes de Playroom, solo admin y administrativo (lib/auth.ts → PERMISOS)
+  const auth = await requirePermiso('reportes_playroom')
+  if (auth.error) return auth.error
   try {
     const supabase = createAdminClient()
     const aging = await fetchAllRows(() => supabase

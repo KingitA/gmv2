@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import React, { type JSXElementConstructor, type ReactElement } from 'react'
 import { PlanillaRetencionesPDF, type PlanillaRetencionesData } from '@/lib/pdf/planilla-retenciones-template'
@@ -37,7 +37,7 @@ const fmtFechaAR = (iso: string) => { // formato-ok: SICORE (DD/MM/YYYY de ancho
 }
 
 export async function GET(request: Request) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso('ordenes_pago')
   if (auth.error) return auth.error
   try {
     const { searchParams } = new URL(request.url)

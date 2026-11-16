@@ -1,13 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
-import { nowArgentina, todayArgentina } from '@/lib/utils'
+import { requirePermiso } from '@/lib/auth'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
-import { moneda } from '@/lib/formato'
 
 // GET /api/ordenes-pago
 export async function GET(request: Request) {
-    const auth = await requireAuth()
+    const auth = await requirePermiso('ordenes_pago')
     if (auth.error) return auth.error
 
     const { searchParams } = new URL(request.url)
@@ -48,153 +46,85 @@ export async function GET(request: Request) {
     }
 }
 
-// POST /api/ordenes-pago - Crear orden de pago
+/**
+ * POST /api/ordenes-pago — crea la orden de pago (queda PENDIENTE; la plata
+ * sale recién al confirmar).
+ *
+ * Todo pasa en UNA función SQL, op_crear (migración 20261116p_op_crear.sql):
+ * cabecera + medios + imputaciones se guardan juntos o no se guarda nada (E-51).
+ * La misma función:
+ *   · calcula la retención de Ganancias (el valor de la pantalla solo vale
+ *     como ajuste manual con motivo),
+ *   · resuelve el vencimiento a su comprobante en cuenta corriente (E-52),
+ *   · no deja imputar más que el saldo pendiente, contando otras OP pendientes (E-54),
+ *   · controla que los medios cubran el neto.
+ *
+ * REGLA ÚNICA DE LOS TOTALES (E-50) — así los leen la lista, el PDF, Jarvis y op_confirmar:
+ *   monto_total       = lo que la OP cancela de la deuda (lo imputado, ya restados
+ *                       los créditos; sin imputaciones = medios + retenciones)
+ *   total_retenciones = Ganancias + IIBB + IVA + SUSS
+ *   neto_a_pagar      = monto_total − total_retenciones = suma de los medios
+ *   bruto             = monto_total + total_creditos
+ *
+ * Body: { proveedor_id, fecha?, observaciones?, clave?,
+ *         retencion_ganancias?, ganancias_manual?, ganancias_motivo?,
+ *         retencion_iibb?, retencion_iva?, retencion_suss?,
+ *         medios_pago: [{ medio, monto, cheque_id?, … }],
+ *         imputaciones: [{ movimiento_cc_id?, vencimiento_id?, comprobante_compra_id?, monto_imputado }] }
+ */
 export async function POST(request: Request) {
-    const auth = await requireAuth()
+    const auth = await requirePermiso('ordenes_pago')
     if (auth.error) return auth.error
 
-    const body = await request.json()
-    const supabase = createAdminClient()
-
-    const {
-        proveedor_id, fecha, observaciones,
-        retencion_ganancias, retencion_iibb, retencion_iva, retencion_suss,
-        ganancias_manual, ganancias_motivo,   // ajuste manual del cálculo automático
-        medios_pago, // Array: [{ medio, monto, cheque_id, cheque_banco, ... }]
-        imputaciones  // Array: [{ movimiento_cc_id?, vencimiento_id?, comprobante_compra_id?, monto_imputado }]
-    } = body
-
-    if (!proveedor_id) {
-        return NextResponse.json({ error: 'Proveedor es obligatorio' }, { status: 400 })
+    let body: any
+    try {
+        body = await request.json()
+    } catch {
+        return NextResponse.json({ error: 'Pedido inválido' }, { status: 400 })
     }
 
-    if (!medios_pago || medios_pago.length === 0) {
+    if (!body?.proveedor_id) {
+        return NextResponse.json({ error: 'Proveedor es obligatorio' }, { status: 400 })
+    }
+    if (!Array.isArray(body.medios_pago) || body.medios_pago.length === 0) {
         return NextResponse.json({ error: 'Debe agregar al menos un medio de pago' }, { status: 400 })
     }
 
-    // ── Retención de Ganancias RG 830: SIEMPRE se calcula server-side ──
-    // (el valor del cliente solo se acepta como ajuste manual con motivo)
-    const { data: calc, error: calcErr } = await supabase.rpc('op_ganancias_preview', {
-        p_proveedor_id: proveedor_id,
-        p_imputaciones: imputaciones ?? [],
-        p_fecha: fecha ?? null,
+    const supabase = createAdminClient()
+    const { data, error } = await supabase.rpc('op_crear', {
+        p_payload: {
+            proveedor_id: body.proveedor_id,
+            fecha: body.fecha || null,
+            observaciones: body.observaciones || null,
+            clave: body.clave || null,
+            ganancias_manual: Boolean(body.ganancias_manual),
+            ganancias_motivo: body.ganancias_motivo || null,
+            retencion_ganancias: body.retencion_ganancias ?? 0,
+            retencion_iibb: body.retencion_iibb ?? 0,
+            retencion_iva: body.retencion_iva ?? 0,
+            retencion_suss: body.retencion_suss ?? 0,
+            medios_pago: body.medios_pago,
+            imputaciones: Array.isArray(body.imputaciones) ? body.imputaciones : [],
+        },
+        p_usuario: auth.user.email || 'admin',
     })
-    if (calcErr) {
-        return NextResponse.json({ error: `Cálculo de retención: ${calcErr.message}` }, { status: 400 })
-    }
-    const retCalculada = Number(calc?.retencion ?? 0)
-    const baseGanancias = Number(calc?.base ?? 0)
 
-    let retGanancias = retCalculada
-    if (ganancias_manual) {
-        if (!ganancias_motivo || !String(ganancias_motivo).trim()) {
-            return NextResponse.json({ error: 'El ajuste manual de la retención requiere un motivo' }, { status: 400 })
-        }
-        retGanancias = Number(retencion_ganancias || 0)
-    }
-
-    const totalMedios = medios_pago.reduce((sum: number, m: any) => sum + Number(m.monto || 0), 0)
-    const totalRetenciones = retGanancias + Number(retencion_iibb || 0) +
-        Number(retencion_iva || 0) + Number(retencion_suss || 0)
-    const totalImputado = (imputaciones ?? []).reduce((s: number, i: any) => s + Number(i.monto_imputado || 0), 0)
-    const totalCreditos = (imputaciones ?? []).reduce((s: number, i: any) => s + Math.max(0, -Number(i.monto_imputado || 0)), 0)
-
-    // Cuadre: con imputaciones, los medios deben cubrir el neto (bruto − retenciones)
-    if (totalImputado > 0) {
-        const netoEsperado = Math.round((totalImputado - totalRetenciones) * 100) / 100
-        if (Math.abs(totalMedios - netoEsperado) > 0.01) {
+    if (error) {
+        // op_crear todavía no está en la base: avisar claro, no crear a medias.
+        // Solo cuando la que falta es op_crear; cualquier otra función inexistente
+        // (42883 desde adentro de op_crear) es un error real y se informa tal cual.
+        const faltaOpCrear = (error.code === 'PGRST202' || error.code === '42883') && /op_crear/.test(error.message || '')
+        if (faltaOpCrear) {
             return NextResponse.json({
-                error: `No cuadra: imputado ${moneda(totalImputado)} − retenciones ${moneda(totalRetenciones)} = neto ${moneda(netoEsperado)}, pero los medios suman ${moneda(totalMedios)}`,
-            }, { status: 400 })
+                error: 'Falta aplicar en la base la migración 20261116p_op_crear.sql (y 20261116q_op_confirmar_v6.sql). Hasta entonces no se pueden crear órdenes de pago.',
+                error_code: 'FALTA_MIGRACION',
+            }, { status: 503 })
         }
+        // P0001 = validación de negocio (RAISE EXCEPTION con el motivo en criollo)
+        const status = error.code === 'P0001' ? 400 : 500
+        if (status === 500) console.error('[ordenes-pago] op_crear:', error)
+        return NextResponse.json({ error: error.message }, { status })
     }
 
-    const montoTotal = totalImputado > 0 ? totalImputado : totalMedios + totalRetenciones
-    const netoAPagar = totalMedios
-
-    // Número de OP atómico (RPC con FOR UPDATE sobre numeracion_comprobantes;
-    // formato 0001-XXXXXXXX, compatible con el Nº de comprobante del TXT SICORE)
-    const { data: numeroOp, error: numErr } = await supabase.rpc('op_siguiente_numero')
-    if (numErr || !numeroOp) {
-        return NextResponse.json({ error: `No se pudo numerar la OP: ${numErr?.message ?? 'sin número'}` }, { status: 500 })
-    }
-
-    // 1. Crear cabecera
-    const { data: op, error: opError } = await supabase
-        .from('ordenes_pago')
-        .insert({
-            numero_op: numeroOp,
-            proveedor_id,
-            fecha: fecha || todayArgentina(),
-            monto_total: montoTotal + totalRetenciones,
-            estado: 'pendiente',
-            observaciones: observaciones || null,
-            retencion_ganancias: retGanancias,
-            retencion_iibb: retencion_iibb || 0,
-            retencion_iva: retencion_iva || 0,
-            retencion_suss: retencion_suss || 0,
-            total_retenciones: totalRetenciones,
-            neto_a_pagar: netoAPagar,
-            base_ganancias: baseGanancias,
-            total_creditos: totalCreditos,
-            ganancias_ajuste_manual: Boolean(ganancias_manual),
-            ganancias_motivo: ganancias_manual ? String(ganancias_motivo).trim() : null,
-            usuario_creador: auth.user.email || 'admin'
-        })
-        .select()
-        .single()
-
-    if (opError) {
-        return NextResponse.json({ error: opError.message }, { status: 500 })
-    }
-
-    // 2. Crear detalle de medios de pago
-    const detalleInserts = medios_pago.map((m: any) => ({
-        orden_pago_id: op.id,
-        // op_confirmar identifica el cheque propio como medio='cheque' sin
-        // cheque_id — normalizar para que registre kardex y cree el cheque
-        medio: m.medio === 'cheque_propio' ? 'cheque' : m.medio,
-        monto: m.monto,
-        cheque_id: m.cheque_id || null,
-        cheque_banco: m.cheque_banco || null,
-        cheque_numero: m.cheque_numero || null,
-        cheque_fecha_vencimiento: m.cheque_fecha_vencimiento || null,
-        banco_destino: m.banco_destino || null,
-        numero_cuenta: m.numero_cuenta || null,
-        cbu: m.cbu || null,
-        numero_transferencia: m.numero_transferencia || null,
-        fecha_transferencia: m.fecha_transferencia || null,
-        observaciones: m.observaciones || null,
-        cuenta_origen_tipo: m.cuenta_origen_tipo || null,
-        cuenta_origen_id: m.cuenta_origen_id || null
-    }))
-
-    const { error: detError } = await supabase
-        .from('ordenes_pago_detalle')
-        .insert(detalleInserts)
-
-    if (detError) {
-        console.error('Error inserting OP detalle:', detError)
-    }
-
-    // 3. Crear imputaciones si hay
-    if (imputaciones && imputaciones.length > 0) {
-        const impInserts = imputaciones.map((imp: any) => ({
-            orden_pago_id: op.id,
-            movimiento_cc_id: imp.movimiento_cc_id || null,
-            vencimiento_id: imp.vencimiento_id || null,
-            comprobante_compra_id: imp.comprobante_compra_id || null,
-            monto_imputado: imp.monto_imputado
-        }))
-
-        const { error: impError } = await supabase
-            .from('ordenes_pago_imputaciones')
-            .insert(impInserts)
-
-        if (impError) {
-            console.error('Error inserting OP imputaciones:', impError)
-        }
-    }
-
-    return NextResponse.json(op)
+    return NextResponse.json(data)
 }

@@ -6,8 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Plus, DollarSign, CheckCircle2, XCircle, Eye, FileText, Receipt, Trash2 } from "lucide-react"
+import { ArrowLeft, Plus, DollarSign, CheckCircle2, FileText, Receipt, Trash2, Undo2 } from "lucide-react"
 import Link from "next/link"
+import { toast } from "sonner"
+import { Input } from "@/components/ui/input"
+import {
+    AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+    AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { useMisRoles } from "@/lib/hooks/useMisRoles"
 import { formatCurrency } from "@/lib/utils"
 import { fecha, hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
 import { useRealtime } from "@/lib/hooks/use-realtime"
@@ -19,6 +26,12 @@ export default function OrdenesPagoPage() {
     const [filtroEstado, setFiltroEstado] = useState("todos")
     const [mesExport, setMesExport] = useState(hoyISO().slice(0, 7))
     const [eligeCuenta, setEligeCuenta] = useState<{ opId: string; bancos: any[] } | null>(null)
+    // Confirmar / anular / eliminar piden confirmación con un diálogo del sistema (no confirm() nativo)
+    const [dialogo, setDialogo] = useState<{ tipo: "confirmar" | "anular" | "eliminar"; op: any } | null>(null)
+    const [motivoAnular, setMotivoAnular] = useState("")
+    const [trabajando, setTrabajando] = useState(false)
+    // Lo que mueve plata (confirmar, anular, eliminar una pagada) es solo de admin; el servidor lo vuelve a controlar
+    const { esAdmin } = useMisRoles()
 
     const finDeMes = (ym: string) => {
         const [y, m] = ym.split("-").map(Number)
@@ -44,6 +57,7 @@ export default function OrdenesPagoPage() {
         try {
             const res = await fetch(`/api/ordenes-pago?estado=${filtroEstado}`)
             const data = await res.json()
+            if (!res.ok && !silencioso) toast.error(data?.error || "No se pudieron cargar las órdenes de pago")
             setOrdenes(Array.isArray(data) ? data : [])
         } catch (e) {
             console.error(e)
@@ -53,7 +67,8 @@ export default function OrdenesPagoPage() {
     }
 
     async function confirmarOP(id: string, cuentaBancariaId?: string) {
-        if (!cuentaBancariaId && !confirm("¿Confirmar esta orden de pago? Se generarán los movimientos en cuenta corriente, kardex y saldos.")) return
+        if (trabajando) return
+        setTrabajando(true)
         try {
             const res = await fetch(`/api/ordenes-pago/${id}/confirmar`, {
                 method: "POST",
@@ -70,36 +85,77 @@ export default function OrdenesPagoPage() {
                     setEligeCuenta({ opId: id, bancos })
                     return
                 }
-                alert(d.error || "Error al confirmar")
+                toast.error(d.error || "No se pudo confirmar la orden de pago", { duration: 12000 })
                 return
             }
             if (d.numero_certificado) {
-                alert(`OP confirmada. Se emitió el certificado de retención N° ${d.numero_certificado} — podés bajarlo con el botón naranja.`)
+                toast.success(`Orden de pago confirmada. Se emitió el certificado de retención N° ${d.numero_certificado}: se baja con el botón naranja.`, { duration: 10000 })
+            } else {
+                toast.success("Orden de pago confirmada.")
             }
             loadOrdenes()
-        } catch (e) {
+        } catch (e: any) {
             console.error(e)
+            toast.error(e?.message || "No se pudo confirmar la orden de pago")
+        } finally {
+            setTrabajando(false)
+        }
+    }
+
+    async function anularOP(op: any, motivo: string) {
+        if (trabajando) return
+        setTrabajando(true)
+        try {
+            const res = await fetch(`/api/ordenes-pago/${op.id}/anular`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ motivo }),
+            })
+            const d = await res.json().catch(() => ({}))
+            if (!res.ok) { toast.error(d.error || "No se pudo anular la orden de pago", { duration: 12000 }); return }
+            toast.success(`Orden de pago ${op.numero_op} anulada. Se revirtió todo y queda en el listado como Anulada.`)
+            loadOrdenes()
+        } catch (e: any) {
+            console.error(e)
+            toast.error(e?.message || "No se pudo anular la orden de pago")
+        } finally {
+            setTrabajando(false)
         }
     }
 
     async function eliminarOP(op: any) {
-        const msg = op.estado === "pagada"
-            ? `¿ELIMINAR la OP ${op.numero_op} como si nunca hubiera existido?\n\nSe revierte TODO: saldos de cajas/bancos (contraasiento en kardex), cheques vuelven a cartera, cuenta corriente del proveedor queda como estaba, vencimientos vuelven a pendiente, el certificado de retención se elimina (no sale en el TXT de SICORE) y los números de OP y certificado se liberan si eran los últimos.`
-            : `¿Eliminar la OP ${op.numero_op}? Se borra por completo y el número se libera si era el último.`
-        if (!confirm(msg)) return
+        if (trabajando) return
+        setTrabajando(true)
         try {
             const res = await fetch(`/api/ordenes-pago/${op.id}/eliminar`, { method: "POST" })
-            const d = await res.json()
-            if (!res.ok) { alert(d.error || "Error al eliminar"); return }
+            const d = await res.json().catch(() => ({}))
+            if (!res.ok) { toast.error(d.error || "No se pudo eliminar la orden de pago", { duration: 12000 }); return }
             const libs = [
                 d.numero_op_liberado ? `N° de OP ${op.numero_op} liberado` : null,
                 d.certificado_liberado ? `N° de certificado liberado` : null,
             ].filter(Boolean)
-            alert(`OP eliminada.${libs.length ? " " + libs.join(" · ") + "." : ""}`)
+            toast.success(`Orden de pago eliminada.${libs.length ? " " + libs.join(" · ") + "." : ""}`)
             loadOrdenes()
-        } catch (e) {
+        } catch (e: any) {
             console.error(e)
+            toast.error(e?.message || "No se pudo eliminar la orden de pago")
+        } finally {
+            setTrabajando(false)
         }
+    }
+
+    function abrirDialogo(tipo: "confirmar" | "anular" | "eliminar", op: any) {
+        setMotivoAnular("")
+        setDialogo({ tipo, op })
+    }
+    function aceptarDialogo() {
+        const d = dialogo
+        if (!d) return
+        if (d.tipo === "anular" && !motivoAnular.trim()) { toast.warning("Escribí el motivo de la anulación."); return }
+        setDialogo(null)
+        if (d.tipo === "confirmar") confirmarOP(d.op.id)
+        else if (d.tipo === "anular") anularOP(d.op, motivoAnular.trim())
+        else eliminarOP(d.op)
     }
 
     function getBadgeEstado(estado: string) {
@@ -108,6 +164,7 @@ export default function OrdenesPagoPage() {
             case "pendiente": return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100">Pendiente</Badge>
             case "borrador": return <Badge variant="secondary">Borrador</Badge>
             case "cancelada": return <Badge className="bg-red-100 text-red-700 hover:bg-red-100">Cancelada</Badge>
+            case "anulada": return <Badge className="bg-red-100 text-red-700 hover:bg-red-100">Anulada</Badge>
             default: return <Badge variant="outline">{estado}</Badge>
         }
     }
@@ -190,6 +247,7 @@ export default function OrdenesPagoPage() {
                                         <SelectItem value="todos">Todos</SelectItem>
                                         <SelectItem value="pendiente">Pendientes</SelectItem>
                                         <SelectItem value="pagada">Pagadas</SelectItem>
+                                        <SelectItem value="anulada">Anuladas</SelectItem>
                                         <SelectItem value="cancelada">Canceladas</SelectItem>
                                     </SelectContent>
                                 </Select>
@@ -284,18 +342,26 @@ export default function OrdenesPagoPage() {
                                                             </Button>
                                                         </a>
                                                     )}
-                                                    {op.estado === "pendiente" && (
-                                                        <Button variant="ghost" size="sm"
+                                                    {op.estado === "pendiente" && esAdmin && (
+                                                        <Button variant="ghost" size="sm" disabled={trabajando}
                                                             className="text-green-600 hover:bg-green-50"
-                                                            onClick={() => confirmarOP(op.id)}
-                                                            title="Confirmar pago">
+                                                            onClick={() => abrirDialogo("confirmar", op)}
+                                                            title="Confirmar pago (sale la plata)">
                                                             <CheckCircle2 className="h-4 w-4" />
                                                         </Button>
                                                     )}
-                                                    {(op.estado === "pendiente" || op.estado === "pagada") && (
-                                                        <Button variant="ghost" size="sm"
+                                                    {op.estado === "pagada" && esAdmin && (
+                                                        <Button variant="ghost" size="sm" disabled={trabajando}
+                                                            className="text-amber-700 hover:bg-amber-50 gap-1"
+                                                            onClick={() => abrirDialogo("anular", op)}
+                                                            title="Anular: revierte el pago y deja la orden como Anulada">
+                                                            <Undo2 className="h-4 w-4" /> Anular
+                                                        </Button>
+                                                    )}
+                                                    {(op.estado === "pendiente" || (op.estado === "pagada" && esAdmin)) && (
+                                                        <Button variant="ghost" size="sm" disabled={trabajando}
                                                             className="text-red-600 hover:bg-red-50"
-                                                            onClick={() => eliminarOP(op)}
+                                                            onClick={() => abrirDialogo("eliminar", op)}
                                                             title="Eliminar (revierte todo, como si nunca hubiera existido)">
                                                             <Trash2 className="h-4 w-4" />
                                                         </Button>
@@ -310,6 +376,77 @@ export default function OrdenesPagoPage() {
                     </CardContent>
                 </Card>
             </main>
+
+            {/* Confirmar / anular / eliminar: diálogo del sistema que explica qué va a pasar */}
+            <AlertDialog open={!!dialogo} onOpenChange={(o) => { if (!o) setDialogo(null) }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            {dialogo?.tipo === "confirmar" && `¿Confirmar la orden de pago ${dialogo.op.numero_op}?`}
+                            {dialogo?.tipo === "anular" && `¿Anular la orden de pago ${dialogo.op.numero_op}?`}
+                            {dialogo?.tipo === "eliminar" && `¿Eliminar la orden de pago ${dialogo.op.numero_op}?`}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                            <div className="space-y-2 text-sm">
+                                {dialogo && (
+                                    <p>
+                                        <b>{dialogo.op.proveedores?.nombre || dialogo.op.proveedores?.sigla || "Proveedor"}</b> · neto {formatCurrency(dialogo.op.neto_a_pagar)}
+                                        {Number(dialogo.op.total_retenciones || 0) > 0 ? ` · retenciones ${formatCurrency(dialogo.op.total_retenciones)}` : ""}
+                                    </p>
+                                )}
+                                {dialogo?.tipo === "confirmar" && (
+                                    <>
+                                        <p>Al confirmar sale la plata:</p>
+                                        <ul className="list-disc space-y-0.5 pl-5">
+                                            <li>baja el saldo de la caja o del banco y los cheques pasan a entregados,</li>
+                                            <li>se registra el pago en la cuenta corriente del proveedor,</li>
+                                            <li>los comprobantes y vencimientos elegidos quedan pagados,</li>
+                                            <li>si hay retención de Ganancias, se emite el certificado.</li>
+                                        </ul>
+                                        <p>Si algún comprobante ya no tiene saldo (lo pagó otra orden), no se confirma y avisa cuál.</p>
+                                    </>
+                                )}
+                                {dialogo?.tipo === "anular" && (
+                                    <>
+                                        <p>Anular revierte el pago y deja la orden en el listado como <b>Anulada</b>:</p>
+                                        <ul className="list-disc space-y-0.5 pl-5">
+                                            <li>la plata vuelve a la caja o al banco (contraasiento),</li>
+                                            <li>los cheques de terceros vuelven a cartera; los propios quedan anulados,</li>
+                                            <li>la deuda vuelve a la cuenta corriente del proveedor,</li>
+                                            <li>los comprobantes y vencimientos vuelven a pendiente,</li>
+                                            <li>el certificado de retención queda anulado (su número no se vuelve a usar).</li>
+                                        </ul>
+                                        <Input autoFocus placeholder="Motivo de la anulación (obligatorio)" value={motivoAnular}
+                                            onChange={e => setMotivoAnular(e.target.value)} />
+                                    </>
+                                )}
+                                {dialogo?.tipo === "eliminar" && (dialogo.op.estado === "pagada" ? (
+                                    <>
+                                        <p>Eliminar la borra <b>como si nunca hubiera existido</b>. Se revierte todo:</p>
+                                        <ul className="list-disc space-y-0.5 pl-5">
+                                            <li>saldos de cajas y bancos (contraasiento), cheques otra vez en cartera,</li>
+                                            <li>la cuenta corriente del proveedor queda como estaba y los vencimientos vuelven a pendiente,</li>
+                                            <li>el certificado de retención se elimina (no sale en el TXT de SICORE),</li>
+                                            <li>los números de OP y de certificado se liberan si eran los últimos.</li>
+                                        </ul>
+                                        <p>Si el certificado ya se le entregó al proveedor o el período ya se presentó, usá <b>Anular</b> en lugar de eliminar.</p>
+                                    </>
+                                ) : (
+                                    <p>Todavía no se pagó: se borra por completo y el número se libera si era el último. No mueve plata.</p>
+                                ))}
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Volver</AlertDialogCancel>
+                        <AlertDialogAction
+                            className={dialogo?.tipo === "confirmar" ? "" : "bg-red-600 hover:bg-red-700"}
+                            onClick={(e) => { e.preventDefault(); aceptarDialogo() }}>
+                            {dialogo?.tipo === "confirmar" ? "Confirmar pago" : dialogo?.tipo === "anular" ? "Anular la orden" : "Eliminar la orden"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             {/* Selección de cuenta bancaria de origen para OP con transferencias */}
             {eligeCuenta && (

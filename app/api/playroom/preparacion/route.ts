@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from "@/lib/utils"
 import { fetchAllRows } from "@/lib/playroom/queries"
 
@@ -23,7 +23,7 @@ interface PedidoEmpleado {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso('reportes_playroom')
   if (auth.error) return auth.error
   const sp = new URL(req.url).searchParams
   const hoy = todayArgentina()

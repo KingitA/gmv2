@@ -8,9 +8,9 @@
  *   · cobranzas   → cobranza_confirmar / pago_verificar
  *   · proveedores → op_confirmar / op_anular (ordenes_pago, migración 20260726_i1)
  *   · cheques     → caja_depositar_cheque / caja_acreditar_cheque
- * Único consumidor restante: app/finanzas/proveedores/pagos/page.tsx (pagos
- * sugeridos por IA). NO agregar nuevos usos; al migrar esa pantalla a OP,
- * eliminar este archivo y dropear las RPCs fin_*.
+ * 16/11/2026 (E-64): la pantalla app/finanzas/proveedores/pagos se retiró
+ * (redirige a /ordenes-pago) y crearPagoProveedor / ejecutarPagoSugerido ya no
+ * mueven plata. Nada vivo importa este archivo. NO agregar nuevos usos.
  */
 
 import { createClient } from "@/lib/supabase/server"
@@ -93,41 +93,17 @@ export async function confirmarCobro(params: {
 }
 
 
-export async function crearPagoProveedor(params: {
-    proveedorId: string
-    color: "BLANCO" | "NEGRO"
-    items: Array<{
-        tipo: "EFECTIVO" | "BANCO" | "CHEQUE" | "CHEQUE_PROPIO"
-        id?: string // cheque_id
-        aux_id?: string // caja_id or banco_id
-        monto: number
-        banco?: string
-        numero?: string
-        fecha_emision?: string
-        fecha_vencimiento?: string
-    }>
-    total: number
-}) {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) throw new Error("Unauthorized")
+// E-64 (16/11/2026): RETIRADO. Llamaba a la RPC fin_crear_pago_proveedor, que
+// movía saldos de caja/banco y cheques sin kardex, sin cuenta corriente del
+// proveedor y sin retención. Los pagos a proveedores se hacen únicamente con
+// Órdenes de pago (/ordenes-pago → op_crear / op_confirmar). Se deja la
+// función para que un llamado viejo falle con un mensaje claro en vez de
+// mover plata por fuera del circuito.
+const PAGO_PROVEEDOR_RETIRADO =
+    "Esta forma de pagar a proveedores se retiró. Los pagos se hacen desde Proveedores → Órdenes de pago."
 
-    // 1. RPC Call
-    const { data, error } = await supabase.rpc("fin_crear_pago_proveedor", {
-        p_proveedor_id: params.proveedorId,
-        p_color: params.color,
-        p_items_json: params.items,
-        p_total: params.total,
-        p_user_id: user.id
-    })
-
-    if (error) throw new Error(error.message)
-
-    // 2. Legacy Call
-    // (Optional: if we found a legacy table, we would call it here)
-
-    revalidatePath("/finanzas")
-    return data
+export async function crearPagoProveedor(_params?: unknown): Promise<never> {
+    throw new Error(PAGO_PROVEEDOR_RETIRADO)
 }
 
 
@@ -157,16 +133,7 @@ export async function obtenerSugerenciaPagoProveedor(proveedorId: string, monto:
     return IAPagoSugerido.generarPagoSugerido(proveedorId, monto, color)
 }
 
-export async function ejecutarPagoSugerido(sugerenciaId: string) {
-    const supabase = await createClient()
-    const { data: sug } = await supabase.from('pagos_proveedores_sugeridos').select('*').eq('id', sugerenciaId).single()
-    if (!sug) throw new Error("Suggestion not found")
-
-    // Call createPagoProveedor with the payload from suggestion
-    return crearPagoProveedor({
-        proveedorId: sug.proveedor_id,
-        color: sug.color,
-        items: sug.items_json,
-        total: sug.monto_objetivo
-    })
+export async function ejecutarPagoSugerido(_sugerenciaId?: string): Promise<never> {
+    // E-64: ejecutaba crearPagoProveedor con lo sugerido por la IA. Retirado.
+    throw new Error(PAGO_PROVEEDOR_RETIRADO)
 }

@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 import { anotarResponsableOP } from '@/lib/ordenes-pago/responsable'
 
 // GET /api/ordenes-pago/[id]
@@ -8,7 +8,7 @@ export async function GET(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth()
+    const auth = await requirePermiso('ordenes_pago')
     if (auth.error) return auth.error
 
     const { id } = await params
@@ -41,7 +41,7 @@ export async function DELETE(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth()
+    const auth = await requirePermiso('ordenes_pago')
     if (auth.error) return auth.error
 
     const { id } = await params
