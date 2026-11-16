@@ -4,6 +4,9 @@ import { requireAuth } from '@/lib/auth';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
 import { nowArgentina } from '@/lib/utils';
 import { hoyISO, mediodiaAR, sumarDiasISO } from '@/lib/formato';
+import { aUnidadesBase, unidadesPorBultoDe } from '@/lib/deposito/unidades';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function calcularFechaEstimadaRecepcion(supabase: any, proveedorId: string): Promise<string> {
     // Try AVG of actual receipt times for this provider
@@ -31,14 +34,61 @@ export async function POST(request: NextRequest) {
 
     try {
         const body = await request.json();
-        const { proveedor_id, observaciones, items } = body;
+        const { proveedor_id, observaciones } = body;
         // items: Array<{ articulo_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1-4 }>
 
-        if (!proveedor_id || !items || items.length === 0) {
+        if (!proveedor_id || !Array.isArray(body.items) || body.items.length === 0) {
             return NextResponse.json({ error: 'proveedor_id e items son requeridos' }, { status: 400 });
         }
 
         const supabase = createAdminClient();
+
+        // ── E-13: nada de lo que define cantidades se le cree al navegador ──
+        // Antes las unidades por bulto venían en el pedido (`item.articulo.unidades_por_bulto`) y,
+        // si no venían (OC de faltantes, importación desde archivo), se tomaba 1: la provisión de
+        // la cuenta corriente y el kardex pendiente quedaban calculados como si cada bulto fuera
+        // una unidad. Ahora se leen de la base. Y un renglón sin artículo no llega al insert.
+        const sinArticulo = body.items.filter((it: any) => !it || typeof it.articulo_id !== 'string' || !UUID.test(it.articulo_id)).length;
+        if (sinArticulo > 0) {
+            return NextResponse.json({
+                error: `Hay ${sinArticulo} renglón${sinArticulo > 1 ? 'es' : ''} sin artículo vinculado. Vinculalos a un artículo del catálogo o sacalos de la orden antes de crearla.`,
+                codigo: 'items_sin_articulo',
+            }, { status: 400 });
+        }
+        const cantidadInvalida = body.items.filter((it: any) => !(Number(it.cantidad_pedida) > 0)).length;
+        if (cantidadInvalida > 0) {
+            return NextResponse.json({ error: `Hay ${cantidadInvalida} renglón${cantidadInvalida > 1 ? 'es' : ''} con cantidad en cero o inválida.`, codigo: 'cantidad_invalida' }, { status: 400 });
+        }
+
+        const idsArticulos: string[] = [...new Set<string>(body.items.map((it: any) => it.articulo_id))];
+        const artPorId = new Map<string, any>();
+        for (let i = 0; i < idsArticulos.length; i += 200) {
+            const { data: arts, error: artErr } = await supabase
+                .from('articulos')
+                .select('id, sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, unidades_por_bulto')
+                .in('id', idsArticulos.slice(i, i + 200));
+            if (artErr) throw new Error(artErr.message);
+            for (const a of arts || []) artPorId.set(a.id, a);
+        }
+        const inexistentes = idsArticulos.filter((id) => !artPorId.has(id)).length;
+        if (inexistentes > 0) {
+            return NextResponse.json({ error: `Hay ${inexistentes} artículo${inexistentes > 1 ? 's' : ''} de la orden que ya no existe${inexistentes > 1 ? 'n' : ''} en el catálogo.`, codigo: 'articulo_inexistente' }, { status: 400 });
+        }
+
+        // Renglones normalizados: tipo válido y unidades por bulto DE LA BASE
+        const items = body.items.map((it: any) => {
+            const tipo_cantidad = it.tipo_cantidad === 'unidad' ? 'unidad' : 'bulto';
+            const unidadesPorBulto = unidadesPorBultoDe(artPorId.get(it.articulo_id)?.unidades_por_bulto);
+            const cantidad_pedida = Number(it.cantidad_pedida);
+            return {
+                ...it,
+                cantidad_pedida,
+                tipo_cantidad,
+                precio_unitario: Number(it.precio_unitario) || 0,
+                /** Unidades base que representa el renglón (bultos × unidades por bulto) */
+                cantidadBase: aUnidadesBase(cantidad_pedida, tipo_cantidad === 'bulto' ? unidadesPorBulto : 1),
+            };
+        });
 
         // 1. Generate OC number
         const { data: ultimaOrden } = await supabase
@@ -82,7 +132,7 @@ export async function POST(request: NextRequest) {
             orden_compra_id: orden.id,
             articulo_id: item.articulo_id,
             cantidad_pedida: item.cantidad_pedida,
-            tipo_cantidad: item.tipo_cantidad || 'bulto',
+            tipo_cantidad: item.tipo_cantidad,
             precio_unitario: item.precio_unitario,
             descuento1: item.descuento1 || 0,
             descuento2: item.descuento2 || 0,
@@ -95,9 +145,7 @@ export async function POST(request: NextRequest) {
 
         // 5. Calculate total and create provisional CC entry
         const totalOrden = items.reduce((sum: number, item: any) => {
-            const cantidadBase = item.tipo_cantidad === 'bulto'
-                ? item.cantidad_pedida * (item.articulo?.unidades_por_bulto || 1)
-                : item.cantidad_pedida;
+            const cantidadBase = item.cantidadBase;
             let precio = item.precio_unitario || 0;
             precio *= (1 - (item.descuento1 || 0) / 100);
             precio *= (1 - (item.descuento2 || 0) / 100);
@@ -132,10 +180,8 @@ export async function POST(request: NextRequest) {
 
         // 6. Insert kardex pendiente for each item + update articulos prices
         for (const item of items) {
-            // Quantity in units
-            const cantidadBase = item.tipo_cantidad === 'bulto'
-                ? item.cantidad_pedida * (item.articulo?.unidades_por_bulto || 1)
-                : item.cantidad_pedida;
+            // Quantity in units (unidades por bulto leídas de la base, no del navegador)
+            const cantidadBase = item.cantidadBase;
 
             let precioFinal = item.precio_unitario || 0;
             precioFinal *= (1 - (item.descuento1 || 0) / 100);
@@ -143,12 +189,8 @@ export async function POST(request: NextRequest) {
             precioFinal *= (1 - (item.descuento3 || 0) / 100);
             precioFinal *= (1 - (item.descuento4 || 0) / 100);
 
-            // Get article info for denormalization
-            const { data: artInfo } = await supabase
-                .from('articulos')
-                .select('sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas')
-                .eq('id', item.articulo_id)
-                .single();
+            // Article info for denormalization (ya leída arriba, una sola consulta)
+            const artInfo = artPorId.get(item.articulo_id);
 
             await insertarKardex(
                 supabase,
