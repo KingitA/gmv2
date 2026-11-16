@@ -5,7 +5,8 @@
 -- (usa op_movimiento_de y op_validar_imputaciones).
 --
 -- El cuerpo es EXACTAMENTE el de la v5 (20260807_op_confirmar_v5_origen_por_linea.sql)
--- con DOS agregados, marcados con "v6":
+-- con TRES agregados, marcados con "v6":
+--   0) al entrar: solo se confirma una OP en estado pendiente (E-73).
 --   A) al entrar: llave por proveedor + completar movimiento_cc_id de las
 --      imputaciones hechas solo por vencimiento que tienen comprobante detrás.
 --   B) antes de asentar el pago en la cuenta corriente: op_validar_imputaciones
@@ -20,6 +21,18 @@
 -- sesión del usuario (verificado en el código el 16/11/2026).
 -- Seguro de re-ejecutar.
 -- ═════════════════════════════════════════════════════════════════════════════
+
+-- ═══ Control previo: esta migración necesita la 20261116p ya aplicada ═══
+-- Es lo PRIMERO que se ejecuta: si falta algo corta acá, antes de cambiar nada.
+DO $$
+BEGIN
+  IF to_regprocedure('public.op_crear(jsonb, text)') IS NULL
+     OR to_regprocedure('public.op_movimiento_de(uuid, uuid)') IS NULL
+     OR to_regprocedure('public.op_validar_imputaciones(uuid, jsonb, uuid, boolean)') IS NULL
+     OR to_regprocedure('public.op_normalizar_imputaciones(jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'Falta aplicar ANTES la migración 20261116p_op_crear.sql (no existen op_crear / op_movimiento_de / op_validar_imputaciones / op_normalizar_imputaciones). No se cambió nada: aplicá primero la 20261116p y después volvé a correr esta.';
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION public.op_confirmar(p_op_id uuid, p_usuario_id uuid, p_caja_id uuid DEFAULT NULL::uuid, p_cuenta_banco_id uuid DEFAULT NULL::uuid)
  RETURNS jsonb
@@ -56,6 +69,10 @@ BEGIN
   END IF;
   IF v_op.estado = 'anulada' THEN
     RAISE EXCEPTION 'op_confirmar: la OP está anulada';
+  END IF;
+  -- v6 (E-73): solo se confirma una orden PENDIENTE (antes una cancelada pasaba)
+  IF v_op.estado IS DISTINCT FROM 'pendiente' THEN
+    RAISE EXCEPTION 'La orden de pago % está %: solo se puede confirmar una orden pendiente.', v_op.numero_op, COALESCE(v_op.estado, 'sin estado');
   END IF;
 
   -- ── v6 (E-52 / E-54) ──────────────────────────────────────────────────────

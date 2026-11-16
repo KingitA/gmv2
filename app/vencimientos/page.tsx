@@ -218,7 +218,7 @@ export default function VencimientosPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Button variant="outline" asChild><Link href="/ordenes-compra?nueva=1"><Plus className="h-4 w-4" /> Orden de compra</Link></Button>
-                    <Button variant="outline" asChild><Link href="/ordenes-pago/nueva"><DollarSign className="h-4 w-4" /> Orden de pago</Link></Button>
+                    {roles.includes("admin") && <Button variant="outline" asChild><Link href="/ordenes-pago/nueva"><DollarSign className="h-4 w-4" /> Orden de pago</Link></Button>}
                 </div>
             </div>
 
@@ -355,12 +355,14 @@ export default function VencimientosPage() {
                                                                 onClick={() => marcarPagado(v.id)}>
                                                                 <CheckCircle2 className="h-4 w-4" />
                                                             </Button>
+                                                            {roles.includes("admin") && (
                                                             <Link href={`/ordenes-pago/nueva?proveedor_id=${v.proveedor_id}&vencimiento_id=${v.id}&monto=${v.monto}`}>
                                                                 <Button variant="ghost" size="sm"
                                                                     className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
                                                                     <DollarSign className="h-4 w-4" />
                                                                 </Button>
                                                             </Link>
+                                                            )}
                                                             <Button variant="ghost" size="sm"
                                                                 className="text-red-600 hover:text-red-700 hover:bg-red-50"
                                                                 onClick={() => cancelarVencimiento(v.id)}>

@@ -49,7 +49,7 @@ export const SECCIONES: Seccion[] = [
     accesos: [
       { label: "Pagos y vencimientos", href: "/vencimientos" },
       { label: "Fichas de proveedores", href: "/proveedores" },
-      { label: "Órdenes de pago", href: "/ordenes-pago" },
+      { label: "Órdenes de pago", href: "/ordenes-pago", roles: ["admin"] }, // solo admin arma y ejecuta pagos (lib/auth.ts → ordenes_pago)
       { label: "Órdenes de compra", href: "/ordenes-compra" },
       { label: "NC esperadas", href: "/ordenes-compra/nc-pendientes" },
       { label: "Listas de precios", href: "/listas-proveedores" },

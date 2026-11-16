@@ -1362,6 +1362,8 @@ const ordenesDePago: Herramienta = {
     "Pagos HECHOS (u órdenes de pago armadas) a proveedores en un período: número de OP, proveedor, monto, retenciones, neto, CÓMO se pagó (efectivo, transferencia, cheque), quién la ARMÓ (= quién AUTORIZÓ el pago), quién la confirmó y quién la anuló. Gastos y vencimientos pagados sin orden de pago (EDES, impuestos…): 'gastos_pagados'. Para lo que FALTA pagar usá 'pagos_proveedores'.",
   esquema: { type: "object", properties: { ...P_PERIODO, proveedor: { type: "string" }, ...P_LIMITE } },
   async ejecutar(ctx, p) {
+    // Órdenes de pago: solo admin, igual que la pantalla (lib/auth.ts → PERMISOS.ordenes_pago)
+    if (!(await veReservados(ctx))) throw new ErrorHerramienta("Las órdenes de pago a proveedores solo las puede consultar un administrador.")
     const r = resolverPeriodo(p as never, "mes_actual", ctx.hoy)
     let provId: string | null = null
     let nombreProv = ""

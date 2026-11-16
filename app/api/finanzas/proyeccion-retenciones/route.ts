@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 
 /**
  * GET /api/finanzas/proyeccion-retenciones — retención de Ganancias proyectada
@@ -9,7 +9,8 @@ import { requireAuth } from '@/lib/auth'
  * el panel muestre el neto real que va a salir de la caja.
  */
 export async function GET() {
-  const auth = await requireAuth()
+  // Retenciones a proveedores: mismo criterio que las órdenes de pago (solo admin)
+  const auth = await requirePermiso('ordenes_pago')
   if (auth.error) return auth.error
   try {
     const supabase = createAdminClient()

@@ -126,6 +126,8 @@ function NuevaOrdenPagoContent() {
     const preselVencHecha = useRef(false)
     // Clave de esta carga: si el pedido llega dos veces (doble click), el servidor crea una sola OP
     const claveRef = useRef("")
+    // Lo que se mandó con esa clave: si el formulario cambió, es otro pedido y lleva clave nueva
+    const claveFirmaRef = useRef("")
 
     const [cheques, setCheques] = useState<any[]>([])
     const [submitting, setSubmitting] = useState(false)
@@ -604,13 +606,8 @@ function NuevaOrdenPagoContent() {
 
         if (submitting) return
         setSubmitting(true)
-        if (!claveRef.current) claveRef.current = crypto.randomUUID()
         try {
-            const res = await fetch("/api/ordenes-pago", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    clave: claveRef.current,
+            const cuerpo = {
                     proveedor_id: proveedorId,
                     fecha,
                     observaciones,
@@ -641,7 +638,19 @@ function NuevaOrdenPagoContent() {
                         comprobante_compra_id: i.comprobante_compra_id || null,
                         monto_imputado: i.monto_imputado
                     }))
-                })
+            }
+            // Misma clave SOLO si es exactamente el mismo pedido (doble click o reintento
+            // por corte de red). Si el formulario cambió después de un intento, es otra
+            // orden: clave nueva, así el servidor no devuelve la anterior como "creada".
+            const firma = JSON.stringify(cuerpo)
+            if (!claveRef.current || claveFirmaRef.current !== firma) {
+                claveRef.current = crypto.randomUUID()
+                claveFirmaRef.current = firma
+            }
+            const res = await fetch("/api/ordenes-pago", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ clave: claveRef.current, ...cuerpo }),
             })
 
             const data = await res.json().catch(() => ({}))

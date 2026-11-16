@@ -366,7 +366,7 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
                   Recalcular desde ficha
                 </Button>
               )}
-              {venc?.proveedor_id && (
+              {venc?.proveedor_id && roles.includes("admin") && (
                 <Button type="button" variant="outline" asChild>
                   <a href={`/ordenes-pago/nueva?proveedor_id=${venc.proveedor_id}&vencimiento_id=${venc.id}&monto=${venc.monto ?? 0}`}>Generar OP</a>
                 </Button>

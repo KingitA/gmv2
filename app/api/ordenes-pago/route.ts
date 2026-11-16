@@ -110,8 +110,11 @@ export async function POST(request: Request) {
     })
 
     if (error) {
-        // La función todavía no está en la base: avisar claro, no crear a medias
-        if (error.code === 'PGRST202' || error.code === '42883') {
+        // op_crear todavía no está en la base: avisar claro, no crear a medias.
+        // Solo cuando la que falta es op_crear; cualquier otra función inexistente
+        // (42883 desde adentro de op_crear) es un error real y se informa tal cual.
+        const faltaOpCrear = (error.code === 'PGRST202' || error.code === '42883') && /op_crear/.test(error.message || '')
+        if (faltaOpCrear) {
             return NextResponse.json({
                 error: 'Falta aplicar en la base la migración 20261116p_op_crear.sql (y 20261116q_op_confirmar_v6.sql). Hasta entonces no se pueden crear órdenes de pago.',
                 error_code: 'FALTA_MIGRACION',
