@@ -1,6 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
+import { conversionesDeRecepcion } from '@/lib/deposito/recepciones';
+import { aUnidadesBase } from '@/lib/deposito/unidades';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
 import { nowArgentina } from '@/lib/utils';
 import { hoyISO } from '@/lib/formato';
@@ -99,9 +101,10 @@ export async function POST(
         for (const decision of decisions) {
             const { item_id, tipo, accion, transporte_id, valor_real, descripcion } = decision;
 
+            // select('*'): trae también unidad_conteo / cantidad_fisica_base si la migración 20261116a está aplicada
             const { data: item } = await supabase
                 .from('recepciones_items')
-                .select(`articulo_id, precio_real, precio_oc, precio_documentado, cantidad_documentada, cantidad_fisica,
+                .select(`*,
                     articulo:articulos(sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual)`)
                 .eq('id', item_id)
                 .single();
@@ -109,21 +112,45 @@ export async function POST(
             if (!item) { results.push({ item_id, error: 'Not found' }); continue; }
 
             const articuloInfo = Array.isArray(item.articulo) ? item.articulo[0] : item.articulo;
-            const precioBase = item.precio_real || item.precio_documentado || item.precio_oc || 0;
+
+            // ── Todo en UNIDADES base (E-30) ──────────────────────────────────────────────
+            // La verificación manda la diferencia en unidades. Los precios de la línea no están
+            // todos en lo mismo: precio_oc es por unidad; precio_documentado (y precio_real cuando
+            // sale de la factura) es por la unidad de la FACTURA: si vino por bulto, es el precio
+            // del bulto y factor_conversion dice cuántas unidades trae. Acá se lleva todo a unidad
+            // para que cantidad × precio dé plata de verdad (1 bulto de 24 u a $2.400 = $2.400,
+            // no 24 × $2.400).
+            const factorDoc = Number(item.factor_conversion) > 0 ? Number(item.factor_conversion) : 1;
+            const precioDocUnidad = Number(item.precio_documentado || 0) / factorDoc;
+            const precioOCUnidad = Number(item.precio_oc || 0);
+            const precioBase = Number(item.precio_documentado || 0) > 0
+                ? Number(item.precio_real || item.precio_documentado) / factorDoc
+                : Number(item.precio_real || item.precio_oc || 0);
+            // Lo recibido, en unidades: lo que sumó al stock, o lo contado × su factor
+            let fisicaUnidades = Number(item.cantidad_fisica_base ?? NaN);
+            if (!Number.isFinite(fisicaUnidades)) {
+                const { porItem } = await conversionesDeRecepcion(supabase, ocId || null, [item]);
+                fisicaUnidades = aUnidadesBase(item.cantidad_fisica, porItem.get(item.id)?.factorConteo ?? 1);
+            }
 
             if (tipo === 'precio') {
-                // Precio facturado real: lo documentado por OCR, o lo que mande el front
-                const precioFacturado = Number(item.precio_documentado || valor_real || 0);
-                const precioAcordado = Number(item.precio_oc || 0);
-                // Cantidad: lo documentado en factura; si no hay, lo recibido físico.
-                const cantidadNC = Number(item.cantidad_documentada || item.cantidad_fisica || 0);
+                // Precio facturado real: lo documentado en la factura, por unidad.
+                // (valor_real NO es un precio: la verificación manda ahí la cantidad de la diferencia.)
+                const precioFacturado = precioDocUnidad;
+                const precioAcordado = precioOCUnidad;
+                if (!(precioFacturado > 0)) {
+                    results.push({ item_id, tipo, accion, error: 'Este artículo no tiene precio facturado: no hay diferencia de precio para resolver.' });
+                    continue;
+                }
+                // Cantidad (unidades): lo documentado en factura; si no hay, lo recibido físico.
+                const cantidadNC = Number(item.cantidad_documentada || 0) || fisicaUnidades;
                 const montoDif = Math.abs(Math.round((precioFacturado - precioAcordado) * cantidadNC * 100) / 100);
 
                 if (accion === 'A') {
-                    // Asumir: update precio_compra on articulo
-                    const nuevoPrecio = precioFacturado || valor_real;
-                    await supabase.from('articulos').update({ precio_compra: nuevoPrecio, actualizado_por: auth.user.id }).eq('id', item.articulo_id);
-                    await supabase.from('recepciones_items').update({ precio_real: nuevoPrecio, precio_verificado: true }).eq('id', item_id);
+                    // Asumir: el costo del artículo (por unidad) pasa a ser el facturado
+                    await supabase.from('articulos').update({ precio_compra: Math.round(precioFacturado * 10000) / 10000, actualizado_por: auth.user.id }).eq('id', item.articulo_id);
+                    // precio_real sigue en la unidad de la factura, como precio_documentado
+                    await supabase.from('recepciones_items').update({ precio_real: Number(item.precio_documentado), precio_verificado: true }).eq('id', item_id);
                 } else if (accion === 'B' || accion === 'C') {
                     // Reclamo al proveedor: NC esperada por diferencia de precio
                     if (proveedorId && montoDif > 0) {
@@ -152,7 +179,7 @@ export async function POST(
                     await supabase.from('recepciones_items').update({ precio_verificado: true }).eq('id', item_id);
                 }
             } else if (tipo === 'mercaderia') {
-                const cantidadDif = Math.abs(valor_real); // cantidad faltante en unidades
+                const cantidadDif = Math.abs(Number(valor_real) || 0); // cantidad faltante en UNIDADES base
 
                 if (accion === 'A') {
                     // Empresa absorbs: just adjust, no extra movement

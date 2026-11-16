@@ -9,6 +9,9 @@
  * renglones bonificados; unidades = round(parte / precio_base).
  */
 
+// Bultos y unidades de la recepción (E-30): la app los importa por el mismo alias `@gm/deposito`.
+export * from "./unidades"
+
 export interface LineaBonificable {
   id: string
   cantidad: number | null

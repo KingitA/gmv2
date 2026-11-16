@@ -15,3 +15,31 @@ export const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash"
 
 /** Alias estable de Google: siempre apunta al Flash vigente. Se usa si el principal falla. */
 export const GEMINI_MODEL_FALLBACK = process.env.GEMINI_MODEL_FALLBACK || "gemini-flash-latest"
+
+/**
+ * ¿El error es del MODELO o del servicio (dado de baja, cuota, caído) y vale la pena
+ * probar con el de respaldo? Un corte por tiempo o una respuesta mal formada NO: el
+ * respaldo tardaría lo mismo y duplicaría la espera.
+ */
+export function esErrorDeModeloGemini(e: unknown): boolean {
+  const err = e as { status?: number; name?: string; message?: string } | null
+  const msg = String(err?.message || "")
+  if (err?.name === "AbortError" || /timed? ?out|aborted/i.test(msg)) return false
+  const status = Number(err?.status) || Number(/\[(\d{3})\b/.exec(msg)?.[1]) || Number(/Gemini API (\d{3})/.exec(msg)?.[1]) || 0
+  if ([404, 429, 500, 502, 503, 504].includes(status)) return true
+  return /not found|no longer available|not supported|unavailable|overloaded|deprecated/i.test(msg)
+}
+
+/**
+ * Corre `fn` con el modelo principal y, si el modelo o el servicio fallan, UNA vez más
+ * con el de respaldo (E-37). Para todo lo que lee documentos con Gemini por el SDK.
+ */
+export async function conRespaldoGemini<T>(fn: (modelo: string) => Promise<T>, etiqueta = "gemini"): Promise<T> {
+  try {
+    return await fn(GEMINI_MODEL)
+  } catch (e) {
+    if (!GEMINI_MODEL_FALLBACK || GEMINI_MODEL_FALLBACK === GEMINI_MODEL || !esErrorDeModeloGemini(e)) throw e
+    console.warn(`[${etiqueta}] ${GEMINI_MODEL} falló, se reintenta con ${GEMINI_MODEL_FALLBACK}:`, (e as Error)?.message)
+    return fn(GEMINI_MODEL_FALLBACK)
+  }
+}

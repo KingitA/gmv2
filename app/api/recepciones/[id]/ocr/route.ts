@@ -5,10 +5,15 @@ import { resolveFactorConversion, UnidadFactura } from "@/lib/services/conversio
 import { MatchingEngine } from "@/lib/matching/matcher";
 import { ImportItemRaw } from "@/lib/matching/types";
 import { requireAuth } from '@/lib/auth'
-import { todayArgentina } from '@/lib/utils'
-import { matchAndCreateDetalle, revertirComprobanteOCR } from '@/lib/services/detalle'
+import { revertirComprobanteOCR } from '@/lib/services/detalle'
+import { buscarComprobanteDuplicado, comprobanteDesdeOCR, datosNoLeido, mensajeDuplicado, motivoNoLeido } from '@/lib/services/documento-compra'
 
 
+// POST /api/recepciones/[id]/ocr — foto de remito/factura desde depósito (web y app).
+// Respuesta: { success, document, comprobante, ocr_processing_results, no_leido?, aviso? }
+//   · no_leido: la IA falló o no encontró renglones ⇒ la foto queda adjunta, SIN marcar
+//     como procesada y sin crear comprobante (E-37). `aviso` dice qué pasó.
+//   · 409 codigo=comprobante_duplicado: esa factura del proveedor ya está cargada (E-36).
 export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -79,8 +84,27 @@ export async function POST(
 
         // 2. Perform OCR with Gemini AI
         const ocrResult = await processWithGemini(file, { proveedorNombre, tipoDocumento: tipo_documento });
+        const noLeido = motivoNoLeido(ocrResult);
 
-        // 3. Save document record
+        // 3. E-36: ¿esa factura del proveedor ya está cargada (en esta orden o en otra)?
+        //    Se avisa y no se guarda nada (antes se salteaba en silencio y la foto quedaba como procesada).
+        if (!noLeido && ordenCompraId && proveedorId && ocrResult.comprobante?.numero_comprobante) {
+            const dup = await buscarComprobanteDuplicado(supabase, {
+                proveedor_id: proveedorId,
+                tipo: inferirTipoComprobante(ocrResult, tipo_documento),
+                numero: ocrResult.comprobante.numero_comprobante,
+            });
+            if (dup) {
+                if (!uploadError) await supabase.storage.from("comprobantes").remove([fileName]);
+                return NextResponse.json(
+                    { error: mensajeDuplicado(dup, ordenCompraId), codigo: 'comprobante_duplicado', comprobante_id: dup.id },
+                    { status: 409 }
+                );
+            }
+        }
+
+        // 4. Save document record. E-37: si no se pudo leer, queda adjunto como "no leído"
+        //    (procesado = false, con el motivo) y NO se crea ningún comprobante.
         const { data: doc, error: docError } = await supabase
             .from("recepciones_documentos")
             .insert({
@@ -90,95 +114,56 @@ export async function POST(
                 storage_path: uploadError ? null : fileName,
                 nombre_archivo: file.name,
                 tipo_mime: file.type,
-                datos_ocr: ocrResult,
-                procesado: true,
+                datos_ocr: noLeido ? datosNoLeido(ocrResult, noLeido) : ocrResult,
+                procesado: !noLeido,
             })
             .select()
             .single();
 
         if (docError) throw docError;
 
-        // 4. Auto-create comprobante_compra when linked to an orden_compra
-        let comprobante = null;
-        if (ordenCompraId && proveedorId) {
-            const compMeta = ocrResult.comprobante;
-            const numeroExtraido = compMeta?.numero_comprobante;
-
-            // Duplicate check
-            let skipCreate = false;
-            if (numeroExtraido) {
-                const { data: dup } = await supabase
-                    .from('comprobantes_compra')
-                    .select('id')
-                    .eq('orden_compra_id', ordenCompraId)
-                    .eq('numero_comprobante', numeroExtraido)
-                    .maybeSingle();
-                if (dup) skipCreate = true;
-            }
-
-            if (!skipCreate) {
-                const tipoComp = inferirTipoComprobante(ocrResult, tipo_documento);
-                const sinIva = tipoComp === 'Adquisicion' || tipoComp === 'Remito';
-                const totalFactura = compMeta?.total_factura || 0;
-                const totalNeto = sinIva ? totalFactura : (compMeta?.subtotal_neto || (totalFactura > 0 ? totalFactura / 1.21 : 0));
-                const totalIva = sinIva ? 0 : (compMeta?.total_iva || (totalNeto > 0 && totalFactura > 0 ? totalFactura - totalNeto : 0));
-
-                const { data: comp } = await supabase.from('comprobantes_compra').insert({
-                    orden_compra_id: ordenCompraId,
-                    proveedor_id: proveedorId,
-                    tipo_comprobante: tipoComp,
-                    numero_comprobante: numeroExtraido || `PENDIENTE-${Date.now()}`,
-                    fecha_comprobante: compMeta?.fecha || todayArgentina(),
-                    total_factura_declarado: totalFactura,
-                    total_neto: totalNeto,
-                    total_iva: totalIva,
-                    percepcion_iva_monto: compMeta?.percepcion_iva || 0,
-                    percepcion_iibb_monto: compMeta?.percepcion_iibb || 0,
-                    retencion_ganancias_monto: compMeta?.retencion_ganancias || 0,
-                    total_calculado: totalNeto + totalIva + (compMeta?.percepcion_iva || 0) + (compMeta?.percepcion_iibb || 0) + (compMeta?.retencion_ganancias || 0),
-                    foto_url: fileUrl,
-                    estado: 'pendiente_recepcion',
-                    ajusta_stock: true,
-                    descuento_fuera_factura: compMeta?.descuento_global || 0,
-                }).select().single();
-                comprobante = comp;
-
-                // Vincular documento → comprobante (permite revertir al eliminar el doc)
-                if (comp) {
-                    await supabase.from('recepciones_documentos')
-                        .update({ comprobante_id: comp.id })
-                        .eq('id', doc.id);
-                }
-            }
+        if (noLeido) {
+            return NextResponse.json({
+                success: true,
+                document: doc,
+                comprobante: null,
+                ocr_processing_results: [],
+                no_leido: true,
+                aviso: `${noLeido} La foto quedó adjunta pero NO generó comprobante: sacala de nuevo (derecha, con luz, el papel entero) o avisá a la oficina para que lo cargue a mano.`,
+            });
         }
 
-        // 5. Create comprobante_compra_detalle from OCR items (even unmatched, to show in verificacion).
-        // matchAndCreateDetalle también actualiza recepciones_items (cantidades/precios documentados),
-        // así que processOCRData solo corre cuando NO se creó comprobante — correr ambos duplicaba
-        // cantidad_documentada.
+        // 5. Comprobante de compra + detalle cuando la recepción es de una OC
+        //    (sin número legible: se suma al comprobante provisorio de la orden, no se crea otro).
+        let comprobante = null;
+        let aviso: string | undefined;
         let processingResults: any[] = [];
-        if (comprobante && ocrResult.items.length > 0 && proveedorId) {
-            await matchAndCreateDetalle(supabase, {
-                comprobante_id: comprobante.id,
-                recepcion_id,
+        if (ordenCompraId && proveedorId) {
+            const r = await comprobanteDesdeOCR(supabase, {
+                orden_compra_id: ordenCompraId,
                 proveedor_id: proveedorId,
-                items: ocrResult.items,
+                recepcion_id,
                 documento_id: doc.id,
+                ocr: ocrResult,
+                tipo_documento,
+                foto_url: fileUrl,
             });
-        } else if (!comprobante && ocrResult.items.length > 0) {
+            comprobante = r.comprobante;
+            if (r.error) aviso = `La foto se leyó pero no se pudo crear el comprobante (${r.error}). Avisá a la oficina.`;
+            else if (r.sumado_a_provisorio) aviso = 'No se leyó el número del comprobante: los renglones se sumaron al comprobante provisorio de esta orden. La oficina tiene que completarle el número.';
+            else if (r.otro_provisorio) aviso = 'No se leyó el número del comprobante y ya había otro sin número en esta orden con otro total o fecha: se cargó como un comprobante aparte. La oficina tiene que completarles el número.';
+            else if (!ocrResult.comprobante?.numero_comprobante) aviso = 'No se leyó el número del comprobante: quedó como provisorio. La oficina tiene que completarle el número.';
+        } else {
             // 6. Sin comprobante (recepción sin OC vinculada) — actualizar items directo.
-            // Si el comprobante ya existía (duplicado), no reprocesar: ya se contó.
-            const yaExistia = ordenCompraId && ocrResult.comprobante?.numero_comprobante;
-            if (!yaExistia) {
-                processingResults = await processOCRData(supabase, recepcion_id, ocrResult);
-            }
+            processingResults = await processOCRData(supabase, recepcion_id, ocrResult);
         }
 
         return NextResponse.json({
             success: true,
             document: doc,
             comprobante,
-            ocr_processing_results: processingResults
+            ocr_processing_results: processingResults,
+            ...(aviso ? { aviso } : {}),
         });
 
     } catch (error: any) {
@@ -396,20 +381,42 @@ export async function DELETE(
 
         if (deleteError) throw deleteError;
 
-        const { count } = await supabase
-            .from("recepciones_documentos")
-            .select("*", { count: 'exact', head: true })
-            .eq("recepcion_id", recepcion_id);
-
-        if (count === 0) {
-            await supabase
-                .from("recepciones_items")
-                .update({
-                    cantidad_documentada: 0,
-                    precio_documentado: 0,
-                    precio_real: 0
-                })
+        // E-41. Antes: al borrar el ÚLTIMO documento se ponía en 0 lo documentado de TODA la
+        // recepción, también lo cargado a mano en la oficina (renglones agregados a un
+        // comprobante, matches confirmados) y lo de comprobantes sin foto.
+        // Ahora: lo que aplicó un documento con comprobante ya lo revirtió revertirComprobanteOCR
+        // (renglón por renglón). Solo queda el caso viejo de un documento SIN comprobante
+        // (recepción sin OC: el OCR sumó directo a los ítems): si era el último documento, se
+        // limpian únicamente los ítems que NO tienen ningún renglón de comprobante que los respalde.
+        if (!doc.comprobante_id) {
+            const { count } = await supabase
+                .from("recepciones_documentos")
+                .select("*", { count: 'exact', head: true })
                 .eq("recepcion_id", recepcion_id);
+
+            if (count === 0) {
+                const { data: items } = await supabase
+                    .from("recepciones_items")
+                    .select("id")
+                    .eq("recepcion_id", recepcion_id);
+                const ids: string[] = (items || []).map((i: any) => i.id);
+                const respaldados = new Set<string>();
+                for (let i = 0; i < ids.length; i += 200) {
+                    const { data: det, error: detErr } = await supabase
+                        .from("comprobantes_compra_detalle")
+                        .select("recepcion_item_id")
+                        .in("recepcion_item_id", ids.slice(i, i + 200));
+                    if (detErr) throw detErr; // ante la duda no se borra nada
+                    for (const d of det || []) if (d.recepcion_item_id) respaldados.add(d.recepcion_item_id);
+                }
+                const aLimpiar = ids.filter((id) => !respaldados.has(id));
+                for (let i = 0; i < aLimpiar.length; i += 200) {
+                    await supabase
+                        .from("recepciones_items")
+                        .update({ cantidad_documentada: 0, precio_documentado: 0, precio_real: 0 })
+                        .in("id", aLimpiar.slice(i, i + 200));
+                }
+            }
         }
 
         return NextResponse.json({ success: true });

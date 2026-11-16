@@ -7,10 +7,13 @@ import { scanOk, scanError } from "@/lib/utils/scan-feedback"
 import { useParams, useRouter } from "next/navigation"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 import { numero, parseMonto, moneda } from "@/lib/formato"
+import { aUnidadesBase, cant, cantidadConUnidad, textoCantidad, unidadLineaOC, unidadesPorBultoDe, type UnidadConteo } from "@/lib/deposito/unidades"
 
 interface RecepcionItem {
   id: string; articulo_id: string; cantidad_oc: number; cantidad_fisica: number
   estado_linea: "pendiente"|"ok"|"faltante"
+  /** E-30: en qué está pedida (y se cuenta) la línea; fuera de OC = unidad. El stock sube en unidades. */
+  unidad?: UnidadConteo; upb?: number
   articulos?: { sku: string; descripcion: string; ean13?: string; unidades_por_bulto?: number }
 }
 interface ArticuloFound { id: string; sku: string; descripcion: string; ean13?: string; stock_actual: number }
@@ -68,13 +71,14 @@ function SwipeItemOC({ item, onConfirm, saving, bgReveal, colorReveal, labelReve
         </div>
         <div style={{ textAlign:"right", flexShrink:0 }}>
           {ok ? <>
-            <div style={{ color:C.green, fontWeight:800, fontSize:27 }}>{item.cantidad_fisica}</div>
-            <div style={{ color:C.light, fontSize:15 }}>de {item.cantidad_oc}</div>
+            <div style={{ color:C.green, fontWeight:800, fontSize:25 }}>{cantidadConUnidad(item.cantidad_fisica, item.unidad ?? "unidad")}</div>
+            {item.unidad==="bulto" && (item.upb ?? 1) > 1 && <div style={{ color:C.green, fontSize:14, fontWeight:700 }}>= {cant(aUnidadesBase(item.cantidad_fisica, item.upb))} u</div>}
+            <div style={{ color:C.light, fontSize:15 }}>de {cantidadConUnidad(item.cantidad_oc, item.unidad ?? "unidad")}</div>
           </> : faltante ? (
             <div style={{ color:C.red, fontWeight:700, fontSize:16 }}>FALTANTE</div>
           ) : <>
-            <div style={{ color:C.text, fontWeight:800, fontSize:27 }}>{item.cantidad_oc}</div>
-            <div style={{ color:C.light, fontSize:15 }}>esperadas</div>
+            <div style={{ color:C.text, fontWeight:800, fontSize:25 }}>{cantidadConUnidad(item.cantidad_oc, item.unidad ?? "unidad")}</div>
+            <div style={{ color:C.light, fontSize:15 }}>{item.unidad==="bulto" ? ((item.upb ?? 1) > 1 ? `× ${cant(item.upb)} = ${cant(aUnidadesBase(item.cantidad_oc, item.upb))} u` : "⚠ sin u. por bulto") : "esperadas"}</div>
           </>}
         </div>
       </div>
@@ -116,7 +120,10 @@ export default function RecibirMercaderiaDetallePage() {
         setOrden(ord)
         setItems((recData.recepciones_items||[]).map((ri:any) => {
           const det = ord?.ordenes_compra_detalle?.find((d:any)=>d.articulo_id===ri.articulo_id)
-          return { ...ri, estado_linea: ri.estado_linea||"pendiente", articulos: det?.articulos }
+          // Misma regla que el servidor al finalizar (lib/deposito/unidades.ts)
+          const enOC = !!det && !ri.fuera_de_oc
+          return { ...ri, estado_linea: ri.estado_linea||"pendiente", articulos: det?.articulos,
+            unidad: ri.unidad_conteo || (enOC ? unidadLineaOC(det.tipo_cantidad) : "unidad"), upb: unidadesPorBultoDe(det?.articulos?.unidades_por_bulto) }
         }))
       }).catch(()=>showToast("Error de conexión","err")).finally(()=>setLoading(false))
   }, [ordenId])
@@ -141,7 +148,8 @@ export default function RecibirMercaderiaDetallePage() {
     if (!recepcion) return
     const res = await fetch("/api/deposito/recepciones", {
       method:"PATCH", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ recepcion_id: recepcion.id, articulo_id, cantidad_fisica }),
+      // unidad: la que esta pantalla le está mostrando al operario (bulto o unidad). E-30
+      body: JSON.stringify({ recepcion_id: recepcion.id, articulo_id, cantidad_fisica, unidad: items.find(i=>i.articulo_id===articulo_id)?.unidad ?? "unidad" }),
     })
     if (!res.ok) {
       const body = await res.json().catch(()=>null)
@@ -286,7 +294,9 @@ export default function RecibirMercaderiaDetallePage() {
       if (r.ok) {
         setDocumentos(prev=>[...prev, data.document])
         const cnt = data.ocr_processing_results?.length || 0
-        showToast(cnt > 0 ? `📷 OCR: ${cnt} artículo${cnt>1?"s":""} detectados` : "📷 Foto adjuntada","ok")
+        // aviso: la foto no se pudo leer (quedó adjunta sin comprobante) o no se leyó el número
+        if (data.aviso) showToast(data.aviso, data.no_leido ? "err" : "ok")
+        else showToast(cnt > 0 ? `📷 OCR: ${cnt} artículo${cnt>1?"s":""} detectados` : "📷 Foto adjuntada","ok")
       } else {
         showToast(data.error || "Error al procesar","err")
       }
@@ -410,8 +420,9 @@ export default function RecibirMercaderiaDetallePage() {
       </div>
       {itemActivo ? (
         <div style={{ background:C.greenL, border:`1.5px solid ${C.greenB}`, borderRadius:16, padding:"16px 20px", textAlign:"center" }}>
-          <div style={{ color:C.green, fontSize:13, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em" }}>Cantidad en OC</div>
-          <div style={{ color:C.green, fontWeight:800, fontSize:52, lineHeight:1.1 }}>{itemActivo.cantidad_oc}</div>
+          <div style={{ color:C.green, fontSize:13, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em" }}>Pedido en la OC</div>
+          <div style={{ color:C.green, fontWeight:800, fontSize:44, lineHeight:1.1 }}>{cantidadConUnidad(itemActivo.cantidad_oc, itemActivo.unidad ?? "unidad")}</div>
+          {itemActivo.unidad==="bulto" && <div style={{ color:(itemActivo.upb ?? 1) > 1 ? C.green : C.red, fontSize:16, fontWeight:700, marginTop:4 }}>{(itemActivo.upb ?? 1) > 1 ? `× ${cant(itemActivo.upb)} u = ${cant(aUnidadesBase(itemActivo.cantidad_oc, itemActivo.upb))} unidades` : "⚠ sin unidades por bulto cargadas: se toma 1 por bulto"}</div>}
         </div>
       ) : (
         <div style={{ background:C.redL, border:`1.5px solid ${C.redB}`, borderRadius:16, padding:"16px 20px", textAlign:"center" }}>
@@ -422,9 +433,14 @@ export default function RecibirMercaderiaDetallePage() {
         </div>
       )}
       <div style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:20, padding:18 }}>
-        <div style={{ color:C.sub, fontSize:14, marginBottom:10 }}>Cantidad recibida físicamente:</div>
+        <div style={{ color:C.sub, fontSize:14, marginBottom:10 }}>{itemActivo?.unidad==="bulto" ? "¿Cuántos BULTOS recibiste?" : "¿Cuántas UNIDADES recibiste?"}</div>
         <input type="text" inputMode="decimal" autoComplete="off" value={cantidadInput} onChange={e=>setCantidadInput(e.target.value.replace(/[^\d.,]/g, ""))} autoFocus
           style={{ width:"100%", background:C.bg, color:C.text, fontSize:48, fontWeight:800, textAlign:"center", borderRadius:16, padding:"16px", border:`2px solid ${C.border}`, outline:"none", boxSizing:"border-box" }} />
+        {itemActivo?.unidad==="bulto" && (itemActivo.upb ?? 1) > 1 && (parseMonto(cantidadInput)||0) > 0 && (
+          <div style={{ color:C.green, fontSize:17, fontWeight:800, marginTop:8, textAlign:"center" }}>
+            {textoCantidad(parseMonto(cantidadInput), "bulto", itemActivo.upb)} → suman {cant(aUnidadesBase(parseMonto(cantidadInput), itemActivo.upb))} unidades al stock
+          </div>
+        )}
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
         <button onClick={()=>guardarCantidad(false)} disabled={saving} style={{ background:C.green, color:"#fff", fontWeight:800, fontSize:20, padding:20, borderRadius:20, border:"none", cursor:"pointer", opacity:saving?0.5:1 }}>
@@ -535,7 +551,7 @@ export default function RecibirMercaderiaDetallePage() {
               <div style={{ color:C.text, fontWeight:700, fontSize:16 }}>{art.descripcion}{articuloMarcaSuffix(art)}</div>
               <div style={{ fontSize:13, color:C.sub, fontFamily:"monospace", marginTop:5 }}>{articuloInfoLine(art)}</div>
               {enOrden&&<div style={{ fontSize:13, color:enOrden.estado_linea==="ok"?C.green:C.orange, marginTop:5, fontWeight:600 }}>
-                OC: {enOrden.cantidad_oc} u · {enOrden.estado_linea.toUpperCase()}
+                OC: {textoCantidad(enOrden.cantidad_oc, enOrden.unidad ?? "unidad", enOrden.upb)} · {enOrden.estado_linea.toUpperCase()}
               </div>}
             </button>
           )

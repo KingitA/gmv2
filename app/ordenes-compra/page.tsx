@@ -22,6 +22,8 @@ import { nowArgentina, todayArgentina, formatCurrency, formatDateAR } from "@/li
 import { InputMonto } from "@/components/ui/input-monto"
 import { DateInputAR } from "@/components/ui/date-input-ar"
 import { entero, fecha, fechaISO, hoyISO } from "@/lib/formato"
+import { bultosParaCubrir, unidadesPorBultoDe } from "@/lib/deposito/unidades"
+import { toast } from "sonner"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -446,11 +448,7 @@ export default function OrdenesCompraPage() {
         const porId: Record<string, number> = {}
         for (const s of data.items) porId[s.articulo_id] = s.cantidad_sugerida
         // La sugerencia viene en UNIDADES: al aplicarla (Jarvis) se pasa a bultos si el artículo tiene bulto
-        const enBultos = (a: any, u: number) => {
-          const ub = Number(a.articulo?.unidades_por_bulto) || 0
-          return ub > 1 ? { cantidad_pedida: Math.ceil(u / ub), tipo_cantidad: "bulto" } : { cantidad_pedida: u, tipo_cantidad: "unidad" }
-        }
-        setArticulosTabla(prev => prev.map(a => ({ ...a, cantidad_sugerida: porId[a.articulo_id] ?? 0, ...(aplicar && porId[a.articulo_id] ? enBultos(a, porId[a.articulo_id]) : {}) })))
+        setArticulosTabla(prev => prev.map(a => ({ ...a, cantidad_sugerida: porId[a.articulo_id] ?? 0, ...(aplicar && porId[a.articulo_id] ? sugerenciaEnBultos(a, porId[a.articulo_id]) : {}) })))
       }
     } finally {
       setLoadingSugerencia(false)
@@ -498,6 +496,25 @@ export default function OrdenesCompraPage() {
     setArticulosTabla(nuevosArticulos)
   }
 
+  /**
+   * La sugerencia viene SIEMPRE en unidades (E-02). Para cargarla como cantidad pedida:
+   * artículo con bulto ⇒ bultos enteros hacia arriba; sin unidades por bulto ⇒ se pide por unidad.
+   * Único camino para Jarvis y para el botón "usar".
+   */
+  const sugerenciaEnBultos = (a: any, unidades: number) => {
+    const ub = unidadesPorBultoDe(a.articulo?.unidades_por_bulto)
+    return ub > 1 ? { cantidad_pedida: bultosParaCubrir(unidades, ub), tipo_cantidad: "bulto" } : { cantidad_pedida: unidades, tipo_cantidad: "unidad" }
+  }
+
+  /** Botón "usar" de la sugerencia: respeta lo que el usuario eligió (bulto / unidad) y convierte. */
+  const usarSugerencia = (index: number) => {
+    setArticulosTabla(prev => prev.map((a, i) => {
+      if (i !== index || !(a.cantidad_sugerida > 0)) return a
+      if (a.tipo_cantidad === "unidad") return { ...a, cantidad_pedida: a.cantidad_sugerida }
+      return { ...a, ...sugerenciaEnBultos(a, a.cantidad_sugerida) }
+    }))
+  }
+
   const calcularSubtotal = (item: any) => {
     if (item.cantidad_pedida === 0) return 0
 
@@ -519,7 +536,13 @@ export default function OrdenesCompraPage() {
     const articulosConCantidad = articulosTabla.filter((item) => item.cantidad_pedida > 0)
 
     if (!selectedProveedor || articulosConCantidad.length === 0) {
-      alert("Seleccioná un proveedor y agregá cantidades a al menos un artículo")
+      toast.error("Seleccioná un proveedor y agregá cantidades a al menos un artículo")
+      return
+    }
+    // E-13: un renglón importado que no se pudo vincular al catálogo no puede ir a la orden
+    const sinVincular = articulosConCantidad.filter((item) => !item.articulo_id)
+    if (sinVincular.length > 0) {
+      toast.error(`Hay ${sinVincular.length} renglón(es) sin artículo vinculado: ${sinVincular.slice(0, 3).map((i) => i.articulo?.descripcion || "sin descripción").join(" · ")}${sinVincular.length > 3 ? "…" : ""}. Poneles cantidad 0 o vinculalos antes de crear la orden.`, { duration: 10000 })
       return
     }
 
@@ -538,14 +561,14 @@ export default function OrdenesCompraPage() {
           descuento2: item.descuento2,
           descuento3: item.descuento3,
           descuento4: item.descuento4,
-          articulo: { unidades_por_bulto: item.articulo?.unidades_por_bulto || 1 },
+          // las unidades por bulto NO se mandan: el servidor las lee de la base (E-13)
         }))
       })
     })
-    const data = await res.json()
-    if (!res.ok) { alert(`Error al crear la orden: ${data.error}`); return }
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) { toast.error(`No se creó la orden: ${data.error || `error ${res.status}`}`, { duration: 10000 }); return }
 
-    alert(`Orden ${data.numeroOrden} creada. Recepción estimada: ${fecha(data.fechaEstimada)}`)
+    toast.success(`Orden ${data.numeroOrden} creada. Recepción estimada: ${fecha(data.fechaEstimada)}`)
     setIsCreating(false)
     setSelectedProveedor("")
     setArticulosTabla([])
@@ -743,12 +766,20 @@ export default function OrdenesCompraPage() {
     window.location.href = `/ordenes-compra/${orden.id}/verificacion`
   }
 
-  const handleImportSuccess = (items: any[], proveedorId: string) => {
+  const handleImportSuccess = async (items: any[], proveedorId: string) => {
     setSelectedProveedor(proveedorId)
+    // E-13: el archivo no trae las unidades por bulto (el diálogo ponía 1 fijo): se leen del
+    // catálogo para que el subtotal y el "× N u" de la tabla muestren lo que realmente se pide.
+    const ids = [...new Set(items.map((i) => i.articulo_id).filter(Boolean))]
+    const reales = new Map<string, any>()
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data } = await supabase.from("articulos").select(COLS_ARTICULO_OC).in("id", ids.slice(i, i + 200))
+      for (const a of data || []) reales.set(a.id, a)
+    }
     // Map items to table format
     const tableItems = items.map(item => ({
-      articulo_id: item.articulo_id, // Might be undefined/null if new
-      articulo: item.articulo, // Partial article object
+      articulo_id: item.articulo_id || null, // null = no se pudo vincular: no se puede pedir hasta vincularlo
+      articulo: reales.get(item.articulo_id) || item.articulo, // datos reales del catálogo si existe
       cantidad_pedida: item.cantidad_pedida,
       tipo_cantidad: "bulto", // Defaulting to bulto as requested in logic
       precio_unitario: item.precio_unitario,
@@ -929,12 +960,16 @@ export default function OrdenesCompraPage() {
                                       <TableCell className="w-24">
                                         {item.cantidad_sugerida != null && item.cantidad_sugerida > 0 ? (
                                           <div className="flex flex-col items-center gap-1">
-                                            <span className="text-blue-700 font-medium">{item.cantidad_sugerida}</span>
+                                            <span className="text-blue-700 font-medium">{entero(item.cantidad_sugerida)} u</span>
+                                            {unidadesPorBultoDe(item.articulo?.unidades_por_bulto) > 1 && (
+                                              <span className="text-[10px] text-muted-foreground">= {entero(bultosParaCubrir(item.cantidad_sugerida, item.articulo?.unidades_por_bulto))} bultos</span>
+                                            )}
                                             <Button
                                               variant="ghost"
                                               size="sm"
                                               className="h-5 text-xs text-blue-600 p-0"
-                                              onClick={() => actualizarArticulo(indexReal, "cantidad_pedida", item.cantidad_sugerida)}
+                                              title={item.tipo_cantidad === "unidad" ? "Carga la sugerencia en unidades" : "La sugerencia está en unidades: se carga en bultos enteros (hacia arriba)"}
+                                              onClick={() => usarSugerencia(indexReal)}
                                             >usar</Button>
                                           </div>
                                         ) : <span className="text-muted-foreground text-xs">—</span>}

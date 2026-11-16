@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai"
+import { conRespaldoGemini } from "@/lib/ai/gemini-model"
 import { parseFecha, parseMonto } from "@/lib/formato"
 
 export const maxDuration = 120
@@ -79,12 +80,13 @@ export async function POST(request: NextRequest) {
     const mime = file.type || "application/pdf"
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA },
-    })
-
-    const result = await model.generateContent([{ inlineData: { mimeType: mime, data: base64 } }, PROMPT])
+    // Modelo central (env GEMINI_MODEL) + respaldo si Google lo da de baja. E-37
+    const result = await conRespaldoGemini((modelo) =>
+      genAI
+        .getGenerativeModel({ model: modelo, generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA } })
+        .generateContent([{ inlineData: { mimeType: mime, data: base64 } }, PROMPT]),
+      "extracto-pdf",
+    )
     const text = result.response.text()
     let parsed: any
     try {

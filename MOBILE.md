@@ -334,7 +334,7 @@ validación con las mismas reglas que la web, `capturado_at` como momento de neg
 | `viaje.gasto` | chofer | RPC `viaje_gasto_registrar` idempotente por clave. Sin viaje (billetera sola): segunda defensa por concepto+monto+10 min. |
 | `viaje.finalizar` | chofer | Transición idempotente: si ya estaba en rendición/completado ⇒ éxito (duplicado). Requiere outbox del viaje vacío (FIFO lo garantiza). Paradas sin resolver ⇒ rechazado (y la app lo valida antes). |
 | `picking.item` | depósito | **Valor absoluto** de cantidad preparada por línea; último escritor gana por línea; si el pedido ya se cerró ⇒ rechazado. |
-| `recepcion.item` | depósito | Igual que picking (conteo absoluto por ítem). |
+| `recepcion.item` | depósito | Igual que picking (conteo absoluto por ítem). `unidad` opcional (`bulto`/`unidad`, 16/11): sin ella vale la unidad de la línea de la OC; el servidor convierte a **unidades** al finalizar (`lib/deposito/unidades.ts`, §17). |
 | `stock.ajustar` | depósito | Se envía como **conteo** (cantidad observada + stock que veía el operario). El servidor aplica el conteo; si el stock cambió entre captura y sync, registra la diferencia como alerta (no se descarta el conteo). |
 | rendiciones, OCR de comprobantes, BCRA, fotos | — | **Online-only** (§9): requieren al servidor en el momento. La UI lo indica y deshabilita sin red. |
 
@@ -894,6 +894,13 @@ recorrido Anterior/Siguiente de Modificación de artículos (calculado sobre la 
 - **Recepción**: todo se direcciona por la OC (la recepción se crea sola en el servidor:
   se puede empezar a contar sin señal). Conteo absoluto por artículo (último escritor
   gana), primer control de bultos registrado vale, finalizar idempotente con candado.
+- **Recepción en bultos y unidades** (16/11, entrada E-30/E-40): `cantidad_oc` va en la unidad de la línea de
+  la OC (`ordenes_compra_detalle.tipo_cantidad`, vacío = bulto) y `cantidad_fisica` en `unidad_conteo` (vacío = la de la
+  OC; fuera de OC = unidad). El stock, el kardex y `movimientos_stock` suben SIEMPRE en unidades: al finalizar,
+  `finalizarRecepcion` multiplica por `articulos.unidades_por_bulto` y suma con `recepcion_aplicar_stock`
+  (migración 20261116a: una transacción, marca por línea ⇒ finalizar dos veces suma una). Regla única, pura y
+  compartida con la app: `lib/deposito/unidades.ts` (`@gm/deposito`); la pantalla muestra "2 bultos × 24 u = 48 u".
+  Las APK ≤ 0.5.1 no mandan `unidad`: cuentan en la unidad de la OC y el servidor convierte igual.
 - **Stock**: el ajuste es un conteo del operario y se aplica siempre; si el stock cambió
   entre el conteo y el sync queda una alerta `stock_conteo` en `mobile_alertas_integridad`.
   `deposito_ajustes_movil` audita cada ajuste (incluye el motivo) y evita la doble suma.

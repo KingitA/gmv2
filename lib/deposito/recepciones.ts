@@ -15,10 +15,75 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { nowArgentina } from "@/lib/utils"
 import { estadoLineaRecepcion } from "./bonificados"
 import { ErrorDeposito } from "./picking"
+import { faltaLaColumna, faltaLaFuncion } from "@/lib/utils/migracion-pendiente"
+import { aUnidadesBase, conversionLinea, esUnidadConteo, type ConversionLinea, type UnidadConteo } from "./unidades"
 
 const SELECT_FULL = `*, recepciones_items(*), recepciones_documentos(*)`
 /** Un finalizador que lleva más que esto sin terminar se considera caído y se retoma */
 const CANDADO_FINALIZAR_MS = 2 * 60_000
+/** Estados en los que una recepción todavía se puede contar y finalizar */
+const ABIERTA = ["en_proceso", "borrador"]
+
+// ── Migración 20261116a_recepcion_unidades.sql (E-30 / E-40) ─────────────────
+// Agrega recepciones_items.unidad_conteo (+ rastro de lo aplicado al stock) y la
+// función recepcion_aplicar_stock. Mientras no esté aplicada todo sigue andando:
+// se cuenta en la unidad de la línea de la OC y el stock se suma como antes
+// (leer y escribir), pero YA convertido a unidades.
+
+let columnasConteo: boolean | null = null
+let columnasConteoAt = 0
+/** ¿Existe recepciones_items.unidad_conteo? Sí = se recuerda; no = se vuelve a mirar cada minuto. */
+export async function hayColumnasConteo(supabase: any): Promise<boolean> {
+  if (columnasConteo === true) return true
+  if (columnasConteo === false && Date.now() - columnasConteoAt < 60_000) return false
+  const { error } = await supabase.from("recepciones_items").select("unidad_conteo").limit(1)
+  // Un corte de red o cualquier otro error NO es "no hay columnas": se propaga (el outbox reintenta)
+  // y no se recuerda nada. Solo "la columna no existe" significa migración sin aplicar.
+  if (error && !faltaLaColumna(error)) throw error
+  columnasConteoAt = Date.now()
+  columnasConteo = !error
+  return columnasConteo
+}
+
+/** Cómo se convierte cada línea de una recepción a unidades base (clave = id de recepciones_items). */
+export async function conversionesDeRecepcion(
+  supabase: any,
+  ordenCompraId: string | null,
+  items: Array<{ id: string; articulo_id: string; fuera_de_oc?: boolean | null; unidad_conteo?: string | null }>,
+): Promise<{ porItem: Map<string, ConversionLinea>; articulos: Map<string, any> }> {
+  const tipoOC = new Map<string, string | null>()
+  if (ordenCompraId) {
+    const { data: detalle, error } = await supabase
+      .from("ordenes_compra_detalle")
+      .select("articulo_id, tipo_cantidad")
+      .eq("orden_compra_id", ordenCompraId)
+    if (error) throw error
+    for (const d of detalle || []) tipoOC.set(d.articulo_id, d.tipo_cantidad)
+  }
+  const ids = [...new Set(items.map((i) => i.articulo_id).filter(Boolean))]
+  const articulos = new Map<string, any>()
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase
+      .from("articulos")
+      .select("id, stock_actual, sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas, precio_compra, unidades_por_bulto")
+      .in("id", ids.slice(i, i + 200))
+    if (error) throw error
+    for (const a of data || []) articulos.set(a.id, a)
+  }
+  const porItem = new Map<string, ConversionLinea>()
+  for (const it of items) {
+    porItem.set(
+      it.id,
+      conversionLinea({
+        enOC: !it.fuera_de_oc && tipoOC.has(it.articulo_id),
+        tipoCantidadOC: tipoOC.get(it.articulo_id),
+        unidadElegida: it.unidad_conteo,
+        unidadesPorBulto: articulos.get(it.articulo_id)?.unidades_por_bulto,
+      }),
+    )
+  }
+  return { porItem, articulos }
+}
 
 async function ultimaTanda(supabase: any, orden_compra_id: string) {
   const { data } = await supabase
@@ -69,6 +134,8 @@ export async function conFotosFirmadas<R extends { recepciones_documentos?: any[
  * Con `ordenId` trae solo esa (o [] si ya no está pendiente).
  */
 export async function cargarOrdenesPendientes(supabase: any, ordenId?: string): Promise<any[]> {
+  // unidad_conteo: en qué contó el operario (null = la unidad de la línea de la OC). Ver unidades.ts
+  const colsItem = `id, articulo_id, cantidad_oc, cantidad_fisica, estado_linea, fuera_de_oc${(await hayColumnasConteo(supabase)) ? ", unidad_conteo" : ""}`
   let q = supabase
     .from("ordenes_compra")
     .select(`
@@ -81,6 +148,7 @@ export async function cargarOrdenesPendientes(supabase: any, ordenId?: string): 
         ordenes_compra_detalle(
           id,
           cantidad_pedida,
+          tipo_cantidad,
           articulo_id,
           precio_unitario,
           articulos(id, sku, descripcion, ean13, unidades_por_bulto)
@@ -98,7 +166,7 @@ export async function cargarOrdenesPendientes(supabase: any, ordenId?: string): 
         .from("recepciones")
         .select(`
             id, estado, fecha_inicio, numero_tanda, conformidad_transporte,
-            recepciones_items(id, articulo_id, cantidad_oc, cantidad_fisica, estado_linea, fuera_de_oc),
+            recepciones_items(${colsItem}),
             recepciones_documentos(id, tipo_documento, url_imagen, procesado)
           `)
         .eq("orden_compra_id", orden.id)
@@ -204,12 +272,53 @@ export async function guardarConformidad(supabase: any, recepcion_id: string, co
   return data
 }
 
-/** Conteo de un artículo. cantidad_fisica: -1 = volver a pendiente · 0 = faltante · n = recibido. */
-export async function aplicarItemRecepcion(supabase: any, recepcion_id: string, articulo_id: string, cantidad_fisica: number) {
+/**
+ * Conteo de un artículo. cantidad_fisica: -1 = volver a pendiente · 0 = faltante · n = recibido.
+ *
+ * `unidad` (E-30): en qué contó el operario. Sin `unidad` (web y APK anteriores a la
+ * 0.5.2) vale la unidad de la línea de la OC —que es el número que esas pantallas
+ * muestran— y "unidad" para lo que no estaba en la OC. La conversión a unidades base
+ * se hace al finalizar (finalizarRecepcion), nunca acá.
+ */
+export async function aplicarItemRecepcion(
+  supabase: any,
+  recepcion_id: string,
+  articulo_id: string,
+  cantidad_fisica: number,
+  unidad?: UnidadConteo | null,
+) {
   const { estado_linea, cantidad } = estadoLineaRecepcion(Number(cantidad_fisica))
+  const elegida: UnidadConteo | null = cantidad > 0 && esUnidadConteo(unidad) ? unidad : null
+  const conColumnas = await hayColumnasConteo(supabase)
+
+  if (elegida && !conColumnas) {
+    // Sin la columna no hay dónde guardar la elección: solo se acepta si coincide con la unidad por defecto.
+    const { data: rec } = await supabase.from("recepciones").select("orden_compra_id").eq("id", recepcion_id).maybeSingle()
+    const { data: fila } = await supabase
+      .from("recepciones_items")
+      .select("id, articulo_id, fuera_de_oc")
+      .eq("recepcion_id", recepcion_id)
+      .eq("articulo_id", articulo_id)
+      .limit(1)
+      .maybeSingle()
+    const porDefecto = fila
+      ? (await conversionesDeRecepcion(supabase, rec?.orden_compra_id ?? null, [fila])).porItem.get(fila.id)!.unidadConteo
+      : "unidad"
+    if (porDefecto !== elegida) {
+      throw new ErrorDeposito(
+        `Todavía no se puede contar este artículo por ${elegida}: cargalo por ${porDefecto} (falta una actualización del sistema).`,
+        409,
+        { codigo: "unidad_no_disponible" },
+      )
+    }
+  }
+  // Conteo absoluto: la unidad también se pisa (null = la de la línea), así un reconteo
+  // desde otro equipo no hereda la unidad del conteo anterior.
+  const conteo = conColumnas ? { unidad_conteo: elegida } : {}
+
   const { data: actualizados, error } = await supabase
     .from("recepciones_items")
-    .update({ cantidad_fisica: cantidad, estado_linea })
+    .update({ cantidad_fisica: cantidad, estado_linea, ...conteo })
     .eq("recepcion_id", recepcion_id)
     .eq("articulo_id", articulo_id)
     .select()
@@ -220,7 +329,7 @@ export async function aplicarItemRecepcion(supabase: any, recepcion_id: string, 
   if (!actualizados || actualizados.length === 0) {
     const { data: nuevo, error: insError } = await supabase
       .from("recepciones_items")
-      .insert({ recepcion_id, articulo_id, cantidad_oc: 0, cantidad_fisica: cantidad, estado_linea, fuera_de_oc: true })
+      .insert({ recepcion_id, articulo_id, cantidad_oc: 0, cantidad_fisica: cantidad, estado_linea, fuera_de_oc: true, ...conteo })
       .select()
       .single()
     if (insError) throw insError
@@ -229,7 +338,51 @@ export async function aplicarItemRecepcion(supabase: any, recepcion_id: string, 
   return actualizados[0]
 }
 
-/** Finalizar recepción: sube stock, deja kardex y cierra la OC. Idempotente. */
+interface StockAplicado {
+  item_id: string
+  articulo_id: string
+  /** Unidades base sumadas al stock por esta línea (null = lo sumó una finalización anterior a la migración) */
+  cantidad_base: number | null
+  stock_antes: number | null
+  stock_despues: number | null
+}
+
+/**
+ * Suma al stock SIN la función SQL (migración 20261116a sin aplicar): leer y escribir,
+ * como se hizo siempre, pero en unidades base. La doble suma la evita el candado de
+ * finalizarRecepcion + la guarda por kardex (`hechos`): por eso cada artículo deja su
+ * kardex (`registrar`) apenas se le suma, antes de pasar al siguiente.
+ */
+async function aplicarStockSinFuncion(
+  supabase: any,
+  lineas: Array<{ id: string; articulo_id: string; base: number }>,
+  hechos: Set<string>,
+  registrar: (articuloId: string, g: { base: number; antes: number | null; despues: number | null }) => Promise<void>,
+): Promise<void> {
+  const porArticulo = new Map<string, number>()
+  for (const l of lineas) porArticulo.set(l.articulo_id, (porArticulo.get(l.articulo_id) || 0) + l.base)
+  for (const [articuloId, base] of porArticulo) {
+    const l = { articulo_id: articuloId, base }
+    if (hechos.has(l.articulo_id)) continue
+    const { data: art, error: errLeer } = await supabase.from("articulos").select("stock_actual").eq("id", l.articulo_id).single()
+    if (errLeer) throw errLeer
+    const antes = Number(art?.stock_actual || 0)
+    const despues = antes + l.base
+    const { error: errEscribir } = await supabase.from("articulos").update({ stock_actual: despues }).eq("id", l.articulo_id)
+    if (errEscribir) throw errEscribir
+    await registrar(articuloId, { base, antes, despues })
+    hechos.add(articuloId)
+  }
+}
+
+/**
+ * Finalizar recepción: sube stock (SIEMPRE en unidades base), deja kardex y cierra la OC.
+ *
+ * Idempotente (E-40): con la migración 20261116a la suma la hace `recepcion_aplicar_stock`
+ * en una sola transacción, con la recepción bloqueada y una marca por línea
+ * (`stock_aplicado_at`): finalizar dos veces, o dos equipos a la vez, suma una sola vez.
+ * Sin la migración queda el candado por `fecha_fin` + la guarda por kardex de antes.
+ */
 export async function finalizarRecepcion(supabase: any, recepcion_id: string, opts: { exigirResuelta?: boolean } = {}) {
   const { data: rec } = await supabase
     .from("recepciones")
@@ -240,10 +393,13 @@ export async function finalizarRecepcion(supabase: any, recepcion_id: string, op
   if (rec.estado === "finalizada") return { ok: true, ya_finalizada: true }
   if (rec.estado === "cancelada") throw new ErrorDeposito("La recepción fue cancelada.", 409, { codigo: "recepcion_cancelada" })
 
-  const { data: items } = await supabase
+  const conColumnas = await hayColumnasConteo(supabase)
+  const { data: items, error: itemsErr } = await supabase
     .from("recepciones_items")
-    .select("articulo_id, cantidad_fisica, precio_documentado, precio_oc, estado_linea")
+    .select(`id, articulo_id, cantidad_fisica, precio_documentado, precio_oc, estado_linea, fuera_de_oc, factor_conversion${conColumnas ? ", unidad_conteo" : ""}`)
     .eq("recepcion_id", recepcion_id)
+    .order("id", { ascending: true })
+  if (itemsErr) throw itemsErr
 
   if (opts.exigirResuelta) {
     const pend = (items || []).filter((i: any) => !i.estado_linea || i.estado_linea === "pendiente").length
@@ -253,7 +409,10 @@ export async function finalizarRecepcion(supabase: any, recepcion_id: string, op
   // ── Candado: un solo finalizador a la vez (fecha_fin hace de marca) ──
   const ahora = nowArgentina()
   const candadoVencido = rec.fecha_fin && Date.now() - Date.parse(rec.fecha_fin) > CANDADO_FINALIZAR_MS
-  let q = supabase.from("recepciones").update({ fecha_fin: ahora }).eq("id", recepcion_id).eq("estado", "en_proceso")
+  // "borrador": la recepción la creó la oficina al subir la factura antes de que llegue la
+  // mercadería (/api/ordenes-compra/[id]/documentos). Con solo "en_proceso" esa recepción no se
+  // podía finalizar nunca desde depósito (quedaba reintentando "otro equipo está finalizando").
+  let q = supabase.from("recepciones").update({ fecha_fin: ahora }).eq("id", recepcion_id).in("estado", ABIERTA)
   q = rec.fecha_fin && candadoVencido ? q.eq("fecha_fin", rec.fecha_fin) : q.is("fecha_fin", null)
   const { data: tomado, error: candErr } = await q.select("id")
   if (candErr) throw candErr
@@ -262,61 +421,103 @@ export async function finalizarRecepcion(supabase: any, recepcion_id: string, op
     throw new ErrorDeposito("Otro equipo está finalizando esta recepción. Se reintenta en unos segundos.", 503, { codigo: "finalizando" })
   }
 
-  // Artículos que ya tienen su movimiento (finalización anterior interrumpida)
-  const { data: yaHechos } = await supabase.from("kardex").select("articulo_id").eq("recepcion_id", recepcion_id).eq("tipo_movimiento", "compra")
-  const hechos = new Set((yaHechos || []).map((k: any) => k.articulo_id))
+  const sinUnidadesPorBulto: string[] = []
+  try {
+    // Cada línea a unidades base: bulto ⇒ × unidades por bulto del artículo (unidades.ts)
+    const { porItem, articulos } = await conversionesDeRecepcion(supabase, rec.orden_compra_id, items || [])
+    const contadas = (items || [])
+      .filter((i: any) => Number(i.cantidad_fisica) > 0)
+      .map((i: any) => {
+        const conv = porItem.get(i.id)!
+        return { ...i, conv, base: aUnidadesBase(i.cantidad_fisica, conv.factorConteo) }
+      })
 
-  for (const item of items || []) {
-    if (!(item.cantidad_fisica > 0) || hechos.has(item.articulo_id)) continue
-    const { data: art } = await supabase
-      .from("articulos")
-      .select("stock_actual, sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas, precio_compra")
-      .eq("id", item.articulo_id)
-      .single()
+    // Artículos que ya tienen su movimiento (finalización anterior interrumpida)
+    const { data: yaHechos, error: kardexErr } = await supabase
+      .from("kardex")
+      .select("articulo_id")
+      .eq("recepcion_id", recepcion_id)
+      .eq("tipo_movimiento", "compra")
+    if (kardexErr) throw kardexErr
+    const hechos = new Set<string>((yaHechos || []).map((k: any) => k.articulo_id))
 
-    const stockAntes = art?.stock_actual || 0
-    const nuevoStock = stockAntes + item.cantidad_fisica
+    // ── Stock ──
+    // ── Kardex y movimiento de stock: uno por artículo, en unidades base ──
+    const registrar = async (articuloId: string, g: { base: number; antes: number | null; despues: number | null }) => {
+      if (hechos.has(articuloId) || !(g.base > 0)) return
+      const art = articulos.get(articuloId)
+      const linea = contadas.find((l: any) => l.articulo_id === articuloId)
+      if (linea?.conv.sinUnidadesPorBulto) sinUnidadesPorBulto.push(art?.descripcion || articuloId)
 
-    await supabase.from("articulos").update({ stock_actual: nuevoStock }).eq("id", item.articulo_id)
+      // Movimiento de stock (legacy — mantener para compatibilidad)
+      await supabase.from("movimientos_stock").insert({
+        articulo_id: articuloId,
+        tipo_movimiento: "entrada",
+        cantidad: g.base,
+        observaciones: `Recepción depósito #${recepcion_id}`,
+      })
 
-    // Movimiento de stock (legacy — mantener para compatibilidad)
-    await supabase.from("movimientos_stock").insert({
-      articulo_id: item.articulo_id,
-      tipo_movimiento: "entrada",
-      cantidad: item.cantidad_fisica,
-      observaciones: `Recepción depósito #${recepcion_id}`,
-    })
+      // Kardex unificado, valorizado POR UNIDAD con el mejor precio disponible:
+      // factura OCR (llevada a unidad con su factor) → precio de la OC → costo del
+      // artículo. Si todo es 0, validar el comprobante después lo revaloriza.
+      const factorDoc = Number(linea?.factor_conversion) > 0 ? Number(linea.factor_conversion) : 1
+      const precioDoc = Number(linea?.precio_documentado || 0) / factorDoc
+      const precio = Number(precioDoc || linea?.precio_oc || art?.precio_compra || 0)
+      const subtotal = Math.round(precio * g.base * 100) / 100
 
-    // Kardex unificado, valorizado con el mejor precio disponible:
-    // factura OCR → precio de la OC → costo del artículo. Si todo es 0,
-    // validar el comprobante después lo revaloriza.
-    const precio = Number(item.precio_documentado || item.precio_oc || art?.precio_compra || 0)
-    const subtotal = Math.round(precio * item.cantidad_fisica * 100) / 100
+      await insertarKardex(
+        supabase,
+        {
+          tipo_movimiento: "compra",
+          fecha: ahora,
+          articulo_id: articuloId,
+          cantidad: g.base,
+          precio_lista: precio,
+          precio_unitario_final: precio,
+          subtotal_neto: subtotal,
+          subtotal_total: subtotal,
+          recepcion_id,
+          stock_antes: g.antes ?? undefined,
+          stock_despues: g.despues ?? undefined,
+        },
+        {
+          sku: art?.sku,
+          descripcion: art?.descripcion,
+          categoria: art?.categoria,
+          proveedor_id: art?.proveedor_id,
+          iva_compras: art?.iva_compras,
+          iva_ventas: art?.iva_ventas,
+        },
+      )
+    }
 
-    await insertarKardex(
-      supabase,
-      {
-        tipo_movimiento: "compra",
-        fecha: ahora,
-        articulo_id: item.articulo_id,
-        cantidad: item.cantidad_fisica,
-        precio_lista: precio,
-        precio_unitario_final: precio,
-        subtotal_neto: subtotal,
-        subtotal_total: subtotal,
-        recepcion_id,
-        stock_antes: stockAntes,
-        stock_despues: nuevoStock,
-      },
-      {
-        sku: art?.sku,
-        descripcion: art?.descripcion,
-        categoria: art?.categoria,
-        proveedor_id: art?.proveedor_id,
-        iva_compras: art?.iva_compras,
-        iva_ventas: art?.iva_ventas,
-      },
-    )
+    let aplicados: StockAplicado[] = []
+    // La función lee de la base en qué se contó cada línea y las unidades por bulto (no recibe
+    // factores). Se llama con el cliente de servicio: no tiene permiso para usuarios; el acceso a
+    // esta recepción ya se comprobó arriba con la sesión del usuario (lectura + candado).
+    const rpc = await createAdminClient().rpc("recepcion_aplicar_stock", { p_recepcion_id: recepcion_id })
+    if (!rpc.error) aplicados = (rpc.data || []) as StockAplicado[]
+    // Solo si la función que falta es ESA (migración sin aplicar). Un error adentro de la función se propaga.
+    else if (faltaLaFuncion(rpc.error, "recepcion_aplicar_stock")) await aplicarStockSinFuncion(supabase, contadas, hechos, registrar)
+    else throw rpc.error
+
+    const porArticulo = new Map<string, { base: number; antes: number | null; despues: number | null }>()
+    for (const a of aplicados) {
+      if (a.cantidad_base == null) continue // sumado por una finalización vieja: ya tiene su kardex
+      const g = porArticulo.get(a.articulo_id)
+      if (!g) porArticulo.set(a.articulo_id, { base: Number(a.cantidad_base), antes: a.stock_antes, despues: a.stock_despues })
+      else {
+        g.base += Number(a.cantidad_base)
+        g.despues = a.stock_despues
+      }
+    }
+
+    for (const [articuloId, g] of porArticulo) await registrar(articuloId, g)
+  } catch (e) {
+    // Se suelta el candado para que el reintento no espere 2 minutos. Lo ya sumado
+    // no se repite: lo marca la función SQL (o el kardex, sin la migración).
+    await supabase.from("recepciones").update({ fecha_fin: null }).eq("id", recepcion_id).in("estado", ABIERTA).eq("fecha_fin", ahora)
+    throw e
   }
 
   await supabase.from("recepciones").update({ estado: "finalizada", fecha_fin: nowArgentina() }).eq("id", recepcion_id)
@@ -326,5 +527,5 @@ export async function finalizarRecepcion(supabase: any, recepcion_id: string, op
   if (rec.orden_compra_id) {
     await supabase.from("ordenes_compra").update({ estado: "recibida_completa" }).eq("id", rec.orden_compra_id)
   }
-  return { ok: true }
+  return { ok: true, ...(sinUnidadesPorBulto.length ? { sin_unidades_por_bulto: sinUnidadesPorBulto } : {}) }
 }

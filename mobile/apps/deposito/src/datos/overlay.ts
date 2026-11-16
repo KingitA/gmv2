@@ -7,7 +7,7 @@
 // ya actualizada (parche de réplica) y el overlay de esa operación desaparece.
 
 import type { ItemOutbox } from "@gm/core"
-import { calcularBonificados, calcularBonificadosPorCupo, estadoBonificadoPicking, estadoItemPicking, estadoLineaRecepcion, usaCupos } from "@gm/deposito"
+import { aUnidadesBase, calcularBonificados, calcularBonificadosPorCupo, conversionLinea, estadoBonificadoPicking, estadoItemPicking, estadoLineaRecepcion, usaCupos, type UnidadConteo } from "@gm/deposito"
 import type {
   Articulo, DetallePedido, Devolucion, EstadoItem, EstadoLinea, OpDatos, OpPickingItem, OpRecepcionItem, OpStock,
   OrdenRecepcion, PedidoDeposito, Preparador,
@@ -139,11 +139,22 @@ export function tomadoPorOtro(v: PedidoVista, detId: string, yo: Yo): string | n
 
 export interface LineaRecepcion {
   articulo_id: string
+  /** En la unidad de la OC (`unidadOC`) */
   cantidad_oc: number
+  /** En la unidad en que se contó (`unidadConteo`) */
   cantidad_fisica: number
   estado_linea: EstadoLinea
   fuera_de_oc: boolean
   sinEnviar: boolean
+  // ── Bultos y unidades (E-30): el stock sube SIEMPRE en unidades ──
+  unidadOC: UnidadConteo
+  unidadConteo: UnidadConteo
+  unidadesPorBulto: number
+  /** Lo pedido y lo contado, en unidades (lo que va a sumar al stock) */
+  ocUnidades: number
+  fisicaUnidades: number
+  /** Se pide o se cuenta por bulto y el artículo no tiene unidades por bulto cargadas */
+  sinUnidadesPorBulto: boolean
   articulo: { sku: string; descripcion: string; ean13?: string[] | string | null; codigo_bulto?: string | null; unidades_por_bulto?: number | null } | null
 }
 
@@ -164,7 +175,12 @@ export function vistaRecepcion(o: OrdenRecepcion, ops: ItemOutbox[], articulo: (
   const info = (id: string): LineaRecepcion["articulo"] => infoOC.get(id) ?? articulo(id) ?? null
 
   // Sin recepción en el servidor todavía: las líneas salen de la OC (igual que al crearla allá)
-  const lineas: LineaRecepcion[] = o.recepcion
+  const tipoOC = new Map(o.ordenes_compra_detalle.map((d) => [d.articulo_id, d.tipo_cantidad]))
+  /** Unidad elegida por el operario para cada artículo (servidor, pisada por lo que todavía no salió) */
+  const elegida = new Map<string, UnidadConteo | null | undefined>((o.recepcion?.recepciones_items ?? []).map((ri) => [ri.articulo_id, ri.unidad_conteo]))
+  type Cruda = Omit<LineaRecepcion, "unidadOC" | "unidadConteo" | "unidadesPorBulto" | "ocUnidades" | "fisicaUnidades" | "sinUnidadesPorBulto">
+
+  const lineas: Cruda[] = o.recepcion
     ? o.recepcion.recepciones_items.map((ri) => ({
         articulo_id: ri.articulo_id,
         cantidad_oc: Number(ri.cantidad_oc || 0),
@@ -202,13 +218,15 @@ export function vistaRecepcion(o: OrdenRecepcion, ops: ItemOutbox[], articulo: (
       const x = op.payload as OpRecepcionItem
       const e = estadoLineaRecepcion(x.cantidad_fisica)
       const l = porArt.get(x.articulo_id)
+      // Conteo absoluto: la unidad también se pisa (sin unidad = la de la línea)
+      elegida.set(x.articulo_id, e.cantidad > 0 ? x.unidad ?? null : null)
       if (l) {
         l.cantidad_fisica = e.cantidad
         l.estado_linea = e.estado_linea
         l.sinEnviar = true
       } else {
         // Artículo que no estaba en la OC: se registra igual (fuera de OC)
-        const nueva: LineaRecepcion = {
+        const nueva: Cruda = {
           articulo_id: x.articulo_id, cantidad_oc: 0, cantidad_fisica: e.cantidad, estado_linea: e.estado_linea,
           fuera_de_oc: true, sinEnviar: true, articulo: info(x.articulo_id),
         }
@@ -217,8 +235,26 @@ export function vistaRecepcion(o: OrdenRecepcion, ops: ItemOutbox[], articulo: (
       }
     }
   }
+  // Misma regla que el servidor al finalizar (lib/deposito/unidades.ts)
+  const conUnidades: LineaRecepcion[] = lineas.map((l) => {
+    const c = conversionLinea({
+      enOC: !l.fuera_de_oc && tipoOC.has(l.articulo_id),
+      tipoCantidadOC: tipoOC.get(l.articulo_id),
+      unidadElegida: elegida.get(l.articulo_id),
+      unidadesPorBulto: l.articulo?.unidades_por_bulto,
+    })
+    return {
+      ...l,
+      unidadOC: c.unidadOC,
+      unidadConteo: c.unidadConteo,
+      unidadesPorBulto: c.unidadesPorBulto,
+      ocUnidades: aUnidadesBase(l.cantidad_oc, c.factorOC),
+      fisicaUnidades: aUnidadesBase(l.cantidad_fisica, c.factorConteo),
+      sinUnidadesPorBulto: c.sinUnidadesPorBulto,
+    }
+  })
   return {
-    orden: o, lineas, conformidad, cierrePendiente, rechazos,
+    orden: o, lineas: conUnidades, conformidad, cierrePendiente, rechazos,
     recepcionId: o.recepcion?.id ?? null,
     documentos: o.recepcion?.recepciones_documentos?.length ?? 0,
   }

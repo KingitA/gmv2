@@ -437,6 +437,10 @@ export async function processEmailAsInvoice(
                         numero_comprobante: invoiceData.numero_comprobante || null,
                         tipo_comprobante: tipoComp,
                         fecha: invoiceData.fecha_comprobante || fechaHoy,
+                        // Vínculo fuerte con el comprobante recién creado: al validarlo se reutiliza
+                        // ESTE movimiento (y su vencimiento) en vez de generar otro (E-32).
+                        referencia_tipo: 'comprobante_compra',
+                        referencia_id: comprobante.id,
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', existingCC.id)
@@ -447,6 +451,7 @@ export async function processEmailAsInvoice(
             } else {
                 // No existing OC movement found, create new one
                 ccResult = await createCCMovement(db, proveedorId, invoiceData, tipoComp, fechaHoy)
+                await vincularMovimientoAComprobante(db, ccResult?.id, comprobante.id)
             }
 
             // Calculate and set vencimiento on the CC movement
@@ -543,8 +548,9 @@ export async function processEmailAsInvoice(
                             estado: 'pendiente_recepcion',
                             diferencia_centavos: 0,
                         }).select('id').single()
-                        // Create CC movement
-                        await createCCMovement(db, proveedorId, addInv, addTipo, fechaHoy)
+                        // Create CC movement (vinculado al comprobante: validar lo reutiliza, no lo duplica)
+                        const addMov = await createCCMovement(db, proveedorId, addInv, addTipo, fechaHoy)
+                        await vincularMovimientoAComprobante(db, addMov?.id, addComp?.id)
                         // Article-level OCR for additional
                         if (recepcion && addComp) {
                             const addFile = (addInv as any)?._sourceFilename
@@ -767,6 +773,19 @@ Si no hay datos de factura, respondé: {"error": "No se encontraron datos de fac
     }
 }
 
+/**
+ * Deja el movimiento de cuenta corriente que creó el mail apuntando a su comprobante de
+ * compra. Solo toca movimientos 'gmail' todavía sueltos (nunca uno que ya es de otro comprobante).
+ */
+async function vincularMovimientoAComprobante(db: ReturnType<typeof getSupabaseAdmin>, movimientoId?: string | null, comprobanteId?: string | null) {
+    if (!movimientoId || !comprobanteId) return
+    const { error } = await db.from('cuenta_corriente_proveedores')
+        .update({ referencia_tipo: 'comprobante_compra', referencia_id: comprobanteId })
+        .eq('id', movimientoId)
+        .eq('referencia_tipo', 'gmail')
+    if (error) console.error('[InvoiceProcessor] no se pudo vincular el movimiento al comprobante:', error.message)
+}
+
 // ── Helper: Create CC movement ─────────────────────────
 async function createCCMovement(
     db: ReturnType<typeof getSupabaseAdmin>,
@@ -974,10 +993,17 @@ async function runArticleLevelOCR(
                         detalleInserts.push({
                             comprobante_id: comprobanteId,
                             articulo_id: articuloId,
-                            cantidad_facturada: cantidadBase,
+                            // Convención ÚNICA de comprobantes_compra_detalle (igual que lib/services/detalle.ts):
+                            // cantidad y precio TAL CUAL la factura; tipo_cantidad = 'bulto' si esa cantidad
+                            // son bultos (factor ≠ 1). La conversión a unidades la hace quien lee, con el
+                            // factor de la línea de recepción. Antes se guardaba la cantidad YA convertida
+                            // con tipo 'bulto' y la verificación la multiplicaba otra vez.
+                            cantidad_facturada: item.cantidad || 0,
                             precio_unitario: item.precio_unitario || 0,
                             iva_porcentaje: tipoDocumento === 'ADQ' ? 0 : 21,
-                            tipo_cantidad: item.unidad_medida?.toLowerCase() === 'bulto' ? 'bulto' : 'unidad',
+                            tipo_cantidad: conversion.factor === 1 ? 'unidad' : 'bulto',
+                            recepcion_item_id: matchedItem.id,
+                            match_estado: 'auto',
                             descripcion_proveedor: item.descripcion || null,
                             codigo_proveedor: item.codigo || null,
                         })
