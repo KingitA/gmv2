@@ -139,7 +139,7 @@ export default function CuentaCorrienteProveedorPage() {
                 </TableCell>
                 <TableCell className="text-right">
                     {mov.referencia_tipo === 'orden_compra' && mov.referencia_id && (
-                        <Link href={`/ordenes-compra/${mov.referencia_id}/articulos`}>
+                        <Link href={`/ordenes-compra/${mov.referencia_id}/verificacion`}>
                             <Button variant="ghost" size="sm" className="gap-1 text-xs text-blue-600 hover:bg-blue-50">
                                 <ExternalLink className="h-3 w-3" /> OC
                             </Button>
