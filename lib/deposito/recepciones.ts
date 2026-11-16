@@ -15,6 +15,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { nowArgentina } from "@/lib/utils"
 import { estadoLineaRecepcion } from "./bonificados"
 import { ErrorDeposito } from "./picking"
+import { faltaLaColumna, faltaLaFuncion } from "@/lib/utils/migracion-pendiente"
 import { aUnidadesBase, conversionLinea, esUnidadConteo, type ConversionLinea, type UnidadConteo } from "./unidades"
 
 const SELECT_FULL = `*, recepciones_items(*), recepciones_documentos(*)`
@@ -28,8 +29,6 @@ const ABIERTA = ["en_proceso", "borrador"]
 // función recepcion_aplicar_stock. Mientras no esté aplicada todo sigue andando:
 // se cuenta en la unidad de la línea de la OC y el stock se suma como antes
 // (leer y escribir), pero YA convertido a unidades.
-const faltaColumna = (e: any) => !!e && (e.code === "42703" || e.code === "PGRST204")
-const faltaFuncion = (e: any) => !!e && (e.code === "PGRST202" || e.code === "42883" || /could not find the function/i.test(String(e.message || "")))
 
 let columnasConteo: boolean | null = null
 let columnasConteoAt = 0
@@ -38,14 +37,16 @@ export async function hayColumnasConteo(supabase: any): Promise<boolean> {
   if (columnasConteo === true) return true
   if (columnasConteo === false && Date.now() - columnasConteoAt < 60_000) return false
   const { error } = await supabase.from("recepciones_items").select("unidad_conteo").limit(1)
+  // Un corte de red o cualquier otro error NO es "no hay columnas": se propaga (el outbox reintenta)
+  // y no se recuerda nada. Solo "la columna no existe" significa migración sin aplicar.
+  if (error && !faltaLaColumna(error)) throw error
   columnasConteoAt = Date.now()
   columnasConteo = !error
-  if (error && !faltaColumna(error)) console.warn("[deposito] no se pudo comprobar recepciones_items.unidad_conteo:", error.message)
   return columnasConteo
 }
 
 /** Cómo se convierte cada línea de una recepción a unidades base (clave = id de recepciones_items). */
-async function conversionesDeRecepcion(
+export async function conversionesDeRecepcion(
   supabase: any,
   ordenCompraId: string | null,
   items: Array<{ id: string; articulo_id: string; fuera_de_oc?: boolean | null; unidad_conteo?: string | null }>,
@@ -441,8 +442,6 @@ export async function finalizarRecepcion(supabase: any, recepcion_id: string, op
     const hechos = new Set<string>((yaHechos || []).map((k: any) => k.articulo_id))
 
     // ── Stock ──
-    const factores: Record<string, { unidad: UnidadConteo; factor: number }> = {}
-    for (const l of contadas) factores[l.id] = { unidad: l.conv.unidadConteo, factor: l.conv.factorConteo }
     // ── Kardex y movimiento de stock: uno por artículo, en unidades base ──
     const registrar = async (articuloId: string, g: { base: number; antes: number | null; despues: number | null }) => {
       if (hechos.has(articuloId) || !(g.base > 0)) return
@@ -493,9 +492,13 @@ export async function finalizarRecepcion(supabase: any, recepcion_id: string, op
     }
 
     let aplicados: StockAplicado[] = []
-    const rpc = await supabase.rpc("recepcion_aplicar_stock", { p_recepcion_id: recepcion_id, p_factores: factores })
+    // La función lee de la base en qué se contó cada línea y las unidades por bulto (no recibe
+    // factores). Se llama con el cliente de servicio: no tiene permiso para usuarios; el acceso a
+    // esta recepción ya se comprobó arriba con la sesión del usuario (lectura + candado).
+    const rpc = await createAdminClient().rpc("recepcion_aplicar_stock", { p_recepcion_id: recepcion_id })
     if (!rpc.error) aplicados = (rpc.data || []) as StockAplicado[]
-    else if (faltaFuncion(rpc.error)) await aplicarStockSinFuncion(supabase, contadas, hechos, registrar)
+    // Solo si la función que falta es ESA (migración sin aplicar). Un error adentro de la función se propaga.
+    else if (faltaLaFuncion(rpc.error, "recepcion_aplicar_stock")) await aplicarStockSinFuncion(supabase, contadas, hechos, registrar)
     else throw rpc.error
 
     const porArticulo = new Map<string, { base: number; antes: number | null; despues: number | null }>()

@@ -17,9 +17,10 @@
 import { todayArgentina } from '@/lib/utils';
 import { inferirTipoComprobante, type ParseResult } from '@/lib/services/ocr';
 import { matchAndCreateDetalle } from '@/lib/services/detalle';
-import { claseComprobante, esNumeroProvisorio, normalizarNumeroComprobante } from '@/lib/services/numero-comprobante';
+import { esNumeroProvisorio, normalizarNumeroComprobante, tiposCompatibles } from '@/lib/services/numero-comprobante';
+import { fechaISO } from '@/lib/formato';
 
-export { claseComprobante, esNumeroProvisorio, normalizarNumeroComprobante };
+export { esNumeroProvisorio, normalizarNumeroComprobante, tiposCompatibles };
 
 export interface ComprobanteDuplicado {
     id: string;
@@ -37,16 +38,25 @@ export async function buscarComprobanteDuplicado(
 ): Promise<ComprobanteDuplicado | null> {
     const clave = normalizarNumeroComprobante(p.numero);
     if (!clave) return null;
-    const { data, error } = await supabase
+    const tipos = tiposCompatibles(p.tipo);
+    if (tipos.length === 0) return null;
+    // Se filtra EN LA CONSULTA (un proveedor puede tener miles de comprobantes): mismo tipo o
+    // compatible, y el número tiene que contener los dígitos del número buscado. La comparación
+    // exacta (punto de venta + número, sin ceros) se hace después sobre esos pocos.
+    const digitos = clave.split('-').pop() || '';
+    let q = supabase
         .from('comprobantes_compra')
         .select('id, tipo_comprobante, numero_comprobante, estado, orden_compra_id')
-        .eq('proveedor_id', p.proveedor_id);
+        .eq('proveedor_id', p.proveedor_id)
+        .in('tipo_comprobante', tipos)
+        .neq('estado', 'esperada') // una NC esperada no es el documento: es lo que se espera recibir
+        .order('created_at', { ascending: true })
+        .limit(500);
+    if (/^\d+$/.test(digitos)) q = q.ilike('numero_comprobante', `%${digitos}%`);
+    const { data, error } = await q;
     if (error) throw new Error(error.message);
-    const clase = claseComprobante(p.tipo);
     const dup = (data || []).find((c: any) =>
         c.id !== p.excluirId
-        && c.estado !== 'esperada' // una NC esperada no es el documento: es lo que se espera recibir
-        && claseComprobante(c.tipo_comprobante) === clase
         && normalizarNumeroComprobante(c.numero_comprobante) === clave);
     if (!dup) return null;
     let numero_orden: string | null = null;
@@ -93,7 +103,7 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
     ocr: ParseResult;
     tipo_documento?: string;
     foto_url?: string | null;
-}): Promise<{ comprobante: any | null; sumado_a_provisorio: boolean; error?: string; vinculados: any[] }> {
+}): Promise<{ comprobante: any | null; sumado_a_provisorio: boolean; otro_provisorio?: boolean; error?: string; vinculados: any[] }> {
     const meta = p.ocr.comprobante;
     const numero = meta?.numero_comprobante && !esNumeroProvisorio(meta.numero_comprobante) ? String(meta.numero_comprobante).trim() : '';
     const tipoComp = inferirTipoComprobante(p.ocr, p.tipo_documento);
@@ -116,6 +126,7 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
 
     let comprobante: any = null;
     let sumado = false;
+    let otroProvisorio = false;
 
     // Sin número: ¿ya hay un comprobante provisorio abierto de esta orden y este tipo?
     if (!numero) {
@@ -128,7 +139,19 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
             .ilike('numero_comprobante', 'PENDIENTE-%')
             .order('created_at', { ascending: true })
             .limit(1);
-        if (abiertos?.[0]) {
+        // Solo se suma si puede ser OTRA HOJA del mismo documento. Si lo leído dice otra cosa
+        // (otro total, u otra fecha) es otro comprobante sin número: va aparte, con su total.
+        const esOtroDocumento = (prov: any) => {
+            const totalProv = Number(prov.total_factura_declarado || 0);
+            if (totalProv > 0 && totalFactura > 0 && Math.abs(totalProv - totalFactura) > 0.01) return true;
+            const fechaProv = String(prov.fecha_comprobante || '').slice(0, 10);
+            // la fecha del provisorio solo vale si se leyó del documento (no si es el día en que se cargó)
+            const fechaLeida = !!fechaProv && fechaProv !== (fechaISO(prov.created_at) || '');
+            return !!meta?.fecha && fechaLeida && fechaProv !== meta.fecha;
+        };
+        if (abiertos?.[0] && esOtroDocumento(abiertos[0])) {
+            otroProvisorio = true;
+        } else if (abiertos?.[0]) {
             comprobante = abiertos[0];
             sumado = true;
             // La hoja con los totales suele ser la última: se toman si el provisorio no los tenía
@@ -173,5 +196,5 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
         documento_id: p.documento_id || undefined,
     });
 
-    return { comprobante, sumado_a_provisorio: sumado, vinculados };
+    return { comprobante, sumado_a_provisorio: sumado, otro_provisorio: otroProvisorio, vinculados };
 }

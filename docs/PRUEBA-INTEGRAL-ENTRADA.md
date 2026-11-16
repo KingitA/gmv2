@@ -152,7 +152,7 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 
 | Archivo | Qué agrega | Sin aplicarla |
 |---|---|---|
-| `20261116a_recepcion_unidades.sql` | `recepciones_items.unidad_conteo` + rastro de lo sumado, función `recepcion_aplicar_stock` | El stock igual sube en unidades (regla en el código); la suma sigue siendo "leer y escribir" y la app nueva no puede contar "en otra unidad" que la de la OC |
+| `20261116a_recepcion_unidades.sql` | `recepciones_items.unidad_conteo` + rastro de lo sumado, función `recepcion_aplicar_stock(recepcion)` (lee las unidades por bulto de la base) | El stock igual sube en unidades (regla en el código); la suma sigue siendo "leer y escribir" y la app nueva no puede contar "en otra unidad" que la de la OC |
 | `20261116b_ordenes_compra_estados.sql` | CHECK de `ordenes_compra.estado` con `enviada, confirmada, en_camino, finalizada` | "Finalizar OC" valida los comprobantes y avisa en pantalla que la orden no pasó a finalizada (antes fallaba callado) |
 | `20261116c_comprobante_compra_validar.sql` | función `comprobante_compra_validar` (todo o nada) | Validar aplica las mismas reglas paso a paso, con el cambio de estado como compuerta |
 
@@ -165,7 +165,23 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 - `validar` escribía `validado_por` / `validado_at`, que no figuran en ningún script ni migración (la tabla tiene `usuario_validador` / `fecha_validacion`), y no miraba el error. Si esas columnas no existen, el comprobante **nunca pasaba a "validado"** y cada click generaba otra deuda y otro vencimiento: explicaría que los 13 comprobantes sigan en `pendiente_recepcion`. Ahora se usan las columnas originales y el estado cambia aunque falle el dato de auditoría. **Verificar en la base** (`select column_name from information_schema.columns where table_name = 'comprobantes_compra'`).
 - Una recepción creada por la oficina al subir la factura queda en `borrador`; `finalizarRecepcion` solo aceptaba `en_proceso` y desde depósito quedaba reintentando "otro equipo está finalizando" para siempre. Ahora acepta las dos.
 - La factura que entra por mail (`lib/ai/email-invoice-processor.ts`) convierte la provisión de la OC en "factura" y crea su vencimiento; al validar después ese comprobante se generaba un segundo movimiento y un segundo vencimiento. Ahora validar adopta ese movimiento. El procesador de mails en sí no se tocó (usa otra fuente de plazo: E-06).
-- `app/api/comprobantes-compra/[id]/lineas` (renglón agregado a mano) suma `cantidad_documentada` sin convertir a unidades. La verificación ya no depende de ese campo (compara por el detalle del comprobante), pero conviene unificarlo en T1-B.
-- Comprobante SIN orden de compra: validar no genera movimiento en la cuenta corriente (solo el vencimiento). Se dejó igual; decidir en T1-D (E-58).
+- ~~`app/api/comprobantes-compra/[id]/lineas` (renglón agregado a mano) sumaba `cantidad_documentada` sin convertir a unidades.~~ Corregido en la revisión.
+- ~~Comprobante SIN orden de compra: validar no generaba movimiento en la cuenta corriente.~~ Decidido por Juan el 16/11: **sí genera la deuda** (hecho en la revisión).
 - No se puede "des-validar" un comprobante (el mensaje al borrar un documento validado lo sugiere, pero no existe). T1-B.
 - Quedan `confirm()` nativos en verificación y comprobantes (E-44) y `alert()` en `app/ordenes-compra/page.tsx` (E-12): solo se pasaron a avisos del sistema los de las funciones que se tocaron.
+
+### Revisión del 16/11 (arreglos pedidos por el orquestador + respuestas de Juan)
+
+- **`cerrar` en unidades** (regresión): la diferencia llega en unidades y los precios se llevan a precio por unidad (`precio_documentado` ÷ `factor_conversion`); 1 bulto de 24 u a $2.400 da $2.400. El costo que se guarda al "absorber" una diferencia de precio es por unidad. `valor_real` ya no se usa como precio (la pantalla manda ahí una cantidad).
+- **Una sola convención en `comprobantes_compra_detalle`**: `cantidad_facturada` y `precio_unitario` tal cual la factura; `tipo_cantidad = 'bulto'` solo si esa cantidad son bultos. La cumplen el OCR, el mail, el vínculo a mano y el renglón agregado a mano; quien lee convierte con el factor de la línea de recepción.
+- **Validar lo que entró por mail**: el mail ahora deja el movimiento de cuenta corriente vinculado al comprobante. Para lo anterior, `buscarMovimientoPrevio` adopta por número normalizado o, sin número, por único candidato de la orden con el mismo importe; si es ambiguo **frena** con un mensaje (no duplica). Los vencimientos que ya existen no se modifican: si el importe no coincide, avisa.
+- **Todo o nada en los dos caminos**: si no se puede crear el vencimiento no se valida nada (con la función SQL, por la transacción; sin ella, se deshace lo hecho) y el mensaje sale en español.
+- **Dos comprobantes sin número** con distinto total o fecha ya no se funden en un solo provisorio.
+- **Duplicados**: la letra es parte del tipo (FA 1-123 y FB 1-123 son distintas); se filtra en la consulta.
+- **Migración pendiente**: se cae al camino anterior solo si la función que falta es exactamente la esperada (`lib/utils/migracion-pendiente.ts`); un error de red ya no se toma como "no hay columnas".
+- **`recepcion_aplicar_stock(recepcion)`** ya no recibe factores: lee `unidades_por_bulto` y la unidad de la base. Sin permiso para usuarios: la llama el servidor con el cliente de servicio.
+- **Juan (1)**: un comprobante sin orden de compra también genera deuda en la cuenta corriente al validarse. Sin proveedor no se valida.
+- **Juan (2)**: artículo por bulto sin unidades por bulto: no se bloquea nada, solo se avisa.
+- **Juan (3)**: el renglón de flete u otro concepto **no se borra**: se marca "No es mercadería" (`match_estado = 'no_mercaderia'`), queda discriminado en la verificación ("Otros conceptos facturados") y la deuda es siempre el **total** del comprobante ($100 + 21 % + 3 % de flete = $124).
+- **Juan (5)**: la APK de Depósito se publica antes de la próxima prueba (PENDIENTES-APPS R1).
+- Visto y no tocado: `lib/ai/email-invoice-processor.ts` mapea a tipos `ADQ` / `REV`, que el CHECK de `comprobantes_compra.tipo_comprobante` no acepta (`Adquisicion` / `Reversa`): esas facturas por mail no crean comprobante. Para T1.

@@ -61,6 +61,7 @@ export default function VerificacionOCPage() {
     const [rows, setRows] = useState<VerRow[]>([])
     const [comprobantes, setComprobantes] = useState<CompData[]>([])
     const [sinMatch, setSinMatch] = useState(0)
+    const [otrosConceptos, setOtrosConceptos] = useState<{ comprobante: string; descripcion: string; importe: number }[]>([])
     const [loading, setLoading] = useState(true)
     const [recepcionId, setRecepcionId] = useState<string | null>(null)
     const [recepcionIds, setRecepcionIds] = useState<string[]>([])
@@ -106,10 +107,19 @@ export default function VerificacionOCPage() {
         if (compIds.length > 0) {
             const { data: det } = await supabase
                 .from("comprobantes_compra_detalle")
-                .select("comprobante_id, articulo_id, cantidad_facturada, precio_unitario, descuento1, tipo_cantidad, match_estado, recepcion_item_id")
+                .select("comprobante_id, articulo_id, cantidad_facturada, precio_unitario, descuento1, tipo_cantidad, match_estado, recepcion_item_id, descripcion_proveedor")
                 .in("comprobante_id", compIds)
             compDetalle = det || []
             setSinMatch(compDetalle.filter((d: any) => d.match_estado === "sugerido" || d.match_estado === "sin_match").length)
+            // Renglones marcados "no es mercadería" (flete, cargos): se muestran discriminados
+            setOtrosConceptos(compDetalle.filter((d: any) => d.match_estado === "no_mercaderia").map((d: any) => {
+                const comp = (comps || []).find((c: any) => c.id === d.comprobante_id)
+                return {
+                    comprobante: comp ? `${comp.tipo_comprobante} ${comp.numero_comprobante}` : "",
+                    descripcion: d.descripcion_proveedor || "(sin descripción)",
+                    importe: Math.round((Number(d.cantidad_facturada) || 0) * (Number(d.precio_unitario) || 0) * (1 - (Number(d.descuento1) || 0) / 100) * 100) / 100,
+                }
+            }))
         }
 
         const { data: recepciones } = await supabase
@@ -417,9 +427,10 @@ export default function VerificacionOCPage() {
             body: JSON.stringify({ decisions: [decision] }),
         })
 
-        const data = await res.json()
-        if (!res.ok) {
-            alert(data.error || 'Error al resolver')
+        const data = await res.json().catch(() => ({}))
+        const fallo = !res.ok ? (data.error || `error ${res.status}`) : (data.results || []).find((r: any) => r.error)?.error
+        if (fallo) {
+            toast.error(`No se resolvió la diferencia: ${fallo}`, { duration: 12000 })
             return
         }
 
@@ -578,6 +589,18 @@ export default function VerificacionOCPage() {
                         <strong>{sinMatch} ítem{sinMatch !== 1 ? "s" : ""} de comprobantes sin vincular al catálogo</strong> —
                         confirmalos en "Revisar matches" (más abajo); hasta entonces la verificación no los incluye.
                     </p>
+                </div>
+            )}
+
+            {otrosConceptos.length > 0 && (
+                <div className="mb-4 p-3 border rounded-lg bg-muted/30">
+                    <p className="text-sm font-medium">Otros conceptos facturados (no son mercadería, no entran al stock)</p>
+                    <ul className="text-sm text-muted-foreground mt-1">
+                        {otrosConceptos.map((o, i) => (
+                            <li key={i}>{o.comprobante} — {o.descripcion}{o.importe > 0 ? <> — <span className="font-mono">{formatCurrency(o.importe)}</span> + impuestos</> : null}</li>
+                        ))}
+                    </ul>
+                    <p className="text-xs text-muted-foreground mt-1">Ya están incluidos en el total de cada comprobante, que es lo que se registra como deuda.</p>
                 </div>
             )}
 

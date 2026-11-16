@@ -84,6 +84,8 @@ export async function PATCH(
 
         // 2. Vincular con la recepción de la OC (crear línea fuera_de_oc si no estaba pedida)
         let recepcionItemId: string | null = detalle.recepcion_item_id;
+        // La línea sin vincular nació como 'unidad'; al vincularla se sabe si la factura la trae por bulto
+        let tipoCantidad: string | null = null;
         if (comprobante.orden_compra_id) {
             const { data: recepcion } = await supabase
                 .from('recepciones')
@@ -134,6 +136,7 @@ export async function PATCH(
                     });
 
                     const cantBase = Number(detalle.cantidad_facturada || 0) * conversion.factor;
+                    tipoCantidad = conversion.factor === 1 ? 'unidad' : 'bulto';
 
                     await supabase
                         .from('recepciones_items')
@@ -161,6 +164,8 @@ export async function PATCH(
                 articulo_sugerido_id: null,
                 match_estado: 'manual',
                 recepcion_item_id: recepcionItemId,
+                // misma convención que el OCR: cantidad tal cual la factura + si son bultos o unidades
+                ...(tipoCantidad ? { tipo_cantidad: tipoCantidad } : {}),
             })
             .eq('id', detalle_id)
             .select()
@@ -176,10 +181,12 @@ export async function PATCH(
 }
 
 // DELETE /api/comprobantes-compra/[id]/detalle  { detalle_id }
-// Quita un renglón que NO es mercadería (flete, leyendas, un total leído como ítem).
-// Solo renglones SIN artículo vinculado y de un comprobante sin validar: como nunca
-// se vincularon, no tocaron la recepción ni el stock; no hay nada que revertir.
-// Hace falta porque validar bloquea mientras queden renglones sin artículo (E-32).
+// Marca un renglón como "NO es mercadería" (flete, un cargo, una leyenda). El renglón NO se
+// borra: queda discriminado en el comprobante (match_estado = 'no_mercaderia') con su
+// descripción e importe, y la deuda sigue siendo el TOTAL de la factura (decisión de Juan,
+// 16/11: $100 + 21 % + 3 % de flete = $124, no $121). Solo renglones SIN artículo y de un
+// comprobante sin validar: nunca tocaron la recepción ni el stock.
+// Hace falta porque validar frena mientras queden renglones sin resolver (E-32).
 export async function DELETE(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -201,20 +208,20 @@ export async function DELETE(
             .maybeSingle();
         if (!comprobante) return NextResponse.json({ error: 'Comprobante no encontrado' }, { status: 404 });
         if (['validado', 'cerrado'].includes(comprobante.estado)) {
-            return NextResponse.json({ error: 'El comprobante ya está validado: no se le pueden quitar renglones.' }, { status: 409 });
+            return NextResponse.json({ error: 'El comprobante ya está validado: no se le pueden cambiar renglones.' }, { status: 409 });
         }
 
-        // La condición va en el mismo DELETE: si alguien lo vinculó recién, no se borra
+        // La condición va en el mismo UPDATE: si alguien lo vinculó recién, no se marca
         const { data: borrados, error } = await supabase
             .from('comprobantes_compra_detalle')
-            .delete()
+            .update({ match_estado: 'no_mercaderia', articulo_sugerido_id: null })
             .eq('id', detalle_id)
             .eq('comprobante_id', comprobante_id)
             .is('articulo_id', null)
             .select('id');
         if (error) throw error;
         if (!borrados || borrados.length === 0) {
-            return NextResponse.json({ error: 'Ese renglón ya está vinculado a un artículo (o ya no existe): no se quitó.' }, { status: 409 });
+            return NextResponse.json({ error: 'Ese renglón ya está vinculado a un artículo (o ya no existe): no se cambió.' }, { status: 409 });
         }
         return NextResponse.json({ success: true });
     } catch (error: any) {

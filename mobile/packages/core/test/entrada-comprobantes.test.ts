@@ -1,6 +1,6 @@
 // E-36 — detectar la misma factura de proveedor aunque el número venga escrito distinto.
 import { describe, expect, it } from "vitest"
-import { claseComprobante, esNumeroProvisorio, normalizarNumeroComprobante } from "../../../../lib/services/numero-comprobante"
+import { esNumeroProvisorio, normalizarNumeroComprobante, tiposCompatibles } from "../../../../lib/services/numero-comprobante"
 
 describe("número de comprobante comparable", () => {
   it("la misma factura escrita de varias formas da la misma clave", () => {
@@ -34,13 +34,32 @@ describe("número de comprobante comparable", () => {
   })
 })
 
-describe("clase del comprobante (cada clase tiene su numeración)", () => {
-  it("factura y adquisición son la misma clase: una misma factura leída de las dos formas es duplicada", () => {
-    for (const t of ["FA", "FB", "FC", "Adquisicion"]) expect(claseComprobante(t)).toBe("factura")
+describe("tipos compatibles (cada tipo tiene su numeración; la letra es parte del tipo)", () => {
+  const mismo = (a: string, b: string) => tiposCompatibles(a).includes(b)
+  it("factura A y factura B con el mismo número NO son la misma", () => {
+    expect(mismo("FA", "FB")).toBe(false)
+    expect(mismo("FB", "FA")).toBe(false)
+    expect(mismo("FA", "FC")).toBe(false)
+    expect(mismo("FA", "FA")).toBe(true)
   })
-  it("nota de crédito, nota de débito y remito van aparte", () => {
-    for (const t of ["NC", "NCA", "NCB", "NCC", "Reversa"]) expect(claseComprobante(t)).toBe("credito")
-    for (const t of ["ND", "NDA", "NDB", "NDC"]) expect(claseComprobante(t)).toBe("debito")
-    expect(claseComprobante("Remito")).toBe("remito")
+  it("una factura leída sin datos fiscales (Adquisicion) puede ser la FA/FB/FC", () => {
+    for (const t of ["FA", "FB", "FC"]) {
+      expect(mismo("Adquisicion", t)).toBe(true)
+      expect(mismo(t, "Adquisicion")).toBe(true)
+    }
+  })
+  it("NC / ND sin letra cruzan con las que tienen letra; entre letras no", () => {
+    expect(mismo("NC", "NCA")).toBe(true)
+    expect(mismo("NCA", "NC")).toBe(true)
+    expect(mismo("NCA", "NCB")).toBe(false)
+    expect(mismo("ND", "NDB")).toBe(true)
+    expect(mismo("NDA", "NDB")).toBe(false)
+  })
+  it("factura, nota de crédito, nota de débito, remito y reversa nunca se cruzan", () => {
+    for (const [a, b] of [["FA", "NCA"], ["FA", "NDA"], ["FA", "Remito"], ["NC", "ND"], ["Remito", "Adquisicion"], ["Reversa", "NC"]]) {
+      expect(mismo(a, b)).toBe(false)
+      expect(mismo(b, a)).toBe(false)
+    }
+    expect(tiposCompatibles("")).toEqual([])
   })
 })

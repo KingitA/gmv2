@@ -151,6 +151,7 @@ export async function POST(
             comprobante = r.comprobante;
             if (r.error) aviso = `La foto se leyó pero no se pudo crear el comprobante (${r.error}). Avisá a la oficina.`;
             else if (r.sumado_a_provisorio) aviso = 'No se leyó el número del comprobante: los renglones se sumaron al comprobante provisorio de esta orden. La oficina tiene que completarle el número.';
+            else if (r.otro_provisorio) aviso = 'No se leyó el número del comprobante y ya había otro sin número en esta orden con otro total o fecha: se cargó como un comprobante aparte. La oficina tiene que completarles el número.';
             else if (!ocrResult.comprobante?.numero_comprobante) aviso = 'No se leyó el número del comprobante: quedó como provisorio. La oficina tiene que completarle el número.';
         } else {
             // 6. Sin comprobante (recepción sin OC vinculada) — actualizar items directo.

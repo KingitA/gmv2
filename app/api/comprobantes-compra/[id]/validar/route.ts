@@ -2,15 +2,19 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { nowArgentina } from '@/lib/utils';
-import { fechaISO, mediodiaAR, sumarDiasISO } from '@/lib/formato';
+import { fechaISO, mediodiaAR, moneda, sumarDiasISO } from '@/lib/formato';
 import { unidadesPorBultoDe } from '@/lib/deposito/unidades';
+import { normalizarNumeroComprobante } from '@/lib/services/numero-comprobante';
+import { faltaLaColumna, faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Validar un comprobante de compra (E-32).
 //
 // Reglas (las mismas con y sin la migración 20261116c):
 //   · Un comprobante ya validado NO vuelve a generar deuda ni vencimiento.
-//   · Con renglones sin artículo no se valida.
+//   · Con renglones sin artículo no se valida (salvo los marcados "no es mercadería": flete, etc.).
+//   · La deuda es SIEMPRE el total del comprobante (con flete, IVA y percepciones), tenga o no
+//     orden de compra; nunca la suma de los renglones de mercadería.
 //   · Sin total no se valida, salvo que sea un Remito: el remito queda validado como
 //     respaldo de cantidades, sin deuda, sin vencimiento y sin tocar la provisión.
 //   · La provisión de la OC baja por lo que se va facturando y se elimina recién cuando
@@ -28,8 +32,6 @@ const CREDITO = ['NC', 'NCA', 'NCB', 'NCC', 'Reversa'];
 const NOTA_DEBITO = ['ND', 'NDA', 'NDB', 'NDC'];
 const YA_VALIDADO = ['validado', 'cerrado'];
 
-const faltaFuncion = (e: any) => !!e && (e.code === 'PGRST202' || e.code === '42883' || /could not find the function/i.test(String(e.message || '')));
-
 class Rechazo extends Error {
     constructor(message: string, public codigo: string, public status = 422) { super(message); }
 }
@@ -41,6 +43,8 @@ interface PlanVencimiento {
     modalidad: string | null;
     fecha_validez: string | null;
     numero_orden: string | null;
+    /** Movimiento de cuenta corriente que dejó el mail y hay que reutilizar (buscarMovimientoPrevio) */
+    movimiento_adoptar?: string | null;
 }
 
 interface Resultado {
@@ -48,6 +52,9 @@ interface Resultado {
     sin_deuda?: boolean;
     movimiento_cc_id?: string | null;
     vencimiento_id?: string | null;
+    vencimiento_nuevo?: boolean;
+    /** Importe del vencimiento (el que ya existía no se modifica) */
+    vencimiento_monto?: number | null;
     sin_vencimiento?: boolean;
     provision?: string;
 }
@@ -110,16 +117,84 @@ async function armarPlan(supabase: any, comprobante: any, proveedorId: string | 
     return plan;
 }
 
+const TIPOS_DEUDA_CC = ['factura', 'nota_credito', 'nota_debito'];
+
+/**
+ * ¿La deuda de este comprobante YA está en la cuenta corriente sin estar vinculada a él?
+ * Pasa con lo que entró por mail antes del 16/11: el procesador convertía la provisión de
+ * la OC en "factura" (queda referenciada a la OC) o creaba un movimiento 'gmail' suelto.
+ * Desde el 16/11 el mail deja el vínculo y esto no hace falta.
+ *
+ * Devuelve el id del movimiento a ADOPTAR (validar lo reutiliza: no crea otro ni otro
+ * vencimiento), null si no hay ninguno, o lanza Rechazo si no se puede saber cuál es:
+ * ante la duda no se duplica deuda, se frena con un mensaje que dice cómo destrabarlo.
+ * Solo lee; lo usan los dos caminos (con y sin la función SQL).
+ */
+async function buscarMovimientoPrevio(supabase: any, comprobante: any, proveedorId: string, ocId: string | null, total: number): Promise<string | null> {
+    const { data: movs, error } = await supabase
+        .from('cuenta_corriente_proveedores')
+        .select('id, tipo_movimiento, monto, numero_comprobante, referencia_tipo, referencia_id, descripcion')
+        .eq('proveedor_id', proveedorId)
+        .in('tipo_movimiento', TIPOS_DEUDA_CC)
+        .in('referencia_tipo', ['orden_compra', 'gmail']);
+    if (error) throw error;
+    const sueltos: any[] = movs || [];
+    if (sueltos.length === 0) return null;
+
+    const pesos = (m: any) => `$${Math.abs(Number(m.monto || 0))}`;
+    const clave = normalizarNumeroComprobante(comprobante.numero_comprobante);
+
+    // 1. Mismo número (normalizado: "A 0001-00000123" = "1-123")
+    if (clave) {
+        const porNumero = sueltos.filter((m) => normalizarNumeroComprobante(m.numero_comprobante) === clave);
+        if (porNumero.length === 1) return porNumero[0].id;
+        if (porNumero.length > 1) {
+            throw new Rechazo(
+                `En la cuenta corriente del proveedor hay ${porNumero.length} movimientos con el número ${comprobante.numero_comprobante} que entraron por mail y no se sabe cuál corresponde a este comprobante. No se validó: hay que revisar esa cuenta corriente y dejar uno solo.`,
+                'movimiento_ambiguo', 409);
+        }
+    }
+
+    // 2. Sin coincidencia por número. Candidatos: lo que el mail convirtió en ESTA orden, y
+    //    movimientos 'gmail' sin número por el mismo importe. Se descartan los que por número
+    //    son de OTRO comprobante del proveedor.
+    const { data: otros, error: otrosErr } = await supabase
+        .from('comprobantes_compra')
+        .select('id, numero_comprobante')
+        .eq('proveedor_id', proveedorId)
+        .neq('id', comprobante.id);
+    if (otrosErr) throw otrosErr;
+    const clavesAjenas = new Set((otros || []).map((c: any) => normalizarNumeroComprobante(c.numero_comprobante)).filter(Boolean));
+    const mismoImporte = (m: any) => Math.abs(Math.abs(Number(m.monto || 0)) - total) < 0.01;
+    const candidatos = sueltos.filter((m) => {
+        const k = normalizarNumeroComprobante(m.numero_comprobante);
+        if (k && clavesAjenas.has(k)) return false;
+        if (m.referencia_tipo === 'orden_compra') return !!ocId && m.referencia_id === ocId;
+        return !k && mismoImporte(m); // 'gmail' sin número
+    });
+    if (candidatos.length === 0) return null;
+    // Uno solo y coincide el importe, o el comprobante no tiene número real (GMAIL-… / PENDIENTE-…): es ese
+    if (candidatos.length === 1 && (mismoImporte(candidatos[0]) || !clave)) return candidatos[0].id;
+
+    const detalle = candidatos.slice(0, 3).map((m) => `${m.numero_comprobante ? `N° ${m.numero_comprobante}` : 'sin número'} por ${pesos(m)}`).join('; ');
+    throw new Rechazo(
+        `En la cuenta corriente del proveedor ya hay deuda de esta orden que entró por mail (${detalle}) y no se puede saber si es este mismo comprobante. No se validó, para no duplicar la deuda. Si es el mismo, corregile al comprobante el número o el total (lápiz) para que coincidan y volvé a validar; si es otro comprobante, cargalo y validalo primero.`,
+        'movimiento_ambiguo', 409);
+}
+
 /**
  * Los mismos pasos que la función SQL, de a uno (migración 20261116c sin aplicar).
  * La compuerta es el UPDATE de estado con condición: solo UNA llamada lo gana.
+ * Todo o nada "a mano": si un paso falla después de la compuerta, se deshace lo hecho
+ * (estado, movimiento, vencimiento) y se informa en español; la provisión va al final.
  */
 async function validarSinFuncion(supabase: any, comprobante: any, proveedorId: string | null, ocId: string | null, plan: PlanVencimiento, usuarioId: string): Promise<Resultado> {
     const id = comprobante.id;
     const movimientoPropio = async (): Promise<string | null> => {
-        const { data } = await supabase.from('cuenta_corriente_proveedores')
+        const { data, error } = await supabase.from('cuenta_corriente_proveedores')
             .select('id').eq('referencia_tipo', 'comprobante_compra').eq('referencia_id', id)
             .order('created_at', { ascending: true }).limit(1);
+        if (error) throw error;
         return data?.[0]?.id ?? null;
     };
 
@@ -132,10 +207,12 @@ async function validarSinFuncion(supabase: any, comprobante: any, proveedorId: s
         .from('comprobantes_compra_detalle')
         .select('id', { count: 'exact', head: true })
         .eq('comprobante_id', id)
-        .is('articulo_id', null);
+        .is('articulo_id', null)
+        // los marcados "no es mercadería" (flete, etc.) quedan en el comprobante y no frenan
+        .or('match_estado.is.null,match_estado.neq.no_mercaderia');
     if (detErr) throw detErr;
     if ((sinArticulo || 0) > 0) {
-        throw new Rechazo(`Hay ${sinArticulo} renglón(es) del comprobante sin vincular a un artículo. Vinculalos (o quitá los que no son mercadería) en "Revisar matches" antes de validar.`, 'lineas_sin_articulo');
+        throw new Rechazo(`Hay ${sinArticulo} renglón(es) del comprobante sin vincular a un artículo. Vinculalos (o marcá "No es mercadería" los que sean flete u otro concepto) en "Revisar matches" antes de validar.`, 'lineas_sin_articulo');
     }
 
     const total = Number(comprobante.total_factura_declarado || 0);
@@ -145,6 +222,11 @@ async function validarSinFuncion(supabase: any, comprobante: any, proveedorId: s
     if (!esRemito && total <= 0) {
         throw new Rechazo(`El comprobante ${comprobante.tipo_comprobante} ${comprobante.numero_comprobante} no tiene total. Cargale el total (lápiz de editar) antes de validarlo; si es solo un remito, cambiale el tipo a Remito.`, 'sin_total');
     }
+
+    if (!esRemito && !proveedorId) {
+        throw new Rechazo(`El comprobante ${comprobante.tipo_comprobante} ${comprobante.numero_comprobante} no tiene proveedor: no se puede registrar la deuda. Asignale el proveedor antes de validar.`, 'sin_proveedor');
+    }
+    const sufijoOC = ocId ? ` — OC ${plan.numero_orden || ''}` : '';
 
     // ── Compuerta: pasa a validado solo si todavía no lo estaba ──
     const pasarAValidado = (conAuditoria: boolean) => supabase
@@ -161,67 +243,121 @@ async function validarSinFuncion(supabase: any, comprobante: any, proveedorId: s
     let { data: ganado, error: updErr } = await pasarAValidado(true);
     // Si las columnas de "quién validó" no existieran, el estado se cambia igual: lo que
     // nunca puede pasar es seguir generando deuda con el comprobante sin validar.
-    if (updErr && (updErr.code === 'PGRST204' || updErr.code === '42703')) ({ data: ganado, error: updErr } = await pasarAValidado(false));
+    if (updErr && faltaLaColumna(updErr)) ({ data: ganado, error: updErr } = await pasarAValidado(false));
     if (updErr) throw updErr;
     if (!ganado || ganado.length === 0) return { ya_validado: true, movimiento_cc_id: await movimientoPropio() };
 
     if (esRemito) return { ya_validado: false, sin_deuda: true, movimiento_cc_id: null, vencimiento_id: null, provision: 'intacta' };
 
-    // ── Cuenta corriente (igual que siempre: solo comprobantes de una OC) ──
-    let ccMovId: string | null = null;
-    let provision = 'sin_provision';
-    if (ocId && proveedorId) {
-        const tipoMovimiento = esCredito ? 'nota_credito' : esNotaDebito ? 'nota_debito' : 'factura';
-        const monto = esCredito ? -total : total;
-        const descripcion = `${comprobante.tipo_comprobante} ${comprobante.numero_comprobante} — OC ${plan.numero_orden || ''}`;
-        const fecha = comprobante.fecha_comprobante ? mediodiaAR(comprobante.fecha_comprobante) : nowArgentina();
-
-        ccMovId = await movimientoPropio();
-        if (!ccMovId && comprobante.numero_comprobante) {
-            // Entró por mail: la provisión ya se convirtió en la factura (sigue referenciada a la OC). Se adopta.
-            const { data: porMail } = await supabase.from('cuenta_corriente_proveedores')
-                .select('id')
-                .eq('referencia_tipo', 'orden_compra').eq('referencia_id', ocId)
-                .neq('tipo_movimiento', 'orden_compra')
-                .eq('numero_comprobante', comprobante.numero_comprobante)
-                .order('created_at', { ascending: true }).limit(1);
-            if (porMail?.[0]?.id) {
-                const { error } = await supabase.from('cuenta_corriente_proveedores')
-                    .update({ referencia_tipo: 'comprobante_compra', referencia_id: id, tipo_movimiento: tipoMovimiento, monto, descripcion, tipo_comprobante: comprobante.tipo_comprobante, fecha })
-                    .eq('id', porMail[0].id);
-                if (error) throw error;
-                ccMovId = porMail[0].id;
-            }
+    // Lo que hay que deshacer si algo falla de acá en adelante
+    let movCreado: string | null = null;
+    let movAdoptadoAntes: any = null;
+    let vencCreado: string | null = null;
+    const deshacer = async () => {
+        if (vencCreado) await supabase.from('vencimientos').delete().eq('id', vencCreado);
+        if (movCreado) await supabase.from('cuenta_corriente_proveedores').delete().eq('id', movCreado);
+        if (movAdoptadoAntes) {
+            const { id: movId, ...antes } = movAdoptadoAntes;
+            await supabase.from('cuenta_corriente_proveedores').update(antes).eq('id', movId);
         }
-        if (!ccMovId) {
-            const { data: ccMov, error } = await supabase.from('cuenta_corriente_proveedores').insert({
-                proveedor_id: proveedorId,
-                tipo_movimiento: tipoMovimiento,
-                monto,
-                descripcion,
-                referencia_id: id,
+        await supabase.from('comprobantes_compra')
+            .update({ estado: comprobante.estado, saldo_pendiente: comprobante.saldo_pendiente ?? null, estado_pago: comprobante.estado_pago ?? 'pendiente', fecha_vencimiento: comprobante.fecha_vencimiento ?? null })
+            .eq('id', id);
+    };
+
+    try {
+        // ── Cuenta corriente: con o sin orden de compra (decisión de Juan, 16/11) ──
+        let ccMovId: string | null = null;
+        let provision = 'sin_provision';
+        const conCC = !!proveedorId;
+        if (conCC) {
+            const tipoMovimiento = esCredito ? 'nota_credito' : esNotaDebito ? 'nota_debito' : 'factura';
+            const datosMov = {
                 referencia_tipo: 'comprobante_compra',
+                referencia_id: id,
+                tipo_movimiento: tipoMovimiento,
+                monto: esCredito ? -total : total,
+                descripcion: `${comprobante.tipo_comprobante} ${comprobante.numero_comprobante}${sufijoOC}`,
                 numero_comprobante: comprobante.numero_comprobante,
                 tipo_comprobante: comprobante.tipo_comprobante,
-                fecha,
-            }).select('id').single();
-            if (error) throw error;
-            ccMovId = ccMov.id;
+                fecha: comprobante.fecha_comprobante ? mediodiaAR(comprobante.fecha_comprobante) : nowArgentina(),
+            };
+
+            // Ya vinculado (validación a medias / mail nuevo) o el que dejó un mail viejo: se reutiliza
+            ccMovId = (await movimientoPropio()) || plan.movimiento_adoptar || null;
+            if (ccMovId) {
+                const { data: antes, error: leerErr } = await supabase.from('cuenta_corriente_proveedores')
+                    .select('id, referencia_tipo, referencia_id, tipo_movimiento, monto, descripcion, numero_comprobante, tipo_comprobante, fecha')
+                    .eq('id', ccMovId).maybeSingle();
+                if (leerErr) throw leerErr;
+                if (!antes) throw new Rechazo('El movimiento de la cuenta corriente que correspondía a este comprobante cambió mientras se validaba. Volvé a intentar.', 'movimiento_cambio', 409);
+                const { error } = await supabase.from('cuenta_corriente_proveedores').update(datosMov).eq('id', ccMovId);
+                if (error) throw error;
+                movAdoptadoAntes = antes;
+            } else {
+                const { data: ccMov, error } = await supabase.from('cuenta_corriente_proveedores')
+                    .insert({ proveedor_id: proveedorId, ...datosMov }).select('id').single();
+                if (error) throw error;
+                ccMovId = ccMov.id;
+                movCreado = ccMov.id;
+            }
         }
 
-        // ── Provisión de la OC: baja por lo facturado; se va cuando no queda nada por validar ──
+        // ── Vencimiento (solo deuda), uno solo. Los que ya existen no se tocan. ──
+        let vencimientoId: string | null = null;
+        let vencimientoMonto: number | null = null;
         if (!esCredito) {
-            const { count: otros } = await supabase
+            if (plan.fecha_vencimiento && !comprobante.fecha_vencimiento) {
+                const { error } = await supabase.from('comprobantes_compra').update({ fecha_vencimiento: plan.fecha_vencimiento }).eq('id', id);
+                if (error) throw error;
+            }
+            const filtros = [`and(referencia_tipo.eq.comprobante_compra,referencia_id.eq.${id})`];
+            if (ccMovId) filtros.push(`and(referencia_tipo.eq.cuenta_corriente,referencia_id.eq.${ccMovId})`);
+            const { data: yaHay, error: buscarErr } = await supabase.from('vencimientos').select('id, monto').neq('estado', 'cancelado').or(filtros.join(',')).limit(1);
+            if (buscarErr) throw buscarErr;
+            vencimientoId = yaHay?.[0]?.id ?? null;
+            vencimientoMonto = yaHay?.[0] ? Number(yaHay[0].monto) : null;
+
+            if (!vencimientoId && plan.fecha_vencimiento) {
+                const { data: venc, error: vencErr } = await supabase.from('vencimientos').insert({
+                    proveedor_id: proveedorId,
+                    tipo: 'factura',
+                    canal: plan.canal,
+                    concepto: `${comprobante.tipo_comprobante} ${comprobante.numero_comprobante}${sufijoOC}`,
+                    monto: total,
+                    fecha_vencimiento: plan.fecha_vencimiento,
+                    estado: 'pendiente',
+                    forma_pago: plan.forma_pago,
+                    modalidad: plan.modalidad,
+                    fecha_validez: plan.fecha_validez,
+                    referencia_id: ccMovId || id,
+                    referencia_tipo: ccMovId ? 'cuenta_corriente' : 'comprobante_compra',
+                }).select('id').single();
+                // Deuda sin vencimiento = pago que se olvida: todo o nada, igual que la función SQL
+                if (vencErr || !venc) {
+                    throw new Rechazo(`No se pudo crear el vencimiento del comprobante (${vencErr?.message || 'sin respuesta'}). No se validó nada: avisá a sistemas con este mensaje.`, 'vencimiento_fallido');
+                }
+                vencimientoId = venc.id;
+                vencCreado = venc.id;
+                vencimientoMonto = total;
+            }
+        }
+
+        // ── Provisión de la OC (al final): baja por lo facturado; se va cuando no queda nada por validar ──
+        if (conCC && ocId && !esCredito) {
+            const { count: otros, error: otrosErr } = await supabase
                 .from('comprobantes_compra')
                 .select('id', { count: 'exact', head: true })
                 .eq('orden_compra_id', ocId)
                 .neq('id', id)
                 .not('estado', 'in', '(validado,cerrado,esperada)')
                 .not('tipo_comprobante', 'in', '(Remito,NC,NCA,NCB,NCC,Reversa)');
-            const { data: provisiones } = await supabase.from('cuenta_corriente_proveedores')
+            if (otrosErr) throw otrosErr;
+            const { data: provisiones, error: provErr } = await supabase.from('cuenta_corriente_proveedores')
                 .select('id, monto')
                 .eq('referencia_tipo', 'orden_compra').eq('referencia_id', ocId).eq('tipo_movimiento', 'orden_compra')
                 .order('created_at', { ascending: true });
+            if (provErr) throw provErr;
             let restante = total;
             for (const pr of provisiones || []) {
                 const montoProv = Number(pr.monto || 0);
@@ -240,40 +376,16 @@ async function validarSinFuncion(supabase: any, comprobante: any, proveedorId: s
                 }
             }
         }
-    }
 
-    // ── Vencimiento (solo deuda), uno solo ──
-    let vencimientoId: string | null = null;
-    if (!esCredito) {
-        if (plan.fecha_vencimiento && !comprobante.fecha_vencimiento) {
-            await supabase.from('comprobantes_compra').update({ fecha_vencimiento: plan.fecha_vencimiento }).eq('id', id);
+        return { ya_validado: false, sin_deuda: false, movimiento_cc_id: ccMovId, vencimiento_id: vencimientoId, vencimiento_nuevo: !!vencCreado, vencimiento_monto: vencimientoMonto, sin_vencimiento: !esCredito && !vencimientoId, provision };
+    } catch (e) {
+        try {
+            await deshacer();
+        } catch (e2: any) {
+            console.error('[Validar] no se pudo deshacer una validación a medias:', e2?.message || e2);
         }
-        const filtros = [`and(referencia_tipo.eq.comprobante_compra,referencia_id.eq.${id})`];
-        if (ccMovId) filtros.push(`and(referencia_tipo.eq.cuenta_corriente,referencia_id.eq.${ccMovId})`);
-        const { data: yaHay } = await supabase.from('vencimientos').select('id').neq('estado', 'cancelado').or(filtros.join(',')).limit(1);
-        vencimientoId = yaHay?.[0]?.id ?? null;
-
-        if (!vencimientoId && plan.fecha_vencimiento) {
-            const { data: venc, error: vencErr } = await supabase.from('vencimientos').insert({
-                proveedor_id: proveedorId,
-                tipo: 'factura',
-                canal: plan.canal,
-                concepto: `${comprobante.tipo_comprobante} ${comprobante.numero_comprobante} — OC ${plan.numero_orden || ''}`,
-                monto: total,
-                fecha_vencimiento: plan.fecha_vencimiento,
-                estado: 'pendiente',
-                forma_pago: plan.forma_pago,
-                modalidad: plan.modalidad,
-                fecha_validez: plan.fecha_validez,
-                referencia_id: ccMovId || id,
-                referencia_tipo: ccMovId ? 'cuenta_corriente' : 'comprobante_compra',
-            }).select('id').single();
-            if (vencErr) console.error('[Validar] no se pudo crear el vencimiento:', vencErr.message);
-            vencimientoId = venc?.id ?? null;
-        }
+        throw e;
     }
-
-    return { ya_validado: false, sin_deuda: false, movimiento_cc_id: ccMovId, vencimiento_id: vencimientoId, sin_vencimiento: !esCredito && !vencimientoId, provision };
 }
 
 /**
@@ -407,9 +519,17 @@ export async function POST(
             ? { canal: 'blanco', fecha_vencimiento: null, forma_pago: null, modalidad: null, fecha_validez: null, numero_orden: oc?.numero_orden || null }
             : await armarPlan(supabase, comprobante, proveedorId, ocId, oc?.numero_orden || null);
 
+        const total = Number(comprobante.total_factura_declarado || 0);
+
         let resultado: Resultado;
         let atomico = true;
         try {
+            // Deuda que el mail ya dejó en la cuenta corriente sin vincular: se adopta (o se frena si es ambiguo).
+            // Se resuelve ANTES de escribir nada, igual para los dos caminos.
+            if (!yaEstaba && !esRemito && proveedorId && total > 0) {
+                plan.movimiento_adoptar = await buscarMovimientoPrevio(supabase, comprobante, proveedorId, ocId, total);
+            }
+
             const rpc = await supabase.rpc('comprobante_compra_validar', {
                 p_comprobante_id: comprobante_id,
                 p_usuario_id: auth.user.id,
@@ -417,7 +537,7 @@ export async function POST(
             });
             if (!rpc.error) {
                 resultado = rpc.data as Resultado;
-            } else if (faltaFuncion(rpc.error)) {
+            } else if (faltaLaFuncion(rpc.error, 'comprobante_compra_validar')) {
                 atomico = false;
                 resultado = await validarSinFuncion(supabase, comprobante, proveedorId, ocId, plan, auth.user.id);
             } else if (rpc.error.code === 'P0001') {
@@ -427,9 +547,14 @@ export async function POST(
             } else {
                 throw rpc.error;
             }
-        } catch (e) {
+        } catch (e: any) {
             if (e instanceof Rechazo) return NextResponse.json({ error: e.message, codigo: e.codigo }, { status: e.status });
-            throw e;
+            // Con la función SQL la transacción se deshace sola; sin ella, validarSinFuncion deshace lo hecho
+            console.error('[Validar Comprobante] no se validó:', e);
+            return NextResponse.json({
+                error: `No se pudo validar el comprobante y no se aplicó ningún cambio. Detalle para sistemas: ${e?.message || e}`,
+                codigo: 'error_interno',
+            }, { status: 500 });
         }
 
         // Kardex: repetible, no mueve plata. Un remito no confirma ni valoriza nada.
@@ -444,6 +569,10 @@ export async function POST(
         const avisos: string[] = [];
         if (resultado.ya_validado) avisos.push('Este comprobante ya estaba validado: no se generó ninguna deuda ni vencimiento nuevo.');
         if (resultado.sin_deuda) avisos.push('Es un remito: quedó validado como respaldo de las cantidades, sin deuda ni vencimiento.');
+        if (!resultado.ya_validado && resultado.vencimiento_id && resultado.vencimiento_nuevo === false
+            && resultado.vencimiento_monto != null && Math.abs(Number(resultado.vencimiento_monto) - total) > 0.01) {
+            avisos.push(`Este comprobante ya tenía un vencimiento cargado por ${moneda(resultado.vencimiento_monto)} y el comprobante es por ${moneda(total)}: el vencimiento NO se modificó, revisalo en Finanzas.`);
+        }
         if (resultado.sin_vencimiento) avisos.push('Quedó validado pero SIN vencimiento: el proveedor no tiene plazo de pago cargado y el comprobante no trae fecha de vencimiento. Cargá el vencimiento a mano en Finanzas.');
 
         return NextResponse.json({ success: true, comprobante_id, ...resultado, atomico, avisos });

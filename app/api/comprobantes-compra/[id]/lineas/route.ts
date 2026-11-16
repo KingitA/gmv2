@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { aUnidadesBase, unidadesPorBultoDe } from '@/lib/deposito/unidades'
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 
@@ -39,7 +40,7 @@ export async function POST(
 
     const { data: art } = await supabase
       .from('articulos')
-      .select('id, sku, descripcion')
+      .select('id, sku, descripcion, unidades_por_bulto')
       .eq('id', articuloId)
       .single()
     if (!art) return NextResponse.json({ error: 'Artículo no encontrado' }, { status: 404 })
@@ -75,8 +76,11 @@ export async function POST(
           || (items ?? [])[0]
         if (item) {
           recepcionItemId = item.id
+          // cantidad_documentada va SIEMPRE en unidades base (como la carga el OCR): si el renglón
+          // se carga por bulto, se convierte con las unidades por bulto del artículo.
+          const enUnidades = aUnidadesBase(cantidad, tipoCantidad === 'bulto' ? unidadesPorBultoDe(art.unidades_por_bulto) : 1)
           await supabase.from('recepciones_items')
-            .update({ cantidad_documentada: Number(item.cantidad_documentada ?? 0) + cantidad })
+            .update({ cantidad_documentada: Number(item.cantidad_documentada ?? 0) + enUnidades })
             .eq('id', item.id)
         }
       }

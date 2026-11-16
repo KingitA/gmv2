@@ -211,6 +211,8 @@ export async function POST(
         ? `El archivo se leyó pero no se pudo crear el comprobante (${r.error}).`
         : r.sumado_a_provisorio
             ? 'No se leyó el número del comprobante: los renglones se sumaron al comprobante provisorio de esta orden. Completale el número con el lápiz.'
+            : r.otro_provisorio
+                ? 'No se leyó el número del comprobante y ya había otro sin número en esta orden con otro total o fecha: se cargó como un comprobante APARTE. Completales el número a los dos con el lápiz (si eran el mismo documento, eliminá uno).'
             : !numeroExtraido
                 ? 'No se leyó el número del comprobante: quedó como provisorio. Completale el número con el lápiz.'
                 : undefined;

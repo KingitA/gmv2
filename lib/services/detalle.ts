@@ -252,7 +252,7 @@ export async function revertirComprobanteOCR(supabase: any, comprobante_id: stri
 
     const { data: detalle } = await supabase
         .from('comprobantes_compra_detalle')
-        .select('id, recepcion_item_id, cantidad_facturada')
+        .select('id, recepcion_item_id, cantidad_facturada, tipo_cantidad')
         .eq('comprobante_id', comprobante_id);
 
     for (const det of detalle || []) {
@@ -264,7 +264,8 @@ export async function revertirComprobanteOCR(supabase: any, comprobante_id: stri
             .maybeSingle();
         if (!item) continue;
 
-        const factor = Number(item.factor_conversion || 1);
+        // Misma convención que al sumar: solo un renglón 'bulto' se multiplica por el factor de la línea
+        const factor = det.tipo_cantidad === 'bulto' ? Number(item.factor_conversion || 1) : 1;
         const restar = Number(det.cantidad_facturada || 0) * factor;
         const nuevaCant = Math.max(0, Number(item.cantidad_documentada || 0) - restar);
 

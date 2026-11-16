@@ -12,7 +12,7 @@
 --      NULL = la unidad de la línea de la OC (lo que mandan las APK viejas y la web).
 --   2. Rastro de lo que se sumó al stock por línea: factor_conteo,
 --      cantidad_fisica_base (unidades), stock_antes, stock_aplicado_at.
---   3. recepcion_aplicar_stock(recepcion, factores): suma al stock en UNA transacción,
+--   3. recepcion_aplicar_stock(recepcion): suma al stock en UNA transacción,
 --      con la recepción bloqueada, y marca cada línea: llamarla dos veces suma una vez.
 --
 -- No toca datos: solo columnas nuevas (vacías) y una función. Se puede correr más
@@ -44,20 +44,31 @@ COMMENT ON COLUMN public.recepciones_items.stock_antes IS
 COMMENT ON COLUMN public.recepciones_items.stock_aplicado_at IS
   'Cuándo se sumó esta línea al stock. Con valor = ya sumada: no se vuelve a sumar.';
 
--- p_factores: { "<id de recepciones_items>": { "unidad": "bulto", "factor": 24 }, ... }
--- (los calcula lib/deposito/recepciones.ts con la regla de lib/deposito/unidades.ts).
+-- La función NO recibe factores: lee de la base en qué se contó cada línea y las unidades
+-- por bulto del artículo, con la recepción y las líneas bloqueadas (nadie le puede pasar
+-- un factor inventado ni uno viejo). Es la MISMA regla que lib/deposito/unidades.ts
+-- (conversionLinea): si se cambia una, cambiar la otra.
+--   unidad = unidad_conteo de la línea; si está vacía: la de la línea de la OC
+--            (tipo_cantidad; vacío = bulto); artículo fuera de la OC = unidad.
+--   factor = unidades_por_bulto del artículo si la unidad es bulto (y es mayor a 1); si no, 1.
 -- Devuelve un arreglo JSON, una fila por línea con cantidad contada:
 --   { item_id, articulo_id, cantidad_base, stock_antes, stock_despues, ya_aplicado }
 -- cantidad_base = null ⇒ la línea la había sumado el código anterior a esta migración
 -- (tiene su kardex de compra): no se toca.
-CREATE OR REPLACE FUNCTION public.recepcion_aplicar_stock(p_recepcion_id uuid, p_factores jsonb)
+DROP FUNCTION IF EXISTS public.recepcion_aplicar_stock(uuid, jsonb);
+
+CREATE OR REPLACE FUNCTION public.recepcion_aplicar_stock(p_recepcion_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
 SET search_path = public
 AS $$
 DECLARE
   v_estado  text;
+  v_oc      uuid;
   v_it      record;
+  v_tipo_oc text;
+  v_en_oc   boolean;
+  v_upb     numeric;
   v_factor  numeric;
   v_unidad  text;
   v_base    numeric;
@@ -65,7 +76,7 @@ DECLARE
   v_out     jsonb := '[]'::jsonb;
 BEGIN
   -- Un solo finalizador a la vez: la fila de la recepción queda bloqueada hasta el final
-  SELECT estado INTO v_estado FROM recepciones WHERE id = p_recepcion_id FOR UPDATE;
+  SELECT estado, orden_compra_id INTO v_estado, v_oc FROM recepciones WHERE id = p_recepcion_id FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Recepción % no encontrada', p_recepcion_id USING ERRCODE = 'P0002';
   END IF;
@@ -74,7 +85,8 @@ BEGIN
   END IF;
 
   FOR v_it IN
-    SELECT id, articulo_id, cantidad_fisica, cantidad_fisica_base, stock_antes, stock_aplicado_at
+    SELECT id, articulo_id, cantidad_fisica, unidad_conteo, fuera_de_oc,
+           cantidad_fisica_base, stock_antes, stock_aplicado_at
       FROM recepciones_items
      WHERE recepcion_id = p_recepcion_id
        AND coalesce(cantidad_fisica, 0) > 0
@@ -107,12 +119,27 @@ BEGIN
       CONTINUE;
     END IF;
 
-    v_factor := coalesce(nullif(p_factores -> v_it.id::text ->> 'factor', '')::numeric, 1);
-    IF v_factor <= 0 THEN v_factor := 1; END IF;
-    v_unidad := p_factores -> v_it.id::text ->> 'unidad';
-    IF v_unidad IS NULL OR v_unidad NOT IN ('bulto', 'unidad') THEN
-      v_unidad := CASE WHEN v_factor = 1 THEN 'unidad' ELSE 'bulto' END;
+    -- En qué se contó (misma regla que conversionLinea)
+    v_en_oc := false;
+    v_tipo_oc := NULL;
+    IF v_oc IS NOT NULL AND NOT coalesce(v_it.fuera_de_oc, false) THEN
+      SELECT true, d.tipo_cantidad INTO v_en_oc, v_tipo_oc
+        FROM ordenes_compra_detalle d
+       WHERE d.orden_compra_id = v_oc AND d.articulo_id = v_it.articulo_id
+       LIMIT 1;
+      v_en_oc := coalesce(v_en_oc, false);
     END IF;
+    v_unidad := CASE
+      WHEN v_it.unidad_conteo IN ('bulto', 'unidad') THEN v_it.unidad_conteo
+      WHEN v_en_oc THEN (CASE WHEN v_tipo_oc = 'unidad' THEN 'unidad' ELSE 'bulto' END)
+      ELSE 'unidad' END;
+
+    -- El artículo queda bloqueado: sus unidades por bulto y su stock se leen y se usan juntos
+    SELECT a.unidades_por_bulto::numeric INTO v_upb FROM articulos a WHERE a.id = v_it.articulo_id FOR UPDATE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'El artículo % de la recepción ya no existe', v_it.articulo_id USING ERRCODE = 'P0002';
+    END IF;
+    v_factor := CASE WHEN v_unidad = 'bulto' AND coalesce(v_upb, 0) > 1 THEN v_upb ELSE 1 END;
     v_base := round(v_it.cantidad_fisica * v_factor, 4);
 
     -- Suma atómica: no se lee el stock para volver a escribirlo
@@ -120,9 +147,6 @@ BEGIN
        SET stock_actual = coalesce(stock_actual, 0) + v_base
      WHERE id = v_it.articulo_id
      RETURNING stock_actual INTO v_despues;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'El artículo % de la recepción ya no existe', v_it.articulo_id USING ERRCODE = 'P0002';
-    END IF;
 
     UPDATE recepciones_items
        SET unidad_conteo        = v_unidad,
@@ -144,10 +168,12 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.recepcion_aplicar_stock(uuid, jsonb) IS
-  'Suma al stock lo contado en una recepción, en unidades base, una sola vez por línea (E-30/E-40). La llama finalizarRecepcion.';
+COMMENT ON FUNCTION public.recepcion_aplicar_stock(uuid) IS
+  'Suma al stock lo contado en una recepción, en unidades base, una sola vez por línea (E-30/E-40). La llama finalizarRecepcion con el cliente de servicio.';
 
-REVOKE ALL ON FUNCTION public.recepcion_aplicar_stock(uuid, jsonb) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.recepcion_aplicar_stock(uuid, jsonb) TO authenticated, service_role;
+-- Solo la llama el servidor (lib/deposito/recepciones.ts, cliente de servicio), después de
+-- comprobar con la sesión del usuario que puede ver la recepción y de tomar el candado.
+REVOKE ALL ON FUNCTION public.recepcion_aplicar_stock(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.recepcion_aplicar_stock(uuid) TO service_role;
 
 NOTIFY pgrst, 'reload schema';

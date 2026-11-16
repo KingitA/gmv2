@@ -78,7 +78,8 @@ export function RevisarMatches({
         }
     }
 
-    // Renglón que no es mercadería (flete, una leyenda, un total leído como ítem): se quita.
+    // Renglón que no es mercadería (flete, un cargo): se marca y queda discriminado en el
+    // comprobante (no se borra; la deuda sigue siendo el total de la factura).
     // Validar el comprobante exige que no quede ninguno sin vincular (E-32).
     const [porQuitar, setPorQuitar] = useState<string | null>(null)
     const quitar = async (row: any) => {
@@ -92,7 +93,7 @@ export function RevisarMatches({
             })
             const data = await res.json().catch(() => ({}))
             if (!res.ok) {
-                setError(data.error || "No se pudo quitar el renglón")
+                setError(data.error || "No se pudo marcar el renglón")
                 return
             }
             setPendientes((prev) => prev.filter((p) => p.id !== row.id))
@@ -120,7 +121,8 @@ export function RevisarMatches({
                     Artículos de la factura que no se pudieron vincular al catálogo. Al confirmarlos, el
                     sistema aprende la equivalencia para las próximas facturas de este proveedor. Mientras
                     quede alguno sin vincular, el comprobante no se puede validar: si un renglón no es
-                    mercadería (flete, una leyenda), quitalo.
+                    mercadería (flete, un cargo), marcalo "No es mercadería": queda anotado aparte en el
+                    comprobante y la deuda sigue siendo el total de la factura.
                 </p>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -201,9 +203,9 @@ export function RevisarMatches({
                                 )}
                                 {porQuitar === row.id ? (
                                     <>
-                                        <span className="text-xs text-red-700">¿Quitar este renglón del comprobante?</span>
+                                        <span className="text-xs text-red-700">¿Marcarlo como flete u otro concepto (no entra al stock)?</span>
                                         <Button size="sm" variant="destructive" disabled={resolviendo === row.id} onClick={() => quitar(row)}>
-                                            Sí, quitar
+                                            Sí, no es mercadería
                                         </Button>
                                         <Button size="sm" variant="ghost" onClick={() => setPorQuitar(null)}>No</Button>
                                     </>

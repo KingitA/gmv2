@@ -30,14 +30,20 @@ export function normalizarNumeroComprobante(numero: unknown): string {
 }
 
 /**
- * Clase del comprobante para detectar duplicados. Cada clase tiene su propia numeración
- * (la factura 1-123 y la nota de crédito 1-123 son dos documentos distintos), pero una
- * misma factura puede haberse leído como FA una vez y como Adquisición otra.
+ * Tipos con los que un comprobante puede ser "el mismo documento" si coincide el número.
+ * Cada tipo tiene su propia numeración: la factura A 1-123, la factura B 1-123 y la nota de
+ * crédito 1-123 son tres documentos distintos (la LETRA es parte del tipo). Lo único que se
+ * cruza es lo que la lectura no puede distinguir:
+ *   · una factura leída sin datos fiscales queda como 'Adquisicion' ⇒ puede ser la FA/FB/FC;
+ *   · 'NC' / 'ND' sin letra ⇒ puede ser la NCA/NCB/NCC (o NDA/NDB/NDC).
  */
-export function claseComprobante(tipo: unknown): 'factura' | 'credito' | 'debito' | 'remito' {
+export function tiposCompatibles(tipo: unknown): string[] {
     const t = String(tipo || '');
-    if (['NC', 'NCA', 'NCB', 'NCC', 'Reversa'].includes(t)) return 'credito';
-    if (['ND', 'NDA', 'NDB', 'NDC'].includes(t)) return 'debito';
-    if (t === 'Remito') return 'remito';
-    return 'factura';
+    if (['FA', 'FB', 'FC'].includes(t)) return [t, 'Adquisicion'];
+    if (t === 'Adquisicion') return ['Adquisicion', 'FA', 'FB', 'FC'];
+    if (['NCA', 'NCB', 'NCC'].includes(t)) return [t, 'NC'];
+    if (t === 'NC') return ['NC', 'NCA', 'NCB', 'NCC'];
+    if (['NDA', 'NDB', 'NDC'].includes(t)) return [t, 'ND'];
+    if (t === 'ND') return ['ND', 'NDA', 'NDB', 'NDC'];
+    return t ? [t] : [];
 }
