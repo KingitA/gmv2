@@ -20,6 +20,7 @@
 --
 -- Piezas:
 --   1. ordenes_pago.clave_idempotencia  → doble click = una sola OP
+--   1b. op_ganancias_bases v5          → no cortar si lo primero no tiene comprobante
 --   2. op_movimiento_de()               → vencimiento/comprobante → movimiento de CC
 --   3. op_normalizar_imputaciones()     → E-52: el vencimiento con comprobante
 --                                         se imputa contra SU movimiento de CC
@@ -35,6 +36,116 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_ordenes_pago_clave_idempotencia
   ON public.ordenes_pago (clave_idempotencia) WHERE clave_idempotencia IS NOT NULL;
 COMMENT ON COLUMN public.ordenes_pago.clave_idempotencia IS
   'Clave que manda la pantalla al crear la OP: si llega dos veces (doble click, reintento), op_crear devuelve la misma OP.';
+
+
+-- ═══ 1b. op_ganancias_bases v5 — no cortar cuando algo no tiene comprobante ═══
+-- Cuerpo EXACTO de la v4 (20260807_op_eliminar_y_bases_v4.sql) con UNA sentencia
+-- cambiada (marcada "v5": el vaciado de v_comp en cada vuelta). No cambia
+-- ninguna base ni ninguna retención: solo evita el error cuando una
+-- imputación es un vencimiento sin comprobante
+-- (el caso de casi todos los vencimientos reales). Encontrado probando op_crear
+-- en una base local el 16/11/2026. Generado por script desde la v4.
+CREATE OR REPLACE FUNCTION public.op_ganancias_bases(p_imputaciones jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_item        jsonb;
+  v_monto       numeric;
+  v_comp_id     uuid;
+  v_cc          record;
+  v_venc        record;
+  v_comp        record;
+  v_base        numeric;
+  v_tipo        text;
+  v_detalle     jsonb := '[]'::jsonb;
+  v_total       numeric := 0;
+  v_etiqueta    text;
+BEGIN
+  FOR v_item IN SELECT * FROM jsonb_array_elements(COALESCE(p_imputaciones, '[]'::jsonb))
+  LOOP
+    v_monto := COALESCE((v_item->>'monto_imputado')::numeric, 0);
+    IF v_monto = 0 THEN CONTINUE; END IF;
+
+    v_comp_id := NULL;
+    v_etiqueta := 'imputación';
+
+    IF v_item->>'comprobante_compra_id' IS NOT NULL THEN
+      v_comp_id := (v_item->>'comprobante_compra_id')::uuid;
+    ELSIF v_item->>'movimiento_cc_id' IS NOT NULL THEN
+      SELECT referencia_tipo, referencia_id, descripcion INTO v_cc
+      FROM cuenta_corriente_proveedores WHERE id = (v_item->>'movimiento_cc_id')::uuid;
+      IF FOUND THEN
+        v_etiqueta := COALESCE(v_cc.descripcion, 'mov. cuenta corriente');
+        IF v_cc.referencia_tipo = 'comprobante_compra' THEN
+          v_comp_id := v_cc.referencia_id;
+        END IF;
+      END IF;
+    ELSIF v_item->>'vencimiento_id' IS NOT NULL THEN
+      SELECT referencia_tipo, referencia_id, concepto INTO v_venc
+      FROM vencimientos WHERE id = (v_item->>'vencimiento_id')::uuid;
+      IF FOUND THEN
+        v_etiqueta := COALESCE(v_venc.concepto, 'vencimiento');
+        IF v_venc.referencia_tipo = 'cuenta_corriente' THEN
+          SELECT referencia_tipo, referencia_id, descripcion INTO v_cc
+          FROM cuenta_corriente_proveedores WHERE id = v_venc.referencia_id;
+          IF FOUND AND v_cc.referencia_tipo = 'comprobante_compra' THEN
+            v_comp_id := v_cc.referencia_id;
+          END IF;
+        END IF;
+      END IF;
+    END IF;
+
+    -- v5: antes era "v_comp := NULL;", que deja el registro SIN forma: si la
+    -- imputación no tiene comprobante (vencimiento cargado a mano, provisión,
+    -- saldo inicial) las condiciones de abajo cortaban con
+    -- 'record "v_comp" is not assigned yet'. Mismo efecto (todo en NULL), con forma.
+    SELECT NULL::text AS tipo_comprobante, NULL::text AS numero_comprobante, NULL::numeric AS total_neto,
+           NULL::date AS fecha_comprobante, NULL::numeric AS total
+    INTO v_comp;
+    IF v_comp_id IS NOT NULL THEN
+      SELECT tipo_comprobante, numero_comprobante, total_neto, fecha_comprobante,
+             COALESCE(NULLIF(abs(total_factura_declarado), 0), NULLIF(abs(total_calculado), 0)) AS total
+      INTO v_comp
+      FROM comprobantes_compra WHERE id = v_comp_id;
+    END IF;
+
+    IF v_comp_id IS NOT NULL AND v_comp.tipo_comprobante IN ('FA','FB','FC','ND','NDA','NDB','NDC')
+       AND COALESCE(v_comp.total, 0) > 0 AND COALESCE(v_comp.total_neto, 0) > 0 THEN
+      -- Factura fiscal: base positiva, neto prorrateado
+      v_base := round(v_comp.total_neto * LEAST(abs(v_monto) / v_comp.total, 1), 2);
+      v_tipo := 'factura';
+      v_etiqueta := COALESCE(v_comp.numero_comprobante, v_etiqueta);
+    ELSIF v_comp_id IS NOT NULL AND v_comp.tipo_comprobante IN ('NC','NCA','NCB','NCC')
+       AND COALESCE(v_comp.total, 0) > 0 AND COALESCE(v_comp.total_neto, 0) <> 0 THEN
+      -- NC fiscal descontada: base NEGATIVA (retención neta de NC)
+      v_base := -round(abs(v_comp.total_neto) * LEAST(abs(v_monto) / v_comp.total, 1), 2);
+      v_tipo := 'nota_credito';
+      v_etiqueta := COALESCE(v_comp.numero_comprobante, v_etiqueta);
+    ELSE
+      -- Adquisición, Reversa, Remito, provisión de OC, pago a cuenta:
+      -- SIN comprobante fiscal → JAMÁS integra la base de retención.
+      v_base := 0;
+      v_tipo := 'sin_retencion';
+      IF v_comp_id IS NOT NULL THEN
+        v_etiqueta := COALESCE(v_comp.numero_comprobante, v_etiqueta) || ' (' || COALESCE(v_comp.tipo_comprobante, '—') || ')';
+      END IF;
+    END IF;
+
+    v_total := v_total + v_base;
+    v_detalle := v_detalle || jsonb_build_object(
+      'etiqueta', v_etiqueta, 'monto_imputado', v_monto, 'base', v_base, 'tipo', v_tipo,
+      'tipo_comprobante', CASE WHEN v_comp_id IS NOT NULL THEN v_comp.tipo_comprobante END,
+      'numero', CASE WHEN v_comp_id IS NOT NULL THEN v_comp.numero_comprobante END,
+      'fecha_comprobante', CASE WHEN v_comp_id IS NOT NULL THEN to_char(v_comp.fecha_comprobante, 'YYYY-MM-DD') END
+    );
+  END LOOP;
+
+  RETURN jsonb_build_object('total_base', GREATEST(0, round(v_total, 2)), 'detalle', v_detalle);
+END;
+$function$;
 
 
 -- ═══ 2. De un vencimiento o comprobante a su movimiento de cuenta corriente ═══
@@ -286,7 +397,7 @@ BEGIN
           RAISE EXCEPTION 'El vencimiento "%" es de otro proveedor.', v_nombre;
         END IF;
         IF v_v.estado IN ('pagado', 'cancelado') THEN
-          RAISE EXCEPTION 'El vencimiento "%" ya figura % : no se puede volver a pagar.', v_nombre, v_v.estado;
+          RAISE EXCEPTION 'El vencimiento "%" ya figura %: no se puede volver a pagar.', v_nombre, v_v.estado;
         END IF;
 
         v_reservado := 0; v_ops := NULL;
