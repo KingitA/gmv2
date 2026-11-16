@@ -43,19 +43,19 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 
 | id | Problema | Verif. |
 |---|---|---|
-| E-01 | Pantalla vieja `app/ordenes-compra/[id]/articulos` suma stock (`incrementar_stock`) en cada guardado y borra el detalle. Se entra desde la cuenta corriente del proveedor. | C |
-| E-02 | "Usar sugerencia" copia unidades como bultos (pide N bultos en vez de N unidades). | C |
+| ~~E-01~~ | ~~Pantalla vieja `app/ordenes-compra/[id]/articulos` suma stock (`incrementar_stock`) en cada guardado y borra el detalle. Se entra desde la cuenta corriente del proveedor.~~ **Hecho T0-A: la pantalla redirige a la verificación; el link de la cuenta corriente también.** | C |
+| ~~E-02~~ | ~~"Usar sugerencia" copia unidades como bultos (pide N bultos en vez de N unidades).~~ **Hecho T0-A: "usar" convierte a bultos enteros hacia arriba (mismo camino que Jarvis).** | C |
 | E-03 | No existe el envío por mail. PDF/Excel solo descargan; el ícono es "Send". | C |
 | E-04 | La OC no tiene condición de pago (columnas existen, nadie las escribe); no se ve en el PDF. | C, B |
 | E-05 | La OC no genera vencimientos; nacen recién al validar la factura. | C, B |
 | E-06 | Tres fuentes de plazo distintas: `pago_blanco_*`/`dias_vencimiento` (validar), `plazo_dias`/`plazo_desde` (mail), ficha (`plazo_dias`). | C |
 | E-07 | Crear/editar OC sin transacción; numeración con carrera; editar reescribe la provisión sin impuestos y no actualiza el kardex pendiente. | C |
 | E-08 | Provisión mal calculada: IVA fijo 21 %, suma el % de retención de Ganancias como deuda. | C |
-| E-09 | Estados `enviada`, `confirmada`, `en_camino`, `cancelada`, `finalizada` no se escriben o los rechaza el CHECK. No hay cancelar (solo borrar). | C, B |
+| E-09 | Estados `enviada`, `confirmada`, `en_camino`, `cancelada`, `finalizada` no se escriben o los rechaza el CHECK. No hay cancelar (solo borrar). **CHECK hecho T0-A (migración 20261116b, sin aplicar); estados y cancelar siguen para T1-A.** | C, B |
 | E-10 | Fecha estimada de entrega usa días de pago; RPC `calcular_avg_dias_recepcion` no existe; no se edita. | C, B |
 | E-11 | Crear la OC pisa `articulos.precio_compra` y descuentos sin historial. | C |
 | E-12 | Diálogo de OC: muestra todo el catálogo sin stock ni venta; sin total, sin guardar-en-curso, doble click crea dos; listado sin total/fecha/creador; `select *` pesado. | C |
-| E-13 | OC de faltantes e importación desde archivo asumen 1 unidad por bulto; ítems sin artículo llegan al insert. | C |
+| ~~E-13~~ | ~~OC de faltantes e importación desde archivo asumen 1 unidad por bulto; ítems sin artículo llegan al insert.~~ **Hecho T0-A: el servidor lee las unidades por bulto de la base y rechaza renglones sin artículo.** | C |
 | E-14 | Proveedor del artículo: la tabla usa `articulos.proveedor_id`, la sugerencia `articulos_proveedores` (18 filas). | C, B |
 | E-15 | Código muerto en `app/ordenes-compra/page.tsx` y pantalla huérfana `[id]/comprobantes`. | C |
 
@@ -72,18 +72,18 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 
 | id | Problema | Verif. |
 |---|---|---|
-| E-30 | **Bultos vs unidades**: la OC va en bultos, la app muestra "u" y el stock suma lo contado tal cual. | C, B |
+| ~~E-30~~ | ~~**Bultos vs unidades**: la OC va en bultos, la app muestra "u" y el stock suma lo contado tal cual.~~ **Hecho T0-A: stock, kardex y movimientos en unidades; app y oficina dicen "2 bultos × 24 u = 48 u". Falta APK (PENDIENTES-APPS R1) y corregir el stock de OC-000010.** | C, B |
 | E-31 | Kardex `compra` duplicado: el pendiente de la OC se confirma al validar y además queda el de la recepción. | C |
-| E-32 | `validar` sin control de estado ni transacción: doble click = doble deuda y doble vencimiento; valida remitos en $0; no bloquea líneas sin match; el primer comprobante borra toda la provisión. | C |
+| ~~E-32~~ | ~~`validar` sin control de estado ni transacción: doble click = doble deuda y doble vencimiento; valida remitos en $0; no bloquea líneas sin match; el primer comprobante borra toda la provisión.~~ **Hecho T0-A: función `comprobante_compra_validar` (migración 20261116c); sin ella, mismas reglas con compuerta de estado.** | C |
 | E-33 | `cerrar` (resolver diferencia) no es idempotente; "proveedor" resta stock que nunca entró; sobrante tratado como faltante; NC esperada sin IVA; precio neto comparado con lista. | C |
 | E-34 | "Empresa absorbe" guarda el neto en `precio_compra` (lista): descuento aplicado dos veces. | C |
-| E-35 | Nota de débito se registra como nota de crédito. | C |
-| E-36 | Duplicados de comprobante: sin número cada foto crea otro `PENDIENTE-…`; factura de 3 hojas = 3 comprobantes; la misma factura en dos OC. | C, B |
-| E-37 | OCR: modelo escrito a mano (`gemini-2.5-flash`) en 4 archivos sin respaldo; si falla crea un comprobante vacío marcado como procesado. | C |
+| ~~E-35~~ | ~~Nota de débito se registra como nota de crédito.~~ **Hecho T0-A: la ND queda como `ND`, suma deuda (`nota_debito`) y genera vencimiento.** | C |
+| ~~E-36~~ | ~~Duplicados de comprobante: sin número cada foto crea otro `PENDIENTE-…`; factura de 3 hojas = 3 comprobantes; la misma factura en dos OC.~~ **Hecho T0-A (duplicados): mismo proveedor + clase + número normalizado en cualquier OC ⇒ aviso 409; las fotos sin número van a UN comprobante provisorio por orden y tipo. La factura de varias hojas CON número repetido en cada hoja se rechaza como duplicada: multipágina real queda para T1-C (E-38).** | C, B |
+| ~~E-37~~ | ~~OCR: modelo escrito a mano (`gemini-2.5-flash`) en 4 archivos sin respaldo; si falla crea un comprobante vacío marcado como procesado.~~ **Hecho T0-A: los 4 usan `lib/ai/gemini-model.ts` (principal + respaldo); lectura fallida o sin renglones ⇒ documento "no leído", sin comprobante.** | C |
 | E-38 | App: una foto por vez, sin PDF, sin offline, el operario no ve lo leído, no comprime (límite 4,5 MB). | C |
 | E-39 | No hay recepción parcial real (segunda tanda nunca se abre); finalizar cierra la OC. | C, B |
-| E-40 | Stock sin atomicidad en `finalizarRecepcion` (lee y escribe). | C |
-| E-41 | Borrar el último documento pone en 0 lo documentado, incluso lo cargado a mano. | C |
+| ~~E-40~~ | ~~Stock sin atomicidad en `finalizarRecepcion` (lee y escribe).~~ **Hecho T0-A: función `recepcion_aplicar_stock` (migración 20261116a), marca por línea; finalizar dos veces suma una.** | C |
+| ~~E-41~~ | ~~Borrar el último documento pone en 0 lo documentado, incluso lo cargado a mano.~~ **Hecho T0-A: solo se limpia lo que aplicó el documento borrado.** | C |
 | E-42 | Bonificados (100 %) aparecen como diferencia de precio; no existe "sin cargo". | C |
 | E-43 | Artículo no pedido: solo se puede vincular a otro, no aceptar ni devolver. | C |
 | E-44 | Oficina: `alert/confirm`, una decisión por artículo, sin vista previa del impacto, la foto no se ve al lado, no se puede corregir lo contado. | C |
@@ -130,7 +130,7 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 ## Plan por tandas
 
 **Tanda 0 — frenar daños (solo código, sin decisiones de negocio).** Dos agentes en paralelo, archivos disjuntos.
-- T0-A Compras/recepción: E-01, E-02, E-09 (CHECK), E-13, E-30, E-32, E-35, E-36 (dedupe), E-37, E-40, E-41.
+- ~~T0-A Compras/recepción: E-01, E-02, E-09 (CHECK), E-13, E-30, E-32, E-35, E-36 (dedupe), E-37, E-40, E-41.~~ **Hecho 16/11, rama `entrada-t0a-compras-recepcion`** (ver "Tanda 0-A" abajo).
 - T0-B Pagos: E-50, E-51, E-52, E-53, E-54, E-64, E-65.
 
 **Tanda 1 — el circuito completo como tiene que ser.**
@@ -145,3 +145,27 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 - T2-C Precios de compra: listas con vigencia e historial (E-20, E-22).
 
 **Pendiente de Juan / contador:** E-59, E-60, E-70 (qué permite cada banco), datos de proveedores (mail, CBU, acuerdo de pago), limpieza de datos de prueba de compras, corrección del stock de OC-000010.
+
+## Tanda 0-A — hecho el 16/11 (rama `entrada-t0a-compras-recepcion`)
+
+**Migraciones (escritas, SIN aplicar; se pueden correr en cualquier orden y más de una vez; ninguna toca datos):**
+
+| Archivo | Qué agrega | Sin aplicarla |
+|---|---|---|
+| `20261116a_recepcion_unidades.sql` | `recepciones_items.unidad_conteo` + rastro de lo sumado, función `recepcion_aplicar_stock` | El stock igual sube en unidades (regla en el código); la suma sigue siendo "leer y escribir" y la app nueva no puede contar "en otra unidad" que la de la OC |
+| `20261116b_ordenes_compra_estados.sql` | CHECK de `ordenes_compra.estado` con `enviada, confirmada, en_camino, finalizada` | "Finalizar OC" valida los comprobantes y avisa en pantalla que la orden no pasó a finalizada (antes fallaba callado) |
+| `20261116c_comprobante_compra_validar.sql` | función `comprobante_compra_validar` (todo o nada) | Validar aplica las mismas reglas paso a paso, con el cambio de estado como compuerta |
+
+El merge NO depende de ninguna: el código detecta si están y, si no, sigue por el camino anterior ya corregido.
+
+**Regla de unidades (E-30), para todo lo que venga después:** `lib/deposito/unidades.ts` es la única fuente. `cantidad_oc` va en la unidad de la línea de la OC (`tipo_cantidad`, vacío = bulto), `cantidad_fisica` en `unidad_conteo` (vacío = la de la OC; fuera de OC = unidad), `cantidad_documentada` y todo lo que toca stock/kardex en unidades base. La verificación compara las tres en unidades y precio neto por unidad.
+
+**Encontrado de paso (no estaba en el relevamiento):**
+
+- `validar` escribía `validado_por` / `validado_at`, que no figuran en ningún script ni migración (la tabla tiene `usuario_validador` / `fecha_validacion`), y no miraba el error. Si esas columnas no existen, el comprobante **nunca pasaba a "validado"** y cada click generaba otra deuda y otro vencimiento: explicaría que los 13 comprobantes sigan en `pendiente_recepcion`. Ahora se usan las columnas originales y el estado cambia aunque falle el dato de auditoría. **Verificar en la base** (`select column_name from information_schema.columns where table_name = 'comprobantes_compra'`).
+- Una recepción creada por la oficina al subir la factura queda en `borrador`; `finalizarRecepcion` solo aceptaba `en_proceso` y desde depósito quedaba reintentando "otro equipo está finalizando" para siempre. Ahora acepta las dos.
+- La factura que entra por mail (`lib/ai/email-invoice-processor.ts`) convierte la provisión de la OC en "factura" y crea su vencimiento; al validar después ese comprobante se generaba un segundo movimiento y un segundo vencimiento. Ahora validar adopta ese movimiento. El procesador de mails en sí no se tocó (usa otra fuente de plazo: E-06).
+- `app/api/comprobantes-compra/[id]/lineas` (renglón agregado a mano) suma `cantidad_documentada` sin convertir a unidades. La verificación ya no depende de ese campo (compara por el detalle del comprobante), pero conviene unificarlo en T1-B.
+- Comprobante SIN orden de compra: validar no genera movimiento en la cuenta corriente (solo el vencimiento). Se dejó igual; decidir en T1-D (E-58).
+- No se puede "des-validar" un comprobante (el mensaje al borrar un documento validado lo sugiere, pero no existe). T1-B.
+- Quedan `confirm()` nativos en verificación y comprobantes (E-44) y `alert()` en `app/ordenes-compra/page.tsx` (E-12): solo se pasaron a avisos del sistema los de las funciones que se tocaron.

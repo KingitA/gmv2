@@ -193,7 +193,7 @@ const recepcionConformidad: HandlerDef<{ orden_compra_id: string; conformidad: C
 
 /**
  * Conteo ABSOLUTO por artículo (último escritor gana por línea).
- * `unidad` (app 0.5.2+, E-30): en qué contó el operario. Las APK anteriores no la mandan:
+ * `unidad` (app 0.5.2 en adelante, E-30): en qué contó el operario. Las APK anteriores no la mandan:
  * el servidor toma la unidad de la línea de la OC (el número que esa app muestra) y
  * convierte a unidades base al finalizar. Ver lib/deposito/unidades.ts.
  */

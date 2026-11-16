@@ -45,6 +45,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | D3 — Poner en 0 las devoluciones de prueba antes de producción (dato sucio) | Cuentas corrientes / oficina | Pendiente (día del corte) |
 | DP1 — Cargar pedido desde depósito: servidor y ERP (handler `pedido.cargar_deposito`, origen, cola web, Facturar varios, entregado al facturar, número de pedido seguro) | Listas de precios | **Hecho y en main 05/11**; migración `20261105_pedidos_origen_numeracion.sql` aplicada |
 | DP2 — CARGAR PEDIDO en la app Depósito: "Para mí" / "Para un cliente", sin precios ni lista + filtro de la cola de la app | App Depósito | **Hecho y en main 05/11**, APK v0.5.0 |
+| R1 — Recepción en bultos y unidades (entrada E-30/E-36/E-37): la app dice "2 bultos × 24 u = 48 u", deja contar por bulto o por unidades sueltas y muestra los avisos del servidor al subir fotos | App Depósito | **Código hecho 16/11 en la rama `entrada-t0a-compras-recepcion` (sin APK, sin instalar)**. El servidor ya convierte bien con la APK v0.5.x instalada. Ver "App Depósito → recepción en unidades" abajo |
 
 ## Versiones instaladas hoy
 
@@ -233,3 +234,25 @@ En la app **no se elige lista, método ni precio**: todo sale de la ficha del cl
   - `cliente_inactivo`.
   - `sin_items`.
 - Novedad del outbox: un `RechazoNegocio` puede traer `datos` (también al repetir una clave ya rechazada).
+
+## App Depósito → recepción en unidades (16/11/2026, entrada E-30) — falta generar la APK
+
+Viene de la prueba integral de entrada (`docs/PRUEBA-INTEGRAL-ENTRADA.md`, Tanda 0-A). Dato real: OC-000010, 2 bultos de 24 u, el operario contó "2" y el stock subió 2.
+
+**Qué hace el servidor (ya vale para la APK instalada, v0.5.x):**
+
+- `recepcion.item` sin `unidad` (APK viejas, web): lo contado está en la unidad de la línea de la OC (bulto si la OC se pidió por bulto, que es el número que esa pantalla muestra); fuera de la OC = unidades. Al finalizar, `finalizarRecepcion` multiplica por `articulos.unidades_por_bulto` y suma **unidades** al stock, kardex y movimientos.
+- `recepcion.item` con `unidad: "bulto" | "unidad"` (app nueva): cuenta en lo que eligió el operario. Hace falta la migración `20261116a_recepcion_unidades.sql` para guardar una unidad distinta de la de la OC; sin ella el servidor rechaza ese conteo con un mensaje claro (409 `unidad_no_disponible`).
+- Dataset `deposito_recepciones`: cada renglón de `ordenes_compra_detalle` trae `tipo_cantidad`, y cada `recepciones_items` trae `unidad_conteo` (con la migración). Campos nuevos, aditivos.
+- `POST /api/recepciones/[id]/ocr`: puede devolver `aviso` (texto para el operario) y `no_leido: true` (la foto quedó adjunta pero la IA no la pudo leer: no hay comprobante). Un comprobante que ya estaba cargado vuelve como **409** con el mensaje (la APK vieja ya lo muestra como error).
+
+**Qué cambia en la app (código en la rama, `mobile/apps/deposito`):**
+
+- Lista y búsqueda: "2 bultos · × 24 = 48 u" en vez de "2 esperadas"; lo contado muestra su equivalente en unidades.
+- Cantidad: botones "Bultos (× 24 u)" / "Unidades sueltas"; debajo del campo, "2 bultos × 24 u = 48 u → suman 48 unidades al stock". Si el artículo no tiene unidades por bulto, aviso en rojo (contarlo por unidades o cargar el dato en Modificar artículos).
+- Documentos: muestra el aviso del servidor y la etiqueta "NO LEÍDO".
+- Regla compartida con el servidor: `lib/deposito/unidades.ts` (alias `@gm/deposito`). Tests: `deposito-unidades.test.ts`.
+
+**Para publicar:** `cd mobile && npm run build:apks -- --apps deposito --notas "Recepcion: bultos y unidades claros; lo contado se ve en unidades; avisos al subir fotos"` (queda v0.5.2) e instalar encima en el NuStar. Aplicar antes la migración `20261116a`.
+
+**Mientras tanto (APK v0.5.x instalada):** la pantalla sigue diciendo "2 esperadas / u". El operario tiene que contar en lo mismo que pide la OC (bultos si la OC está en bultos): el servidor convierte. Si cuenta unidades sueltas en una línea por bulto, el stock queda multiplicado: por eso conviene publicar esta APK antes de volver a recibir mercadería.
