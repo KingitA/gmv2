@@ -20,6 +20,7 @@
 --
 -- Piezas:
 --   1. ordenes_pago.clave_idempotencia  → doble click = una sola OP
+--   1a. retiene_ganancias por imputación + proveedor exento (ganancias_calcular v2)
 --   1b. op_ganancias_bases v5          → no cortar si lo primero no tiene comprobante
 --   2. op_movimiento_de()               → vencimiento/comprobante → movimiento de CC
 --   3. op_normalizar_imputaciones()     → E-52: el vencimiento con comprobante
@@ -38,13 +39,166 @@ COMMENT ON COLUMN public.ordenes_pago.clave_idempotencia IS
   'Clave que manda la pantalla al crear la OP: si llega dos veces (doble click, reintento), op_crear devuelve la misma OP.';
 
 
+-- ═══ 1a. Retención de Ganancias: pregunta por vencimiento y proveedor exento ═══
+-- Decisión de Juan (16/11/2026): al pagar un vencimiento cargado a mano (sin
+-- comprobante) el sistema PREGUNTA si corresponde retener, porque puede ser algo
+-- no fiscal (adquisición de stock, un cheque rechazado). Si se contesta que SÍ,
+-- el importe pagado entra como base con las mismas reglas del motor. Si el
+-- proveedor es EXENTO no se retiene y la pantalla lo avisa con un cartel.
+ALTER TABLE public.ordenes_pago_imputaciones ADD COLUMN IF NOT EXISTS retiene_ganancias boolean;
+COMMENT ON COLUMN public.ordenes_pago_imputaciones.retiene_ganancias IS
+  'Solo para imputaciones a un vencimiento SIN comprobante: true = corresponde retener Ganancias (el importe pagado es la base), false = no corresponde, NULL = no aplica / no se preguntó (base 0).';
+
+ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS ganancias_exento_hasta date;
+COMMENT ON COLUMN public.proveedores.ganancias_exento_hasta IS
+  'Hasta cuándo vale la exención de Ganancias (condicion_ganancias = exento). NULL = sin vencimiento. Vencida, se vuelve a retener y se avisa.';
+ALTER TABLE public.proveedores DROP CONSTRAINT IF EXISTS proveedores_condicion_ganancias_check;
+ALTER TABLE public.proveedores ADD CONSTRAINT proveedores_condicion_ganancias_check
+  CHECK (condicion_ganancias IN ('inscripto', 'no_inscripto', 'exento'));
+
+-- ganancias_calcular v2 — cuerpo EXACTO de la R2 (20260802_r2_motor_ganancias.sql)
+-- con el agregado del proveedor exento (líneas marcadas "v2"). No cambia
+-- alícuotas, mínimos, acumulado ni exclusiones. Generado por script desde la R2.
+CREATE OR REPLACE FUNCTION public.ganancias_calcular(
+  p_proveedor_id uuid,
+  p_base         numeric,
+  p_fecha        date DEFAULT NULL,
+  p_excluir_op   uuid DEFAULT NULL   -- al recalcular una OP existente, excluirla del acumulado
+) RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_fecha       date := COALESCE(p_fecha, (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date);
+  v_prov        record;
+  v_reg         record;
+  v_exclusion   numeric := 0;
+  v_acum_previo numeric;
+  v_ret_previa  numeric;
+  v_alicuota    numeric;
+  v_minimo      numeric;
+  v_teorica     numeric;
+  v_ret         numeric;
+  v_motivo      text := NULL;
+  v_exento      boolean := false;   -- v2
+  v_exento_venc boolean := false;   -- v2
+BEGIN
+  SELECT nombre, cuit, regimen_ganancias, condicion_ganancias, ganancias_exento_hasta INTO v_prov   -- v2: + ganancias_exento_hasta
+  FROM proveedores WHERE id = p_proveedor_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'ganancias_calcular: proveedor % no encontrado', p_proveedor_id;
+  END IF;
+
+  SELECT * INTO v_reg FROM retencion_regimenes
+  WHERE clave = COALESCE(v_prov.regimen_ganancias, 'bienes')
+    AND vigencia_desde <= v_fecha
+    AND (vigencia_hasta IS NULL OR vigencia_hasta >= v_fecha)
+  ORDER BY vigencia_desde DESC LIMIT 1;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'ganancias_calcular: sin régimen vigente para clave % al %', v_prov.regimen_ganancias, v_fecha;
+  END IF;
+
+  -- Certificado de exclusión vigente
+  SELECT COALESCE(max(porcentaje_excencion), 0) INTO v_exclusion
+  FROM excenciones_impositivas
+  WHERE proveedor_id = p_proveedor_id
+    AND tipo = 'retencion_ganancias'
+    AND activo = true
+    AND fecha_desde <= v_fecha
+    AND (fecha_hasta IS NULL OR fecha_hasta >= v_fecha);
+
+  -- Acumulado del mes calendario (bases de OPs pagadas) y retenido previo
+  SELECT COALESCE(sum(base_ganancias), 0) INTO v_acum_previo
+  FROM ordenes_pago
+  WHERE proveedor_id = p_proveedor_id
+    AND estado = 'pagada'
+    AND date_trunc('month', fecha) = date_trunc('month', v_fecha)
+    AND (p_excluir_op IS NULL OR id <> p_excluir_op);
+
+  SELECT COALESCE(sum(monto), 0) INTO v_ret_previa
+  FROM retenciones_emitidas
+  WHERE proveedor_id = p_proveedor_id
+    AND estado = 'emitida'
+    AND date_trunc('month', fecha) = date_trunc('month', v_fecha)
+    AND (p_excluir_op IS NULL OR orden_pago_id <> p_excluir_op);
+
+  IF v_prov.condicion_ganancias = 'no_inscripto' THEN
+    v_alicuota := v_reg.alicuota_no_inscripto;
+    v_minimo := 0;  -- no inscriptos: sin monto no sujeto
+  ELSE
+    v_alicuota := v_reg.alicuota_inscripto;
+    v_minimo := v_reg.minimo_no_sujeto;
+  END IF;
+
+  v_teorica := round((v_alicuota / 100.0) * GREATEST(0, v_acum_previo + COALESCE(p_base, 0) - v_minimo), 2);
+  v_ret := GREATEST(0, round(v_teorica - v_ret_previa, 2));
+
+  IF v_ret > 0 AND v_ret < v_reg.retencion_minima THEN
+    v_motivo := 'menor a retención mínima (' || v_reg.retencion_minima || ')';
+    v_ret := 0;
+  ELSIF v_acum_previo + COALESCE(p_base, 0) <= v_minimo THEN
+    v_motivo := 'acumulado del mes no supera el mínimo no sujeto';
+  END IF;
+
+  IF v_exclusion > 0 AND v_ret > 0 THEN
+    v_ret := round(v_ret * (1 - v_exclusion / 100.0), 2);
+    v_motivo := 'certificado de exclusión ' || v_exclusion || '%';
+  END IF;
+
+  -- ── v2: proveedor EXENTO de Ganancias (ficha: condición 'exento') ──
+  -- Mientras la exención esté vigente (sin fecha o fecha >= día del pago) no se
+  -- retiene nada, con motivo claro. Vencida, se calcula como inscripto y se avisa
+  -- (exento_vencido). Un certificado de exclusión del 100 % vale lo mismo para el
+  -- cartel de la pantalla (exento = true). El resto del cálculo no cambia.
+  v_exento := v_prov.condicion_ganancias = 'exento'
+              AND (v_prov.ganancias_exento_hasta IS NULL OR v_prov.ganancias_exento_hasta >= v_fecha);
+  v_exento_venc := v_prov.condicion_ganancias = 'exento' AND NOT v_exento;
+  IF v_exento THEN
+    v_ret := 0;
+    v_motivo := 'proveedor exento de Ganancias' ||
+                COALESCE(' (certificado vigente hasta el ' || to_char(v_prov.ganancias_exento_hasta, 'DD/MM/YYYY') || ')', '');
+  END IF;
+  -- ── fin v2 ──
+
+  RETURN jsonb_build_object(
+    'proveedor', v_prov.nombre,
+    'cuit', v_prov.cuit,
+    'regimen_id', v_reg.id,
+    'regimen', v_reg.clave,
+    'regimen_descripcion', v_reg.descripcion,
+    'condicion', v_prov.condicion_ganancias,
+    'alicuota', v_alicuota,
+    'minimo_no_sujeto', v_minimo,
+    'retencion_minima', v_reg.retencion_minima,
+    'exclusion_pct', v_exclusion,
+    'base', round(COALESCE(p_base, 0), 2),
+    'acumulado_previo_mes', v_acum_previo,
+    'acumulado_total_mes', round(v_acum_previo + COALESCE(p_base, 0), 2),
+    'retenido_previo_mes', v_ret_previa,
+    'retencion', v_ret,
+    'motivo_sin_retencion', v_motivo,
+    'exento', (v_exento OR v_exclusion >= 100),                 -- v2
+    'exento_hasta', v_prov.ganancias_exento_hasta,             -- v2
+    'exento_vencido', v_exento_venc                            -- v2
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.ganancias_calcular(uuid, numeric, date, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.ganancias_calcular(uuid, numeric, date, uuid) TO authenticated, service_role;
+
 -- ═══ 1b. op_ganancias_bases v5 — no cortar cuando algo no tiene comprobante ═══
--- Cuerpo EXACTO de la v4 (20260807_op_eliminar_y_bases_v4.sql) con UNA sentencia
--- cambiada (marcada "v5": el vaciado de v_comp en cada vuelta). No cambia
--- ninguna base ni ninguna retención: solo evita el error cuando una
--- imputación es un vencimiento sin comprobante
--- (el caso de casi todos los vencimientos reales). Encontrado probando op_crear
--- en una base local el 16/11/2026. Generado por script desde la v4.
+-- Cuerpo de la v4 (20260807_op_eliminar_y_bases_v4.sql) con DOS cambios marcados:
+--   "v5":  el vaciado de v_comp en cada vuelta. No cambia ninguna base: solo evita
+--          el error cuando una imputación no tiene comprobante (el caso de casi
+--          todos los vencimientos reales). Encontrado probando op_crear en una
+--          base local el 16/11/2026.
+--   "v5b": el vencimiento sin comprobante con retiene_ganancias = true aporta su
+--          importe pagado como base (decisión de Juan). Sin esa respuesta todo
+--          sigue como en la v4: base 0.
+-- Generado por script desde la v4.
 CREATE OR REPLACE FUNCTION public.op_ganancias_bases(p_imputaciones jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -124,6 +278,15 @@ BEGIN
       v_base := -round(abs(v_comp.total_neto) * LEAST(abs(v_monto) / v_comp.total, 1), 2);
       v_tipo := 'nota_credito';
       v_etiqueta := COALESCE(v_comp.numero_comprobante, v_etiqueta);
+    ELSIF v_comp_id IS NULL AND v_monto > 0
+       AND NULLIF(v_item->>'vencimiento_id', '') IS NOT NULL
+       AND COALESCE(NULLIF(v_item->>'retiene_ganancias', '')::boolean, false)
+       AND NOT EXISTS (SELECT 1 FROM vencimientos vn
+                       WHERE vn.id = (v_item->>'vencimiento_id')::uuid AND vn.canal = 'negro') THEN
+      -- v5b (Juan, 16/11/2026): vencimiento cargado a mano en el que se contestó
+      -- que SÍ corresponde retener → el importe pagado es la base. Canal negro: nunca.
+      v_base := round(v_monto, 2);
+      v_tipo := 'vencimiento_con_retencion';
     ELSE
       -- Adquisición, Reversa, Remito, provisión de OC, pago a cuenta:
       -- SIN comprobante fiscal → JAMÁS integra la base de retención.
@@ -236,7 +399,10 @@ BEGIN
       'movimiento_cc_id', v_mov,
       'vencimiento_id', v_venc,
       'comprobante_compra_id', v_comp,
-      'monto_imputado', v_monto
+      'monto_imputado', v_monto,
+      -- La respuesta "¿corresponde retener?" solo vale para un vencimiento sin comprobante
+      'retiene_ganancias', CASE WHEN v_monto > 0 AND v_mov IS NULL AND v_venc IS NOT NULL
+                                THEN NULLIF(v_item->>'retiene_ganancias', '')::boolean END
     );
   END LOOP;
 
@@ -502,7 +668,8 @@ GRANT EXECUTE ON FUNCTION public.op_validar_imputaciones(uuid, jsonb, uuid, bool
 --                      cheque_fecha_vencimiento?, banco_destino?, numero_cuenta?, cbu?,
 --                      numero_transferencia?, fecha_transferencia?, observaciones?,
 --                      cuenta_origen_tipo?, cuenta_origen_id? }],
---     imputaciones: [{ movimiento_cc_id?, vencimiento_id?, comprobante_compra_id?, monto_imputado }] }
+--     imputaciones: [{ movimiento_cc_id?, vencimiento_id?, comprobante_compra_id?, monto_imputado,
+--                      retiene_ganancias? (obligatorio en vencimientos sin comprobante) }] }
 -- Devuelve la fila de ordenes_pago (jsonb) + ya_existia.
 -- La retención de Ganancias SIEMPRE la calcula el servidor; el valor de la
 -- pantalla solo vale como ajuste manual con motivo.
@@ -537,6 +704,7 @@ DECLARE
   v_cheque      record;
   v_numero      text;
   v_op          ordenes_pago%ROWTYPE;
+  v_sin_resp    text;
 BEGIN
   IF v_prov IS NULL THEN
     RAISE EXCEPTION 'Proveedor es obligatorio';
@@ -562,6 +730,22 @@ BEGIN
   -- E-52 + E-54
   v_imps := op_normalizar_imputaciones(p_payload->'imputaciones');
   PERFORM op_validar_imputaciones(v_prov, v_imps, NULL, true);
+
+  -- Vencimiento sin comprobante: hay que contestar si corresponde retener
+  -- Ganancias (no hay valor por defecto). No se pregunta si el proveedor está
+  -- exento ni si el vencimiento es de canal negro (nunca retiene).
+  IF NOT COALESCE((ganancias_calcular(v_prov, 0, v_fecha)->>'exento')::boolean, false) THEN
+    SELECT string_agg('"' || COALESCE(vn.concepto, 'vencimiento') || '"', ', ') INTO v_sin_resp
+    FROM jsonb_array_elements(v_imps) e
+    JOIN vencimientos vn ON vn.id = NULLIF(e->>'vencimiento_id', '')::uuid
+    WHERE NULLIF(e->>'movimiento_cc_id', '') IS NULL
+      AND (e->>'monto_imputado')::numeric > 0
+      AND vn.canal IS DISTINCT FROM 'negro'
+      AND NULLIF(e->>'retiene_ganancias', '') IS NULL;
+    IF v_sin_resp IS NOT NULL THEN
+      RAISE EXCEPTION 'Falta contestar si corresponde retener Ganancias en: %. Elegí Sí o No en cada vencimiento.', v_sin_resp;
+    END IF;
+  END IF;
 
   -- Retención de Ganancias RG 830
   v_calc := op_ganancias_preview(v_prov, v_imps, v_fecha);
@@ -660,13 +844,14 @@ BEGIN
     NULLIF(e->>'cuenta_origen_id', '')::uuid
   FROM jsonb_array_elements(v_medios) e;
 
-  INSERT INTO ordenes_pago_imputaciones (orden_pago_id, movimiento_cc_id, vencimiento_id, comprobante_compra_id, monto_imputado)
+  INSERT INTO ordenes_pago_imputaciones (orden_pago_id, movimiento_cc_id, vencimiento_id, comprobante_compra_id, monto_imputado, retiene_ganancias)
   SELECT
     v_op.id,
     NULLIF(e->>'movimiento_cc_id', '')::uuid,
     NULLIF(e->>'vencimiento_id', '')::uuid,
     NULLIF(e->>'comprobante_compra_id', '')::uuid,
-    (e->>'monto_imputado')::numeric
+    (e->>'monto_imputado')::numeric,
+    NULLIF(e->>'retiene_ganancias', '')::boolean
   FROM jsonb_array_elements(v_imps) e;
 
   RETURN to_jsonb(v_op) || jsonb_build_object('ya_existia', false);

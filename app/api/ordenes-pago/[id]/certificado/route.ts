@@ -46,6 +46,7 @@ export async function GET(
         vencimiento_id: i.vencimiento_id,
         comprobante_compra_id: i.comprobante_compra_id,
         monto_imputado: i.monto_imputado,
+        retiene_ganancias: i.retiene_ganancias ?? null,
       })),
     })
 
