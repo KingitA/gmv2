@@ -33,6 +33,9 @@ export function FichaFiscalDialog({
   const [data, setData] = useState<any>(null)
   const [regimen, setRegimen] = useState("bienes")
   const [condicion, setCondicion] = useState("inscripto")
+  // Exento de Ganancias: hasta cuándo vale el certificado (vacío = sin vencimiento)
+  const [exentoHasta, setExentoHasta] = useState("")
+  const [exentoHastaCargado, setExentoHastaCargado] = useState(false)
   const vacio = { medio: "", plazo_cheque: "", entrega: "", dias: "", desde: "factura" }
   const [blanco, setBlanco] = useState({ ...vacio })
   const [negro, setNegro] = useState({ ...vacio })
@@ -56,6 +59,8 @@ export function FichaFiscalDialog({
         setData(d)
         setRegimen(d.proveedor.regimen_ganancias || "bienes")
         setCondicion(d.proveedor.condicion_ganancias || "inscripto")
+        setExentoHasta(d.proveedor.ganancias_exento_hasta ? String(d.proveedor.ganancias_exento_hasta).slice(0, 10) : "")
+        setExentoHastaCargado(!!d.proveedor.ganancias_exento_hasta)
         const pv = d.proveedor
         setBlanco({
           medio: pv.pago_blanco_medio || "",
@@ -120,6 +125,8 @@ export function FichaFiscalDialog({
       const body: any = {
         regimen_ganancias: regimen,
         condicion_ganancias: condicion,
+        // Solo se manda si se usa (así la ficha se sigue guardando aunque falte la migración 20261116p)
+        ...(condicion === "exento" ? { ganancias_exento_hasta: exentoHasta || null } : exentoHastaCargado ? { ganancias_exento_hasta: null } : {}),
         pago_blanco_medio: blanco.medio || null,
         pago_blanco_plazo_cheque: blanco.plazo_cheque !== "" ? parseInt(blanco.plazo_cheque) : null,
         pago_blanco_entrega: blanco.entrega || null,
@@ -193,8 +200,16 @@ export function FichaFiscalDialog({
                   <SelectContent>
                     <SelectItem value="inscripto">Inscripto</SelectItem>
                     <SelectItem value="no_inscripto">No inscripto (alícuota agravada)</SelectItem>
+                    <SelectItem value="exento">Exento (no se le retiene)</SelectItem>
                   </SelectContent>
                 </Select>
+                {condicion === "exento" && (
+                  <div className="mt-2">
+                    <Label className="text-xs">Exento hasta (vencimiento del certificado; vacío = sin vencimiento)</Label>
+                    <FechaInput value={exentoHasta} onChange={v => setExentoHasta(v || "")} />
+                    <p className="mt-1 text-xs text-muted-foreground">Mientras esté vigente no se le retiene Ganancias y la orden de pago lo avisa con un cartel. Vencido, se vuelve a retener.</p>
+                  </div>
+                )}
               </div>
             </div>
 

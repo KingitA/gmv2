@@ -28,6 +28,10 @@ export async function GET(
         .is('vigencia_hasta', null).order('clave'),
     ])
     if (!prov) return NextResponse.json({ error: 'Proveedor no encontrado' }, { status: 404 })
+    // Vencimiento de la exención de Ganancias (migración 20261116p). Se lee aparte
+    // para que la ficha siga abriendo aunque la columna todavía no exista.
+    const { data: ex, error: exErr } = await supabase.from('proveedores').select('ganancias_exento_hasta').eq('id', id).maybeSingle()
+    if (!exErr && ex) (prov as any).ganancias_exento_hasta = (ex as any).ganancias_exento_hasta ?? null
     return NextResponse.json({ proveedor: prov, exclusiones: excl ?? [], regimenes: regs ?? [] })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
@@ -48,6 +52,7 @@ export async function PUT(
     const updates: Record<string, any> = {}
     if (body.regimen_ganancias) updates.regimen_ganancias = body.regimen_ganancias
     if (body.condicion_ganancias) updates.condicion_ganancias = body.condicion_ganancias
+    if ('ganancias_exento_hasta' in body) updates.ganancias_exento_hasta = body.ganancias_exento_hasta || null
     for (const campo of [
       'pago_blanco_medio', 'pago_blanco_plazo_cheque', 'pago_blanco_entrega', 'pago_blanco_dias', 'pago_blanco_desde',
       'pago_negro_medio', 'pago_negro_plazo_cheque', 'pago_negro_entrega', 'pago_negro_dias', 'pago_negro_desde',

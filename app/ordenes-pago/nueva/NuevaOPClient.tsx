@@ -48,6 +48,8 @@ interface Imputacion {
     comprobante_compra_id?: string
     monto_imputado: number
     descripcion: string
+    // Solo vencimientos sin comprobante: ¿corresponde retener Ganancias? Sin contestar = undefined
+    retiene_ganancias?: boolean
 }
 
 // ── Etiquetas reales por tipo de comprobante ────────────────────────────────
@@ -169,6 +171,7 @@ function NuevaOrdenPagoContent() {
                     vencimiento_id: i.vencimiento_id || null,
                     comprobante_compra_id: i.comprobante_compra_id || null,
                     monto_imputado: i.monto_imputado,
+                    retiene_ganancias: i.retiene_ganancias ?? null,
                 })),
             }),
         })
@@ -435,6 +438,21 @@ function NuevaOrdenPagoContent() {
     // El importe de un vencimiento sin comprobante se puede cambiar: se paga más o
     // menos que lo anotado y la diferencia queda como ajuste o entrega a cuenta
     // del proveedor (decisión de Juan, 16/11/2026)
+    // ── Retención en vencimientos cargados a mano (decisión de Juan, 16/11/2026) ──
+    // Un vencimiento sin comprobante puede ser algo no fiscal (adquisición de stock,
+    // un cheque rechazado): el sistema PREGUNTA si corresponde retener, sin valor por
+    // defecto. No se pregunta si el proveedor está exento ni en canal negro (nunca retiene).
+    const provExento = calcGanancias?.exento === true
+    const provExentoVencido = calcGanancias?.exento_vencido === true
+    const preguntaRetencion = (v: any) => !provExento && v?.canal !== "negro"
+    const sinContestar = imputaciones.filter(i => {
+        if (!i.vencimiento_id || i.movimiento_cc_id || i.retiene_ganancias !== undefined) return false
+        return preguntaRetencion(vencimientosProv.find((v: any) => v.id === i.vencimiento_id))
+    })
+    function responderRetencion(vencId: string, retiene: boolean) {
+        setImputaciones(prev => prev.map(i => i.vencimiento_id === vencId && !i.movimiento_cc_id ? { ...i, retiene_ganancias: retiene } : i))
+    }
+
     function cambiarMontoVenc(vencId: string, monto: number) {
         setImputaciones(prev => prev.map(i => i.vencimiento_id === vencId && !i.movimiento_cc_id ? { ...i, monto_imputado: monto } : i))
     }
@@ -599,6 +617,11 @@ function NuevaOrdenPagoContent() {
             toast.warning("Hay un vencimiento tildado sin importe: escribí cuánto se paga o destildalo.")
             return
         }
+        if (calcLoading) { toast.warning("Esperá un segundo: se está calculando la retención."); return }
+        if (sinContestar.length > 0) {
+            toast.warning(`Falta contestar si corresponde retener Ganancias en: ${sinContestar.map(i => i.descripcion).join(", ")}. Elegí Sí o No.`)
+            return
+        }
         if (!cuadra) {
             toast.warning(`No cuadra: imputado ${formatCurrency(totalImputado)} − retenciones ${formatCurrency(totalRetenciones)} = ${formatCurrency(netoObjetivo!)}, pero los medios suman ${formatCurrency(totalMedios)}`)
             return
@@ -636,7 +659,8 @@ function NuevaOrdenPagoContent() {
                         movimiento_cc_id: i.movimiento_cc_id || null,
                         vencimiento_id: i.vencimiento_id || null,
                         comprobante_compra_id: i.comprobante_compra_id || null,
-                        monto_imputado: i.monto_imputado
+                        monto_imputado: i.monto_imputado,
+                        retiene_ganancias: i.retiene_ganancias ?? null
                     }))
             }
             // Misma clave SOLO si es exactamente el mismo pedido (doble click o reintento
@@ -691,6 +715,26 @@ function NuevaOrdenPagoContent() {
                         </div>
                     </div>
                 </div>
+                {/* Cartel fijo: queda siempre a la vista aunque se baje en la pantalla */}
+                {proveedorId && provExento && (
+                    <div className="bg-red-600 text-white">
+                        <div className="container mx-auto px-6 py-2.5 text-center text-base font-extrabold tracking-wide">
+                            PROVEEDOR EXENTO DE GANANCIAS: NO SE RETIENE
+                            {calcGanancias?.exento_hasta && (
+                                <span className="ml-2 font-semibold">(certificado vigente hasta el {fmtFecha(String(calcGanancias.exento_hasta).slice(0, 10))})</span>
+                            )}
+                        </div>
+                    </div>
+                )}
+                {proveedorId && provExentoVencido && (
+                    <div className="bg-amber-400 text-amber-950">
+                        <div className="container mx-auto px-6 py-2.5 text-center text-sm font-bold">
+                            OJO: la exención de Ganancias de este proveedor VENCIÓ
+                            {calcGanancias?.exento_hasta ? ` el ${fmtFecha(String(calcGanancias.exento_hasta).slice(0, 10))}` : ""}.
+                            Se le retiene como a cualquier inscripto. Si renovó el certificado, actualizá la fecha en su ficha fiscal.
+                        </div>
+                    </div>
+                )}
             </header>
 
             <main className="container mx-auto px-6 py-8 space-y-6 max-w-4xl">
@@ -798,9 +842,12 @@ function NuevaOrdenPagoContent() {
                                             const sinMonto = !(Number(v.monto) > 0)
                                             const bloqueado = !!tomado
                                             const distinto = sel && Number(v.monto) > 0 && Math.abs(Number(imp!.monto_imputado) - Number(v.monto)) > 0.01
+                                            const pregunta = sel && preguntaRetencion(v)
+                                            const falta = pregunta && imp!.retiene_ganancias === undefined
                                             return (
-                                                <div key={v.id}
-                                                    className={`flex items-center gap-3 p-2 rounded-lg border ${bloqueado ? "opacity-60 cursor-not-allowed" : "hover:bg-muted/50 cursor-pointer"} ${sel ? "border-indigo-300 bg-indigo-50/40" : ""}`}
+                                              <div key={v.id} className={`rounded-lg border ${falta ? "border-red-400 bg-red-50/50" : sel ? "border-indigo-300 bg-indigo-50/40" : ""}`}>
+                                                <div
+                                                    className={`flex items-center gap-3 p-2 ${bloqueado ? "opacity-60 cursor-not-allowed" : "hover:bg-muted/50 cursor-pointer"}`}
                                                     onClick={() => toggleImputacionVenc(v)}>
                                                     <Checkbox checked={sel} disabled={bloqueado} />
                                                     <div className="flex-1">
@@ -826,6 +873,26 @@ function NuevaOrdenPagoContent() {
                                                         <span className="text-sm font-medium">{sinMonto ? "—" : formatCurrency(Number(v.monto))}</span>
                                                     )}
                                                 </div>
+                                                {pregunta && (
+                                                    <div className="flex flex-wrap items-center gap-2 border-t px-2 py-2 pl-9">
+                                                        <span className={`text-sm font-semibold ${falta ? "text-red-700" : "text-slate-700"}`}>¿Corresponde retener Ganancias?</span>
+                                                        <Button type="button" size="sm" className="h-7 px-4"
+                                                            variant={imp!.retiene_ganancias === true ? "default" : "outline"}
+                                                            onClick={() => responderRetencion(v.id, true)}>Sí</Button>
+                                                        <Button type="button" size="sm" className="h-7 px-4"
+                                                            variant={imp!.retiene_ganancias === false ? "default" : "outline"}
+                                                            onClick={() => responderRetencion(v.id, false)}>No</Button>
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {falta ? "Hay que contestar para poder crear la orden."
+                                                                : imp!.retiene_ganancias ? "Sí: el importe pagado entra en el cálculo de la retención y sale en el certificado."
+                                                                : "No: es algo no fiscal (adquisición de stock, cheque rechazado…). No se retiene."}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {sel && !pregunta && v.canal === "negro" && (
+                                                    <p className="border-t px-2 py-1.5 pl-9 text-xs text-muted-foreground">Canal negro: no se retiene.</p>
+                                                )}
+                                              </div>
                                             )
                                         })}
                                     </div>
