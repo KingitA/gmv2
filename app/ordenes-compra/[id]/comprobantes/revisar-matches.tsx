@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Check, Loader2, Link2 } from "lucide-react"
+import { Check, Loader2, Link2, Trash2 } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { formatCurrency } from "@/lib/utils"
@@ -78,6 +78,33 @@ export function RevisarMatches({
         }
     }
 
+    // Renglón que no es mercadería (flete, una leyenda, un total leído como ítem): se quita.
+    // Validar el comprobante exige que no quede ninguno sin vincular (E-32).
+    const [porQuitar, setPorQuitar] = useState<string | null>(null)
+    const quitar = async (row: any) => {
+        setResolviendo(row.id)
+        setError(null)
+        try {
+            const res = await fetch(`/api/comprobantes-compra/${row.comprobante.id}/detalle`, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ detalle_id: row.id }),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                setError(data.error || "No se pudo quitar el renglón")
+                return
+            }
+            setPendientes((prev) => prev.filter((p) => p.id !== row.id))
+            onResolved?.()
+        } catch {
+            setError("Error de conexión")
+        } finally {
+            setResolviendo(null)
+            setPorQuitar(null)
+        }
+    }
+
     if (loading && pendientes.length === 0) return null
     if (pendientes.length === 0) return null
 
@@ -91,7 +118,9 @@ export function RevisarMatches({
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">
                     Artículos de la factura que no se pudieron vincular al catálogo. Al confirmarlos, el
-                    sistema aprende la equivalencia para las próximas facturas de este proveedor.
+                    sistema aprende la equivalencia para las próximas facturas de este proveedor. Mientras
+                    quede alguno sin vincular, el comprobante no se puede validar: si un renglón no es
+                    mercadería (flete, una leyenda), quitalo.
                 </p>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -168,6 +197,19 @@ export function RevisarMatches({
                                                 <Check className="h-4 w-4 mr-1" /> Vincular
                                             </>
                                         )}
+                                    </Button>
+                                )}
+                                {porQuitar === row.id ? (
+                                    <>
+                                        <span className="text-xs text-red-700">¿Quitar este renglón del comprobante?</span>
+                                        <Button size="sm" variant="destructive" disabled={resolviendo === row.id} onClick={() => quitar(row)}>
+                                            Sí, quitar
+                                        </Button>
+                                        <Button size="sm" variant="ghost" onClick={() => setPorQuitar(null)}>No</Button>
+                                    </>
+                                ) : (
+                                    <Button size="sm" variant="ghost" className="text-red-700" disabled={resolviendo === row.id} onClick={() => setPorQuitar(row.id)}>
+                                        <Trash2 className="h-4 w-4 mr-1" /> No es mercadería
                                     </Button>
                                 )}
                             </div>

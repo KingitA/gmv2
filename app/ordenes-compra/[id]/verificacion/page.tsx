@@ -19,6 +19,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ComprobantesSection } from "./comprobantes-section"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { aUnidadesBase, bultosParaCubrir, cant, conversionLinea, desdeUnidadesBase, unidadesPorBultoDe } from "@/lib/deposito/unidades"
+import { toast } from "sonner"
 
 interface CompData {
     id: string
@@ -230,7 +231,10 @@ export default function VerificacionOCPage() {
                 const artData = cd.items[artId]
                 if (artData) {
                     compDataForArt[cd.id] = artData
-                    if (cd.tipo.startsWith("NC") || cd.tipo.startsWith("ND")) {
+                    if (cd.tipo.startsWith("ND")) {
+                        // Nota de débito (E-35): es un cargo, no mercadería que entra ni que vuelve.
+                        // No cambia la cantidad facturada (antes restaba, como si fuera una NC).
+                    } else if (cd.tipo.startsWith("NC") || cd.tipo === "Reversa") {
                         cantTotalFacturada -= artData.cantidad
                     } else {
                         cantTotalFacturada += artData.cantidad
@@ -440,16 +444,28 @@ export default function VerificacionOCPage() {
             .eq("orden_compra_id", ordenId)
             .not("estado", "in", "(validado,cerrado,esperada)")
 
+        const avisos: string[] = []
         for (const comp of pendientes || []) {
             const res = await fetch(`/api/comprobantes-compra/${comp.id}/validar`, { method: "POST" })
+            const data = await res.json().catch(() => ({}))
             if (!res.ok) {
-                const data = await res.json()
-                alert(`Error validando ${comp.tipo_comprobante} ${comp.numero_comprobante}: ${data.error || "error"}`)
+                // Se frena acá: la OC NO queda finalizada con un comprobante sin validar (E-32)
+                toast.error(`La OC no se finalizó. No se pudo validar ${comp.tipo_comprobante} ${comp.numero_comprobante}: ${data.error || `error ${res.status}`}`, { duration: 15000 })
+                loadAll()
                 return
             }
+            for (const a of (data.avisos || []) as string[]) avisos.push(`${comp.tipo_comprobante} ${comp.numero_comprobante}: ${a}`)
         }
 
-        await supabase.from("ordenes_compra").update({ estado: "finalizada" }).eq("id", ordenId)
+        // E-09: la base rechazaba 'finalizada' y nadie se enteraba (falta la migración 20261116b)
+        const { error: errEstado } = await supabase.from("ordenes_compra").update({ estado: "finalizada" }).eq("id", ordenId)
+        if (errEstado) {
+            toast.error(`Los comprobantes quedaron validados, pero la orden NO pasó a "finalizada": ${errEstado.message}`, { duration: 15000 })
+            loadAll()
+            return
+        }
+        if (avisos.length > 0) toast.warning(avisos.join(" · "), { duration: 15000 })
+        else toast.success("Orden finalizada")
         router.push("/ordenes-compra")
     }
 
@@ -493,12 +509,12 @@ export default function VerificacionOCPage() {
                 items,
             }),
         })
-        const data = await res.json()
+        const data = await res.json().catch(() => ({}))
         if (!res.ok) {
-            alert(data.error || "Error al generar la OC")
+            toast.error(`No se generó la OC de faltantes: ${data.error || `error ${res.status}`}`, { duration: 12000 })
             return
         }
-        alert(`OC de reposición creada: ${data.orden?.numero_orden || "OK"}`)
+        toast.success(`OC de reposición creada: ${data.orden?.numero_orden || "OK"}`)
         router.push("/ordenes-compra")
     }
 
@@ -515,7 +531,8 @@ export default function VerificacionOCPage() {
     const tieneComps = comprobantes.length > 0
     const tieneOCR = comprobantes.some(c => Object.keys(c.items).length > 0)
     const totalOC = rows.reduce((s, r) => s + r.precio_oc * r.cant_oc, 0)
-    const totalFacturado = comprobantes.reduce((s, c) => s + c.total, 0)
+    // NC y reversas restan; la nota de débito suma (E-35)
+    const totalFacturado = comprobantes.reduce((s, c) => s + (c.tipo.startsWith("NC") || c.tipo === "Reversa" ? -1 : 1) * (Number(c.total) || 0), 0)
     const itemsOK = rows.filter(r => r.status === "ok").length
     const itemsDiff = rows.filter(r => r.status !== "ok").length
     const allOK = itemsDiff === 0 && rows.length > 0 && tieneComps

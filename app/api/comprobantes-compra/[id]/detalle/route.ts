@@ -174,3 +174,51 @@ export async function PATCH(
         return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
     }
 }
+
+// DELETE /api/comprobantes-compra/[id]/detalle  { detalle_id }
+// Quita un renglón que NO es mercadería (flete, leyendas, un total leído como ítem).
+// Solo renglones SIN artículo vinculado y de un comprobante sin validar: como nunca
+// se vincularon, no tocaron la recepción ni el stock; no hay nada que revertir.
+// Hace falta porque validar bloquea mientras queden renglones sin artículo (E-32).
+export async function DELETE(
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const auth = await requireAuth();
+    if (auth.error) return auth.error;
+
+    try {
+        const { id: comprobante_id } = await params;
+        const { detalle_id } = await request.json().catch(() => ({}));
+        if (!detalle_id) return NextResponse.json({ error: 'detalle_id es requerido' }, { status: 400 });
+
+        const supabase = createAdminClient();
+
+        const { data: comprobante } = await supabase
+            .from('comprobantes_compra')
+            .select('id, estado')
+            .eq('id', comprobante_id)
+            .maybeSingle();
+        if (!comprobante) return NextResponse.json({ error: 'Comprobante no encontrado' }, { status: 404 });
+        if (['validado', 'cerrado'].includes(comprobante.estado)) {
+            return NextResponse.json({ error: 'El comprobante ya está validado: no se le pueden quitar renglones.' }, { status: 409 });
+        }
+
+        // La condición va en el mismo DELETE: si alguien lo vinculó recién, no se borra
+        const { data: borrados, error } = await supabase
+            .from('comprobantes_compra_detalle')
+            .delete()
+            .eq('id', detalle_id)
+            .eq('comprobante_id', comprobante_id)
+            .is('articulo_id', null)
+            .select('id');
+        if (error) throw error;
+        if (!borrados || borrados.length === 0) {
+            return NextResponse.json({ error: 'Ese renglón ya está vinculado a un artículo (o ya no existe): no se quitó.' }, { status: 409 });
+        }
+        return NextResponse.json({ success: true });
+    } catch (error: any) {
+        console.error('[detalle DELETE] Error:', error);
+        return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+    }
+}
