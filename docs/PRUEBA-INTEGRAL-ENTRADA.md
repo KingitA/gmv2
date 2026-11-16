@@ -107,6 +107,8 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 | E-69 | Proyección de caja usa vencimientos brutos (sin retenciones ni saldo inicial). | C |
 | E-70 | Bancos: solo lectura de Mercado Pago. Sin emisión de transferencias ni e-cheq; Provincia y MP sin CBU. | C, B |
 | E-71 | No hay vista "efectivo a separar" ni "cheques propios a hacer". | C |
+| ~~E-72~~ | ~~(hallazgo T0-B) `op_ganancias_bases` corta con `record "v_comp" is not assigned yet` cuando una imputación no tiene comprobante (vencimiento cargado a mano, provisión): no se podía calcular la retención ni crear la OP.~~ **Hecho (T0-B):** v5 en `20261116p` (v4 con una sentencia cambiada; no cambia el cálculo). Visto en una base local de prueba; sin verificar contra producción. | C |
+| E-73 | (hallazgo T0-B, sin tocar) `op_confirmar` no exige estado `pendiente`: una OP `cancelada` se puede confirmar llamando a la ruta. `op_confirmar`, `op_anular` y `op_eliminar` eran ejecutables por cualquier usuario logueado (esto último sí queda cerrado en `20261116q`). | C |
 
 ### E. Reportes, Jarvis, IA
 
