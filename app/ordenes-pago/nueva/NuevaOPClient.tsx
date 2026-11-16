@@ -269,10 +269,7 @@ function NuevaOrdenPagoContent() {
             return
         }
         const monto = Number(venc.monto) || 0
-        if (monto <= 0) {
-            toast.warning("Ese vencimiento no tiene importe cargado. Cargale el importe en el calendario y volvé a generar la orden.")
-            return
-        }
+        if (monto <= 0) toast.info("Ese vencimiento no tiene importe cargado: escribí cuánto se paga en su renglón.")
         setVencOrigen(venc)
         setImputaciones(prev => prev.some(i => i.vencimiento_id === vencId) ? prev : [...prev, {
             vencimiento_id: vencId,
@@ -425,16 +422,19 @@ function NuevaOrdenPagoContent() {
                 toast.warning(`Ese vencimiento ya está en la orden de pago pendiente ${tomadoPorVenc.get(venc.id)}. Confirmala o eliminala primero.`)
                 return
             }
-            if (!(Number(venc.monto) > 0)) {
-                toast.warning("Ese vencimiento no tiene importe cargado. Cargalo primero en el calendario.")
-                return
-            }
             setImputaciones([...imputaciones, {
                 vencimiento_id: venc.id,
-                monto_imputado: venc.monto,
+                monto_imputado: Number(venc.monto) || 0,
                 descripcion: venc.concepto
             }])
         }
+    }
+
+    // El importe de un vencimiento sin comprobante se puede cambiar: se paga más o
+    // menos que lo anotado y la diferencia queda como ajuste o entrega a cuenta
+    // del proveedor (decisión de Juan, 16/11/2026)
+    function cambiarMontoVenc(vencId: string, monto: number) {
+        setImputaciones(prev => prev.map(i => i.vencimiento_id === vencId && !i.movimiento_cc_id ? { ...i, monto_imputado: monto } : i))
     }
 
     const totalMedios = medios.reduce((sum, m) => sum + Number(m.monto || 0), 0)
@@ -593,6 +593,10 @@ function NuevaOrdenPagoContent() {
         if (medios.length === 0) { toast.warning("Agregá al menos un medio de pago"); return }
         if (totalMedios <= 0) { toast.warning("El total de medios de pago debe ser mayor a 0"); return }
         if (gananciasManual && !gananciasMotivo.trim()) { toast.warning("Indicá el motivo del ajuste manual de la retención"); return }
+        if (imputaciones.some(i => i.vencimiento_id && !i.movimiento_cc_id && !(Number(i.monto_imputado) > 0))) {
+            toast.warning("Hay un vencimiento tildado sin importe: escribí cuánto se paga o destildalo.")
+            return
+        }
         if (!cuadra) {
             toast.warning(`No cuadra: imputado ${formatCurrency(totalImputado)} − retenciones ${formatCurrency(totalRetenciones)} = ${formatCurrency(netoObjetivo!)}, pero los medios suman ${formatCurrency(totalMedios)}`)
             return
@@ -775,13 +779,16 @@ function NuevaOrdenPagoContent() {
                                     <h4 className="font-medium text-sm mb-1">Vencimientos del calendario (sin comprobante cargado)</h4>
                                     <p className="text-xs text-muted-foreground mb-2">
                                         Se pagan contra el vencimiento: al confirmar la orden quedan como pagados en el calendario.
+                                        Al tildarlo podés cambiar el importe: si se paga más o menos, la diferencia queda como ajuste o entrega a cuenta del proveedor.
                                     </p>
                                     <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                                         {vencSinComprobante.map((v: any) => {
-                                            const sel = !!imputaciones.find(i => i.vencimiento_id === v.id)
+                                            const imp = imputaciones.find(i => i.vencimiento_id === v.id)
+                                            const sel = !!imp
                                             const tomado = sel ? undefined : tomadoPorVenc.get(v.id)
                                             const sinMonto = !(Number(v.monto) > 0)
-                                            const bloqueado = !!tomado || sinMonto
+                                            const bloqueado = !!tomado
+                                            const distinto = sel && Number(v.monto) > 0 && Math.abs(Number(imp!.monto_imputado) - Number(v.monto)) > 0.01
                                             return (
                                                 <div key={v.id}
                                                     className={`flex items-center gap-3 p-2 rounded-lg border ${bloqueado ? "opacity-60 cursor-not-allowed" : "hover:bg-muted/50 cursor-pointer"} ${sel ? "border-indigo-300 bg-indigo-50/40" : ""}`}
@@ -794,11 +801,21 @@ function NuevaOrdenPagoContent() {
                                                         {tomado && (
                                                             <span className="text-xs font-semibold text-amber-700 ml-2">ya está en la OP pendiente {tomado}</span>
                                                         )}
-                                                        {sinMonto && (
-                                                            <span className="text-xs font-semibold text-amber-700 ml-2">sin importe: cargalo en el calendario</span>
+                                                        {sinMonto && !sel && (
+                                                            <span className="text-xs font-semibold text-amber-700 ml-2">sin importe: se escribe al tildarlo</span>
+                                                        )}
+                                                        {distinto && (
+                                                            <span className="text-xs font-semibold text-amber-700 ml-2">el vencimiento es de {formatCurrency(Number(v.monto))}</span>
                                                         )}
                                                     </div>
-                                                    <span className="text-sm font-medium">{sinMonto ? "—" : formatCurrency(Number(v.monto))}</span>
+                                                    {sel ? (
+                                                        <span onClick={e => e.stopPropagation()}>
+                                                            <InputMonto className="h-8 w-36 text-sm text-right" soloPositivos value={imp!.monto_imputado}
+                                                                onChange={n => cambiarMontoVenc(v.id, n ?? 0)} />
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-sm font-medium">{sinMonto ? "—" : formatCurrency(Number(v.monto))}</span>
+                                                    )}
                                                 </div>
                                             )
                                         })}

@@ -253,7 +253,8 @@ GRANT EXECUTE ON FUNCTION public.op_normalizar_imputaciones(jsonb) TO service_ro
 --   · la misma deuda está elegida dos veces (por el comprobante y por su vencimiento)
 --   · algo es de otro proveedor o no existe
 --   · lo imputado supera el saldo pendiente del comprobante/movimiento
---   · el vencimiento ya está pagado o cancelado, o se le imputa más que su monto
+--   · el vencimiento ya está pagado o cancelado, o ya está en otra OP pendiente
+--     (al vencimiento SIN comprobante se le puede pagar un importe distinto al suyo)
 --   · un crédito (NC/Reversa) no tiene saldo suficiente
 -- p_contar_pendientes = true (al CREAR): además descuenta lo que ya tienen
 --   tomado otras OP PENDIENTES sobre la misma deuda.
@@ -412,17 +413,11 @@ BEGIN
             AND (p_excluir_op IS NULL OR o.id <> p_excluir_op);
         END IF;
 
-        IF v_mov IS NULL THEN
-          -- Vencimiento sin comprobante: el tope es el monto del vencimiento
-          IF v_monto > COALESCE(v_v.monto, 0) - v_reservado + 0.01 THEN
-            IF v_reservado > 0 THEN
-              RAISE EXCEPTION 'El vencimiento "%" ya está en la orden de pago pendiente % (% de %). Confirmá o eliminá esa orden primero.',
-                v_nombre, v_ops, fmt_moneda(v_reservado), fmt_moneda(COALESCE(v_v.monto, 0));
-            END IF;
-            RAISE EXCEPTION 'El vencimiento "%" es de % y se quieren imputar %. Si el importe cambió, corregilo primero en el vencimiento.',
-              v_nombre, fmt_moneda(COALESCE(v_v.monto, 0)), fmt_moneda(v_monto);
-          END IF;
-        ELSIF v_reservado > 0 THEN
+        -- Vencimiento sin comprobante: NO hay tope de importe. Se puede pagar más
+        -- (o menos) que lo que dice el vencimiento: la diferencia queda como
+        -- ajuste o entrega a cuenta del proveedor (decisión de Juan, 16/11/2026).
+        -- Lo único que no se puede es tenerlo en dos órdenes a la vez.
+        IF v_reservado > 0 THEN
           RAISE EXCEPTION 'El vencimiento "%" ya está en la orden de pago pendiente %. Confirmá o eliminá esa orden primero.', v_nombre, v_ops;
         END IF;
       END IF;

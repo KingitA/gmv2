@@ -10,8 +10,9 @@ import { requirePermiso, tienePermiso } from '@/lib/auth'
  * elimina el certificado de retención (fuera del TXT SICORE) y libera los
  * números de OP y certificado si eran los últimos de la serie.
  *
- * Permisos (E-65): una OP pendiente la elimina quien puede armarla (admin,
- * administrativo); una OP ya pagada mueve plata al revertirse: solo admin.
+ * Permisos (E-65): hoy todo lo de órdenes de pago es solo de admin (Juan,
+ * 16/11/2026). Si algún día otro rol puede armarlas (permiso ordenes_pago),
+ * eliminar una OP ya pagada sigue siendo solo de admin: mueve plata al revertirse.
  */
 export async function POST(
     request: Request,
