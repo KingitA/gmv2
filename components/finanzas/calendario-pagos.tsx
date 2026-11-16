@@ -1082,7 +1082,7 @@ export function CalendarioPagos({
                         {avisoSinOP?.ids.length === 1 && (() => {
                             const v = vencimientos.find((x) => x.id === avisoSinOP.ids[0])
                             return v?.proveedor_id ? (
-                                <Button variant="outline" onClick={() => { window.location.href = `/ordenes-pago/nueva?proveedor_id=${v.proveedor_id}&vencimiento_id=${v.id}` }}>Generar OP</Button>
+                                <Button variant="outline" onClick={() => { window.location.href = `/ordenes-pago/nueva?proveedor_id=${v.proveedor_id}&vencimiento_id=${v.id}&monto=${v.monto ?? 0}` }}>Generar OP</Button>
                             ) : null
                         })()}
                         <AlertDialogAction onClick={() => { const a = avisoSinOP; setAvisoSinOP(null); if (a) confirmarPagados(a.ids, a.vencCheque) }}>Marcar pagado sin OP</AlertDialogAction>

@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
+import { useState, useEffect, useRef, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -112,6 +113,19 @@ function NuevaOrdenPagoContent() {
     const [comprobantesCC, setComprobantesCC] = useState<any[]>([])
     const [creditos, setCreditos] = useState<any[]>([])
     const [vencimientosProv, setVencimientosProv] = useState<any[]>([])
+    // Todos los movimientos de la cuenta corriente (pagados o no): sirven para
+    // saber a qué comprobante corresponde un vencimiento (E-52)
+    const [movimientosCC, setMovimientosCC] = useState<any[]>([])
+    // Otras OP pendientes del proveedor: lo que ya tienen tomado no se puede volver a elegir (E-54)
+    const [opsPendientes, setOpsPendientes] = useState<any[]>([])
+    // Proveedor cuyos datos ya terminaron de cargar (para preseleccionar recién ahí)
+    const [provCargado, setProvCargado] = useState("")
+    const [vencOrigen, setVencOrigen] = useState<any>(null)
+    const provRef = useRef(proveedorId)
+    provRef.current = proveedorId
+    const preselVencHecha = useRef(false)
+    // Clave de esta carga: si el pedido llega dos veces (doble click), el servidor crea una sola OP
+    const claveRef = useRef("")
 
     const [cheques, setCheques] = useState<any[]>([])
     const [submitting, setSubmitting] = useState(false)
@@ -170,34 +184,103 @@ function NuevaOrdenPagoContent() {
     }, [proveedorId, fecha, JSON.stringify(imputaciones), gananciasManual])
 
     useEffect(() => {
-        if (proveedorId) {
-            loadComprobantesCC()
-            loadVencimientos()
-            loadCreditos()
-            fetch(`/api/proveedores/${proveedorId}/fiscal`).then(r => r.json())
-                .then(d => setFichaPago(d.proveedor || null))
-                .catch(() => setFichaPago(null))
-        }
+        if (!proveedorId) return
+        const id = proveedorId
+        setProvCargado("")
+        Promise.all([loadComprobantesCC(id), loadVencimientos(id), loadCreditos(id), loadOpsPendientes(id)])
+            .finally(() => { if (provRef.current === id) setProvCargado(id) })
+        fetch(`/api/proveedores/${id}/fiscal`).then(r => r.json())
+            .then(d => { if (provRef.current === id) setFichaPago(d.proveedor || null) })
+            .catch(() => { if (provRef.current === id) setFichaPago(null) })
     }, [proveedorId])
 
-    // Si viene un vencimiento_id por URL, pre-seleccionarlo
+    // ── Vencimiento → comprobante de la cuenta corriente (E-52) ──
+    // Igual que op_movimiento_de en la base: si el vencimiento nació de un
+    // comprobante, la deuda es el comprobante (se tilda ESE renglón). Si se
+    // cargó a mano (casi todos), se paga contra el vencimiento.
+    const movDeVenc = (v: any): string | null => {
+        if (!v?.referencia_id) return null
+        if (v.referencia_tipo === "cuenta_corriente") {
+            return movimientosCC.find((m: any) => m.id === v.referencia_id && Number(m.total) > 0)?.id ?? null
+        }
+        if (v.referencia_tipo === "comprobante_compra") {
+            return movimientosCC.find((m: any) => m.referencia_tipo === "comprobante_compra" && m.referencia_id === v.referencia_id && Number(m.total) > 0)?.id ?? null
+        }
+        return null
+    }
+    // Lo que ya tienen tomado otras OP pendientes: deuda → número de esa OP
+    const tomadoPorMov = new Map<string, string>()
+    const tomadoPorVenc = new Map<string, string>()
+    for (const op of opsPendientes) {
+        for (const i of (op.ordenes_pago_imputaciones || [])) {
+            if (!(Number(i.monto_imputado) > 0)) continue
+            if (i.vencimiento_id) tomadoPorVenc.set(i.vencimiento_id, op.numero_op)
+            const mov = i.movimiento_cc_id || movDeVenc(vencimientosProv.find((v: any) => v.id === i.vencimiento_id))
+            if (mov) tomadoPorMov.set(mov, op.numero_op)
+        }
+    }
+    const vencSinComprobante = vencimientosProv.filter((v: any) => !movDeVenc(v))
+    // Vencimientos cuyo comprobante ya figura pagado en la cuenta corriente (quedaron colgados)
+    const vencComprobantePagado = vencimientosProv.filter((v: any) => {
+        const mov = movDeVenc(v)
+        return !!mov && !comprobantesCC.some((c: any) => c.id === mov)
+    })
+    // El vencimiento pendiente de un comprobante (si es uno solo), para marcarlo pagado junto con él
+    const vencDeMov = (movId: string): string | undefined => {
+        const vs = vencimientosProv.filter((v: any) => movDeVenc(v) === movId && !tomadoPorVenc.has(v.id))
+        return vs.length === 1 ? vs[0].id : undefined
+    }
+
+    // Si viene un vencimiento por URL (Generar OP desde el calendario), preseleccionarlo (E-53).
+    // Espera a que estén cargados la cuenta corriente y los vencimientos del proveedor.
     useEffect(() => {
         const vencId = searchParams.get("vencimiento_id")
-        const monto = searchParams.get("monto")
-        if (vencId && monto && vencimientosProv.length > 0) {
-            const yaImputado = imputaciones.some(i => i.vencimiento_id === vencId)
-            if (!yaImputado) {
-                const venc = vencimientosProv.find(v => v.id === vencId)
-                if (venc) {
-                    setImputaciones(prev => [...prev, {
-                        vencimiento_id: vencId,
-                        monto_imputado: Number(monto) || 0, // formato-ok: parámetro de URL en formato de máquina
-                        descripcion: venc.concepto
-                    }])
-                }
-            }
+        if (!vencId || preselVencHecha.current) return
+        if (!proveedorId || provCargado !== proveedorId) return
+        preselVencHecha.current = true
+
+        const venc = vencimientosProv.find((v: any) => v.id === vencId)
+        if (!venc) {
+            toast.warning("Ese vencimiento ya no está pendiente para este proveedor: no se preseleccionó nada.")
+            return
         }
-    }, [vencimientosProv])
+        if (tomadoPorVenc.has(vencId)) {
+            toast.warning(`Ese vencimiento ya está en la orden de pago pendiente ${tomadoPorVenc.get(vencId)}. Confirmala o eliminala antes de armar otra.`)
+            return
+        }
+        const movId = movDeVenc(venc)
+        if (movId) {
+            const comp = comprobantesCC.find((c: any) => c.id === movId)
+            if (!comp) {
+                toast.warning("El comprobante de ese vencimiento ya figura pagado en la cuenta corriente: no se puede volver a pagar. Si corresponde, marcá el vencimiento como pagado desde el calendario.")
+                return
+            }
+            if (tomadoPorMov.has(movId)) {
+                toast.warning(`El comprobante de ese vencimiento ya está en la orden de pago pendiente ${tomadoPorMov.get(movId)}. Confirmala o eliminala antes de armar otra.`)
+                return
+            }
+            setVencOrigen(venc)
+            setImputaciones(prev => prev.some(i => i.movimiento_cc_id === movId) ? prev : [...prev, {
+                movimiento_cc_id: movId,
+                vencimiento_id: vencId,
+                monto_imputado: comp.saldo_pendiente,
+                descripcion: comp.numero || venc.concepto,
+            }])
+            return
+        }
+        const monto = Number(venc.monto) || 0
+        if (monto <= 0) {
+            toast.warning("Ese vencimiento no tiene importe cargado. Cargale el importe en el calendario y volvé a generar la orden.")
+            return
+        }
+        setVencOrigen(venc)
+        setImputaciones(prev => prev.some(i => i.vencimiento_id === vencId) ? prev : [...prev, {
+            vencimiento_id: vencId,
+            monto_imputado: monto,
+            descripcion: venc.concepto,
+        }])
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [provCargado, proveedorId])
 
     // Si vienen mov_cc_ids por URL (desde CC proveedor), pre-seleccionarlos
     useEffect(() => {
@@ -236,32 +319,49 @@ function NuevaOrdenPagoContent() {
         setCheques(data || [])
     }
 
-    async function loadComprobantesCC() {
+    // Los cargadores reciben el proveedor y descartan la respuesta si mientras
+    // tanto se eligió otro (provRef), para no mezclar deudas de dos proveedores.
+    async function loadComprobantesCC(id: string) {
         try {
-            const res = await fetch(`/api/proveedores/${proveedorId}/cuenta-corriente`)
+            const res = await fetch(`/api/proveedores/${id}/cuenta-corriente`)
             const data = await res.json()
-            const pendientes = (data.comprobantes || []).filter((c: any) => c.estado === "pendiente" && c.saldo_pendiente > 0)
-            setComprobantesCC(pendientes)
+            if (provRef.current !== id) return
+            const todos = data.comprobantes || []
+            setMovimientosCC(todos)
+            setComprobantesCC(todos.filter((c: any) => c.estado === "pendiente" && c.saldo_pendiente > 0))
         } catch (e) {
             console.error(e)
         }
     }
 
-    async function loadCreditos() {
+    async function loadCreditos(id: string) {
         try {
-            const res = await fetch(`/api/proveedores/${proveedorId}/creditos`)
+            const res = await fetch(`/api/proveedores/${id}/creditos`)
             const data = await res.json()
+            if (provRef.current !== id) return
             setCreditos(data.creditos || [])
         } catch (e) {
             console.error(e)
         }
     }
 
-    async function loadVencimientos() {
+    async function loadVencimientos(id: string) {
         try {
-            const res = await fetch(`/api/vencimientos?proveedor_id=${proveedorId}&estado=pendiente`)
+            const res = await fetch(`/api/vencimientos?proveedor_id=${id}&estado=pendiente`)
             const data = await res.json()
+            if (provRef.current !== id) return
             setVencimientosProv(Array.isArray(data) ? data : [])
+        } catch (e) {
+            console.error(e)
+        }
+    }
+
+    async function loadOpsPendientes(id: string) {
+        try {
+            const res = await fetch(`/api/ordenes-pago?estado=pendiente&proveedor_id=${id}`)
+            const data = await res.json()
+            if (provRef.current !== id) return
+            setOpsPendientes(Array.isArray(data) ? data : [])
         } catch (e) {
             console.error(e)
         }
@@ -288,8 +388,15 @@ function NuevaOrdenPagoContent() {
         if (exists) {
             setImputaciones(imputaciones.filter(i => i.movimiento_cc_id !== comp.id))
         } else {
+            if (tomadoPorMov.has(comp.id)) {
+                toast.warning(`Ese comprobante ya está en la orden de pago pendiente ${tomadoPorMov.get(comp.id)}. Confirmala o eliminala primero.`)
+                return
+            }
             setImputaciones([...imputaciones, {
                 movimiento_cc_id: comp.id,
+                // Si el comprobante tiene su vencimiento en el calendario, va junto:
+                // al confirmar quedan pagados los dos (una sola deuda, un solo tilde)
+                vencimiento_id: vencDeMov(comp.id),
                 monto_imputado: comp.saldo_pendiente,
                 descripcion: comp.numero || comp.tipo
             }])
@@ -314,6 +421,14 @@ function NuevaOrdenPagoContent() {
         if (exists) {
             setImputaciones(imputaciones.filter(i => i.vencimiento_id !== venc.id))
         } else {
+            if (tomadoPorVenc.has(venc.id)) {
+                toast.warning(`Ese vencimiento ya está en la orden de pago pendiente ${tomadoPorVenc.get(venc.id)}. Confirmala o eliminala primero.`)
+                return
+            }
+            if (!(Number(venc.monto) > 0)) {
+                toast.warning("Ese vencimiento no tiene importe cargado. Cargalo primero en el calendario.")
+                return
+            }
             setImputaciones([...imputaciones, {
                 vencimiento_id: venc.id,
                 monto_imputado: venc.monto,
@@ -425,7 +540,7 @@ function NuevaOrdenPagoContent() {
         const picksNegro = greedy(candidatos.filter((ch: any) => colorDeCheque(ch) === "NEGRO"), faltaNegro)
         const picksBlanco = greedy(candidatos.filter((ch: any) => colorDeCheque(ch) !== "NEGRO"), faltaBlanco)
         const picks = [...picksNegro, ...picksBlanco]
-        if (picks.length === 0) { alert("No hay cheques del color y la ventana necesarios que entren en el monto restante"); return }
+        if (picks.length === 0) { toast.warning("No hay cheques del color y la ventana necesarios que entren en el monto restante"); return }
         setMedios(prev => [...prev, ...picks.map(chequeAMedio)])
         const sumaN = picksNegro.reduce((s, c) => s + Number(c.monto), 0)
         const sumaB = picksBlanco.reduce((s, c) => s + Number(c.monto), 0)
@@ -433,7 +548,7 @@ function NuevaOrdenPagoContent() {
             picksNegro.length ? `${picksNegro.length} negro(s) por ${formatCurrency(sumaN)}${sumaN < faltaNegro - 0.01 ? ` (faltan ${formatCurrency(faltaNegro - sumaN)} del canal negro)` : ""}` : (faltaNegro > 0.01 ? `sin cheques NEGROS para cubrir ${formatCurrency(faltaNegro)}` : null),
             picksBlanco.length ? `${picksBlanco.length} blanco/echeq por ${formatCurrency(sumaB)}${sumaB < faltaBlanco - 0.01 ? ` (faltan ${formatCurrency(faltaBlanco - sumaB)} del canal blanco)` : ""}` : (faltaBlanco > 0.01 ? `sin cheques BLANCOS/ECHEQ para cubrir ${formatCurrency(faltaBlanco)}` : null),
         ].filter(Boolean)
-        alert(`Sugerencia aplicada: ${partes.join(" · ")}. Lo que falte se completa con efectivo o transferencia.`)
+        toast.info(`Sugerencia aplicada: ${partes.join(" · ")}. Lo que falte se completa con efectivo o transferencia.`)
     }
 
     // ── Bancos y cajas con saldo vivo ──
@@ -444,8 +559,8 @@ function NuevaOrdenPagoContent() {
     const agregarTransferencia = () => {
         const cta = bancosFondos.find((b: any) => b.cuenta_id === bancoOrigenSel)
         const m = montoTransfer !== "" ? parseMonto(montoTransfer) : (restante != null ? redondear(restante) : null)
-        if (!cta) { alert("Elegí desde qué banco sale la transferencia"); return }
-        if (m === null || m <= 0) { alert("Monto inválido — formato: 1.500,50"); return }
+        if (!cta) { toast.warning("Elegí desde qué banco sale la transferencia"); return }
+        if (m === null || m <= 0) { toast.warning("Monto inválido — formato: 1.500,50"); return }
         setMedios(prev => [...prev, {
             id: crypto.randomUUID(),
             medio: "transferencia",
@@ -460,8 +575,8 @@ function NuevaOrdenPagoContent() {
     const agregarEfectivo = () => {
         const cta = cajasFondos.find((c: any) => c.cuenta_id === cajaOrigenSel)
         const m = montoEfectivo !== "" ? parseMonto(montoEfectivo) : (restante != null ? redondear(restante) : null)
-        if (!cta) { alert("Elegí de qué caja sale el efectivo"); return }
-        if (m === null || m <= 0) { alert("Monto inválido — formato: 1.500,50"); return }
+        if (!cta) { toast.warning("Elegí de qué caja sale el efectivo"); return }
+        if (m === null || m <= 0) { toast.warning("Monto inválido — formato: 1.500,50"); return }
         setMedios(prev => [...prev, {
             id: crypto.randomUUID(),
             medio: "efectivo",
@@ -474,21 +589,24 @@ function NuevaOrdenPagoContent() {
     }
 
     async function handleSubmit() {
-        if (!proveedorId) { alert("Seleccioná un proveedor"); return }
-        if (medios.length === 0) { alert("Agregá al menos un medio de pago"); return }
-        if (totalMedios <= 0) { alert("El total de medios de pago debe ser mayor a 0"); return }
-        if (gananciasManual && !gananciasMotivo.trim()) { alert("Indicá el motivo del ajuste manual de la retención"); return }
+        if (!proveedorId) { toast.warning("Seleccioná un proveedor"); return }
+        if (medios.length === 0) { toast.warning("Agregá al menos un medio de pago"); return }
+        if (totalMedios <= 0) { toast.warning("El total de medios de pago debe ser mayor a 0"); return }
+        if (gananciasManual && !gananciasMotivo.trim()) { toast.warning("Indicá el motivo del ajuste manual de la retención"); return }
         if (!cuadra) {
-            alert(`No cuadra: imputado ${formatCurrency(totalImputado)} − retenciones ${formatCurrency(totalRetenciones)} = ${formatCurrency(netoObjetivo!)}, pero los medios suman ${formatCurrency(totalMedios)}`)
+            toast.warning(`No cuadra: imputado ${formatCurrency(totalImputado)} − retenciones ${formatCurrency(totalRetenciones)} = ${formatCurrency(netoObjetivo!)}, pero los medios suman ${formatCurrency(totalMedios)}`)
             return
         }
 
+        if (submitting) return
         setSubmitting(true)
+        if (!claveRef.current) claveRef.current = crypto.randomUUID()
         try {
             const res = await fetch("/api/ordenes-pago", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
+                    clave: claveRef.current,
                     proveedor_id: proveedorId,
                     fecha,
                     observaciones,
@@ -522,15 +640,23 @@ function NuevaOrdenPagoContent() {
                 })
             })
 
+            const data = await res.json().catch(() => ({}))
             if (!res.ok) {
-                const err = await res.json()
-                alert(err.error || "Error al crear la orden")
+                // El servidor contestó que NO la creó: la próxima es un intento nuevo
+                claveRef.current = ""
+                toast.error(data.error || "No se pudo crear la orden de pago", { duration: 12000 })
+                // Puede haber cambiado algo desde que se abrió la pantalla (otra OP, un pago): refrescar
+                if (proveedorId) {
+                    loadComprobantesCC(proveedorId); loadVencimientos(proveedorId)
+                    loadCreditos(proveedorId); loadOpsPendientes(proveedorId)
+                }
                 return
             }
 
+            toast.success(`Orden de pago ${data.numero_op ?? ""} creada. Queda pendiente: la plata sale cuando se confirma.`)
             router.push("/ordenes-pago")
         } catch (e: any) {
-            alert(e.message || "Error")
+            toast.error(e.message || "No se pudo crear la orden de pago")
         } finally {
             setSubmitting(false)
         }
@@ -566,7 +692,17 @@ function NuevaOrdenPagoContent() {
                                     entity="proveedores"
                                     placeholder="Seleccionar proveedor..."
                                     value={proveedorId ? ((proveedores.find((p: any) => p.id === proveedorId) as any) ?? null) : null}
-                                    onSelect={(p: any) => setProveedorId(p ? p.id : "")}
+                                    onSelect={(p: any) => {
+                                        const nuevo = p ? p.id : ""
+                                        if (nuevo !== proveedorId) {
+                                            // Lo tildado era del proveedor anterior: no se arrastra a otro
+                                            setImputaciones([])
+                                            setVencOrigen(null)
+                                            setComprobantesCC([]); setMovimientosCC([]); setCreditos([])
+                                            setVencimientosProv([]); setOpsPendientes([])
+                                        }
+                                        setProveedorId(nuevo)
+                                    }}
                                 />
                             </div>
                             <div>
@@ -593,30 +729,87 @@ function NuevaOrdenPagoContent() {
                             </p>
                         </CardHeader>
                         <CardContent className="space-y-4">
+                            {vencOrigen && (
+                                <p className="text-sm text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-md px-3 py-1.5">
+                                    Viene del vencimiento <b>{vencOrigen.concepto}</b> ({fmtFecha(vencOrigen.fecha_vencimiento)}): ya quedó tildado abajo.
+                                </p>
+                            )}
+                            {provCargado !== proveedorId && (
+                                <p className="text-sm text-muted-foreground">Cargando la deuda del proveedor…</p>
+                            )}
                             {comprobantesCC.length > 0 && (
                                 <div>
                                     <h4 className="font-medium text-sm mb-2">Comprobantes pendientes</h4>
                                     <div className="space-y-2">
-                                        {comprobantesCC.map((c: any) => (
-                                            <div key={c.id} className="flex items-center gap-3 p-2 rounded-lg border hover:bg-muted/50 cursor-pointer"
-                                                onClick={() => toggleImputacionCC(c)}>
-                                                <Checkbox checked={!!imputaciones.find(i => i.movimiento_cc_id === c.id)} />
-                                                <div className="flex-1">
-                                                    <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${c.tipo_comprobante ? claseTipo(c.tipo_comprobante) : "bg-muted text-muted-foreground"}`}>
-                                                        {etiquetaTipo(c.tipo_comprobante, c.tipo)}
-                                                    </span>
-                                                    <span className="text-sm text-muted-foreground ml-2">{c.numero}</span>
-                                                    {c.vencimiento && (
-                                                        <span className="text-xs text-muted-foreground ml-2">
-                                                            Vence: {fmtFecha(c.vencimiento)}
+                                        {comprobantesCC.map((c: any) => {
+                                            const sel = !!imputaciones.find(i => i.movimiento_cc_id === c.id)
+                                            const tomado = sel ? undefined : tomadoPorMov.get(c.id)
+                                            return (
+                                                <div key={c.id}
+                                                    className={`flex items-center gap-3 p-2 rounded-lg border ${tomado ? "opacity-60 cursor-not-allowed" : "hover:bg-muted/50 cursor-pointer"} ${sel ? "border-indigo-300 bg-indigo-50/40" : ""}`}
+                                                    onClick={() => toggleImputacionCC(c)}>
+                                                    <Checkbox checked={sel} disabled={!!tomado} />
+                                                    <div className="flex-1">
+                                                        <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${c.tipo_comprobante ? claseTipo(c.tipo_comprobante) : "bg-muted text-muted-foreground"}`}>
+                                                            {etiquetaTipo(c.tipo_comprobante, c.tipo)}
                                                         </span>
-                                                    )}
+                                                        <span className="text-sm text-muted-foreground ml-2">{c.numero}</span>
+                                                        {c.vencimiento && (
+                                                            <span className="text-xs text-muted-foreground ml-2">
+                                                                Vence: {fmtFecha(c.vencimiento)}
+                                                            </span>
+                                                        )}
+                                                        {tomado && (
+                                                            <span className="text-xs font-semibold text-amber-700 ml-2">ya está en la OP pendiente {tomado}</span>
+                                                        )}
+                                                    </div>
+                                                    <span className="text-sm font-medium">{formatCurrency(c.saldo_pendiente)}</span>
                                                 </div>
-                                                <span className="text-sm font-medium">{formatCurrency(c.saldo_pendiente)}</span>
-                                            </div>
-                                        ))}
+                                            )
+                                        })}
                                     </div>
                                 </div>
+                            )}
+                            {vencSinComprobante.length > 0 && (
+                                <div>
+                                    <h4 className="font-medium text-sm mb-1">Vencimientos del calendario (sin comprobante cargado)</h4>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                        Se pagan contra el vencimiento: al confirmar la orden quedan como pagados en el calendario.
+                                    </p>
+                                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                                        {vencSinComprobante.map((v: any) => {
+                                            const sel = !!imputaciones.find(i => i.vencimiento_id === v.id)
+                                            const tomado = sel ? undefined : tomadoPorVenc.get(v.id)
+                                            const sinMonto = !(Number(v.monto) > 0)
+                                            const bloqueado = !!tomado || sinMonto
+                                            return (
+                                                <div key={v.id}
+                                                    className={`flex items-center gap-3 p-2 rounded-lg border ${bloqueado ? "opacity-60 cursor-not-allowed" : "hover:bg-muted/50 cursor-pointer"} ${sel ? "border-indigo-300 bg-indigo-50/40" : ""}`}
+                                                    onClick={() => toggleImputacionVenc(v)}>
+                                                    <Checkbox checked={sel} disabled={bloqueado} />
+                                                    <div className="flex-1">
+                                                        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">VENCIMIENTO</span>
+                                                        <span className="text-sm text-muted-foreground ml-2">{v.concepto}</span>
+                                                        <span className="text-xs text-muted-foreground ml-2">Vence: {fmtFecha(v.fecha_vencimiento)}</span>
+                                                        {tomado && (
+                                                            <span className="text-xs font-semibold text-amber-700 ml-2">ya está en la OP pendiente {tomado}</span>
+                                                        )}
+                                                        {sinMonto && (
+                                                            <span className="text-xs font-semibold text-amber-700 ml-2">sin importe: cargalo en el calendario</span>
+                                                        )}
+                                                    </div>
+                                                    <span className="text-sm font-medium">{sinMonto ? "—" : formatCurrency(Number(v.monto))}</span>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                            {vencComprobantePagado.length > 0 && (
+                                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+                                    {vencComprobantePagado.length === 1 ? "Hay un vencimiento pendiente" : `Hay ${vencComprobantePagado.length} vencimientos pendientes`} cuyo comprobante ya figura pagado en la cuenta corriente
+                                    ({vencComprobantePagado.map((v: any) => v.concepto).join(" · ")}). No se pueden volver a pagar: si corresponde, marcalos pagados desde el calendario.
+                                </p>
                             )}
                             {creditos.length > 0 && (
                                 <div>
@@ -648,9 +841,9 @@ function NuevaOrdenPagoContent() {
                                     <span>Imputado neto de NC: <b>{formatCurrency(totalImputado)}</b></span>
                                 </div>
                             )}
-                            {comprobantesCC.length === 0 && (
+                            {provCargado === proveedorId && comprobantesCC.length === 0 && vencSinComprobante.length === 0 && (
                                 <p className="text-sm text-muted-foreground py-4 text-center">
-                                    No hay comprobantes pendientes para este proveedor.
+                                    No hay comprobantes ni vencimientos pendientes para este proveedor.
                                     Podés crear la orden sin imputar.
                                 </p>
                             )}
