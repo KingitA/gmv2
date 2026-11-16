@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ComprobantesSection } from "./comprobantes-section"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { aUnidadesBase, bultosParaCubrir, cant, conversionLinea, desdeUnidadesBase, unidadesPorBultoDe } from "@/lib/deposito/unidades"
 
 interface CompData {
     id: string
@@ -31,15 +32,19 @@ interface VerRow {
     articulo_id: string
     sku: string
     descripcion: string
-    cant_oc: number              // en la unidad pedida (bultos si tipo bulto)
+    // E-30: TODAS las cantidades de la fila van en UNIDADES base (lo que entra al stock)
+    // y todos los precios son NETOS POR UNIDAD, así OC, recibido y facturado se comparan
+    // en lo mismo aunque la OC esté en bultos y la factura en unidades (o al revés).
+    cant_oc: number              // unidades pedidas (bultos × unidades por bulto si la línea es por bulto)
     unidades_por_bulto: number
-    es_bulto: boolean
-    precio_oc: number            // NETO por unidad pedida (lista − D1..D4, × unid/bulto si bulto)
-    cant_recibida: number        // suma de todas las tandas (bultos)
+    es_bulto: boolean            // la línea de la OC está pedida por bulto
+    sin_upb: boolean             // pedida o contada por bulto y el artículo no tiene unidades por bulto
+    precio_oc: number            // NETO por unidad (lista − D1..D4)
+    cant_recibida: number        // unidades recibidas, suma de todas las tandas
     // Per-comprobante data filled dynamically
-    comp_data: Record<string, { cantidad: number; precio: number }> // keyed by comprobante id; precio NETO por línea
+    comp_data: Record<string, { cantidad: number; precio: number }> // keyed by comprobante id; unidades y precio NETO por unidad
     cant_total_facturada: number
-    pendiente_oc: number         // lo que el proveedor no envió vs OC (ni recibido ni facturado)
+    pendiente_oc: number         // unidades que el proveedor no envió vs OC (ni recibido ni facturado)
     no_pedido: boolean           // recibido/facturado sin estar en la OC
     resuelto: string | null      // diferencia ya imputada (empresa/transporte/proveedor/nc)
     status: "ok" | "diferencia_cantidad" | "diferencia_precio" | "faltante" | "ambas" | "no_pedido" | "sin_documentar"
@@ -100,7 +105,7 @@ export default function VerificacionOCPage() {
         if (compIds.length > 0) {
             const { data: det } = await supabase
                 .from("comprobantes_compra_detalle")
-                .select("comprobante_id, articulo_id, cantidad_facturada, precio_unitario, descuento1, tipo_cantidad, match_estado")
+                .select("comprobante_id, articulo_id, cantidad_facturada, precio_unitario, descuento1, tipo_cantidad, match_estado, recepcion_item_id")
                 .in("comprobante_id", compIds)
             compDetalle = det || []
             setSinMatch(compDetalle.filter((d: any) => d.match_estado === "sugerido" || d.match_estado === "sin_match").length)
@@ -120,21 +125,63 @@ export default function VerificacionOCPage() {
             recItems = data || []
         }
 
+        // ── Unidades por bulto de todo artículo que aparezca (OC, recibido o facturado) ──
+        const ocArtIds = new Set((ocItems || []).map((i: any) => i.articulo_id))
+        const tipoOC = new Map<string, string | null>((ocItems || []).map((i: any) => [i.articulo_id, i.tipo_cantidad]))
+        const upbPorArt: Record<string, number> = {}
+        for (const i of ocItems || []) upbPorArt[i.articulo_id] = unidadesPorBultoDe(i.articulo?.unidades_por_bulto)
+        const extraIds = new Set<string>()
+        for (const ri of recItems) if (ri.articulo_id && !ocArtIds.has(ri.articulo_id)) extraIds.add(ri.articulo_id)
+        for (const det of compDetalle) if (det.articulo_id && !ocArtIds.has(det.articulo_id)) extraIds.add(det.articulo_id)
+        let extraArts: any[] = []
+        if (extraIds.size > 0) {
+            const { data } = await supabase
+                .from("articulos")
+                .select("id, sku, descripcion, unidades_por_bulto")
+                .in("id", [...extraIds])
+            extraArts = data || []
+            for (const a of extraArts) upbPorArt[a.id] = unidadesPorBultoDe(a.unidades_por_bulto)
+        }
+        const recItemPorId = new Map<string, any>(recItems.map((ri: any) => [ri.id, ri]))
+        const sinUpb: Record<string, boolean> = {}
+
+        /** Unidades base de lo contado en una línea de recepción (misma regla que finalizarRecepcion). */
+        const recibidoBase = (ri: any): number => {
+            if (ri.cantidad_fisica_base != null) return Number(ri.cantidad_fisica_base) // lo que realmente sumó al stock
+            const c = conversionLinea({
+                enOC: !ri.fuera_de_oc && ocArtIds.has(ri.articulo_id),
+                tipoCantidadOC: tipoOC.get(ri.articulo_id),
+                unidadElegida: ri.unidad_conteo,
+                unidadesPorBulto: upbPorArt[ri.articulo_id],
+            })
+            if (c.sinUnidadesPorBulto && Number(ri.cantidad_fisica || 0) > 0) sinUpb[ri.articulo_id] = true
+            return aUnidadesBase(ri.cantidad_fisica, c.factorConteo)
+        }
+        /** Unidades base por cada 1 de cantidad_facturada: el factor con que el OCR documentó la línea, o las unidades por bulto. */
+        const factorFactura = (det: any): number => {
+            if (det.tipo_cantidad !== "bulto") return 1
+            const f = Number(recItemPorId.get(det.recepcion_item_id)?.factor_conversion)
+            return f > 1 ? f : (upbPorArt[det.articulo_id] || 1)
+        }
+
         // Build comprobantes data with article-level info from detalle table.
-        // El precio se guarda NETO (precio − descuento de línea) para poder
-        // compararlo contra el precio neto de la OC.
+        // Cantidad en UNIDADES y precio NETO POR UNIDAD (precio − descuento de línea,
+        // dividido por el factor si la factura viene por bulto) para compararlo
+        // contra la OC en la misma unidad.
         const compDataList: CompData[] = (comps || []).map((c: any) => {
             const items: Record<string, { cantidad: number; precio: number }> = {}
             const detalleRows = compDetalle.filter((d: any) => d.comprobante_id === c.id)
 
             for (const det of detalleRows) {
                 if (det.articulo_id) {
-                    const precioNeto = (Number(det.precio_unitario) || 0) * (1 - (Number(det.descuento1) || 0) / 100)
+                    const factor = factorFactura(det)
+                    const precioNeto = (Number(det.precio_unitario) || 0) * (1 - (Number(det.descuento1) || 0) / 100) / factor
+                    const unidades = aUnidadesBase(det.cantidad_facturada, factor)
                     if (items[det.articulo_id]) {
-                        items[det.articulo_id].cantidad += Number(det.cantidad_facturada) || 0
+                        items[det.articulo_id].cantidad += unidades
                     } else {
                         items[det.articulo_id] = {
-                            cantidad: Number(det.cantidad_facturada) || 0,
+                            cantidad: unidades,
                             precio: Math.round(precioNeto * 100) / 100,
                         }
                     }
@@ -154,7 +201,6 @@ export default function VerificacionOCPage() {
         // Recibido por artículo: SUMA de todas las tandas. Las filas fuera_de_oc
         // de artículos que SÍ están en la OC son duplicados de documentación
         // vieja — no suman recibido.
-        const ocArtIds = new Set((ocItems || []).map((i: any) => i.articulo_id))
         const recibidoPorArt: Record<string, number> = {}
         const faltanteMarcado: Record<string, boolean> = {}
         // Diferencias ya resueltas desde el dialog (persisten en recepciones_items)
@@ -164,7 +210,7 @@ export default function VerificacionOCPage() {
             if (ri.precio_verificado) precioResuelto[ri.articulo_id] = true
             if (ri.cantidad_diferencia_destino) cantResuelta[ri.articulo_id] = ri.cantidad_diferencia_destino
             if (ri.fuera_de_oc && ocArtIds.has(ri.articulo_id)) continue
-            recibidoPorArt[ri.articulo_id] = (recibidoPorArt[ri.articulo_id] || 0) + Number(ri.cantidad_fisica || 0)
+            recibidoPorArt[ri.articulo_id] = (recibidoPorArt[ri.articulo_id] || 0) + recibidoBase(ri)
             if (ri.estado_linea === "faltante") faltanteMarcado[ri.articulo_id] = true
         }
 
@@ -195,9 +241,9 @@ export default function VerificacionOCPage() {
 
             const hasOCRData = Object.keys(compDataForArt).length > 0
 
-            // Diferencia de cantidad: lo FACTURADO vs lo RECIBIDO (misma unidad: bultos)
+            // Diferencia de cantidad: lo FACTURADO vs lo RECIBIDO (misma unidad: unidades base)
             const diffCant = hasOCRData ? cantTotalFacturada - cantRecibida : 0
-            // Diferencia de precio: neto factura vs neto OC (ambos por bulto/unidad de pedido)
+            // Diferencia de precio: neto factura vs neto OC (ambos por unidad)
             const difPrecio = precioFANeto !== null && precioOCNeto > 0
                 ? Math.abs(precioFANeto - precioOCNeto) / precioOCNeto > TOLERANCIA_PRECIO
                 : false
@@ -228,6 +274,7 @@ export default function VerificacionOCPage() {
             return {
                 articulo_id: artId, sku, descripcion,
                 cant_oc: cantOC, unidades_por_bulto: upb, es_bulto: esBulto,
+                sin_upb: (esBulto && upb <= 1) || !!sinUpb[artId],
                 precio_oc: precioOCNeto,
                 cant_recibida: cantRecibida,
                 comp_data: compDataForArt,
@@ -239,10 +286,11 @@ export default function VerificacionOCPage() {
             }
         }
 
-        // Filas de la OC (cantidades y precios en la unidad pedida: bultos)
+        // Filas de la OC (cantidades en unidades base, precios netos por unidad)
         const verRows: VerRow[] = (ocItems || []).map((item: any) => {
-            const upb = item.articulo?.unidades_por_bulto || 1
-            const esBulto = item.tipo_cantidad === "bulto"
+            const upb = upbPorArt[item.articulo_id] || 1
+            // tipo_cantidad vacío = bulto (valor por defecto de la base), igual que al recibir
+            const esBulto = item.tipo_cantidad !== "unidad"
             const descuentos = [item.descuento1, item.descuento2, item.descuento3, item.descuento4]
                 .map((d: any) => Number(d) || 0)
             const precioNetoUnit = descuentos.reduce((p, d) => p * (1 - d / 100), Number(item.precio_unitario) || 0)
@@ -251,43 +299,29 @@ export default function VerificacionOCPage() {
                 sku: item.articulo?.sku || "",
                 descripcion: item.articulo?.descripcion || "",
                 upb, esBulto,
-                cantOC: Number(item.cantidad_pedida) || 0,
-                precioOCNeto: Math.round(precioNetoUnit * (esBulto ? upb : 1) * 100) / 100,
+                cantOC: aUnidadesBase(item.cantidad_pedida, esBulto ? upb : 1),
+                precioOCNeto: Math.round(precioNetoUnit * 100) / 100,
                 noPedido: false,
             })
         })
 
         // Artículos NO pedidos: recibidos (fuera_de_oc) o facturados sin estar en la OC
-        const extraIds = new Set<string>()
-        for (const ri of recItems) {
-            if (ri.fuera_de_oc && !ocArtIds.has(ri.articulo_id)) extraIds.add(ri.articulo_id)
-        }
-        for (const cd of compDataList) {
-            for (const artId of Object.keys(cd.items)) {
-                if (!ocArtIds.has(artId)) extraIds.add(artId)
-            }
-        }
-        if (extraIds.size > 0) {
-            const { data: extraArts } = await supabase
-                .from("articulos")
-                .select("id, sku, descripcion, unidades_por_bulto")
-                .in("id", [...extraIds])
-            for (const art of extraArts || []) {
-                // Lo recibido fuera de OC sí cuenta como recibido acá
-                recibidoPorArt[art.id] = recItems
-                    .filter(ri => ri.articulo_id === art.id)
-                    .reduce((s, ri) => s + Number(ri.cantidad_fisica || 0), 0)
-                verRows.push(buildRow({
-                    artId: art.id,
-                    sku: art.sku || "",
-                    descripcion: art.descripcion || "",
-                    upb: art.unidades_por_bulto || 1,
-                    esBulto: true,
-                    cantOC: 0,
-                    precioOCNeto: 0,
-                    noPedido: true,
-                }))
-            }
+        // (los artículos extra ya se cargaron arriba, junto con sus unidades por bulto)
+        for (const art of extraArts) {
+            // Lo recibido fuera de OC sí cuenta como recibido acá
+            recibidoPorArt[art.id] = recItems
+                .filter(ri => ri.articulo_id === art.id)
+                .reduce((s, ri) => s + recibidoBase(ri), 0)
+            verRows.push(buildRow({
+                artId: art.id,
+                sku: art.sku || "",
+                descripcion: art.descripcion || "",
+                upb: upbPorArt[art.id] || 1,
+                esBulto: false,
+                cantOC: 0,
+                precioOCNeto: 0,
+                noPedido: true,
+            }))
         }
 
         setRows(verRows)
@@ -426,7 +460,9 @@ export default function VerificacionOCPage() {
         const faltantes = rows.filter(r => r.pendiente_oc > 0)
         if (faltantes.length === 0) return
 
-        const resumen = faltantes.map(r => `· ${r.sku} — ${r.pendiente_oc}${r.es_bulto ? " BUL" : " u"} — ${r.descripcion}`).join("\n")
+        // pendiente_oc está en unidades: una línea por bulto se repide en bultos ENTEROS (hacia arriba)
+        const aPedir = (r: VerRow) => r.es_bulto ? bultosParaCubrir(r.pendiente_oc, r.unidades_por_bulto) : r.pendiente_oc
+        const resumen = faltantes.map(r => `· ${r.sku} — ${cant(aPedir(r))}${r.es_bulto ? ` BUL (${cant(aPedir(r) * r.unidades_por_bulto)} u)` : " u"} — ${r.descripcion}`).join("\n")
         if (!confirm(`¿Generar una nueva OC con estos faltantes?\n\n${resumen}`)) return
 
         const { data: ocDetalle } = await supabase
@@ -438,8 +474,8 @@ export default function VerificacionOCPage() {
             const det = (ocDetalle || []).find((d: any) => d.articulo_id === r.articulo_id)
             return {
                 articulo_id: r.articulo_id,
-                cantidad_pedida: r.pendiente_oc,
-                tipo_cantidad: det?.tipo_cantidad || "bulto",
+                cantidad_pedida: aPedir(r),
+                tipo_cantidad: r.es_bulto ? "bulto" : "unidad",
                 precio_unitario: det?.precio_unitario || 0,
                 descuento1: det?.descuento1 || 0,
                 descuento2: det?.descuento2 || 0,
@@ -580,7 +616,7 @@ export default function VerificacionOCPage() {
                                     <SelectContent>
                                         {rows.filter(r => !r.no_pedido && r.articulo_id !== resolviendoRow.articulo_id).map(r => (
                                             <SelectItem key={r.articulo_id} value={r.articulo_id}>
-                                                {r.sku} — {r.descripcion} (OC: {r.cant_oc})
+                                                {r.sku} — {r.descripcion} (OC: {cant(r.cant_oc)} u)
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
@@ -612,9 +648,9 @@ export default function VerificacionOCPage() {
                                 <p className="font-semibold truncate">{resolviendoRow.descripcion}</p>
                                 <p className="text-muted-foreground font-mono text-xs mt-1">{resolviendoRow.sku}</p>
                                 <div className="flex gap-4 mt-2 text-xs">
-                                    <span>OC: <strong>{resolviendoRow.cant_oc}</strong></span>
-                                    <span>Recibido: <strong>{resolviendoRow.cant_recibida}</strong></span>
-                                    <span className="text-orange-600">Faltante: <strong>{resolviendoRow.cant_oc - resolviendoRow.cant_recibida}</strong></span>
+                                    <span>OC: <strong>{cant(resolviendoRow.cant_oc)} u</strong></span>
+                                    <span>Recibido: <strong>{cant(resolviendoRow.cant_recibida)} u</strong></span>
+                                    <span className="text-orange-600">Faltante: <strong>{cant(resolviendoRow.cant_oc - resolviendoRow.cant_recibida)} u</strong></span>
                                 </div>
                             </div>
 
@@ -699,8 +735,8 @@ export default function VerificacionOCPage() {
                                 <TableHead className="w-[30px]"></TableHead>
                                 <TableHead>SKU</TableHead>
                                 <TableHead>Descripción</TableHead>
-                                <TableHead className="text-right">Cant. OC</TableHead>
-                                <TableHead className="text-right">Cant. Recibida</TableHead>
+                                <TableHead className="text-right">Cant. OC<br /><span className="text-[10px] text-muted-foreground font-normal">en unidades</span></TableHead>
+                                <TableHead className="text-right">Cant. Recibida<br /><span className="text-[10px] text-muted-foreground font-normal">en unidades</span></TableHead>
                                 {/* Dynamic columns per comprobante */}
                                 {comprobantes.map(c => (
                                     <TableHead key={`h-cant-${c.id}`} className="text-right text-xs">
@@ -710,7 +746,7 @@ export default function VerificacionOCPage() {
                                 {showMultipleComps && (
                                     <TableHead className="text-right font-bold">Total Fact.</TableHead>
                                 )}
-                                <TableHead className="text-right">Precio OC<br /><span className="text-[10px] text-muted-foreground font-normal">neto c/desc.</span></TableHead>
+                                <TableHead className="text-right">Precio OC<br /><span className="text-[10px] text-muted-foreground font-normal">neto por unidad</span></TableHead>
                                 {comprobantes.map(c => (
                                     <TableHead key={`h-pre-${c.id}`} className="text-right text-xs">
                                         Precio {c.tipo}<br /><span className="text-[10px] text-muted-foreground">{c.numero}</span>
@@ -740,23 +776,26 @@ export default function VerificacionOCPage() {
                                         <TableCell className="font-mono text-xs">{row.sku}</TableCell>
                                         <TableCell className="text-sm max-w-[180px] truncate">{row.descripcion}</TableCell>
                                         <TableCell className="text-right font-mono">
-                                            {row.cant_oc}{row.es_bulto && row.cant_oc > 0 ? <span className="text-[10px] text-muted-foreground"> BUL ({row.cant_oc * row.unidades_por_bulto} u)</span> : null}
+                                            {cant(row.cant_oc)}
+                                            {row.es_bulto && row.cant_oc > 0 ? <div className="text-[10px] text-muted-foreground">{cant(desdeUnidadesBase(row.cant_oc, row.unidades_por_bulto))} BUL × {cant(row.unidades_por_bulto)}</div> : null}
+                                            {row.sin_upb ? <div className="text-[10px] text-red-600 font-sans" title="Se pidió o se contó por bulto y el artículo no tiene unidades por bulto: se tomó 1 unidad por bulto. Cargá el dato en la ficha del artículo.">⚠ sin unidades por bulto</div> : null}
                                         </TableCell>
                                         <TableCell className={`text-right font-mono ${hasDiff ? "text-orange-600 font-bold" : ""}`}>
-                                            {row.cant_recibida}{row.es_bulto && row.cant_recibida > 0 ? <span className="text-[10px] text-muted-foreground"> BUL</span> : null}
+                                            {cant(row.cant_recibida)}
+                                            {row.es_bulto && row.cant_recibida > 0 && row.unidades_por_bulto > 1 ? <div className="text-[10px] text-muted-foreground font-normal">{cant(desdeUnidadesBase(row.cant_recibida, row.unidades_por_bulto))} BUL</div> : null}
                                         </TableCell>
                                         {/* Cant per comprobante */}
                                         {comprobantes.map(c => {
                                             const d = row.comp_data[c.id]
                                             return (
                                                 <TableCell key={`c-${c.id}`} className="text-right font-mono text-sm">
-                                                    {d ? d.cantidad : <span className="text-muted-foreground">—</span>}
+                                                    {d ? cant(d.cantidad) : <span className="text-muted-foreground">—</span>}
                                                 </TableCell>
                                             )
                                         })}
                                         {showMultipleComps && (
                                             <TableCell className="text-right font-mono font-bold">
-                                                {row.cant_total_facturada > 0 ? row.cant_total_facturada : <span className="text-muted-foreground">—</span>}
+                                                {row.cant_total_facturada > 0 ? cant(row.cant_total_facturada) : <span className="text-muted-foreground">—</span>}
                                             </TableCell>
                                         )}
                                         <TableCell className="text-right font-mono">{formatCurrency(row.precio_oc)}</TableCell>
@@ -790,7 +829,7 @@ export default function VerificacionOCPage() {
                                                 {row.pendiente_oc > 0 && row.status !== "faltante" && (
                                                     <Badge variant="outline" className="text-[10px] text-amber-700 border-amber-400"
                                                         title="El proveedor no envió ni facturó esta cantidad de la OC (faltante de fábrica: no se debe, pero quedó sin cubrir)">
-                                                        Incompleto: −{row.pendiente_oc}{row.es_bulto ? " BUL" : ""} vs OC
+                                                        Incompleto: −{cant(row.pendiente_oc)} u vs OC
                                                     </Badge>
                                                 )}
                                             </div>

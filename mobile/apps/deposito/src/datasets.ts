@@ -103,6 +103,8 @@ export interface RecepcionItem {
   cantidad_fisica: number
   estado_linea: EstadoLinea
   fuera_de_oc?: boolean | null
+  /** En qué se contó cantidad_fisica (null/ausente = la unidad de la línea de la OC). E-30 */
+  unidad_conteo?: "bulto" | "unidad" | null
 }
 
 export interface OrdenRecepcion {
@@ -115,6 +117,8 @@ export interface OrdenRecepcion {
   ordenes_compra_detalle: Array<{
     id: string
     cantidad_pedida: number
+    /** 'bulto' | 'unidad': en qué está pedida la línea (ausente en réplicas viejas = bulto, el valor por defecto de la base) */
+    tipo_cantidad?: string | null
     articulo_id: string
     articulos: { id: string; sku: string; descripcion: string; ean13?: string[] | string | null; unidades_por_bulto?: number | null } | null
   }>
@@ -158,7 +162,7 @@ export interface CatTransportes { id: "transportes"; items: Array<{ id: string; 
 // ─── Payloads del outbox (servidor: lib/mobile/outbox/deposito.ts) ───────────
 
 export interface OpPickingItem { pedido_id: string; pedido_detalle_id: string; cantidad_preparada: number; es_faltante: boolean; operario?: string }
-export interface OpRecepcionItem { orden_compra_id: string; articulo_id: string; cantidad_fisica: number }
+export interface OpRecepcionItem { orden_compra_id: string; articulo_id: string; cantidad_fisica: number; unidad?: "bulto" | "unidad" | null }
 export interface OpStock { articulo_id: string; tipo: "correccion" | "entrada" | "salida"; cantidad: number; motivo?: string | null; stock_visto: number | null }
 export interface OpDatos { articulo_id: string; cambios: Record<string, { antes: unknown; despues: unknown }> }
 export interface RenglonRevisionOp { id: string; aceptar: boolean; cantidad_aceptada: number; es_vendible: boolean; motivo: string | null }

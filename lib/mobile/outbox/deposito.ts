@@ -27,6 +27,7 @@ import {
   obtenerOCrearRecepcion,
   type ConformidadTransporte,
 } from "@/lib/deposito/recepciones"
+import { esUnidadConteo, type UnidadConteo } from "@/lib/deposito/unidades"
 import type { FilaReplica } from "../contrato"
 import { cargarArticulosDeposito, cargarPedidosDeposito, cargarRecepcionDeposito } from "../sync/deposito"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
@@ -190,17 +191,24 @@ const recepcionConformidad: HandlerDef<{ orden_compra_id: string; conformidad: C
   },
 }
 
-/** Conteo ABSOLUTO por artículo (último escritor gana por línea). */
-const recepcionItem: HandlerDef<{ orden_compra_id: string; articulo_id: string; cantidad_fisica: number }> = {
+/**
+ * Conteo ABSOLUTO por artículo (último escritor gana por línea).
+ * `unidad` (app 0.5.2+, E-30): en qué contó el operario. Las APK anteriores no la mandan:
+ * el servidor toma la unidad de la línea de la OC (el número que esa app muestra) y
+ * convierte a unidades base al finalizar. Ver lib/deposito/unidades.ts.
+ */
+const recepcionItem: HandlerDef<{ orden_compra_id: string; articulo_id: string; cantidad_fisica: number; unidad?: UnidadConteo | null }> = {
   tipo: "recepcion.item",
   roles: ROLES,
   validar: (p) =>
-    esId(p?.orden_compra_id) && esId(p?.articulo_id) && Number.isFinite(Number(p?.cantidad_fisica)) && Number(p.cantidad_fisica) >= -1
-      ? null
-      : "Artículo o cantidad inválidos",
+    !(esId(p?.orden_compra_id) && esId(p?.articulo_id) && Number.isFinite(Number(p?.cantidad_fisica)) && Number(p.cantidad_fisica) >= -1)
+      ? "Artículo o cantidad inválidos"
+      : p.unidad != null && !esUnidadConteo(p.unidad)
+        ? "Unidad de conteo inválida (bulto o unidad)"
+        : null,
   async aplicar(ctx, m) {
     const rec = await recepcionAbierta(ctx, m.payload.orden_compra_id)
-    await negocio(() => aplicarItemRecepcion(ctx.supabase, rec.id, m.payload.articulo_id, Number(m.payload.cantidad_fisica)))
+    await negocio(() => aplicarItemRecepcion(ctx.supabase, rec.id, m.payload.articulo_id, Number(m.payload.cantidad_fisica), m.payload.unidad ?? null))
     return { recepcion_id: rec.id, replica: [await parcheRecepcion(ctx, m.payload.orden_compra_id)] }
   },
 }

@@ -20,7 +20,7 @@ import { C, useCampoSinRafaga, useTecladoAbierto } from "../../ui"
  * cabecera grande y "Volver al scanner" (queda `resumenTeclado`, una línea) para
  * que Confirmar / Faltante entren arriba del teclado.
  */
-export function PanelCantidad({ articulo, titulo, cabecera, resumenTeclado, etiquetaInput, ayudaInput, inicial, exigirCantidad = false, onConfirmar, onFaltante, onVolverBuscar, mostrar }: {
+export function PanelCantidad({ articulo, titulo, cabecera, resumenTeclado, etiquetaInput, ayudaInput, selector, equivalente, inicial, exigirCantidad = false, onConfirmar, onFaltante, onVolverBuscar, mostrar }: {
   articulo: Buscable & { unidades_por_bulto?: number | null }
   titulo: string
   cabecera: ReactNode
@@ -28,6 +28,10 @@ export function PanelCantidad({ articulo, titulo, cabecera, resumenTeclado, etiq
   resumenTeclado?: ReactNode
   etiquetaInput: string
   ayudaInput?: string
+  /** Va arriba del campo y queda a la vista con el teclado abierto (recepción: contar por bulto o por unidad) */
+  selector?: ReactNode
+  /** Línea debajo del campo con lo tipeado convertido (recepción: "= 48 unidades"). null = todavía no hay una cantidad válida */
+  equivalente?: (cantidad: number | null) => ReactNode
   inicial: string
   exigirCantidad?: boolean
   onConfirmar: (cantidad: number) => void
@@ -43,6 +47,7 @@ export function PanelCantidad({ articulo, titulo, cabecera, resumenTeclado, etiq
   const teclado = useTecladoAbierto()
   const vacio = !valor.trim()
   const bloqueado = exigirCantidad && vacio
+  const tipeado = leerCantidad(valor, true)
 
   // El teclado terminó de abrir: los botones a la vista (el contenedor scrollea)
   useEffect(() => {
@@ -109,6 +114,7 @@ export function PanelCantidad({ articulo, titulo, cabecera, resumenTeclado, etiq
       </div>
       {!teclado && cabecera}
       <div style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 20, padding: teclado ? 12 : 18 }}>
+        {selector}
         <div style={{ color: C.sub, fontSize: 14, marginBottom: teclado ? 6 : 10 }}>{etiquetaInput}</div>
         <input
           type="text" inputMode="decimal" value={valor} autoFocus
@@ -117,6 +123,7 @@ export function PanelCantidad({ articulo, titulo, cabecera, resumenTeclado, etiq
           onFocus={(e) => e.target.select()}
           style={{ width: "100%", background: C.bg, color: C.text, fontSize: teclado ? 36 : 48, fontWeight: 800, textAlign: "center", borderRadius: 16, padding: teclado ? 10 : 16, border: `2px solid ${C.border}`, outline: "none", boxSizing: "border-box" }}
         />
+        {equivalente?.(typeof tipeado === "number" ? tipeado : null)}
         {ayudaInput && !teclado && <div style={{ color: C.light, fontSize: 13, marginTop: 8, textAlign: "center" }}>{ayudaInput}</div>}
       </div>
       <div ref={botones} style={{ display: "grid", gridTemplateColumns: onFaltante ? "1fr 1fr" : "1fr", gap: 12 }}>

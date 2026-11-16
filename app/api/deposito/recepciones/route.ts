@@ -45,11 +45,11 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const supabase = await createClient()
-    const { recepcion_id, articulo_id, cantidad_fisica, finalizar, conformidad } = await request.json()
+    const { recepcion_id, articulo_id, cantidad_fisica, unidad, finalizar, conformidad } = await request.json()
 
     if (conformidad) return NextResponse.json(await guardarConformidad(supabase, recepcion_id, conformidad))
     if (finalizar) return NextResponse.json(await finalizarRecepcion(supabase, recepcion_id))
-    return NextResponse.json(await aplicarItemRecepcion(supabase, recepcion_id, articulo_id, cantidad_fisica))
+    return NextResponse.json(await aplicarItemRecepcion(supabase, recepcion_id, articulo_id, cantidad_fisica, unidad ?? null))
   } catch (error: any) {
     if (error instanceof ErrorDeposito) return NextResponse.json({ error: error.message, ...error.extra }, { status: error.status })
     console.error("[deposito] Error PATCH recepcion:", error)

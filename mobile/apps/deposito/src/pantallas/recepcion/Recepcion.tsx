@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { ErrorHttp, esQrOUrl, lecturaError, lecturaOk, useLector, useNoEnviados, useOnline, useRuntime } from "@gm/core"
 import { fecha, moneda, parseMonto } from "@gm/formato"
+import { aUnidadesBase, cant, cantidadConUnidad, textoCantidad, type UnidadConteo } from "@gm/deposito"
 import { DS } from "../../datasets"
 import { buscarPorCodigo, eansDe, padEan13 } from "../../datos/busqueda"
 import { useArticulos, useCatalogos, useEncolar, useRecepcion, useRecepciones, useRefrescarAlEntrar } from "../../datos/hooks"
@@ -111,10 +112,12 @@ function useAccionesRecepcion(r: RecepcionVista | null, mostrar: Mostrar) {
   }, [oc, r?.cierrePendiente, ops, encolar])
 
   const contar = useCallback(
-    async (articuloId: string, descripcion: string, cantidadFisica: number) => {
+    // `unidad`: en qué se contó (bulto | unidad). El servidor convierte a unidades al finalizar (E-30).
+    async (articuloId: string, descripcion: string, cantidadFisica: number, unidad?: UnidadConteo) => {
       if (!oc) return
-      const que = cantidadFisica === -1 ? "a pendientes" : cantidadFisica === 0 ? "faltante" : `${cantidadFisica} u`
-      await encolar("recepcion.item", { orden_compra_id: oc.id, articulo_id: articuloId, cantidad_fisica: cantidadFisica }, `Recepción ${oc.numero_orden}: ${descripcion} → ${que}`)
+      const que = cantidadFisica === -1 ? "a pendientes" : cantidadFisica === 0 ? "faltante" : cantidadConUnidad(cantidadFisica, unidad ?? "unidad")
+      const payload = { orden_compra_id: oc.id, articulo_id: articuloId, cantidad_fisica: cantidadFisica, ...(cantidadFisica > 0 && unidad ? { unidad } : {}) }
+      await encolar("recepcion.item", payload, `Recepción ${oc.numero_orden}: ${descripcion} → ${que}`)
     },
     [oc, encolar],
   )
@@ -172,11 +175,18 @@ function Linea({ l, accion, onAbrir }: { l: LineaRecepcion; accion: { fondo: str
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
         {ok ? (
-          <><div style={{ color: C.green, fontWeight: 800, fontSize: 24, lineHeight: 1.1 }}>{l.cantidad_fisica}</div><div style={{ color: C.light, fontSize: 12 }}>de {l.cantidad_oc}</div></>
+          <>
+            <div style={{ color: C.green, fontWeight: 800, fontSize: 22, lineHeight: 1.1 }}>{cantidadConUnidad(l.cantidad_fisica, l.unidadConteo)}</div>
+            {l.unidadConteo === "bulto" && <div style={{ color: l.sinUnidadesPorBulto ? C.red : C.green, fontSize: 12, fontWeight: 700 }}>{l.sinUnidadesPorBulto ? "⚠ sin u. por bulto" : `= ${cant(l.fisicaUnidades)} u`}</div>}
+            {!l.fuera_de_oc && <div style={{ color: C.light, fontSize: 12 }}>de {cantidadConUnidad(l.cantidad_oc, l.unidadOC)}</div>}
+          </>
         ) : faltante ? (
           <div style={{ color: C.red, fontWeight: 800, fontSize: 13 }}>FALTANTE</div>
         ) : (
-          <><div style={{ color: C.text, fontWeight: 800, fontSize: 24, lineHeight: 1.1 }}>{l.cantidad_oc}</div><div style={{ color: C.light, fontSize: 12 }}>esperadas</div></>
+          <>
+            <div style={{ color: C.text, fontWeight: 800, fontSize: 22, lineHeight: 1.1 }}>{cantidadConUnidad(l.cantidad_oc, l.unidadOC)}</div>
+            <div style={{ color: l.sinUnidadesPorBulto ? C.red : C.light, fontSize: 12 }}>{l.unidadOC === "bulto" ? (l.sinUnidadesPorBulto ? "⚠ sin u. por bulto" : `× ${cant(l.unidadesPorBulto)} = ${cant(l.ocUnidades)} u`) : "esperadas"}</div>
+          </>
         )}
       </div>
     </TarjetaSwipe>
@@ -402,7 +412,7 @@ export function RecepcionBuscar() {
           const l = r.lineas.find((x) => x.articulo_id === art.id)
           if (!l) return null
           const ok = l.estado_linea === "ok"
-          return { bg: ok ? C.greenL : C.orangeL, borde: ok ? C.greenB : C.orangeB, leyenda: <span style={{ color: ok ? C.green : C.orange }}>OC: {l.cantidad_oc} u · {l.estado_linea.toUpperCase()}</span> }
+          return { bg: ok ? C.greenL : C.orangeL, borde: ok ? C.greenB : C.orangeB, leyenda: <span style={{ color: ok ? C.green : C.orange }}>OC: {textoCantidad(l.cantidad_oc, l.unidadOC, l.unidadesPorBulto)} · {l.estado_linea.toUpperCase()}</span> }
         }}
         onElegir={(art) => abrirItem(art.id, { replace: true })}
         onCodigo={(c) => { const a = resolverCodigo(c); if (a) abrirItem(a, { replace: true }) }}
@@ -432,32 +442,64 @@ export function RecepcionItem() {
   const linea = r?.lineas.find((l) => l.articulo_id === articuloId)
   const articulo = linea?.articulo ?? (articuloId ? indice.porId.get(articuloId) : undefined)
 
+  // En qué cuenta el operario (E-30). Arranca en la unidad de la línea de la OC (fuera de OC: unidades)
+  // y la puede cambiar; lo que sube al stock son SIEMPRE unidades y se le muestra antes de confirmar.
+  const [unidadElegida, setUnidadElegida] = useState<UnidadConteo | null>(null)
+
   if (!r || r.cierrePendiente || !articulo || !articuloId) return <Marco titulo="Cantidad">{toast}<OrdenNoDisponible cargando={cargando} finalizada={r?.cierrePendiente} /></Marco>
+  const enOC = !!linea && !linea.fuera_de_oc
+  const upb = linea?.unidadesPorBulto ?? (Number(articulo.unidades_por_bulto) > 1 ? Number(articulo.unidades_por_bulto) : 1)
+  const unidad: UnidadConteo = unidadElegida ?? (enOC ? linea!.unidadOC : "unidad")
+  const sinBulto = unidad === "bulto" && upb === 1
   const guardar = async (cantidad: number, esFaltante: boolean) => {
-    // Igual que la web: manda la cantidad tal cual (0 = el servidor la deja como faltante)
-    await contar(articuloId, articulo.descripcion ?? "artículo", esFaltante ? 0 : Math.max(0, cantidad))
+    // La cantidad viaja tal cual se contó, con su unidad (0 = el servidor la deja como faltante)
+    await contar(articuloId, articulo.descripcion ?? "artículo", esFaltante ? 0 : Math.max(0, cantidad), unidad)
     dejarAviso(esFaltante ? "Marcado como faltante" : "✓ Guardado")
     volver()
   }
-  const enOC = !!linea && !linea.fuera_de_oc
+  const textoOC = enOC ? textoCantidad(linea!.cantidad_oc, linea!.unidadOC, upb) : ""
+  const botonUnidad = (u: UnidadConteo, texto: string) => (
+    <button
+      key={u} onClick={() => setUnidadElegida(u)}
+      style={{ flex: 1, padding: "10px 6px", borderRadius: 12, fontSize: 15, fontWeight: 800, border: `2px solid ${unidad === u ? C.green : C.border}`, background: unidad === u ? C.greenL : C.white, color: unidad === u ? C.green : C.sub }}
+    >
+      {texto}
+    </button>
+  )
   return (
     <Marco titulo="Cantidad">
       {toast}
       <PanelCantidad
         articulo={{ id: articuloId, ...articulo }}
         titulo="Artículo"
-        etiquetaInput="Cantidad recibida físicamente:"
+        etiquetaInput={unidad === "bulto" ? "¿Cuántos BULTOS recibiste?" : "¿Cuántas UNIDADES recibiste?"}
         // Arranca VACÍA aunque esté en la OC (P2-16 llevado a recepción, 30/10): se cuenta, no se confirma la OC
         inicial=""
         exigirCantidad
         ayudaInput="Escribí lo que contaste · 0 = no llegó"
         mostrar={mostrar}
-        resumenTeclado={enOC ? <div style={{ color: C.green, fontSize: 14, fontWeight: 700, marginTop: 2 }}>En OC: {linea!.cantidad_oc}</div> : <div style={{ color: C.red, fontSize: 14, fontWeight: 700, marginTop: 2 }}>⚠ No pedido en esta OC</div>}
+        selector={
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            {botonUnidad("bulto", upb > 1 ? `Bultos (× ${cant(upb)} u)` : "Bultos")}
+            {botonUnidad("unidad", "Unidades sueltas")}
+          </div>
+        }
+        equivalente={(c) =>
+          sinBulto ? (
+            <div style={{ color: C.red, fontSize: 14, fontWeight: 700, marginTop: 8, textAlign: "center" }}>⚠ Este artículo no tiene unidades por bulto cargadas: contalo por UNIDADES o cargá el dato en Modificar artículos.</div>
+          ) : c !== null && c > 0 ? (
+            <div style={{ color: C.green, fontSize: 17, fontWeight: 800, marginTop: 8, textAlign: "center" }}>
+              {unidad === "bulto" ? `${textoCantidad(c, "bulto", upb)} → suman ${cant(aUnidadesBase(c, upb))} unidades al stock` : `Suman ${cant(c)} unidades al stock`}
+            </div>
+          ) : null
+        }
+        resumenTeclado={enOC ? <div style={{ color: C.green, fontSize: 14, fontWeight: 700, marginTop: 2 }}>OC: {textoOC}</div> : <div style={{ color: C.red, fontSize: 14, fontWeight: 700, marginTop: 2 }}>⚠ No pedido en esta OC</div>}
         cabecera={
           enOC ? (
             <div style={{ background: C.greenL, border: `1.5px solid ${C.greenB}`, borderRadius: 16, padding: "16px 20px", textAlign: "center" }}>
-              <div style={{ color: C.green, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>Cantidad en OC</div>
-              <div style={{ color: C.green, fontWeight: 800, fontSize: 52, lineHeight: 1.1 }}>{linea!.cantidad_oc}</div>
+              <div style={{ color: C.green, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>Pedido en la OC</div>
+              <div style={{ color: C.green, fontWeight: 800, fontSize: 44, lineHeight: 1.1 }}>{cantidadConUnidad(linea!.cantidad_oc, linea!.unidadOC)}</div>
+              {linea!.unidadOC === "bulto" && <div style={{ color: linea!.sinUnidadesPorBulto ? C.red : C.green, fontSize: 16, fontWeight: 700, marginTop: 4 }}>{linea!.sinUnidadesPorBulto ? "⚠ sin unidades por bulto cargadas" : `× ${cant(upb)} u = ${cant(linea!.ocUnidades)} unidades`}</div>}
             </div>
           ) : (
             <div style={{ background: C.redL, border: `1.5px solid ${C.redB}`, borderRadius: 16, padding: "16px 20px", textAlign: "center" }}>
