@@ -33,6 +33,7 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 2. El stock actual es de prueba: antes de producción se carga desde ajustes de depósito. No hace falta corregir OC-000010.
 3. Bancos: no tienen Interbanking. Se puede adoptar si resuelve el problema y cuesta poco (tope: no más del 1 % mensual sobre lo que hoy pagan). A investigar antes de la Tanda 2.
 4. Retenciones: **solo Ganancias**. 2 % a proveedores de mercadería, 0,25 % a transportes, salvo exentos. No hay IIBB/IVA/SUSS: E-60 se cierra sin motor (ocultar esos campos). Falta la condición "exento" en la ficha (hoy solo `inscripto` / `no_inscripto`).
+   Confirmado por Juan: el mínimo no sujeto de $224.000 mensual por proveedor (mercadería) está bien aplicado; el motor nuevo es el correcto, no el TXT del sistema viejo. Pendiente: mínimo de transporte (seed 6.700, ¿67.170?).
 5. Plazo de pago: depende del proveedor, desde la emisión de la factura o desde la recepción. Fuente única = `proveedores.pago_blanco_*` / `pago_negro_*` (ya tienen `*_desde` = `factura` | `recepcion`). `plazo_dias`, `plazo_desde`, `dias_vencimiento` y `condicion_pago` quedan como legado a retirar (E-06).
 6. Datos de proveedores: Juan completa `docs/entrada/proveedores-para-completar.xlsx` (sin commitear) y se importa. Hay que escribir el importador y agregar las columnas que falten (mail de OC, alias, titular, acepta cheques de terceros / e-cheq, exento y vencimiento del certificado, días de entrega).
 
