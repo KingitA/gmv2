@@ -3,6 +3,7 @@
 // Processes supplier invoices from emails
 // =====================================================
 
+import { acuerdoDeProveedor, acuerdoDelCanal, diasDePago, formaPagoVencimiento, modalidadVencimiento, normalizarAcuerdo } from '@/lib/compras/acuerdo-pago'
 import { downloadAttachment, type ParsedEmail } from './gmail'
 import { analyzeXlsxInvoice } from './claude-xlsx-analyzer'
 import type { AttachmentContent } from './attachment-content-extractor'
@@ -457,13 +458,11 @@ export async function processEmailAsInvoice(
             // Calculate and set vencimiento on the CC movement
             if (ccResult && !isCredit) {
                 try {
-                    const { data: prov } = await db.from('proveedores')
-                        .select('plazo_dias, plazo_desde, nombre')
-                        .eq('id', proveedorId)
-                        .single()
-
-                    const plazoDias = prov?.plazo_dias || 30
-                    const plazoDesde = prov?.plazo_desde || 'fecha_factura'
+                    // E-06: el plazo sale del acuerdo de pago (el de la orden si lo tiene; si no, el de la
+                    // ficha del proveedor). plazo_dias / plazo_desde son legado y ya no se leen.
+                    const plazo = await plazoDePago(db, proveedorId, pendingOC.id)
+                    const plazoDias = plazo.dias
+                    const plazoDesde = plazo.desde === 'recepcion' ? 'fecha_recepcion' : 'fecha_factura'
 
                     let fechaBase = invoiceData.fecha_comprobante || fechaHoy
                     // If plazo is from recepcion, check if there's a finished recepcion
@@ -496,7 +495,13 @@ export async function processEmailAsInvoice(
                         referencia_id: ccResult.id,
                         referencia_tipo: 'cuenta_corriente',
                         dias_alerta: 3,
+                        forma_pago: plazo.forma_pago,
+                        modalidad: plazo.modalidad,
                     })
+                    // Llegó el vencimiento real: se descuenta del ESTIMADO que generó la orden (E-05).
+                    // Si la función todavía no está en la base (migración 20261117n), no pasa nada.
+                    const { error: errEst } = await db.rpc('oc_vencimiento_estimado_reemplazar', { p_orden_id: pendingOC.id, p_canal: 'blanco', p_monto: Math.abs(montoFinal) })
+                    if (errEst) console.warn('[InvoiceProcessor] No se reemplazó el vencimiento estimado de la orden:', errEst.message)
                 } catch (vErr) {
                     console.error('[InvoiceProcessor] Error creating vencimiento for OC invoice:', vErr)
                 }
@@ -836,11 +841,13 @@ async function createCCMovement(
         try {
             // Get proveedor payment terms
             const { data: prov } = await db.from('proveedores')
-                .select('plazo_dias, plazo_desde, nombre, sigla')
+                .select('nombre, sigla')
                 .eq('id', proveedorId)
                 .single()
 
-            const plazoDias = prov?.plazo_dias || 30
+            // E-06: plazo del acuerdo de pago de la ficha (no más plazo_dias)
+            const plazo = await plazoDePago(db, proveedorId, null)
+            const plazoDias = plazo.dias
             const fechaBase = invoiceData.fecha_comprobante || fechaHoy
 
             // Use fecha_vencimiento from invoice if available, otherwise calculate
@@ -858,6 +865,8 @@ async function createCCMovement(
                 referencia_id: data.id,
                 referencia_tipo: 'cuenta_corriente',
                 dias_alerta: 3,
+                forma_pago: plazo.forma_pago,
+                modalidad: plazo.modalidad,
             })
         } catch (vencError) {
             console.error('[InvoiceProcessor] Error creating vencimiento:', vencError)
@@ -866,6 +875,33 @@ async function createCCMovement(
     }
 
     return data
+}
+
+// ── Helper: plazo de pago (E-06) ───────────────────────
+/**
+ * Cuántos días hay para pagar una factura fiscal (canal blanco) y desde cuándo corren.
+ * Única fuente: el acuerdo de pago — el que quedó copiado en la orden de compra, y si no
+ * hay orden o es anterior, el de la ficha del proveedor (pago_blanco_*).
+ * Sin acuerdo cargado se mantienen los 30 días desde la factura que ya se usaban.
+ */
+async function plazoDePago(db: any, proveedorId: string, ordenCompraId: string | null) {
+    let acuerdo = null as ReturnType<typeof normalizarAcuerdo>
+    if (ordenCompraId) {
+        const { data: oc, error } = await db.from('ordenes_compra').select('acuerdo_pago').eq('id', ordenCompraId).maybeSingle()
+        if (!error) acuerdo = normalizarAcuerdo(oc?.acuerdo_pago)
+    }
+    if (!acuerdo) {
+        const { data: prov } = await db.from('proveedores').select('*').eq('id', proveedorId).maybeSingle()
+        acuerdo = acuerdoDeProveedor(prov)
+    }
+    const canal = acuerdoDelCanal(acuerdo, 'blanco')
+    const dias = diasDePago(canal)
+    return {
+        dias: dias.length > 0 ? dias[0] : 30,
+        desde: canal.desde,
+        forma_pago: formaPagoVencimiento(canal.medio),
+        modalidad: modalidadVencimiento(canal.entrega),
+    }
 }
 
 // ── Helper: Map invoice type ───────────────────────────

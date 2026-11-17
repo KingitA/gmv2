@@ -93,7 +93,8 @@ export async function POST(
     // Fecha: si la ficha define plazo (incluido 0 = contado), manda la ficha;
     // si no, se conserva la fecha actual del vencimiento.
     let fechaVencimiento: string = venc.fecha_vencimiento
-    if (cfg.dias != null || Number(p.dias_vencimiento ?? 0) > 0) {
+    // E-06: el plazo sale SOLO del acuerdo de pago (pago_blanco_* / pago_negro_*); dias_vencimiento es legado.
+    if (cfg.dias != null) {
       let fechaBase: string | null = comprobante?.fecha_comprobante
         ? String(comprobante.fecha_comprobante).slice(0, 10)
         : null
@@ -108,7 +109,7 @@ export async function POST(
         const f = (rec as any)?.fecha_fin || (rec as any)?.fecha_inicio || (rec as any)?.created_at
         if (f) fechaBase = fechaISO(f) || null // timestamptz → día argentino
       }
-      const dias = Number(cfg.dias ?? p.dias_vencimiento ?? 0)
+      const dias = Number(cfg.dias)
       if (fechaBase) {
         fechaVencimiento = sumarDiasISO(fechaBase, dias)
       }

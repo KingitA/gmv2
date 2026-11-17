@@ -138,10 +138,13 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
             <Campo label="Email del vendedor">
               <Input id="mail_vendedor" type="email" value={formData.mail_vendedor} onChange={e => set('mail_vendedor', e.target.value)} />
             </Campo>
+            <Campo label="Mail para órdenes de compra" nota="a esta casilla se le envía la orden; varios separados por coma" ancho={2}>
+              <Input id="mail_ordenes_compra" value={formData.mail_ordenes_compra ?? ''} onChange={e => set('mail_ordenes_compra', e.target.value)} placeholder="pedidos@proveedor.com" autoComplete="off" />
+            </Campo>
           </Campos>
         </FichaSeccion>
 
-        <FichaSeccion id="compra" titulo="Condiciones de compra" icono={ShoppingCart} ayuda="Cómo nos factura y cuándo le pagamos.">
+        <FichaSeccion id="compra" titulo="Condiciones de compra" icono={ShoppingCart} ayuda="Cómo nos factura.">
           <Campos>
             <Campo label="Sus descuentos se aplican" ancho={2}>
               <Select value={formData.tipo_descuento} onValueChange={v => set('tipo_descuento', v)}>
@@ -164,34 +167,15 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
                 </SelectContent>
               </Select>
             </Campo>
-            <Campo label="Condición de pago">
-              <Select value={formData.condicion_pago_tipo} onValueChange={v => set('condicion_pago_tipo', v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {CONDICIONES_PAGO.map(c => <SelectItem key={c.valor} value={c.valor}>{c.nombre} ({c.codigo})</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Campo>
-            {formData.condicion_pago_tipo !== 'anticipado' && (
-              <>
-                <Campo label="Plazo">
-                  <ConUnidad unidad="días">
-                    <InputMonto id="plazo_dias" decimales={0} soloPositivos className="tabular-nums" value={formData.plazo_dias}
-                      onChange={v => set('plazo_dias', v != null ? Math.trunc(v) : null)} placeholder="30" required />
-                  </ConUnidad>
-                </Campo>
-                <Campo label="Plazo desde">
-                  <Select value={formData.plazo_desde} onValueChange={v => set('plazo_desde', v)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="fecha_factura">La fecha de factura</SelectItem>
-                      <SelectItem value="fecha_recepcion">La fecha de recepción</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Campo>
-              </>
-            )}
           </Campos>
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-neutro-50/60 px-4 py-3">
+            <ShieldCheck className="size-5 shrink-0 text-azul-500" />
+            <p className="min-w-0 flex-1 text-[13px] text-neutro-500">
+              <b className="font-semibold text-neutro-600">Cuándo y cómo le pagamos</b> (medio, días o cuotas, desde la factura o la recepción) se carga en un solo lugar: el acuerdo de pago de la <b className="font-semibold text-neutro-600">ficha fiscal</b>. De ahí lo toman la orden de compra y los vencimientos.
+              {!editando && ' Disponible una vez creado el proveedor.'}
+            </p>
+            {editando && onFichaFiscal && <Button type="button" variant="outline" onClick={onFichaFiscal}>Abrir ficha fiscal</Button>}
+          </div>
         </FichaSeccion>
 
         <FichaSeccion id="fiscal" titulo="Fiscal" icono={Receipt} aviso={faltaProvincia}
