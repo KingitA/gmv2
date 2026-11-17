@@ -316,6 +316,7 @@ export default function VerificacionOCPage() {
 
             {resolviendo && (
                 <ResolverDiferencia fila={resolviendo} filasOC={filas.filter((f) => !f.no_pedido)} transportes={datos.transportes} ordenId={ordenId}
+                    recepcion={datos.recepciones.find((r) => r.id === resolviendo.recepcion_id) || null}
                     onCerrar={() => setResolviendo(null)} onHecho={() => { setResolviendo(null); cargar() }} />
             )}
             {corrigiendo && (

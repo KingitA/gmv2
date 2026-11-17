@@ -54,6 +54,8 @@ export async function POST(
         const iva = num(body.total_iva);
         const percIva = num(body.percepcion_iva_monto);
         const percIibb = num(body.percepcion_iibb_monto);
+        const internos = num(body.impuestos_internos);
+        const otros = num(body.otros_impuestos);
         const { data: comp, error } = await supabase.from('comprobantes_compra').insert({
             orden_compra_id: ordenId,
             proveedor_id: oc.proveedor_id,
@@ -65,7 +67,9 @@ export async function POST(
             total_iva: iva,
             percepcion_iva_monto: percIva,
             percepcion_iibb_monto: percIibb,
-            total_calculado: neto + iva + percIva + percIibb,
+            impuestos_internos: internos,
+            otros_impuestos: otros,
+            total_calculado: neto + iva + percIva + percIibb + internos + otros,
             foto_url: doc?.url_imagen || null,
             estado: 'pendiente_recepcion',
             ajusta_stock: true,

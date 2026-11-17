@@ -117,6 +117,8 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
     const percIva = Number(meta?.percepcion_iva || 0);
     const percIibb = Number(meta?.percepcion_iibb || 0);
     const retGanancias = Number(meta?.retencion_ganancias || 0);
+    const internos = Number(meta?.impuestos_internos || 0);
+    const otros = Number(meta?.otros_impuestos || 0);
     const totales = {
         total_factura_declarado: totalFactura,
         total_neto: totalNeto,
@@ -124,7 +126,9 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
         percepcion_iva_monto: percIva,
         percepcion_iibb_monto: percIibb,
         retencion_ganancias_monto: retGanancias,
-        total_calculado: totalNeto + totalIva + percIva + percIibb + retGanancias,
+        impuestos_internos: internos,
+        otros_impuestos: otros,
+        total_calculado: totalNeto + totalIva + percIva + percIibb + retGanancias + internos + otros,
     };
 
     let comprobante: any = null;

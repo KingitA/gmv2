@@ -103,7 +103,7 @@ export function ComprobantesSection({
     const cargarAMano = (doc?: DocumentoRecepcion) => setEditando({
         nuevo: true, documento_id: doc?.id || null,
         tipo_comprobante: "FA", numero_comprobante: "", fecha_comprobante: hoyISO(),
-        total_factura_declarado: null, total_neto: null, total_iva: null, percepcion_iva_monto: null, percepcion_iibb_monto: null, retencion_ganancias_monto: null,
+        total_factura_declarado: null, total_neto: null, total_iva: null, percepcion_iva_monto: null, percepcion_iibb_monto: null, retencion_ganancias_monto: null, impuestos_internos: null, otros_impuestos: null,
     })
 
     // Subida no bloqueante: cada archivo es un job independiente; se puede
@@ -216,6 +216,8 @@ export function ComprobantesSection({
                     percepcion_iva_monto: Number(editando.percepcion_iva_monto) || 0,
                     percepcion_iibb_monto: Number(editando.percepcion_iibb_monto) || 0,
                     retencion_ganancias_monto: Number(editando.retencion_ganancias_monto) || 0,
+                    impuestos_internos: Number(editando.impuestos_internos) || 0,
+                    otros_impuestos: Number(editando.otros_impuestos) || 0,
                 }),
             })
             const data = await res.json().catch(() => ({}))
@@ -453,6 +455,19 @@ export function ComprobantesSection({
                                         onChange={n => setEditando((p: any) => ({ ...p, retencion_ganancias_monto: n }))} />
                                 </div>
                             </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <Label className="text-xs">Impuestos internos</Label>
+                                    <InputMonto pesos value={editando.impuestos_internos ?? null}
+                                        onChange={n => setEditando((p: any) => ({ ...p, impuestos_internos: n }))} />
+                                </div>
+                                <div>
+                                    <Label className="text-xs">Otros impuestos</Label>
+                                    <InputMonto pesos value={editando.otros_impuestos ?? null}
+                                        onChange={n => setEditando((p: any) => ({ ...p, otros_impuestos: n }))} />
+                                </div>
+                            </div>
+                            <p className="text-xs text-muted-foreground">Neto + IVA + percepciones + retención + impuestos internos + otros impuestos tiene que dar el total; si no, el comprobante no se puede validar.</p>
                         </div>
                     )}
                     <DialogFooter>

@@ -256,7 +256,7 @@ export async function POST(
 
         const { data: recepcion } = await supabase
             .from('recepciones')
-            .select('proveedor_id, transporte_id, orden_compra:ordenes_compra(id, proveedor_id)')
+            .select('proveedor_id, transporte_id, conformidad_transporte, bultos_declarados, bultos_recibidos, conformidad_observaciones, orden_compra:ordenes_compra(id, proveedor_id)')
             .eq('id', recepcion_id)
             .single();
         const ocRel: any = Array.isArray(recepcion?.orden_compra) ? recepcion?.orden_compra[0] : recepcion?.orden_compra;
@@ -265,6 +265,11 @@ export async function POST(
             ocId: (ocRel?.id || null) as string | null,
             // Transporte por defecto: el registrado en el control de bultos de la recepción
             transporteId: (recepcion?.transporte_id || null) as string | null,
+            // E-45: lo que el depósito dejó asentado contra el remito del transporte. Se lee de la base
+            // (no del navegador) y va en la descripción del cargo y en el registro de la resolución.
+            bultos: recepcion?.conformidad_transporte === 'no_conforme'
+                ? `Control de bultos NO conforme: remito ${recepcion.bultos_declarados ?? '?'} bultos, contados ${recepcion.bultos_recibidos ?? '?'}${recepcion.conformidad_observaciones ? ` (${recepcion.conformidad_observaciones})` : ''}`
+                : recepcion?.conformidad_transporte === 'conforme' ? 'Control de bultos firmado conforme' : null,
         };
 
         const results: any[] = [];
@@ -292,7 +297,11 @@ export async function POST(
 
                 // La cuenta la hace el servidor: lo que mande el navegador como cantidad o precio no se usa
                 const { dif, hermanas, descuentoAlPie } = await contexto(supabase, item, rec.ocId);
-                const p = plan(dif, tipo, destino, decision, articuloInfo?.sku || '', descuentoAlPie);
+                const p: any = plan(dif, tipo, destino, decision, articuloInfo?.sku || '', descuentoAlPie);
+                if (destino === 'transporte' && rec.bultos) {
+                    p.descripcion = `${p.descripcion || 'Faltante de mercadería'}. ${rec.bultos}`;
+                    p.detalle = { ...p.detalle, control_bultos: rec.bultos };
+                }
 
                 let r: any;
                 const rpc = await supabase.rpc('recepcion_resolver_diferencia', {

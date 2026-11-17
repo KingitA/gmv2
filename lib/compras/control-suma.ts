@@ -9,7 +9,7 @@
  * Dos controles, los dos con una tolerancia de centavos de redondeo:
  *   A. (comprobantes con precios: factura / adquisición) la suma de los renglones NETOS
  *      —todos, también los marcados "no es mercadería" (flete, etc.)— = neto del comprobante;
- *   B. neto + IVA + percepciones + otros impuestos = total del comprobante.
+ *   B. neto + IVA + percepciones + retención + impuestos internos + otros impuestos = total.
  * Si no coinciden, el comprobante NO se puede validar hasta corregir los renglones o la
  * cabecera. Lo controla el servidor (ruta de validar y función SQL), no solo la pantalla.
  *
@@ -43,6 +43,8 @@ export interface CabeceraComprobante {
   percepcion_iva_monto?: number | null
   percepcion_iibb_monto?: number | null
   retencion_ganancias_monto?: number | null
+  impuestos_internos?: number | null
+  otros_impuestos?: number | null
   /** Descuento al pie de la factura, en % (0 = no hay) */
   descuento_fuera_factura?: number | null
 }
@@ -69,6 +71,7 @@ export interface ControlSuma {
 export function controlSuma(c: CabeceraComprobante, renglones: RenglonComprobante[]): ControlSuma {
   const total = r2(num(c.total_factura_declarado))
   const impuestos = num(c.total_iva) + num(c.percepcion_iva_monto) + num(c.percepcion_iibb_monto) + num(c.retencion_ganancias_monto)
+    + num(c.impuestos_internos) + num(c.otros_impuestos)
   const netoComprobante = r2(num(c.total_neto) > 0 ? num(c.total_neto) : total - impuestos)
   const netoRenglones = r2(
     renglones.reduce((s, l) => s + r2(num(l.cantidad_facturada) * netoDocumento(l.precio_unitario, [l.descuento1, l.descuento2, l.descuento3, l.descuento4])), 0),
@@ -97,7 +100,7 @@ export function controlSuma(c: CabeceraComprobante, renglones: RenglonComprobant
   // B. Neto + impuestos contra el total
   if (total > 0 && Math.abs(totalCalculado - total) >= TOLERANCIA_SUMA_PESOS) {
     const dif = r2(total - totalCalculado)
-    r.faltas.push(`El neto más los impuestos da ${pesos(totalCalculado)} y el total del comprobante dice ${pesos(total)}: ${dif > 0 ? "falta" : "sobra"} ${pesos(Math.abs(dif))}. Revisá neto, IVA y percepciones (lápiz de editar).`)
+    r.faltas.push(`El neto más los impuestos da ${pesos(totalCalculado)} y el total del comprobante dice ${pesos(total)}: ${dif > 0 ? "falta" : "sobra"} ${pesos(Math.abs(dif))}. Revisá neto, IVA, percepciones y otros impuestos (lápiz de editar).`)
   }
 
   r.ok = r.faltas.length === 0

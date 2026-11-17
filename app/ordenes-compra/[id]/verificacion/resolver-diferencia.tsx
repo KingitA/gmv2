@@ -36,8 +36,10 @@ function Opcion({ activa, onClick, titulo, detalle }: { activa: boolean; onClick
     )
 }
 
-export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, onCerrar, onHecho }: {
+export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepcion, onCerrar, onHecho }: {
     fila: FilaVerificacion
+    /** La entrega de la línea, con el control de bultos contra el remito del transporte (E-45) */
+    recepcion: { transporte_id: string | null; conformidad_transporte: string | null; bultos_declarados: number | null; bultos_recibidos: number | null; conformidad_observaciones: string | null } | null
     /** Artículos de la orden, para "en realidad era este otro artículo" */
     filasOC: FilaVerificacion[]
     transportes: Array<{ id: string; nombre: string }>
@@ -54,7 +56,15 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, onCerr
 
     const [destinoPrecio, setDestinoPrecio] = useState<DestinoPrecio | "">("")
     const [destinoCantidad, setDestinoCantidad] = useState<DestinoCantidad | "">("")
-    const [transporte, setTransporte] = useState(transportes[0]?.id || "")
+    // E-45: el transporte por defecto es el que trajo la mercadería (el del control de bultos)
+    const [transporte, setTransporte] = useState(recepcion?.transporte_id || transportes[0]?.id || "")
+    const bultosFaltantes = recepcion?.bultos_declarados != null && recepcion?.bultos_recibidos != null ? Number(recepcion.bultos_declarados) - Number(recepcion.bultos_recibidos) : null
+    const controlBultos = !recepcion || !recepcion.conformidad_transporte ? null
+        : recepcion.conformidad_transporte === "no_conforme"
+            ? { ok: false, texto: `El depósito NO firmó conforme: el remito decía ${recepcion.bultos_declarados ?? "?"} bultos y contó ${recepcion.bultos_recibidos ?? "?"}${bultosFaltantes && bultosFaltantes > 0 ? ` (faltan ${bultosFaltantes})` : ""}.${recepcion.conformidad_observaciones ? ` Observación: "${recepcion.conformidad_observaciones}"` : ""}` }
+            : recepcion.conformidad_transporte === "conforme"
+                ? { ok: true, texto: `El depósito firmó CONFORME los bultos (${recepcion.bultos_recibidos ?? "?"} de ${recepcion.bultos_declarados ?? "?"}): va a ser difícil reclamarle al transporte.` }
+                : { ok: true, texto: "El depósito salteó el control de bultos: no hay constancia contra el remito del transporte." }
     const [rechazo, setRechazo] = useState<number | null>(null) // unidades que entraron y se devuelven, además del faltante
     const [descripcion, setDescripcion] = useState("")
     const [guardando, setGuardando] = useState(false)
@@ -148,6 +158,8 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, onCerr
                 decisions.push({
                     item_id: fila.recepcion_item_id, tipo: "cantidad", destino,
                     transporte_id: destinoCantidad === "transporte" ? transporte : undefined,
+                    bultos: destinoCantidad === "transporte" && recepcion?.conformidad_transporte === "no_conforme"
+                        ? { declarados: recepcion.bultos_declarados, recibidos: recepcion.bultos_recibidos, observaciones: recepcion.conformidad_observaciones } : undefined,
                     devolver_unidades: devolver > 0 ? devolver : undefined,
                     descripcion: descripcion || undefined,
                 })
@@ -235,6 +247,9 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, onCerr
                             </div>
                             {destinoCantidad === "transporte" && (
                                 <div className="space-y-1">
+                                    {controlBultos && (
+                                        <p className={`text-xs p-2 rounded border ${controlBultos.ok ? "border-amber-300 bg-amber-50 text-amber-900" : "border-green-300 bg-green-50 text-green-900"}`}>{controlBultos.texto}</p>
+                                    )}
                                     <Label className="text-xs">Transporte responsable</Label>
                                     <Select value={transporte} onValueChange={setTransporte}>
                                         <SelectTrigger><SelectValue placeholder="Elegir transporte…" /></SelectTrigger>

@@ -49,6 +49,11 @@ describe("neto + impuestos = total", () => {
     const c = fa({ total_neto: 1000, total_iva: 210, percepcion_iva_monto: 30, percepcion_iibb_monto: 25, total_factura_declarado: 1265 })
     expect(controlSuma(c, [ren(10, 100)]).ok).toBe(true)
   })
+  it("impuestos internos y otros impuestos también suman al total", () => {
+    const c = fa({ total_neto: 1000, total_iva: 210, impuestos_internos: 80, otros_impuestos: 15.5, total_factura_declarado: 1305.5 })
+    expect(controlSuma(c, [ren(10, 100)]).ok).toBe(true)
+    expect(controlSuma({ ...c, otros_impuestos: 0 }, [ren(10, 100)]).ok).toBe(false)
+  })
   it("el total no da: lo dice con los dos números", () => {
     const r = controlSuma(fa({ total_neto: 1000, total_iva: 210, total_factura_declarado: 1300 }), [ren(10, 100)])
     expect(r.ok).toBe(false)

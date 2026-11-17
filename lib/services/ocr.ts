@@ -34,6 +34,8 @@ export interface ComprobanteMeta {
     percepcion_iva: number | null;
     percepcion_iibb: number | null;
     retencion_ganancias: number | null;
+    impuestos_internos?: number | null;
+    otros_impuestos?: number | null;
     descuento_global: number | null;
     impuestos_discriminados: boolean | null;
     leyenda_no_valido_factura: boolean | null;
@@ -126,6 +128,8 @@ FORMATO JSON:
     "percepcion_iva": number o null,
     "percepcion_iibb": number o null,
     "retencion_ganancias": number o null,
+    "impuestos_internos": number o null (impuestos internos, si la factura los discrimina),
+    "otros_impuestos": number o null (cualquier otro impuesto o cargo del pie que no sea IVA, percepción ni impuestos internos),
     "descuento_global": number o null,
     "impuestos_discriminados": boolean (true si el documento discrimina IVA/percepciones como conceptos separados),
     "leyenda_no_valido_factura": boolean (true si dice "documento no válido como factura" o similar),
@@ -313,6 +317,8 @@ function sanearOcr(parsed: any): any {
         percepcion_iva: num(c.percepcion_iva),
         percepcion_iibb: num(c.percepcion_iibb),
         retencion_ganancias: num(c.retencion_ganancias),
+        impuestos_internos: num(c.impuestos_internos),
+        otros_impuestos: num(c.otros_impuestos),
         descuento_global: num(c.descuento_global),
     } : null;
     return { items, comprobante };

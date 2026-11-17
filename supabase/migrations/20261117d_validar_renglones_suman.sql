@@ -10,7 +10,7 @@
 -- de escribir nada:
 --   A. factura / adquisición: suma de los renglones netos (todos, también los marcados
 --      "no es mercadería") = neto del comprobante;
---   B. neto + IVA + percepciones + retención = total del comprobante.
+--   B. neto + IVA + percepciones + retención + impuestos internos + otros impuestos = total.
 -- Se toleran centavos de redondeo (diferencia MENOR a $1). Si no cierra, rechaza con los
 -- dos números y no valida.
 --
@@ -106,7 +106,8 @@ BEGIN
   -- ── E-46 (regla de Juan, 17/11): los renglones tienen que sumar lo que dice el comprobante ──
   -- Misma cuenta que lib/compras/control-suma.ts. Se toleran centavos: la diferencia tiene que
   -- ser MENOR a $1 (20 contra 21 ya es un error).
-  v_impuestos := coalesce(v.total_iva, 0) + coalesce(v.percepcion_iva_monto, 0) + coalesce(v.percepcion_iibb_monto, 0) + coalesce(v.retencion_ganancias_monto, 0);
+  v_impuestos := coalesce(v.total_iva, 0) + coalesce(v.percepcion_iva_monto, 0) + coalesce(v.percepcion_iibb_monto, 0) + coalesce(v.retencion_ganancias_monto, 0)
+               + coalesce(v.impuestos_internos, 0) + coalesce(v.otros_impuestos, 0);
   v_neto_comp := round(CASE WHEN coalesce(v.total_neto, 0) > 0 THEN v.total_neto ELSE v_total - v_impuestos END, 2);
   IF v.tipo_comprobante IN ('FA', 'FB', 'FC', 'Adquisicion') THEN
     SELECT coalesce(sum(round(coalesce(d.cantidad_facturada, 0) * round(coalesce(d.precio_unitario, 0)
@@ -123,7 +124,7 @@ BEGIN
     END IF;
   END IF;
   IF v_total > 0 AND abs(round(v_neto_comp + v_impuestos, 2) - v_total) >= 1 THEN
-    RAISE EXCEPTION 'El neto más los impuestos da $% y el total del comprobante dice $%: hay $% de diferencia. Revisá neto, IVA y percepciones. No se validó.', round(v_neto_comp + v_impuestos, 2), v_total, abs(v_total - round(v_neto_comp + v_impuestos, 2))
+    RAISE EXCEPTION 'El neto más los impuestos da $% y el total del comprobante dice $%: hay $% de diferencia. Revisá neto, IVA, percepciones y otros impuestos. No se validó.', round(v_neto_comp + v_impuestos, 2), v_total, abs(v_total - round(v_neto_comp + v_impuestos, 2))
       USING ERRCODE = 'P0001', DETAIL = 'renglones_no_suman';
   END IF;
 

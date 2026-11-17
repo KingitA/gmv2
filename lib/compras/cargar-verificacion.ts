@@ -34,7 +34,14 @@ export interface VerificacionOC {
   orden: { id: string; numero_orden: string; estado: string; proveedor_id: string | null; proveedor_nombre: string | null; observaciones: string | null }
   verificacion: Verificacion
   comprobantes: any[]
-  recepciones: Array<{ id: string; estado: string; numero_tanda: number | null; fecha_fin: string | null; transporte_id: string | null }>
+  /**
+   * Entregas de la orden, con el control de bultos que hizo el depósito contra el remito del
+   * transporte (E-45): si faltaron bultos, es la base para cargarle el faltante al transporte.
+   */
+  recepciones: Array<{
+    id: string; estado: string; numero_tanda: number | null; fecha_fin: string | null; transporte_id: string | null
+    conformidad_transporte: string | null; bultos_declarados: number | null; bultos_recibidos: number | null; conformidad_observaciones: string | null
+  }>
   documentos: DocumentoRecepcion[]
   control: ControlFinalizarOC & { /** Artículos de la orden que no llegaron completos (E-92) */ pendientes: Array<{ articulo_id: string; sku: string; unidades: number }> }
   /** Comprobantes sin validar cuyos renglones no suman lo que dice el comprobante (E-46): no se pueden validar así */
@@ -64,8 +71,8 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
   const [rOrden, rItems, rComps, rRecs] = await Promise.all([
     medir("orden", supabase.from("ordenes_compra").select("id, numero_orden, estado, proveedor_id, observaciones, proveedor:proveedores(nombre)").eq("id", ordenId).maybeSingle()),
     medir("detalle_oc", supabase.from("ordenes_compra_detalle").select("articulo_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4").eq("orden_compra_id", ordenId)),
-    medir("comprobantes", supabase.from("comprobantes_compra").select("id, tipo_comprobante, numero_comprobante, fecha_comprobante, estado, total_factura_declarado, total_neto, total_iva, percepcion_iva_monto, percepcion_iibb_monto, retencion_ganancias_monto, descuento_fuera_factura, origen_nc, foto_url, created_at").eq("orden_compra_id", ordenId).order("created_at", { ascending: true })),
-    medir("recepciones", supabase.from("recepciones").select("id, estado, numero_tanda, fecha_fin, transporte_id, created_at").eq("orden_compra_id", ordenId).neq("estado", "cancelada").order("created_at", { ascending: true })),
+    medir("comprobantes", supabase.from("comprobantes_compra").select("id, tipo_comprobante, numero_comprobante, fecha_comprobante, estado, total_factura_declarado, total_neto, total_iva, percepcion_iva_monto, percepcion_iibb_monto, retencion_ganancias_monto, impuestos_internos, otros_impuestos, descuento_fuera_factura, origen_nc, foto_url, created_at").eq("orden_compra_id", ordenId).order("created_at", { ascending: true })),
+    medir("recepciones", supabase.from("recepciones").select("id, estado, numero_tanda, fecha_fin, transporte_id, conformidad_transporte, bultos_declarados, bultos_recibidos, conformidad_observaciones, created_at").eq("orden_compra_id", ordenId).neq("estado", "cancelada").order("created_at", { ascending: true })),
   ])
   const ordenFila: any = ok(rOrden as any, "orden")
   if (!ordenFila) return null
@@ -170,7 +177,11 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
     orden: { id: ordenFila.id, numero_orden: ordenFila.numero_orden, estado: ordenFila.estado, proveedor_id: ordenFila.proveedor_id ?? null, proveedor_nombre: prov?.nombre ?? null, observaciones: ordenFila.observaciones ?? null },
     verificacion,
     comprobantes,
-    recepciones: recepciones.map((r) => ({ id: r.id, estado: r.estado, numero_tanda: r.numero_tanda ?? null, fecha_fin: r.fecha_fin ?? null, transporte_id: r.transporte_id ?? null })),
+    recepciones: recepciones.map((r) => ({
+      id: r.id, estado: r.estado, numero_tanda: r.numero_tanda ?? null, fecha_fin: r.fecha_fin ?? null, transporte_id: r.transporte_id ?? null,
+      conformidad_transporte: r.conformidad_transporte ?? null, bultos_declarados: r.bultos_declarados ?? null, bultos_recibidos: r.bultos_recibidos ?? null,
+      conformidad_observaciones: r.conformidad_observaciones ?? null,
+    })),
     documentos,
     control: { ...control, pendientes },
     descuadres,
