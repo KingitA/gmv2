@@ -25,7 +25,10 @@ export async function POST(request: Request) {
         const { data, error } = await supabase.rpc('op_ganancias_preview', {
             p_proveedor_id: body.proveedor_id,
             p_imputaciones: body.imputaciones ?? [],
-            p_fecha: body.fecha ?? null,
+            // E-57: la retención cuenta por el día en que se CONFIRMA el pago, no por la fecha
+            // de la orden. La vista previa calcula con hoy; si la orden queda pendiente y se
+            // confirma otro día, se recalcula ahí.
+            p_fecha: null,
         })
         if (error) return NextResponse.json({ error: error.message }, { status: 400 })
         return NextResponse.json(data)

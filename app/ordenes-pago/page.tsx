@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -29,7 +29,32 @@ export default function OrdenesPagoPage() {
     // Confirmar / anular / eliminar piden confirmación con un diálogo del sistema (no confirm() nativo)
     const [dialogo, setDialogo] = useState<{ tipo: "confirmar" | "anular" | "eliminar"; op: any } | null>(null)
     const [motivoAnular, setMotivoAnular] = useState("")
+    // E-57: qué retención corresponde HOY para la orden que se está por confirmar
+    const [retHoy, setRetHoy] = useState<any>(null)
+    const [retCargando, setRetCargando] = useState(false)
     const [trabajando, setTrabajando] = useState(false)
+    // Si el usuario ya vio y aceptó la retención nueva (se conserva si hay que elegir la cuenta bancaria)
+    const aceptaRetRef = useRef(false)
+    // E-61: hasta qué día están presentadas ante ARCA las retenciones (cierra el período)
+    const [presentadoHasta, setPresentadoHasta] = useState<string | null>(null)
+    const [puedePresentar, setPuedePresentar] = useState(false)
+    const [confirmaPresentar, setConfirmaPresentar] = useState(false)
+    const cargarPresentado = () => fetch("/api/retenciones/export?formato=estado&desde=2000-01-01&hasta=2000-01-01")
+        .then(r => r.json()).then(d => { setPresentadoHasta(d?.presentado_hasta ?? null); setPuedePresentar(d?.disponible === true) }).catch(() => {})
+    useEffect(() => { cargarPresentado() }, [])
+    async function marcarPresentado() {
+        setConfirmaPresentar(false)
+        try {
+            const res = await fetch("/api/retenciones/export", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ desde: `${mesExport}-01`, hasta: finDeMes(mesExport) }),
+            })
+            const d = await res.json().catch(() => ({}))
+            if (!res.ok) { toast.error(d.error || "No se pudo marcar el período", { duration: 10000 }); return }
+            toast.success(d.ya_estaba ? "Ese período ya estaba marcado como presentado." : "Período marcado como presentado ante ARCA.")
+            cargarPresentado()
+        } catch (e: any) { toast.error(e?.message || "No se pudo marcar el período") }
+    }
     // Lo que mueve plata (confirmar, anular, eliminar una pagada) es solo de admin; el servidor lo vuelve a controlar
     const { esAdmin } = useMisRoles()
 
@@ -66,14 +91,15 @@ export default function OrdenesPagoPage() {
         }
     }
 
-    async function confirmarOP(id: string, cuentaBancariaId?: string) {
+    async function confirmarOP(id: string, cuentaBancariaId?: string, aceptarRetencion = aceptaRetRef.current) {
         if (trabajando) return
         setTrabajando(true)
+        aceptaRetRef.current = aceptarRetencion
         try {
             const res = await fetch(`/api/ordenes-pago/${id}/confirmar`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(cuentaBancariaId ? { cuenta_bancaria_id: cuentaBancariaId } : {}),
+                body: JSON.stringify({ ...(cuentaBancariaId ? { cuenta_bancaria_id: cuentaBancariaId } : {}), ...(aceptarRetencion ? { aceptar_retencion: true } : {}) }),
             })
             const d = await res.json()
             if (!res.ok) {
@@ -147,13 +173,21 @@ export default function OrdenesPagoPage() {
     function abrirDialogo(tipo: "confirmar" | "anular" | "eliminar", op: any) {
         setMotivoAnular("")
         setDialogo({ tipo, op })
+        setRetHoy(null)
+        aceptaRetRef.current = false
+        if (tipo === "confirmar") {
+            setRetCargando(true)
+            fetch(`/api/ordenes-pago/${op.id}/confirmar`).then(r => r.json())
+                .then(d => setRetHoy(d?.error ? null : d)).catch(() => setRetHoy(null))
+                .finally(() => setRetCargando(false))
+        }
     }
     function aceptarDialogo() {
         const d = dialogo
         if (!d) return
         if (d.tipo === "anular" && !motivoAnular.trim()) { toast.warning("Escribí el motivo de la anulación."); return }
         setDialogo(null)
-        if (d.tipo === "confirmar") confirmarOP(d.op.id)
+        if (d.tipo === "confirmar") confirmarOP(d.op.id, undefined, retHoy?.cambia === true)
         else if (d.tipo === "anular") anularOP(d.op, motivoAnular.trim())
         else eliminarOP(d.op)
     }
@@ -272,6 +306,14 @@ export default function OrdenesPagoPage() {
                             <a href={`/api/retenciones/export?formato=txt&desde=${mesExport}-01&hasta=${finDeMes(mesExport)}`}>
                                 <Button variant="outline" size="sm">TXT SICORE</Button>
                             </a>
+                            {puedePresentar && esAdmin && (
+                                <Button variant="outline" size="sm" disabled={finDeMes(mesExport) > hoyISO() || (!!presentadoHasta && finDeMes(mesExport) <= presentadoHasta)}
+                                    title="Cuando el contador ya presentó el TXT de ese mes: cierra el período"
+                                    onClick={() => setConfirmaPresentar(true)}>
+                                    Marcar presentado ante ARCA
+                                </Button>
+                            )}
+                            {presentadoHasta && <span className="text-xs text-muted-foreground">Presentado hasta el {fecha(presentadoHasta)}</span>}
                         </div>
                     </CardHeader>
                     <CardContent className="p-0">
@@ -377,6 +419,30 @@ export default function OrdenesPagoPage() {
                 </Card>
             </main>
 
+            {/* Marcar un mes como presentado ante ARCA */}
+            <AlertDialog open={confirmaPresentar} onOpenChange={setConfirmaPresentar}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>¿Marcar {mesesExport.find(m => m.v === mesExport)?.l} como presentado ante ARCA?</AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                            <div className="space-y-2 text-sm">
+                                <p>Hacelo recién cuando el contador ya presentó el TXT de SICORE de ese mes. Bajar el TXT no marca nada.</p>
+                                <p>Desde ese momento, hasta el {fecha(finDeMes(mesExport))}:</p>
+                                <ul className="list-disc space-y-0.5 pl-5">
+                                    <li>no se puede <b>eliminar</b> una orden de pago con certificado de retención (se anula),</li>
+                                    <li>no se puede crear ni confirmar una orden con retención fechada en ese período.</li>
+                                </ul>
+                                <p className="text-muted-foreground">No se puede deshacer desde la pantalla.</p>
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Volver</AlertDialogCancel>
+                        <AlertDialogAction onClick={marcarPresentado}>Marcar como presentado</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
             {/* Confirmar / anular / eliminar: diálogo del sistema que explica qué va a pasar */}
             <AlertDialog open={!!dialogo} onOpenChange={(o) => { if (!o) setDialogo(null) }}>
                 <AlertDialogContent>
@@ -404,6 +470,22 @@ export default function OrdenesPagoPage() {
                                             <li>si hay retención de Ganancias, se emite el certificado.</li>
                                         </ul>
                                         <p>Si algún comprobante ya no tiene saldo (lo pagó otra orden), no se confirma y avisa cuál.</p>
+                                        {retCargando && <p className="text-muted-foreground">Calculando la retención de hoy…</p>}
+                                        {retHoy?.cambia && (
+                                            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+                                                <p className="font-semibold">La retención de Ganancias cambió desde que se armó la orden.</p>
+                                                <p>
+                                                    La retención cuenta por el día en que se paga (hoy, {fecha(retHoy.fecha_pago)}), no por la fecha de la orden ({fecha(retHoy.fecha_orden)}).
+                                                    Era <b>{formatCurrency(retHoy.retencion_guardada)}</b> y hoy corresponde <b>{formatCurrency(retHoy.retencion_hoy)}</b>:
+                                                    el neto a pagar pasa de {formatCurrency(retHoy.neto_guardado)} a <b>{formatCurrency(retHoy.neto_hoy)}</b>.
+                                                </p>
+                                                {retHoy.se_puede_ajustar ? (
+                                                    <p>Si confirmás, la diferencia se ajusta en {retHoy.medio_que_se_ajusta === "efectivo" ? "el efectivo" : retHoy.medio_que_se_ajusta === "deposito" ? "el depósito" : "la transferencia"} de la orden.</p>
+                                                ) : (
+                                                    <p className="font-semibold">Esta orden no tiene una transferencia ni efectivo donde ajustar la diferencia (se paga con cheques): eliminala y armala de nuevo.</p>
+                                                )}
+                                            </div>
+                                        )}
                                     </>
                                 )}
                                 {dialogo?.tipo === "anular" && (
@@ -440,9 +522,10 @@ export default function OrdenesPagoPage() {
                     <AlertDialogFooter>
                         <AlertDialogCancel>Volver</AlertDialogCancel>
                         <AlertDialogAction
+                            disabled={dialogo?.tipo === "confirmar" && (retCargando || (retHoy?.cambia === true && retHoy?.se_puede_ajustar === false))}
                             className={dialogo?.tipo === "confirmar" ? "" : "bg-red-600 hover:bg-red-700"}
                             onClick={(e) => { e.preventDefault(); aceptarDialogo() }}>
-                            {dialogo?.tipo === "confirmar" ? "Confirmar pago" : dialogo?.tipo === "anular" ? "Anular la orden" : "Eliminar la orden"}
+                            {dialogo?.tipo === "confirmar" ? (retHoy?.cambia ? "Confirmar con la retención de hoy" : "Confirmar pago") : dialogo?.tipo === "anular" ? "Anular la orden" : "Eliminar la orden"}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

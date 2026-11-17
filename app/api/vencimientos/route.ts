@@ -168,6 +168,23 @@ export async function PUT(request: Request) {
 
     updateData.updated_at = nowArgentina()
     for (const k of ['creado_por', 'actualizado_por', 'pagado_por', 'pagado_at']) delete updateData[k]
+    // Lo llevan las órdenes de pago: no se editan desde afuera
+    for (const k of ['monto_original', 'monto_pagado', 'monto_ajuste']) delete updateData[k]
+
+    // Vencimiento con pago parcial por orden de pago: "monto" es LO QUE FALTA pagar. Si se
+    // edita, el total se acomoda (total = lo que falta + lo ya pagado + lo dado por cancelado),
+    // así al completar el pago o al anular la orden no se pisa lo que se escribió acá.
+    // Si esas columnas todavía no existen (migración 20261117p_ordenes_pago_t1d.sql), no hace nada.
+    if (updateData.monto !== undefined && updateData.monto !== null) {
+        const { data: parcial, error: parcialErr } = await supabase.from('vencimientos')
+            .select('estado, monto_original, monto_pagado, monto_ajuste').eq('id', id).maybeSingle()
+        if (!parcialErr && parcial && parcial.estado === 'pendiente' && Number(parcial.monto_pagado) > 0) {
+            const falta = Number(updateData.monto)
+            if (Number.isFinite(falta) && falta >= 0) {
+                updateData.monto_original = Math.round((falta + Number(parcial.monto_pagado) + Number(parcial.monto_ajuste || 0)) * 100) / 100
+            }
+        }
+    }
 
     // Quién lo cambió: si lo marca pagado, la base lo anota como quien lo pagó
     const { data, error } = await conResponsable((quien) => supabase

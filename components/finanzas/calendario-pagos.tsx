@@ -41,8 +41,17 @@ interface Vencimiento {
     estado: string
     observaciones: string | null
     orden_pago_id?: string | null
+    // Vencimiento ESTIMADO de una orden de compra (todavía sin factura): es_estimado + referencia a la OC
+    es_estimado?: boolean | null
+    referencia_tipo?: string | null
+    // Pago parcial por orden de pago: "monto" es lo que falta; el total y lo pagado van acá
+    monto_original?: number | null
+    monto_pagado?: number | null
     proveedores?: { id: string; nombre: string; sigla: string | null } | null
 }
+
+/** Estimado de una orden de compra: se ve distinto (rayado, atenuado) y dice "Estimado OC-…". */
+const esEstimadoOC = (v: { es_estimado?: boolean | null; referencia_tipo?: string | null }) => v.es_estimado === true && v.referencia_tipo === "orden_compra"
 
 interface ChequeCartera {
     id: string
@@ -337,6 +346,15 @@ export function CalendarioPagos({
     // "Pagado sin OP": aviso antes de marcar pagos a proveedores
     const [avisoSinOP, setAvisoSinOP] = useState<{ ids: string[]; vencCheque?: Vencimiento; cantidad: number } | null>(null)
 
+    // E-63: dirección de la orden de pago con estos vencimientos ya tildados. null si no se
+    // pueden pagar juntos (sin proveedor, de proveedores distintos, o estimados de una OC).
+    const urlPagar = (lista: Vencimiento[]): string | null => {
+        if (lista.length === 0) return null
+        const prov = lista[0].proveedor_id
+        if (!prov || lista.some((v) => v.proveedor_id !== prov || esEstimadoOC(v))) return null
+        return `/ordenes-pago/nueva?proveedor_id=${prov}&vencimiento_ids=${lista.map((v) => v.id).join(",")}`
+    }
+
     async function confirmarPagados(ids: string[], vencCheque?: Vencimiento) {
         setSaving(true)
         try {
@@ -502,20 +520,26 @@ export function CalendarioPagos({
                                                     {pagos.map((p) => {
                                                         const f = FORMAS[formaDe(p)]
                                                         const sel = seleccion.has(p.id)
-                                                        const nombre = p.proveedores?.nombre || p.concepto
+                                                        const estOC = esEstimadoOC(p)
+                                                        const nombre = estOC
+                                                            ? `Estimado ${String(p.concepto || "").replace(/^ESTIMADO +/i, "")}${p.proveedores?.nombre ? ` · ${p.proveedores.nombre}` : ""}`
+                                                            : (p.proveedores?.nombre || p.concepto)
                                                         return (
-                                                            <div key={p.id} className="group/chip relative">
+                                                            <div key={p.id} className={`group/chip relative ${estOC && !sel ? "opacity-60" : ""}`}>
                                                                 <button
                                                                     draggable
                                                                     onDragStart={(e) => { setArrastrandoVenc(p.id); e.dataTransfer.effectAllowed = "move" }}
                                                                     onDragEnd={() => { setArrastrandoVenc(null); setSobreDia(null) }}
                                                                     onClick={() => toggleSel(p.id)}
-                                                                    title={`${p.concepto} · ${f.label} · ${formatCurrency(Number(p.monto))}${p.fecha_validez ? ` · validez ${fmtCorta(p.fecha_validez)}` : ""}${p.modalidad ? ` · ${p.modalidad}` : ""}${!p.descuentos_aplicados ? " · ⚠ chequear NC/retenciones" : ""}`}
+                                                                    title={`${estOC ? "ESTIMADO, todavía sin factura · " : ""}${p.concepto} · ${f.label} · ${formatCurrency(Number(p.monto))}${p.fecha_validez ? ` · validez ${fmtCorta(p.fecha_validez)}` : ""}${p.modalidad ? ` · ${p.modalidad}` : ""}${!p.descuentos_aplicados ? " · ⚠ chequear NC/retenciones" : ""}`}
                                                                     className="w-full rounded-md border px-1.5 py-1 text-left transition-all hover:-translate-y-px hover:shadow"
                                                                     style={{
                                                                         borderColor: f.color,
                                                                         borderLeftWidth: 3,
-                                                                        background: sel ? f.color : `${f.color}18`,
+                                                                        borderStyle: estOC ? "dashed" : undefined,
+                                                                        background: sel ? f.color : estOC
+                                                                            ? `repeating-linear-gradient(135deg, ${f.color}22 0 5px, transparent 5px 10px)`
+                                                                            : `${f.color}18`,
                                                                     }}
                                                                 >
                                                                     <span className={`flex items-center gap-1 text-[10px] font-semibold leading-tight ${sel ? "text-white" : "text-slate-700"}`}>
@@ -531,6 +555,11 @@ export function CalendarioPagos({
                                                                     </span>
                                                                     <span className={`block font-mono text-[9.5px] ${sel ? "text-white/80" : "text-slate-500"}`}>
                                                                         {formatCurrency(Number(p.monto))}
+                                                                        {p.monto_original != null && Number(p.monto_pagado) > 0 && (
+                                                                            <span className="ml-1 font-sans font-semibold" title={`Pagado en parte: ya se pagaron ${formatCurrency(Number(p.monto_pagado))} de ${formatCurrency(Number(p.monto_original))}`}>
+                                                                                · falta de {formatCurrency(Number(p.monto_original))}
+                                                                            </span>
+                                                                        )}
                                                                         {p.fecha_validez && p.fecha_validez !== p.fecha_vencimiento && (
                                                                             <span className="ml-1">→ {fmtCorta(p.fecha_validez)}</span>
                                                                         )}
@@ -988,11 +1017,22 @@ export function CalendarioPagos({
                                 Limpiar
                             </Button>
                         </div>
+                        {/* E-63: pagar de verdad (orden de pago con todo preseleccionado). Solo admin y si lo
+                            elegido es de UN mismo proveedor y no es un estimado de orden de compra. */}
+                        {soyAdmin && urlPagar(seleccionados) && (
+                            <Button size="sm" className="mt-2 w-full gap-1 text-xs" disabled={saving}
+                                title="Abre la orden de pago con esto ya tildado: registra caja o banco, cuenta corriente y retención"
+                                onClick={() => { window.location.href = urlPagar(seleccionados)! }}>
+                                Pagar ({seleccionados.length})
+                            </Button>
+                        )}
                         {seleccionados.length > 0 && (
                             <Button
                                 size="sm"
-                                className="mt-2 w-full gap-1 bg-emerald-600 text-xs hover:bg-emerald-700"
+                                variant={soyAdmin && urlPagar(seleccionados) ? "outline" : "default"}
+                                className={soyAdmin && urlPagar(seleccionados) ? "mt-1 w-full gap-1 text-xs" : "mt-2 w-full gap-1 bg-emerald-600 text-xs hover:bg-emerald-700"}
                                 disabled={saving}
+                                title="Solo lo marca pagado en el calendario: no registra caja, cuenta corriente ni retención"
                                 onClick={() => marcarPagados(seleccionados.map((v) => v.id))}
                             >
                                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
@@ -1073,17 +1113,15 @@ export function CalendarioPagos({
                                     <li>no registra el pago en la cuenta corriente del proveedor,</li>
                                     <li>no calcula la retención de Ganancias.</li>
                                 </ul>
-                                <p>Queda marcado como <b>pagado sin OP</b>. Para hacerlo completo, usá <b>Generar OP</b>.</p>
+                                <p>Queda marcado como <b>pagado sin OP</b>. Para hacerlo completo (caja o banco, cuenta corriente y retención), usá <b>Pagar con orden de pago</b>.</p>
                             </div>
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        {avisoSinOP?.ids.length === 1 && (() => {
-                            const v = vencimientos.find((x) => x.id === avisoSinOP.ids[0])
-                            return v?.proveedor_id && soyAdmin ? (
-                                <Button variant="outline" onClick={() => { window.location.href = `/ordenes-pago/nueva?proveedor_id=${v.proveedor_id}&vencimiento_id=${v.id}&monto=${v.monto ?? 0}` }}>Generar OP</Button>
-                            ) : null
+                        {soyAdmin && avisoSinOP && (() => {
+                            const url = urlPagar(vencimientos.filter((x) => avisoSinOP.ids.includes(x.id)))
+                            return url ? <Button onClick={() => { window.location.href = url }}>Pagar con orden de pago</Button> : null
                         })()}
                         <AlertDialogAction onClick={() => { const a = avisoSinOP; setAvisoSinOP(null); if (a) confirmarPagados(a.ids, a.vencCheque) }}>Marcar pagado sin OP</AlertDialogAction>
                     </AlertDialogFooter>

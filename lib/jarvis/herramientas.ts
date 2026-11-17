@@ -588,16 +588,25 @@ const pagosProveedores: Herramienta = {
     let provId: string | null = null
     if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); provId = pr.id; nombre = pr.nombre }
     const admin = await veReservados(ctx)
-    const data = await fetchAllRows<any>(() => {
-      let q = ctx.db.from("vencimientos").select("id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)")
+    // Con pago parcial por orden de pago, "monto" es LO QUE FALTA; el total del vencimiento
+    // queda en monto_original y lo ya pagado en monto_pagado (migración 20261117p_ordenes_pago_t1d.sql). Si esas
+    // columnas todavía no existen, se sigue leyendo como antes.
+    const colsVenc = "id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)"
+    const traerVenc = (cols: string) => fetchAllRows<any>(() => {
+      let q = ctx.db.from("vencimientos").select(cols)
         .eq("estado", "pendiente").lte("fecha_vencimiento", hasta)
       if (!admin) q = q.not("tipo", "in", filtroReservados)
       return provId ? q.eq("proveedor_id", provId) : q
     }, "id")
+    let data: any[]
+    try { data = await traerVenc(`${colsVenc}, monto_original, monto_pagado`) } catch (e) { if (!faltaEnLaBase(e)) throw e; data = await traerVenc(colsVenc) }
     data.sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)))
     const filas = data.map((v: any) => ({
       fecha: fechaSola(v.fecha_vencimiento), proveedor: v.proveedores?.nombre ?? "—", concepto: v.concepto ?? v.tipo ?? null,
       monto: red(n0(v.monto)), atrasado: String(v.fecha_vencimiento) < ctx.hoy ? "sí" : "", estimado: v.es_estimado ? "sí" : "",
+      // Solo si ya recibió un pago parcial: "monto" es lo que falta de este total
+      importe_original: v.monto_original != null ? red(n0(v.monto_original)) : null,
+      ya_pagado: v.monto_original != null ? red(n0(v.monto_pagado)) : null,
     }))
     const atrasado = red(filas.filter((f) => f.atrasado).reduce((s, f) => s + f.monto, 0))
     const semana = red(filas.filter((f) => !f.atrasado && (f.fecha ?? "") <= sumarDiasISO(ctx.hoy, 7)).reduce((s, f) => s + f.monto, 0))
@@ -1679,6 +1688,14 @@ const gastosPagados: Herramienta = {
       if (error && !faltaEnLaBase(error)) throw new Error(error.message)
       for (const x of (h ?? []) as any[]) historial.set(x.vencimiento_id, [...(historial.get(x.vencimiento_id) ?? []), x])
     }
+    // Pagados por orden de pago: lo que realmente se pagó (monto_pagado) y, si se dio por
+    // cancelado pagando menos, el descuento. Si esas columnas todavía no existen, queda "monto".
+    const pagoReal = new Map<string, { pagado: number; ajuste: number }>()
+    if (data.length) {
+      const { data: pr, error: prErr } = await ctx.db.from("vencimientos").select("id, monto_pagado, monto_ajuste").in("id", data.map((v) => v.id)).gt("monto_pagado", 0)
+      if (prErr && !faltaEnLaBase(prErr)) throw new Error(prErr.message)
+      for (const x of (pr ?? []) as any[]) pagoReal.set(x.id, { pagado: n0(x.monto_pagado), ajuste: n0(x.monto_ajuste) })
+    }
     const nom = await nombresDeUsuarios(ctx.db, [
       ...data.flatMap((v) => [v.pagado_por, v.creado_por]),
       ...[...historial.values()].flat().map((x) => x.usuario_id),
@@ -1689,7 +1706,11 @@ const gastosPagados: Herramienta = {
       const op = v.orden_pago_id ? opDe.get(v.orden_pago_id) : null
       const pagadoAntes = conQuien && !v.pagado_at
       return {
-        concepto: v.concepto ?? "—", proveedor: v.proveedores?.nombre ?? null, tipo: v.tipo, monto: red(n0(v.monto)),
+        concepto: v.concepto ?? "—", proveedor: v.proveedores?.nombre ?? null, tipo: v.tipo,
+        // monto = lo pagado. Si se pagó por orden de pago, lo realmente pagado (puede ser más o menos que el vencimiento)
+        monto: red(pagoReal.get(v.id)?.pagado || n0(v.monto)),
+        importe_del_vencimiento: pagoReal.has(v.id) && Math.abs(pagoReal.get(v.id)!.pagado - n0(v.monto)) > 0.01 ? red(n0(v.monto)) : null,
+        descuento: pagoReal.get(v.id)?.ajuste ? red(pagoReal.get(v.id)!.ajuste) : null,
         vencia: fechaSola(v.fecha_vencimiento), forma: v.forma_pago ?? null,
         pago: op ? `orden de pago ${op.numero ?? ""}`.trim() : !conQuien || pagadoAntes ? "no quedó registrado (se marcó pagado antes de que se anotara)" : q(v.pagado_por),
         cuando: op ? op.cuando : v.pagado_at ? cuando(v.pagado_at) : `${cuando(v.updated_at)} (última modificación)`,

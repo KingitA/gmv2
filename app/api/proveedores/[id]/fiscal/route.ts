@@ -32,6 +32,13 @@ export async function GET(
     // para que la ficha siga abriendo aunque la columna todavía no exista.
     const { data: ex, error: exErr } = await supabase.from('proveedores').select('ganancias_exento_hasta').eq('id', id).maybeSingle()
     if (!exErr && ex) (prov as any).ganancias_exento_hasta = (ex as any).ganancias_exento_hasta ?? null
+    // Datos para pagarle, SOLO LECTURA acá (los muestra la orden de pago). Se cargan en la ficha
+    // del proveedor: columnas de 20261117m_proveedores_datos_compra.sql (Tanda 1-A). Se leen
+    // aparte para que esto siga andando si esa migración todavía no está aplicada.
+    const { data: bco } = await supabase.from('proveedores').select('banco_nombre, banco_cuenta, banco_numero_cuenta, banco_tipo_cuenta').eq('id', id).maybeSingle()
+    if (bco) Object.assign(prov as any, bco)
+    const { data: pago, error: pagoErr } = await supabase.from('proveedores').select('cbu, cbu_alias, banco_titular, acepta_cheques_terceros, acepta_echeq').eq('id', id).maybeSingle()
+    if (!pagoErr && pago) Object.assign(prov as any, pago)
     return NextResponse.json({ proveedor: prov, exclusiones: excl ?? [], regimenes: regs ?? [] })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })

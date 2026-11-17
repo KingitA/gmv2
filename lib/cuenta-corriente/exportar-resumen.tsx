@@ -41,6 +41,8 @@ export interface DatosResumen {
   soloSeleccion?: boolean
   /** total con signo de la selección (créditos restan) */
   totalSeleccion?: number
+  /** Textos opcionales (los usa la cuenta corriente de PROVEEDORES; sin esto queda como para clientes) */
+  etiquetas?: { tituloExtracto?: string; positivo?: string; negativo?: string; columnaPedido?: string; archivo?: string }
 }
 
 const firmado = (f: FilaSaldoExport, v: number) => (f.es_credito ? -Math.abs(v) : Math.abs(v))
@@ -61,7 +63,7 @@ const estadoLegible = (e: string) => ESTADO_LEGIBLE[e] ?? (e ? e.charAt(0).toUpp
 
 function nombreArchivo(d: DatosResumen, ext: string) {
   const slug = (d.cliente.nombre || "cliente").replace(/[^\p{L}\p{N}]+/gu, "-").toLowerCase()
-  return `resumen-cuenta-${slug}-${hoyISO()}.${ext}`
+  return `${d.etiquetas?.archivo ?? "resumen-cuenta"}-${slug}-${hoyISO()}.${ext}`
 }
 
 function descargar(blob: Blob, nombre: string) {
@@ -149,12 +151,12 @@ export async function exportarResumenPdf(d: DatosResumen) {
         <Text style={st.titulo}>Resumen de cuenta — {d.cliente.nombre}</Text>
         <Text style={st.sub}>
           {d.cliente.cuit ? `CUIT ${formatCuit(d.cliente.cuit)} · ` : ""}emitido el {fechaAR(hoyISO())}
-          {rango} · Saldo actual: {moneda(d.saldoFinal)} {d.saldoFinal > 0 ? "(debe)" : d.saldoFinal < 0 ? "(a favor)" : ""}
+          {rango} · Saldo actual: {moneda(d.saldoFinal)} {d.saldoFinal > 0 ? (d.etiquetas?.positivo ?? "(debe)") : d.saldoFinal < 0 ? (d.etiquetas?.negativo ?? "(a favor)") : ""}
         </Text>
 
         {d.vista === "detallada" && !d.soloSeleccion && (
           <>
-            <Text style={st.seccion}>Extracto (del más nuevo al más viejo)</Text>
+            <Text style={st.seccion}>{d.etiquetas?.tituloExtracto ?? "Extracto (del más nuevo al más viejo)"}</Text>
             <View style={st.cab}>
               <C w={colE[0]}>Fecha</C>
               <C w={colE[1]}>Movimiento</C>
@@ -185,7 +187,7 @@ export async function exportarResumenPdf(d: DatosResumen) {
           <C w={colS[0]}>Tipo</C>
           <C w={colS[1]}>Número</C>
           <C w={colS[2]}>Fecha</C>
-          <C w={colS[3]}>Pedido</C>
+          <C w={colS[3]}>{d.etiquetas?.columnaPedido ?? "Pedido"}</C>
           <C w={colS[4]} num>Total</C>
           <C w={colS[5]} num>Saldo</C>
           <C w={colS[6]}>Estado</C>

@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requirePermiso } from '@/lib/auth'
+import { hoyISO, parseFecha } from '@/lib/formato'
 import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import React, { type JSXElementConstructor, type ReactElement } from 'react'
 import { PlanillaRetencionesPDF, type PlanillaRetencionesData } from '@/lib/pdf/planilla-retenciones-template'
@@ -44,6 +45,15 @@ export async function GET(request: Request) {
     const desde = searchParams.get('desde')
     const hasta = searchParams.get('hasta')
     const formato = searchParams.get('formato') || 'planilla'
+
+    // ?formato=estado → hasta qué día están presentadas las retenciones (para la pantalla)
+    if (formato === 'estado') {
+      const sb = createAdminClient()
+      const { data: pres, error: presErr } = await sb.from('retenciones_exportaciones')
+        .select('hasta').eq('formato', 'txt').eq('presentado', true).order('hasta', { ascending: false }).limit(1)
+      // Sin la migración 20261117p_ordenes_pago_t1d.sql la tabla no existe: no hay nada presentado
+      return NextResponse.json({ disponible: !presErr, presentado_hasta: presErr ? null : (pres?.[0]?.hasta ?? null) })
+    }
     if (!desde || !hasta || !/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta)) {
       return NextResponse.json({ error: 'desde y hasta (YYYY-MM-DD) son obligatorios' }, { status: 400 })
     }
@@ -82,6 +92,8 @@ export async function GET(request: Request) {
         )
       })
       const contenido = lineas.map((l) => l + '\r\n').join('')
+      // Bajar el TXT NO cierra el período (se puede bajar las veces que haga falta para
+      // revisarlo). El período se cierra con POST, cuando se marca "Presentado ante ARCA".
       const nombre = `RET_OP_GAN_${desde.slice(0, 7).replace('-', '')}.TXT`
       return new NextResponse(contenido, {
         headers: {
@@ -118,6 +130,52 @@ export async function GET(request: Request) {
     })
   } catch (error: any) {
     console.error('[retenciones/export] error:', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+}
+
+/**
+ * POST /api/retenciones/export — marca un período como PRESENTADO ante ARCA (E-61).
+ * Body: { desde, hasta } (AAAA-MM-DD). El "hasta" no puede ser futuro.
+ *
+ * Desde ese momento, hasta esa fecha: no se elimina una orden con certificado (se anula),
+ * ni se crea o confirma una orden con retención fechada ahí. Bajar el TXT no marca nada.
+ */
+export async function POST(request: Request) {
+  const auth = await requirePermiso('ordenes_pago')
+  if (auth.error) return auth.error
+  try {
+    const body = await request.json().catch(() => ({}))
+    const desde = parseFecha(body?.desde), hasta = parseFecha(body?.hasta)
+    if (!desde || !hasta || desde > hasta) {
+      return NextResponse.json({ error: 'El período no es válido.' }, { status: 400 })
+    }
+    if (hasta > hoyISO()) {
+      return NextResponse.json({ error: 'No se puede marcar como presentado un período que todavía no terminó.' }, { status: 400 })
+    }
+    const supabase = createAdminClient()
+    const { data: ya } = await supabase.from('retenciones_exportaciones')
+      .select('id').eq('formato', 'txt').eq('presentado', true).eq('desde', desde).eq('hasta', hasta).limit(1)
+    if (ya?.length) return NextResponse.json({ success: true, ya_estaba: true, presentado_hasta: hasta })
+
+    const { data: certs, error: certErr } = await supabase.from('retenciones_emitidas')
+      .select('monto').eq('estado', 'emitida').gte('fecha', desde).lte('fecha', hasta)
+    if (certErr) throw certErr
+    const { error } = await supabase.from('retenciones_exportaciones').insert({
+      formato: 'txt', desde, hasta, presentado: true,
+      certificados: (certs ?? []).length,
+      total: (certs ?? []).reduce((t: number, c: any) => t + Number(c.monto ?? 0), 0),
+      usuario_id: auth.user.id,
+    })
+    if (error) {
+      const falta = error.code === '42P01' || error.code === 'PGRST205' || error.code === '42703' || error.code === 'PGRST204'
+      return NextResponse.json({
+        error: falta ? 'Falta aplicar en la base la migración 20261117p_ordenes_pago_t1d.sql para poder marcar períodos presentados.' : error.message,
+      }, { status: falta ? 503 : 500 })
+    }
+    return NextResponse.json({ success: true, ya_estaba: false, presentado_hasta: hasta, certificados: (certs ?? []).length })
+  } catch (error: any) {
+    console.error('[retenciones/export] POST error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
