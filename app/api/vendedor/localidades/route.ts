@@ -22,12 +22,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Nombre y provincia son obligatorios." }, { status: 400 })
     }
 
-    const { data: existente } = await supabase
-      .from("localidades")
-      .select("id, nombre, provincia")
-      .ilike("nombre", nombre)
-      .ilike("provincia", provincia)
-      .maybeSingle()
+    // Repetida = mismo nombre sin importar provincia, mayúsculas ni acentos: es lo que
+    // exige la base (índice único uq_localidades_nombre sobre norm_txt(nombre)). Antes se
+    // comparaba nombre + provincia y "NEUQUEN" con otra provincia pasaba el chequeo y
+    // reventaba en la base con el error en inglés (17/11/2026).
+    const existente = await localidadConMismoNombre(supabase, nombre)
     if (existente) {
       return NextResponse.json(
         { error: `La localidad "${existente.nombre}" (${existente.provincia}) ya existe.`, localidad_existente: existente },
@@ -45,11 +44,31 @@ export async function POST(request: Request) {
       .insert({ nombre, provincia, codigo_postal: codigoPostal, zona_id: zonaId })
       .select("id, nombre, provincia, codigo_postal, zona_id")
       .single()
-    if (error) throw error
+    if (error) {
+      // Otro la creó en el mismo instante: se usa esa
+      if ((error as { code?: string }).code === "23505") {
+        const otra = await localidadConMismoNombre(supabase, nombre)
+        if (otra) return NextResponse.json({ error: `La localidad "${otra.nombre}" (${otra.provincia || "sin provincia"}) ya existe.`, localidad_existente: otra }, { status: 409 })
+        return NextResponse.json({ error: `Ya existe una localidad llamada "${nombre}".` }, { status: 409 })
+      }
+      throw error
+    }
 
     return NextResponse.json({ success: true, localidad })
   } catch (error: any) {
     console.error("[vendedor] Error en POST /api/vendedor/localidades:", error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: "No se pudo crear la localidad. Probá de nuevo o pedíselo a la oficina." }, { status: 500 })
   }
+}
+
+/** Igual que norm_txt() de la base: minúsculas, sin espacios en los bordes y sin acentos. */
+function normTxt(s: string | null | undefined): string {
+  return (s || "").trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "")
+}
+
+async function localidadConMismoNombre(supabase: Awaited<ReturnType<typeof createClient>>, nombre: string) {
+  const n = normTxt(nombre)
+  // Son pocas (cientos): se comparan todas igual que la base
+  const { data } = await supabase.from("localidades").select("id, nombre, provincia, codigo_postal, zona_id").limit(5000)
+  return (data || []).find((l) => normTxt(l.nombre) === n) ?? null
 }
