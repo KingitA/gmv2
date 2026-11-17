@@ -23,13 +23,15 @@ import { toast } from "sonner"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { InputMonto } from "@/components/ui/input-monto"
 import { DateInputAR } from "@/components/ui/date-input-ar"
-import { fecha } from "@/lib/formato"
+import { fecha, fechaISO } from "@/lib/formato"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
 import { etiquetaComprobante, type FilaExtracto } from "@/lib/proveedores/extracto-cc"
 import type { DatosResumen } from "@/lib/cuenta-corriente/exportar-resumen"
 
-// Movimientos que no son un comprobante para pagar: van agrupados en el extracto
-const NO_ES_COMPROBANTE = ["PAGO", "RETENCION", "ANULACION"]
+// Movimientos que no son un comprobante para pagar: los pagos van agrupados en el extracto y
+// las provisiones de órdenes de compra (mercadería pedida, sin facturar) NO son deuda: se
+// muestran aparte, fuera del saldo y fuera de lo que se puede pagar.
+const NO_ES_COMPROBANTE = ["PAGO", "RETENCION", "ANULACION", "ORDEN COMPRA"]
 
 export default function CuentaCorrienteProveedorPage() {
     const params = useParams()
@@ -41,6 +43,7 @@ export default function CuentaCorrienteProveedorPage() {
     const [saldo, setSaldo] = useState(0)
     const [extracto, setExtracto] = useState<{ filas: FilaExtracto[]; saldo_anterior: number; saldo_final: number }>({ filas: [], saldo_anterior: 0, saldo_final: 0 })
     const [ncEsperadas, setNcEsperadas] = useState<any[]>([])
+    const [comprometido, setComprometido] = useState<FilaExtracto[]>([])
     const [proveedor, setProveedor] = useState<{ nombre: string; sigla?: string | null; cuit?: string | null } | null>(null)
     const [loading, setLoading] = useState(true)
     const [desde, setDesde] = useState("")
@@ -67,6 +70,7 @@ export default function CuentaCorrienteProveedorPage() {
             setSaldo(Number(data.totales?.saldo ?? 0))
             setExtracto(data.extracto || { filas: [], saldo_anterior: 0, saldo_final: 0 })
             setNcEsperadas(data.nc_esperadas || [])
+            setComprometido(data.comprometido_oc || [])
             if (data.proveedor) setProveedor(data.proveedor)
         } catch (e: any) {
             toast.error(e?.message || "No se pudo cargar la cuenta corriente")
@@ -131,11 +135,11 @@ export default function CuentaCorrienteProveedorPage() {
                 cliente: { nombre: proveedor?.nombre || provNombre || "proveedor", cuit: proveedor?.cuit ?? null },
                 vista: "detallada",
                 extracto: extracto.filas.map(f => ({
-                    fecha: String(f.fecha).slice(0, 10), movimiento: f.movimiento, detalle: f.detalle,
+                    fecha: fechaISO(f.fecha), movimiento: f.movimiento, detalle: f.detalle,
                     debe: f.debe, haber: f.haber, saldo_acumulado: f.saldo,
                 })),
                 saldos: [...deudas, ...creditos].map((m: any) => ({
-                    tipo: m.tipo_comprobante || m.tipo, numero: m.numero || "", fecha: String(m.fecha).slice(0, 10),
+                    tipo: m.tipo_comprobante || m.tipo, numero: m.numero || "", fecha: fechaISO(m.fecha),
                     pedido: m.vencimiento ? `vence ${fecha(m.vencimiento)}` : "-",
                     total: Math.abs(Number(m.total)), saldo: Math.abs(Number(m.saldo_pendiente)),
                     estado: Math.abs(Number(m.saldo_pendiente)) < Math.abs(Number(m.total)) - 0.01 ? "parcial" : "pendiente",
@@ -183,7 +187,7 @@ export default function CuentaCorrienteProveedorPage() {
                     <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">{saldo > 0.005 ? "Le debemos" : saldo < -0.005 ? "Saldo a nuestro favor" : "Saldo"}</CardTitle></CardHeader>
                     <CardContent>
                         <div className={`text-2xl font-bold tabular-nums ${saldo > 0.005 ? "text-red-600" : "text-green-600"}`}>{formatCurrency(Math.abs(saldo))}</div>
-                        <p className="mt-1 text-xs text-muted-foreground">Suma de todos los movimientos de la cuenta</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Comprobantes, pagos y retenciones. No incluye la mercadería pedida sin facturar.</p>
                     </CardContent>
                 </Card>
                 <Card>
@@ -199,6 +203,30 @@ export default function CuentaCorrienteProveedorPage() {
                     <CardContent><div className="text-2xl font-bold tabular-nums">{formatCurrency(Math.max(0, aCuenta))}</div><p className="mt-1 text-xs text-muted-foreground">Pagos y retenciones sin aplicar a un comprobante</p></CardContent>
                 </Card>
             </div>
+
+            {/* Mercadería pedida y todavía sin factura: no es deuda, no se paga */}
+            {comprometido.length > 0 && (
+                <Card className="mb-6 border-dashed">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-base">Comprometido por órdenes de compra · {formatCurrency(comprometido.reduce((s, c) => s + c.debe, 0))}</CardTitle>
+                        <p className="text-xs text-muted-foreground">Mercadería pedida que todavía no tiene factura. NO es deuda: no suma al saldo ni se puede pagar. Pasa a deuda cuando se valida la factura.</p>
+                    </CardHeader>
+                    <CardContent className="space-y-1 text-sm">
+                        {comprometido.map((c) => (
+                            <div key={c.clave} className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                                <span className="w-24">{fecha(c.fecha)}</span>
+                                <span className="flex-1 truncate">{c.detalle}</span>
+                                <span className="font-mono">{formatCurrency(c.debe)}</span>
+                                {c.orden_compra_id && (
+                                    <Link href={`/ordenes-compra/${c.orden_compra_id}/verificacion`} className="inline-flex items-center gap-1 text-xs text-blue-700 underline">
+                                        <ExternalLink className="h-3 w-3" /> ver la orden
+                                    </Link>
+                                )}
+                            </div>
+                        ))}
+                    </CardContent>
+                </Card>
+            )}
 
             {/* NC que el proveedor nos debe mandar */}
             {ncEsperadas.length > 0 && (
@@ -271,7 +299,7 @@ export default function CuentaCorrienteProveedorPage() {
                                                 {esAdmin && <TableCell><Checkbox checked={selectedMovs.has(m.id)} onCheckedChange={() => toggle(m.id)} /></TableCell>}
                                                 <TableCell className="text-sm">{fecha(m.fecha)}</TableCell>
                                                 <TableCell>
-                                                    <Badge variant="secondary" className="mr-2">{m.tipo === "ORDEN COMPRA" ? "Sin facturar" : etiquetaComprobante(m.tipo_comprobante)}</Badge>
+                                                    <Badge variant="secondary" className="mr-2">{etiquetaComprobante(m.tipo_comprobante)}</Badge>
                                                     <span className="text-sm">{m.numero}</span>
                                                 </TableCell>
                                                 <TableCell className="text-sm text-muted-foreground">{m.vencimiento ? fecha(m.vencimiento) : ""}</TableCell>
@@ -356,7 +384,7 @@ export default function CuentaCorrienteProveedorPage() {
                                             )}
                                             {extracto.filas.map((f) => (
                                                 <TableRow key={f.clave} className={claseFila[f.clase] ?? ""}>
-                                                    <TableCell className="whitespace-nowrap text-sm">{fecha(String(f.fecha).slice(0, 10))}</TableCell>
+                                                    <TableCell className="whitespace-nowrap text-sm">{fecha(f.fecha)}</TableCell>
                                                     <TableCell className="text-sm font-medium">{f.movimiento}</TableCell>
                                                     <TableCell className="max-w-[420px] text-sm text-muted-foreground">
                                                         {f.clase === "pago" ? (

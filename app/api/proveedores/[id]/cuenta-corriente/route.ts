@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from '@/lib/auth'
 import { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all'
 import { armarExtracto, type OrdenPagoResumen } from '@/lib/proveedores/extracto-cc'
+import { parseFecha } from '@/lib/formato'
 
 /**
  * GET /api/proveedores/[id]/cuenta-corriente[?desde=AAAA-MM-DD&hasta=AAAA-MM-DD]
@@ -25,8 +26,8 @@ export async function GET(
     if (auth.error) return auth.error
     const { id: proveedorId } = await params;
     const sp = new URL(request.url).searchParams
-    const esFecha = (v: string | null) => (v && /^d{4}-d{2}-d{2}$/.test(v) ? v : null)
-    const desde = esFecha(sp.get('desde')), hasta = esFecha(sp.get('hasta'))
+    // parseFecha (lib/formato): devuelve AAAA-MM-DD o null si no es una fecha válida
+    const desde = parseFecha(sp.get('desde')), hasta = parseFecha(sp.get('hasta'))
 
     const supabase = createAdminClient();
 
@@ -48,7 +49,7 @@ export async function GET(
 
         if (movimientos.length === 0) {
             return NextResponse.json({
-                totales: { comprobantes: 0, facturado: 0, pagado: 0, saldo: 0 },
+                totales: { comprobantes: 0, facturado: 0, pagado: 0, saldo: 0, comprometido: 0 },
                 comprobantes: [],
                 extracto: { filas: [], saldo_anterior: 0, saldo_final: 0, desde, hasta },
                 nc_esperadas: ncEsperadas,
@@ -86,6 +87,7 @@ export async function GET(
         let totalFacturado = 0;
         let totalPagado = 0;
         let saldoPendienteGlobal = 0;
+        let comprometido = 0;
 
         const formattedMovimientos = movimientos.map((mov: any) => {
             const tipo = mov.tipo_movimiento;
@@ -112,7 +114,10 @@ export async function GET(
                 totalFacturado += amount;
             }
 
-            saldoPendienteGlobal += amount;
+            // Las provisiones de órdenes de compra (mercadería pedida, sin facturar) NO son deuda:
+            // van aparte como "comprometido", fuera del saldo.
+            if (tipo === 'orden_compra') comprometido += amount;
+            else saldoPendienteGlobal += amount;
 
             return {
                 id: mov.id,
@@ -155,10 +160,12 @@ export async function GET(
                 comprobantes: movimientos.length,
                 facturado: totalFacturado,
                 pagado: totalPagado,
-                saldo: Math.round(saldoPendienteGlobal * 100) / 100
+                saldo: Math.round(saldoPendienteGlobal * 100) / 100,
+                comprometido: Math.round(comprometido * 100) / 100
             },
             comprobantes: formattedMovimientos,
             extracto: { filas: ext.filas, saldo_anterior: ext.saldoAnterior, saldo_final: ext.saldoFinal, desde, hasta },
+            comprometido_oc: ext.comprometido,
             nc_esperadas: ncEsperadas,
             proveedor: prov ?? null,
         });

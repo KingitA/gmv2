@@ -32,11 +32,12 @@ export async function GET(
     // para que la ficha siga abriendo aunque la columna todavía no exista.
     const { data: ex, error: exErr } = await supabase.from('proveedores').select('ganancias_exento_hasta').eq('id', id).maybeSingle()
     if (!exErr && ex) (prov as any).ganancias_exento_hasta = (ex as any).ganancias_exento_hasta ?? null
-    // Datos para pagarle (migración 20261117p + columnas bancarias de siempre). Aparte por lo mismo.
+    // Datos para pagarle, SOLO LECTURA acá (los muestra la orden de pago). Se cargan en la ficha
+    // del proveedor: columnas de 20261117m_proveedores_datos_compra.sql (Tanda 1-A). Se leen
+    // aparte para que esto siga andando si esa migración todavía no está aplicada.
     const { data: bco } = await supabase.from('proveedores').select('banco_nombre, banco_cuenta, banco_numero_cuenta, banco_tipo_cuenta').eq('id', id).maybeSingle()
     if (bco) Object.assign(prov as any, bco)
-    const { data: pago, error: pagoErr } = await supabase.from('proveedores').select('banco_cbu, banco_alias, banco_titular, acepta_cheques_terceros, acepta_echeq').eq('id', id).maybeSingle()
-    ;(prov as any).datos_pago_disponibles = !pagoErr
+    const { data: pago, error: pagoErr } = await supabase.from('proveedores').select('cbu, cbu_alias, banco_titular, acepta_cheques_terceros, acepta_echeq').eq('id', id).maybeSingle()
     if (!pagoErr && pago) Object.assign(prov as any, pago)
     return NextResponse.json({ proveedor: prov, exclusiones: excl ?? [], regimenes: regs ?? [] })
   } catch (error: any) {
@@ -59,13 +60,6 @@ export async function PUT(
     if (body.regimen_ganancias) updates.regimen_ganancias = body.regimen_ganancias
     if (body.condicion_ganancias) updates.condicion_ganancias = body.condicion_ganancias
     if ('ganancias_exento_hasta' in body) updates.ganancias_exento_hasta = body.ganancias_exento_hasta || null
-    // Datos para pagarle (E-67). Solo llegan si la pantalla los tiene (migración 20261117p aplicada)
-    for (const campo of ['banco_cbu', 'banco_alias', 'banco_titular']) {
-      if (campo in body) updates[campo] = String(body[campo] ?? '').trim() || null
-    }
-    for (const campo of ['acepta_cheques_terceros', 'acepta_echeq']) {
-      if (campo in body) updates[campo] = body[campo] === true ? true : body[campo] === false ? false : null
-    }
     for (const campo of [
       'pago_blanco_medio', 'pago_blanco_plazo_cheque', 'pago_blanco_entrega', 'pago_blanco_dias', 'pago_blanco_desde',
       'pago_negro_medio', 'pago_negro_plazo_cheque', 'pago_negro_entrega', 'pago_negro_dias', 'pago_negro_desde',

@@ -30,6 +30,26 @@ export default function OrdenesPagoPage() {
     const [dialogo, setDialogo] = useState<{ tipo: "confirmar" | "anular" | "eliminar"; op: any } | null>(null)
     const [motivoAnular, setMotivoAnular] = useState("")
     const [trabajando, setTrabajando] = useState(false)
+    // E-61: hasta qué día están presentadas ante ARCA las retenciones (cierra el período)
+    const [presentadoHasta, setPresentadoHasta] = useState<string | null>(null)
+    const [puedePresentar, setPuedePresentar] = useState(false)
+    const [confirmaPresentar, setConfirmaPresentar] = useState(false)
+    const cargarPresentado = () => fetch("/api/retenciones/export?formato=estado&desde=2000-01-01&hasta=2000-01-01")
+        .then(r => r.json()).then(d => { setPresentadoHasta(d?.presentado_hasta ?? null); setPuedePresentar(d?.disponible === true) }).catch(() => {})
+    useEffect(() => { cargarPresentado() }, [])
+    async function marcarPresentado() {
+        setConfirmaPresentar(false)
+        try {
+            const res = await fetch("/api/retenciones/export", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ desde: `${mesExport}-01`, hasta: finDeMes(mesExport) }),
+            })
+            const d = await res.json().catch(() => ({}))
+            if (!res.ok) { toast.error(d.error || "No se pudo marcar el período", { duration: 10000 }); return }
+            toast.success(d.ya_estaba ? "Ese período ya estaba marcado como presentado." : "Período marcado como presentado ante ARCA.")
+            cargarPresentado()
+        } catch (e: any) { toast.error(e?.message || "No se pudo marcar el período") }
+    }
     // Lo que mueve plata (confirmar, anular, eliminar una pagada) es solo de admin; el servidor lo vuelve a controlar
     const { esAdmin } = useMisRoles()
 
@@ -272,6 +292,14 @@ export default function OrdenesPagoPage() {
                             <a href={`/api/retenciones/export?formato=txt&desde=${mesExport}-01&hasta=${finDeMes(mesExport)}`}>
                                 <Button variant="outline" size="sm">TXT SICORE</Button>
                             </a>
+                            {puedePresentar && esAdmin && (
+                                <Button variant="outline" size="sm" disabled={finDeMes(mesExport) > hoyISO() || (!!presentadoHasta && finDeMes(mesExport) <= presentadoHasta)}
+                                    title="Cuando el contador ya presentó el TXT de ese mes: cierra el período"
+                                    onClick={() => setConfirmaPresentar(true)}>
+                                    Marcar presentado ante ARCA
+                                </Button>
+                            )}
+                            {presentadoHasta && <span className="text-xs text-muted-foreground">Presentado hasta el {fecha(presentadoHasta)}</span>}
                         </div>
                     </CardHeader>
                     <CardContent className="p-0">
@@ -376,6 +404,30 @@ export default function OrdenesPagoPage() {
                     </CardContent>
                 </Card>
             </main>
+
+            {/* Marcar un mes como presentado ante ARCA */}
+            <AlertDialog open={confirmaPresentar} onOpenChange={setConfirmaPresentar}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>¿Marcar {mesesExport.find(m => m.v === mesExport)?.l} como presentado ante ARCA?</AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                            <div className="space-y-2 text-sm">
+                                <p>Hacelo recién cuando el contador ya presentó el TXT de SICORE de ese mes. Bajar el TXT no marca nada.</p>
+                                <p>Desde ese momento, hasta el {fecha(finDeMes(mesExport))}:</p>
+                                <ul className="list-disc space-y-0.5 pl-5">
+                                    <li>no se puede <b>eliminar</b> una orden de pago con certificado de retención (se anula),</li>
+                                    <li>no se puede crear ni confirmar una orden con retención fechada en ese período.</li>
+                                </ul>
+                                <p className="text-muted-foreground">No se puede deshacer desde la pantalla.</p>
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Volver</AlertDialogCancel>
+                        <AlertDialogAction onClick={marcarPresentado}>Marcar como presentado</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             {/* Confirmar / anular / eliminar: diálogo del sistema que explica qué va a pasar */}
             <AlertDialog open={!!dialogo} onOpenChange={(o) => { if (!o) setDialogo(null) }}>

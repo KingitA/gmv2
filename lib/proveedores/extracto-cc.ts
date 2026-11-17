@@ -8,8 +8,15 @@
  * El saldo es la suma de los movimientos: la misma fuente que usa el resto del
  * sistema (E-56). Positivo = le debemos al proveedor.
  *
+ * Las provisiones de órdenes de compra (mercadería pedida, todavía sin factura) NO son
+ * deuda: no entran al extracto ni al saldo; se devuelven aparte como "comprometido".
+ *
+ * Las fechas se pasan a día de Argentina con fechaISO (lib/formato): un pago registrado a
+ * las 22 h figura ese día, no el siguiente.
+ *
  * Sin imports de React ni de la base: se usa en la ruta y se puede probar suelto.
  */
+import { fechaISO } from "@/lib/formato"
 
 export interface MovimientoCC {
   id: string
@@ -91,8 +98,16 @@ export function armarExtracto(
   movimientos: MovimientoCC[],
   ops: Map<string, OrdenPagoResumen>,
   rango?: { desde?: string | null; hasta?: string | null },
-): { filas: FilaExtracto[]; saldoAnterior: number; saldoFinal: number; saldoActual: number } {
-  const orden = [...movimientos].sort((a, b) =>
+): { filas: FilaExtracto[]; saldoAnterior: number; saldoFinal: number; saldoActual: number; comprometido: FilaExtracto[] } {
+  const comprometido: FilaExtracto[] = movimientos
+    .filter((m) => m.tipo_movimiento === "orden_compra")
+    .map((m) => ({
+      clave: `mov:${m.id}`, fecha: m.fecha, clase: "provision" as const,
+      movimiento: "Mercadería pedida, sin facturar", detalle: m.descripcion || "Provisión de la orden de compra",
+      debe: Math.max(0, Number(m.monto) || 0), haber: 0, saldo: 0,
+      orden_compra_id: m.referencia_tipo === "orden_compra" ? m.referencia_id ?? undefined : undefined,
+    }))
+  const orden = movimientos.filter((m) => m.tipo_movimiento !== "orden_compra").sort((a, b) =>
     String(a.fecha).localeCompare(String(b.fecha)) || String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || a.id.localeCompare(b.id))
 
   // Agrupar: una fila por orden de pago y una por su anulación
@@ -159,11 +174,11 @@ export function armarExtracto(
     }
   }
 
-  const dia = (f: string) => String(f).slice(0, 10)
+  const dia = (f: string) => fechaISO(f)
   const desde = rango?.desde || null, hasta = rango?.hasta || null
   const antes = desde ? todas.filter((f) => dia(f.fecha) < desde) : []
   const filas = todas.filter((f) => (!desde || dia(f.fecha) >= desde) && (!hasta || dia(f.fecha) <= hasta))
   const saldoAnterior = antes.length ? antes[antes.length - 1].saldo : 0
   const saldoFinal = filas.length ? filas[filas.length - 1].saldo : saldoAnterior
-  return { filas, saldoAnterior, saldoFinal, saldoActual: saldo }
+  return { filas, saldoAnterior, saldoFinal, saldoActual: saldo, comprometido }
 }

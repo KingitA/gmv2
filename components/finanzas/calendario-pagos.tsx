@@ -44,6 +44,9 @@ interface Vencimiento {
     // Vencimiento ESTIMADO de una orden de compra (todavía sin factura): es_estimado + referencia a la OC
     es_estimado?: boolean | null
     referencia_tipo?: string | null
+    // Pago parcial por orden de pago: "monto" es lo que falta; el total y lo pagado van acá
+    monto_original?: number | null
+    monto_pagado?: number | null
     proveedores?: { id: string; nombre: string; sigla: string | null } | null
 }
 
@@ -552,6 +555,11 @@ export function CalendarioPagos({
                                                                     </span>
                                                                     <span className={`block font-mono text-[9.5px] ${sel ? "text-white/80" : "text-slate-500"}`}>
                                                                         {formatCurrency(Number(p.monto))}
+                                                                        {p.monto_original != null && Number(p.monto_pagado) > 0 && (
+                                                                            <span className="ml-1 font-sans font-semibold" title={`Pagado en parte: ya se pagaron ${formatCurrency(Number(p.monto_pagado))} de ${formatCurrency(Number(p.monto_original))}`}>
+                                                                                · falta de {formatCurrency(Number(p.monto_original))}
+                                                                            </span>
+                                                                        )}
                                                                         {p.fecha_validez && p.fecha_validez !== p.fecha_vencimiento && (
                                                                             <span className="ml-1">→ {fmtCorta(p.fecha_validez)}</span>
                                                                         )}

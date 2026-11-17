@@ -367,7 +367,8 @@ function NuevaOrdenPagoContent() {
             if (provRef.current !== id) return
             const todos = data.comprobantes || []
             setMovimientosCC(todos)
-            setComprobantesCC(todos.filter((c: any) => c.estado === "pendiente" && c.saldo_pendiente > 0))
+            // Las provisiones de órdenes de compra (mercadería pedida sin facturar) NO son deuda: no se pagan
+            setComprobantesCC(todos.filter((c: any) => c.estado === "pendiente" && c.saldo_pendiente > 0 && c.tipo !== "ORDEN COMPRA"))
         } catch (e) {
             console.error(e)
         }
@@ -521,7 +522,7 @@ function NuevaOrdenPagoContent() {
     function cambiarMontoCC(movId: string, monto: number) {
         setImputaciones(prev => prev.map(i => i.movimiento_cc_id === movId ? { ...i, monto_imputado: monto } : i))
     }
-    // ¿La base ya guarda el saldo del vencimiento? (migración 20261117q). Sin ella, un pago
+    // ¿La base ya guarda el saldo del vencimiento? (migración 20261117p_ordenes_pago_t1d.sql). Sin ella, un pago
     // parcial deja el vencimiento marcado como pagado entero, y la pantalla lo avisa.
     const guardaSaldoVenc = vencimientosProv.length === 0 || vencimientosProv.some((v: any) => "monto_pagado" in v)
     const FORMA_VENC: Record<string, string> = { efectivo: "Efectivo", transferencia: "Transferencia", cheque: "Cheque" }
@@ -533,7 +534,7 @@ function NuevaOrdenPagoContent() {
         v.canal === "negro" ? "canal negro" : null,
         v.observaciones ? String(v.observaciones).slice(0, 80) : null,
     ].filter(Boolean).join(" · ")
-    // ¿La base ya acepta "con este pago queda cancelado"? (migración 20261117s)
+    // ¿La base ya acepta "con este pago queda cancelado"? (migración 20261117p_ordenes_pago_t1d.sql)
     const aceptaCancelar = vencimientosProv.some((v: any) => "monto_ajuste" in v)
     function marcarCancela(vencId: string, cancela: boolean) {
         setImputaciones(prev => prev.map(i => i.vencimiento_id === vencId && !i.movimiento_cc_id ? { ...i, cancela_vencimiento: cancela } : i))
@@ -960,14 +961,14 @@ function NuevaOrdenPagoContent() {
                                 </div>
                                 <div>
                                     <p className="text-xs font-bold tracking-wide text-slate-500">CUENTA PARA TRANSFERIRLE</p>
-                                    {!(fp.banco_cbu || fp.banco_alias || fp.banco_numero_cuenta || fp.banco_nombre) ? (
+                                    {!(fp.cbu || fp.cbu_alias || fp.banco_numero_cuenta || fp.banco_nombre) ? (
                                         <p className="text-amber-700">Sin datos bancarios cargados en la ficha.</p>
                                     ) : (
                                         <div className="space-y-0.5">
                                             {(fp.banco_nombre || fp.banco_tipo_cuenta || fp.banco_numero_cuenta) && (
                                                 <p>{[fp.banco_nombre, fp.banco_tipo_cuenta, fp.banco_cuenta, fp.banco_numero_cuenta ? `N° ${fp.banco_numero_cuenta}` : null].filter(Boolean).join(" · ")}</p>
                                             )}
-                                            {([["banco_cbu", "CBU"], ["banco_alias", "Alias"]] as const).map(([k, nombre]) => fp[k] ? (
+                                            {([["cbu", "CBU"], ["cbu_alias", "Alias"]] as const).map(([k, nombre]) => fp[k] ? (
                                                 <p key={k} className="flex items-center gap-2">
                                                     <span className="text-muted-foreground">{nombre}:</span> <span className="font-mono">{fp[k]}</span>
                                                     <button type="button" className="text-muted-foreground hover:text-foreground" title={`Copiar ${nombre}`}
@@ -985,7 +986,7 @@ function NuevaOrdenPagoContent() {
                                     Ojo: este proveedor NO acepta cheques de terceros y el pago armado tiene uno.
                                 </p>
                             )}
-                            <p className="text-xs text-muted-foreground">Estos datos se cargan en la ficha del proveedor (Ficha fiscal y de pago).</p>
+                            <p className="text-xs text-muted-foreground">Estos datos se cargan en la ficha del proveedor.</p>
                         </CardContent>
                     </Card>
                 )}

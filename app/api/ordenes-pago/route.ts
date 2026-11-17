@@ -123,7 +123,7 @@ export async function POST(request: Request) {
         (error?.code === 'PGRST202' || error?.code === '42883') && new RegExp(`\\b${nombre}\\(`).test(error.message || '')
 
     // ── E-67: crear y confirmar en un paso (body.confirmar = true) ──
-    // Con la migración 20261117p las dos cosas pasan en UNA transacción
+    // Con la migración 20261117p_ordenes_pago_t1d.sql las dos cosas pasan en UNA transacción
     // (op_crear_y_confirmar): si la confirmación falla no queda ni la orden.
     if (body.confirmar === true) {
         const junto = await supabase.rpc('op_crear_y_confirmar', {
@@ -154,7 +154,7 @@ export async function POST(request: Request) {
 
     if (body.confirmar !== true) return NextResponse.json(data)
 
-    // Respaldo sin la migración 20261117p: la orden ya quedó creada (pendiente) y se confirma
+    // Respaldo sin la migración 20261117p_ordenes_pago_t1d.sql: la orden ya quedó creada (pendiente) y se confirma
     // aparte. Si la confirmación falla, la orden queda pendiente y se avisa con el motivo.
     const op = data as any
     const { data: det } = await supabase.from('ordenes_pago_detalle')

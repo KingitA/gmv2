@@ -7,7 +7,7 @@ import { todayArgentina } from "@/lib/utils"
  * POST /api/cheques/[id]/debitar — conciliación de un cheque PROPIO:
  * el banco lo debitó. ENTREGADO_A_PROVEEDOR → COBRADO + fecha_debito.
  *
- * E-62 (17/11/2026): con la migración 20261117u lo hace la función cheque_propio_debitar,
+ * E-62 (17/11/2026): con la migración 20261117p_ordenes_pago_t1d.sql lo hace la función cheque_propio_debitar,
  * que además BAJA el saldo de la cuenta bancaria del cheque (una línea de kardex), una sola
  * vez. Si el cheque no tiene cuenta (los cargados antes) se puede mandar cuenta_bancaria_id;
  * sin cuenta se marca debitado como antes y se avisa que el saldo del banco no se movió.
@@ -50,7 +50,7 @@ export async function POST(
       return NextResponse.json({ error: rpc.error.message }, { status: rpc.error.code === "P0001" ? 400 : 500 })
     }
 
-    // Respaldo sin la migración 20261117u: solo cambia el estado (comportamiento anterior)
+    // Respaldo sin la migración 20261117p_ordenes_pago_t1d.sql: solo cambia el estado (comportamiento anterior)
     const { data: cheque, error: errGet } = await supabase
       .from("cheques")
       .select("id, tipo, estado")
