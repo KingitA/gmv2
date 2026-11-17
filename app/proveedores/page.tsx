@@ -56,6 +56,7 @@ export default function ProveedoresPage() {
     mail_vendedor: "",
     mail_oficina: "",
     mail_ordenes_compra: "",
+    mixto_pct_factura: null as number | null,
     cuit: "",
     tipo_iva: 2,
     condicion_pago_tipo: "cuenta_corriente" as "cuenta_corriente" | "contado" | "anticipado",
@@ -132,15 +133,18 @@ export default function ProveedoresPage() {
     // Código vacío = la base asigna el primer número libre (trigger de 20261014_codigos_unicos)
     // El mail para órdenes de compra es una columna nueva (migración 20261117m). Va aparte: si la
     // migración todavía no está, el resto de la ficha se guarda igual y se avisa.
-    const { mail_ordenes_compra: mailOC, ...resto } = formData
+    const { mail_ordenes_compra: mailOC, mixto_pct_factura: mixtoPct, ...resto } = formData
     const mailOCLimpio = separarMails(mailOC).join(", ") || null
     const datos = { ...resto, codigo_proveedor: codigo, cuit: normalizarCuit(formData.cuit) }
     const guardarMailOC = async (id: string) => {
-      if (!mailOCLimpio && !(editingProveedor as any)?.mail_ordenes_compra) return
-      const { error } = await createClient().from("proveedores").update({ mail_ordenes_compra: mailOCLimpio }).eq("id", id)
+      const antes: any = editingProveedor || {}
+      const sinCambios = (mailOCLimpio ?? null) === (antes.mail_ordenes_compra ?? null)
+        && (mixtoPct ?? null) === (antes.mixto_pct_factura != null ? Number(antes.mixto_pct_factura) : null)
+      if (sinCambios) return
+      const { error } = await createClient().from("proveedores").update({ mail_ordenes_compra: mailOCLimpio, mixto_pct_factura: mixtoPct ?? null }).eq("id", id)
       if (error) toast.warning(faltaLaColumna(error)
-        ? "La ficha se guardó, pero el mail para órdenes de compra todavía no se puede guardar: falta aplicar la migración 20261117m_proveedores_datos_compra.sql."
-        : `La ficha se guardó, pero no el mail para órdenes de compra: ${error.message}`, { duration: 12000 })
+        ? "La ficha se guardó, pero el mail para órdenes de compra y el % con factura de los mixtos todavía no se pueden guardar: falta aplicar la migración 20261117m_proveedores_datos_compra.sql."
+        : `La ficha se guardó, pero no el mail para órdenes de compra ni el % de mixtos: ${error.message}`, { duration: 12000 })
     }
     const supabase = createClient()
     const avisarError = (error: any) => toast.error(esCodigoDuplicado(error) ? `El código ${codigo} ya lo tiene otro proveedor. Elegí otro.` : `No se guardó: ${error.message}`, { duration: 10000 })
@@ -202,6 +206,7 @@ export default function ProveedoresPage() {
       mail_vendedor: "",
       mail_oficina: "",
       mail_ordenes_compra: "",
+      mixto_pct_factura: null,
       cuit: "",
       tipo_iva: 2,
       condicion_pago_tipo: "cuenta_corriente",
@@ -241,6 +246,7 @@ export default function ProveedoresPage() {
       mail_vendedor: proveedor.mail_vendedor || "",
       mail_oficina: proveedor.mail_oficina || "",
       mail_ordenes_compra: (proveedor as any).mail_ordenes_compra || "",
+      mixto_pct_factura: (proveedor as any).mixto_pct_factura != null ? Number((proveedor as any).mixto_pct_factura) : null,
       cuit: proveedor.cuit || "",
       tipo_iva: proveedor.tipo_iva || 2,
       condicion_pago_tipo: proveedor.condicion_pago_tipo || "cuenta_corriente",

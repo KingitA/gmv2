@@ -65,7 +65,7 @@ export interface InicioOrden {
 }
 
 interface Preparado {
-  proveedor: { id: string; nombre: string; percepcion_iva: number; percepcion_iibb: number }
+  proveedor: { id: string; nombre: string; percepcion_iva: number; percepcion_iibb: number; tipo_descuento: "cascada" | "sobre_lista"; mixto_pct_factura: number | null }
   acuerdo_pago: AcuerdoPago
   entrega: DiasEntrega & { fecha: string }
   periodo: { desde: string; hasta: string; dias: number; tipo_venta: "vendida" | "facturada"; dias_objetivo: number }
@@ -92,16 +92,18 @@ const precioPorUnidad = (precio: number, por: "bulto" | "unidad" | undefined, un
   por === "bulto" && unidadesPorBulto > 1 ? Math.round((precio / unidadesPorBulto) * 1e6) / 1e6 : precio
 
 // ─── Una fila de la tabla (memo: escribir en una no redibuja las otras) ────────────────────
-const FilaArticulo = memo(function FilaArticulo({ a, f, onCambio, onUsar }: {
+const FilaArticulo = memo(function FilaArticulo({ a, f, tipo, onCambio, onUsar }: {
   a: ArticuloParaPedir
   f: Fila
+  /** Cómo aplica el proveedor sus descuentos */
+  tipo: "cascada" | "sobre_lista"
   onCambio: (id: string, cambio: Partial<Fila>) => void
   onUsar: (id: string) => void
 }) {
   const ub = a.unidades_por_bulto
   const r = renglonDe(a, f)
-  const neto = precioNeto(r)
-  const netoFicha = precioNeto({ precio_unitario: a.precio_compra, descuento1: a.descuento1, descuento2: a.descuento2, descuento3: a.descuento3, descuento4: a.descuento4 })
+  const neto = precioNeto(r, tipo)
+  const netoFicha = precioNeto({ precio_unitario: a.precio_compra, descuento1: a.descuento1, descuento2: a.descuento2, descuento3: a.descuento3, descuento4: a.descuento4 }, tipo)
   const cambioPrecio = Math.abs(neto - netoFicha) > 0.005
   const enBultos = (u: number) => (ub > 1 ? `${numero(u / ub, 0, 1)} bul` : null)
   const sugeridoEnUnidad = f.tipo === "bulto" ? a.sugerido_bultos : a.sugerido
@@ -114,7 +116,7 @@ const FilaArticulo = memo(function FilaArticulo({ a, f, onCambio, onUsar }: {
           {a.sku ? `SKU ${a.sku}` : "sin SKU"}{a.ean13 ? ` · ${a.ean13}` : ""} · {ub > 1 ? `${entero(ub)} u por bulto` : <span className="font-semibold text-red-600">sin unidades por bulto</span>}
           {a.externo && <span className="ml-1.5 rounded bg-amber-100 px-1 text-amber-800">de otro proveedor</span>}
           {a.iva_compras === "adquisicion_stock" && <span className="ml-1.5 rounded bg-neutral-200 px-1 text-neutral-700">sin factura</span>}
-          {a.iva_compras === "mixto" && <span className="ml-1.5 rounded bg-amber-100 px-1 text-amber-800">mitad con factura</span>}
+          {a.iva_compras === "mixto" && <span className="ml-1.5 rounded bg-amber-100 px-1 text-amber-800">mixto</span>}
         </div>
       </td>
       <td className="px-2 py-1.5 text-right tabular-nums">
@@ -167,7 +169,7 @@ const FilaArticulo = memo(function FilaArticulo({ a, f, onCambio, onUsar }: {
         {ub > 1 && <div className="text-xs text-muted-foreground">{moneda(neto * ub)} el bulto</div>}
         {cambioPrecio && <div className="text-xs font-medium text-amber-700" title="El precio de esta orden no es el de la ficha del artículo. La ficha NO se modifica: el costo lo actualiza la factura validada.">ficha: {moneda(netoFicha)}</div>}
       </td>
-      <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{f.cantidad > 0 ? moneda(netoRenglon(r)) : <span className="font-normal text-muted-foreground">—</span>}</td>
+      <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{f.cantidad > 0 ? moneda(netoRenglon(r, tipo)) : <span className="font-normal text-muted-foreground">—</span>}</td>
     </tr>
   )
 })
@@ -245,6 +247,8 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
   const [numeroOrden, setNumeroOrden] = useState<string | null>(null)
   const [fechaEntrega, setFechaEntrega] = useState("")
   const [acuerdo, setAcuerdo] = useState<AcuerdoPago | null>(null)
+  // % con factura de los artículos mixtos de ESTA orden (null = no cargado: 50)
+  const [mixtoPct, setMixtoPct] = useState<number | null>(null)
   const [editarPago, setEditarPago] = useState(false)
   const [observaciones, setObservaciones] = useState("")
   const [sinArticulo, setSinArticulo] = useState<RenglonSinArticulo[]>([])
@@ -280,6 +284,7 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
       if (!opciones.conservar) {
         setFechaEntrega(opciones.orden?.orden.fecha_estimada_recepcion || p.entrega.fecha)
         setAcuerdo(opciones.orden ? opciones.orden.orden.acuerdo_pago : p.acuerdo_pago)
+        setMixtoPct(opciones.orden?.orden.mixto_pct_factura ?? p.proveedor.mixto_pct_factura ?? null)
       }
       setFilas((prev) => {
         const out: Record<string, Fila> = {}
@@ -305,7 +310,7 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
     clave.current = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : ""
     extras.current = []
     setProveedor(null); setPrep(null); setFilas({}); setError(null); setNumeroOrden(null)
-    setFechaEntrega(""); setAcuerdo(null); setEditarPago(false); setGuardando(false)
+    setFechaEntrega(""); setAcuerdo(null); setMixtoPct(null); setEditarPago(false); setGuardando(false)
     setObservaciones(inicio?.observaciones || ""); setSinArticulo(inicio?.sinArticulo || [])
     setBusca(""); setSoloSugeridos(false); setVerTodas(false)
     setSoloConCantidad(!!inicio?.ordenId || !!inicio?.importados?.length)
@@ -426,8 +431,8 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
 
   const conCantidad = useMemo(() => articulos.filter((a) => (filas[a.id]?.cantidad ?? 0) > 0), [articulos, filas])
   const totales = useMemo(
-    () => totalesOC(conCantidad.map((a) => renglonDe(a, filas[a.id])), prep?.proveedor),
-    [conCantidad, filas, prep],
+    () => totalesOC(conCantidad.map((a) => renglonDe(a, filas[a.id])), prep ? { ...prep.proveedor, mixto_pct_factura: mixtoPct } : null),
+    [conCantidad, filas, prep, mixtoPct],
   )
   const haySugerencias = articulos.some((a) => a.sugerido > 0)
 
@@ -470,7 +475,7 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orden_id: ordenId, proveedor_id: proveedor.id, observaciones,
-          fecha_estimada_recepcion: fechaEntrega, acuerdo_pago: acuerdo, clave: clave.current || null,
+          fecha_estimada_recepcion: fechaEntrega, acuerdo_pago: acuerdo, mixto_pct_factura: mixtoPct, clave: clave.current || null,
           // las unidades por bulto y el régimen de IVA NO se mandan: los lee el servidor de la base (E-13)
           items: conCantidad.map((a) => {
             const f = filas[a.id]
@@ -554,6 +559,15 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
                           <b>{fecha(p.fecha)}</b> · {moneda(p.monto)}{p.forma_pago ? ` · ${p.forma_pago}` : ""}{hayNegro && hayBlanco ? ` · ${p.canal === "blanco" ? "con factura" : "sin factura"}` : ""}
                         </span>
                       ))}
+                    </div>
+                  )}
+                  {totales.hay_mixto && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 border-t pt-2 text-sm">
+                      <span>Artículos <b>mixtos</b>: viene con factura el</span>
+                      <InputMonto decimales={0} soloPositivos className="h-7 w-16 text-right" value={mixtoPct} placeholder="50"
+                        onChange={(v) => setMixtoPct(v == null ? null : Math.min(100, Math.max(0, v)))} aria-label="Porcentaje con factura de los artículos mixtos" />
+                      <span>% (el resto, sin factura).</span>
+                      {mixtoPct == null && <span className="text-xs font-medium text-amber-700">El proveedor no tiene cargado este porcentaje: se toma 50 %. Cargalo en su ficha.</span>}
                     </div>
                   )}
                   {deLegado && (
@@ -650,13 +664,13 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
                         <th className="px-2 py-2 text-right font-semibold">Venta del período</th>
                         <th className="px-2 py-2 text-center font-semibold">Sugerido</th>
                         <th className="px-2 py-2 font-semibold">Pedir</th>
-                        <th className="px-2 py-2 font-semibold">Lista por UNIDAD y descuentos %</th>
+                        <th className="px-2 py-2 font-semibold">Lista por UNIDAD y descuentos % <span className="font-normal text-muted-foreground">({prep.proveedor.tipo_descuento === "sobre_lista" ? "se suman, sobre lista" : "en cascada"})</span></th>
                         <th className="px-2 py-2 text-right font-semibold">Neto por unidad</th>
                         <th className="px-2 py-2 text-right font-semibold">Subtotal</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {mostradas.map((a) => <FilaArticulo key={a.id} a={a} f={filas[a.id] ?? filaDe(a)} onCambio={cambiarFila} onUsar={usarSugerencia} />)}
+                      {mostradas.map((a) => <FilaArticulo key={a.id} a={a} f={filas[a.id] ?? filaDe(a)} tipo={prep.proveedor.tipo_descuento} onCambio={cambiarFila} onUsar={usarSugerencia} />)}
                       {mostradas.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-muted-foreground">Ningún artículo coincide con el filtro.</td></tr>}
                     </tbody>
                   </table>

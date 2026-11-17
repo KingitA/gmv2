@@ -28,13 +28,15 @@
 --        oc_kardex_pendiente_sincronizar(orden, usuario)           ← APARTE y fácil de quitar (E-31)
 --
 -- Reglas de plata (las mismas que usa la pantalla, lib/compras/oc-totales.ts):
---   · precio_unitario es SIEMPRE por unidad. Renglón = unidades × precio neto
---     (precio con los 4 descuentos en cascada, sin redondear), redondeado a centavos.
+--   · precio_unitario es SIEMPRE por unidad. Renglón = unidades × precio neto, redondeado a
+--     centavos. Precio neto = lista con los descuentos como los aplica el proveedor
+--     (proveedores.tipo_descuento: en cascada o sobre precio de lista), sin redondear.
 --     Unidades = cantidad × unidades por bulto si el renglón se pide por bulto.
 --   · Blanco / negro según el artículo (articulos.iva_compras):
 --       factura            → todo con factura (blanco): + IVA 21 % + percepciones
 --       adquisicion_stock  → todo sin factura (negro): sin impuestos
---       mixto              → mitad y mitad
+--       mixto              → una parte con factura y el resto sin: ordenes_compra.mixto_pct_factura
+--                            (viene de la ficha del proveedor; sin dato, 50 %)
 --   · Percepciones: percepcion_iva + percepcion_iibb del proveedor, sobre el neto blanco.
 --   · La retención de Ganancias NO se suma: no es deuda con el proveedor.
 --
@@ -52,6 +54,7 @@
 -- ═══ 1. Columnas ═══
 ALTER TABLE public.ordenes_compra
   ADD COLUMN IF NOT EXISTS acuerdo_pago        jsonb,
+  ADD COLUMN IF NOT EXISTS mixto_pct_factura   numeric(5,2),
   ADD COLUMN IF NOT EXISTS total_neto          numeric(14,2),
   ADD COLUMN IF NOT EXISTS total_iva           numeric(14,2),
   ADD COLUMN IF NOT EXISTS total_percepciones  numeric(14,2),
@@ -75,6 +78,8 @@ ALTER TABLE public.ordenes_compra
 
 COMMENT ON COLUMN public.ordenes_compra.acuerdo_pago IS
   'Acuerdo de pago copiado de la ficha del proveedor al crear la orden (editable en la orden): {"blanco": {medio, dias, cuotas, desde, plazo_cheque, entrega}, "negro": {...} | null}. negro null = igual que blanco.';
+COMMENT ON COLUMN public.ordenes_compra.mixto_pct_factura IS
+  'Artículos mixtos de esta orden: % que viene con factura (el resto, sin). Copiado de la ficha del proveedor al crear la orden, editable en la orden. NULL = 50.';
 COMMENT ON COLUMN public.ordenes_compra.total_estimado IS
   'Lo que se estima deber por la orden: total_blanco (neto + IVA + percepciones) + total_negro. Lo calcula oc_guardar.';
 COMMENT ON COLUMN public.ordenes_compra.clave_creacion IS
@@ -145,7 +150,24 @@ BEGIN
   END IF;
 END $$;
 
--- ═══ 3. Totales de la orden ═══
+-- ═══ 3. Precio neto y totales de la orden ═══
+-- Precio neto por unidad según cómo aplica el proveedor sus descuentos (proveedores.tipo_descuento):
+--   cascada     → lista × (1 − d1) × (1 − d2) × (1 − d3) × (1 − d4)
+--   sobre_lista → lista × (1 − (d1 + d2 + d3 + d4))
+-- Misma regla que netoCompra (lib/compras/neto-compra.ts). Sin redondear.
+CREATE OR REPLACE FUNCTION public.oc_neto_unitario(
+  p_precio numeric, p_d1 numeric, p_d2 numeric, p_d3 numeric, p_d4 numeric, p_tipo text
+) RETURNS numeric
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE WHEN p_tipo = 'sobre_lista'
+    THEN coalesce(p_precio, 0) * greatest(0, 1 - (coalesce(p_d1, 0) + coalesce(p_d2, 0) + coalesce(p_d3, 0) + coalesce(p_d4, 0)) / 100.0)
+    ELSE coalesce(p_precio, 0)
+         * (1 - coalesce(p_d1, 0) / 100.0) * (1 - coalesce(p_d2, 0) / 100.0)
+         * (1 - coalesce(p_d3, 0) / 100.0) * (1 - coalesce(p_d4, 0) / 100.0)
+  END
+$$;
 CREATE OR REPLACE FUNCTION public.oc_totales(p_orden_id uuid)
 RETURNS TABLE (
   neto_blanco  numeric,
@@ -163,12 +185,17 @@ STABLE
 SET search_path = public
 AS $$
 DECLARE
-  v_perc numeric := 0;
+  v_perc  numeric := 0;
+  v_tipo  text;
+  v_mixto numeric;
 BEGIN
-  SELECT coalesce(p.percepcion_iva, 0) + coalesce(p.percepcion_iibb, 0) INTO v_perc
+  SELECT coalesce(p.percepcion_iva, 0) + coalesce(p.percepcion_iibb, 0), p.tipo_descuento, o.mixto_pct_factura
+    INTO v_perc, v_tipo, v_mixto
     FROM ordenes_compra o JOIN proveedores p ON p.id = o.proveedor_id
    WHERE o.id = p_orden_id;
   v_perc := coalesce(v_perc, 0);
+  -- parte con factura de los artículos mixtos: la de la orden; sin dato, 50 %
+  v_mixto := CASE WHEN v_mixto IS NULL OR v_mixto < 0 OR v_mixto > 100 THEN 50 ELSE v_mixto END;
 
   RETURN QUERY
   WITH l AS (
@@ -177,12 +204,8 @@ BEGIN
       round(d.cantidad_pedida * CASE WHEN d.tipo_cantidad = 'unidad' THEN 1
                                      WHEN coalesce(a.unidades_por_bulto, 1) > 1 THEN a.unidades_por_bulto
                                      ELSE 1 END, 4) AS unid,
-      -- precio neto por unidad, sin redondear
-      d.precio_unitario
-        * (1 - coalesce(d.descuento1, 0) / 100.0)
-        * (1 - coalesce(d.descuento2, 0) / 100.0)
-        * (1 - coalesce(d.descuento3, 0) / 100.0)
-        * (1 - coalesce(d.descuento4, 0) / 100.0) AS neto_u,
+      -- precio neto por unidad, sin redondear, con los descuentos como los aplica el proveedor
+      public.oc_neto_unitario(d.precio_unitario, d.descuento1, d.descuento2, d.descuento3, d.descuento4, v_tipo) AS neto_u,
       coalesce(nullif(d.iva_compras, ''), nullif(a.iva_compras, ''), 'factura') AS regimen
     FROM ordenes_compra_detalle d
     JOIN articulos a ON a.id = d.articulo_id
@@ -192,10 +215,10 @@ BEGIN
   ), s AS (
     SELECT
       coalesce(sum(CASE regimen WHEN 'adquisicion_stock' THEN 0
-                                WHEN 'mixto' THEN round(neto / 2, 2)
+                                WHEN 'mixto' THEN round(neto * v_mixto / 100.0, 2)
                                 ELSE neto END), 0) AS nb,
       coalesce(sum(CASE regimen WHEN 'adquisicion_stock' THEN neto
-                                WHEN 'mixto' THEN neto - round(neto / 2, 2)
+                                WHEN 'mixto' THEN neto - round(neto * v_mixto / 100.0, 2)
                                 ELSE 0 END), 0) AS nn,
       count(*)::int AS n,
       coalesce(sum(unid), 0) AS u
@@ -495,9 +518,8 @@ BEGIN
       round(d.cantidad_pedida * CASE WHEN d.tipo_cantidad = 'unidad' THEN 1
                                      WHEN coalesce(a.unidades_por_bulto, 1) > 1 THEN a.unidades_por_bulto
                                      ELSE 1 END, 4) AS unid,
-      d.precio_unitario
-        * (1 - coalesce(d.descuento1, 0) / 100.0) * (1 - coalesce(d.descuento2, 0) / 100.0)
-        * (1 - coalesce(d.descuento3, 0) / 100.0) * (1 - coalesce(d.descuento4, 0) / 100.0) AS neto_u
+      public.oc_neto_unitario(d.precio_unitario, d.descuento1, d.descuento2, d.descuento3, d.descuento4,
+                              (SELECT p.tipo_descuento FROM proveedores p WHERE p.id = o.proveedor_id)) AS neto_u
   ) x
   WHERE d.orden_compra_id = p_orden_id AND x.unid > 0;
   GET DIAGNOSTICS v_n = ROW_COUNT;
@@ -526,6 +548,9 @@ DECLARE
   v_clave      uuid  := nullif(p_datos ->> 'clave', '')::uuid;
   v_fecha_est  date  := nullif(p_datos ->> 'fecha_estimada_recepcion', '')::date;
   v_acuerdo    jsonb := CASE WHEN jsonb_typeof(p_datos -> 'acuerdo_pago') = 'object' THEN p_datos -> 'acuerdo_pago' ELSE NULL END;
+  v_mixto      numeric := CASE WHEN coalesce(p_datos ->> 'mixto_pct_factura', '') ~ '^[0-9]+(\.[0-9]+)?$'
+                                AND (p_datos ->> 'mixto_pct_factura')::numeric <= 100
+                               THEN (p_datos ->> 'mixto_pct_factura')::numeric ELSE NULL END;
   v_id         uuid;
   v_numero     text;
   v_nueva      boolean := false;
@@ -606,12 +631,12 @@ BEGIN
     BEGIN
       INSERT INTO ordenes_compra (
         numero_orden, proveedor_id, fecha_orden, fecha_estimada_recepcion, estado,
-        observaciones, condicion_pago, acuerdo_pago, usuario_creador, creado_por, clave_creacion
+        observaciones, condicion_pago, acuerdo_pago, mixto_pct_factura, usuario_creador, creado_por, clave_creacion
       ) VALUES (
         v_numero, v_prov, now(), v_fecha_est, 'pendiente',
         nullif(trim(coalesce(p_datos ->> 'observaciones', '')), ''),
         nullif(left(trim(coalesce(p_datos ->> 'condicion_pago', '')), 100), ''),
-        v_acuerdo, p_usuario_id::text, p_usuario_id, v_clave
+        v_acuerdo, v_mixto, p_usuario_id::text, p_usuario_id, v_clave
       ) RETURNING id INTO v_id;
     EXCEPTION WHEN unique_violation THEN
       -- otra llamada con la misma clave ganó la carrera
@@ -657,6 +682,7 @@ BEGIN
       fecha_estimada_recepcion = coalesce(v_fecha_est, fecha_estimada_recepcion),
       condicion_pago           = CASE WHEN p_datos ? 'condicion_pago' THEN nullif(left(trim(coalesce(p_datos ->> 'condicion_pago', '')), 100), '') ELSE condicion_pago END,
       acuerdo_pago             = CASE WHEN p_datos ? 'acuerdo_pago' THEN v_acuerdo ELSE acuerdo_pago END,
+      mixto_pct_factura        = CASE WHEN p_datos ? 'mixto_pct_factura' THEN v_mixto ELSE mixto_pct_factura END,
       editada_at               = now(),
       editada_por              = p_usuario_id,
       updated_at               = now()
@@ -683,9 +709,8 @@ BEGIN
     coalesce(nullif(a.iva_compras, ''), 'factura'),
     CASE WHEN coalesce(a.unidades_por_bulto, 1) > 1 THEN a.unidades_por_bulto ELSE 1 END,
     a.precio_compra,
-    a.precio_compra
-      * (1 - coalesce(a.descuento1, 0) / 100.0) * (1 - coalesce(a.descuento2, 0) / 100.0)
-      * (1 - coalesce(a.descuento3, 0) / 100.0) * (1 - coalesce(a.descuento4, 0) / 100.0)
+    public.oc_neto_unitario(a.precio_compra, a.descuento1, a.descuento2, a.descuento3, a.descuento4,
+                            (SELECT p.tipo_descuento FROM proveedores p WHERE p.id = v_prov))
   FROM jsonb_array_elements(v_items) WITH ORDINALITY AS e(item, pos)
   JOIN articulos a ON a.id = (e.item ->> 'articulo_id')::uuid;
   GET DIAGNOSTICS v_n = ROW_COUNT;
@@ -815,6 +840,7 @@ $$;
 
 -- ═══ 10. Permisos: solo el servidor ═══
 REVOKE ALL ON FUNCTION public.oc_totales(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.oc_neto_unitario(numeric, numeric, numeric, numeric, numeric, text) TO service_role, authenticated;
 REVOKE ALL ON FUNCTION public.oc_provision_sincronizar(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.oc_vencimientos_estimados_borrar(uuid, text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.oc_vencimientos_estimados_sincronizar(uuid, uuid) FROM PUBLIC, anon, authenticated;

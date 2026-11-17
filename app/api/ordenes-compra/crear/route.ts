@@ -7,6 +7,11 @@ import { regimenDe } from '@/lib/compras/oc-totales';
 import { diasEntregaDeProveedor, errorDeFuncion, fechaEntregaEstimada, mensajeMigracionOC } from '@/lib/compras/orden-compra';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const pctValido = (v: unknown): number | null => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round(n * 100) / 100 : null;
+};
 
 /**
  * POST /api/ordenes-compra/crear — crea o edita una orden de compra (E-07, E-08).
@@ -116,6 +121,8 @@ export async function POST(request: NextRequest) {
                 fecha_estimada_recepcion: fechaEstimada,
                 condicion_pago: textoCondicionPago(acuerdo, hay),
                 acuerdo_pago: acuerdo,
+                // % con factura de los artículos mixtos: pantalla → orden actual → ficha del proveedor (null = 50)
+                mixto_pct_factura: pctValido(body.mixto_pct_factura) ?? pctValido(ordenActual?.mixto_pct_factura) ?? pctValido((proveedor as any).mixto_pct_factura),
                 clave: typeof body.clave === 'string' && UUID.test(body.clave) ? body.clave : null,
                 items,
             },

@@ -8,7 +8,7 @@ import { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all';
 
 const COLS_NUEVAS = 'id, numero_orden, proveedor_id, fecha_orden, fecha_estimada_recepcion, estado, observaciones, condicion_pago, usuario_creador, total_neto, total_estimado, cantidad_renglones, editada_at, enviada_at, enviada_a, envios, cancelada_at, motivo_cancelacion';
 const COLS_VIEJAS = 'id, numero_orden, proveedor_id, fecha_orden, fecha_estimada_recepcion, estado, observaciones, condicion_pago, usuario_creador';
-const COLS_PROVEEDOR = 'id, nombre, sigla, percepcion_iva, percepcion_iibb';
+const COLS_PROVEEDOR = 'id, nombre, sigla, percepcion_iva, percepcion_iibb, tipo_descuento';
 
 /**
  * GET /api/ordenes-compra/listado — el listado de órdenes, liviano (E-12, E-96).
@@ -86,7 +86,7 @@ export async function GET() {
             let neto = o.total_neto != null ? Number(o.total_neto) : null;
             let renglones = o.cantidad_renglones ?? null;
             if (total == null) {
-                const t = totalesOC(detPorOrden.get(o.id) || [], prov);
+                const t = totalesOC(detPorOrden.get(o.id) || [], { ...prov, mixto_pct_factura: o.mixto_pct_factura ?? null });
                 total = t.total; neto = t.neto; renglones = t.renglones;
             }
             const comp = compPorOrden.get(o.id) || { total: 0, validados: 0 };

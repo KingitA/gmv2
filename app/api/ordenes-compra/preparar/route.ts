@@ -54,6 +54,9 @@ export async function GET(request: NextRequest) {
                 nombre: proveedor.nombre,
                 percepcion_iva: Number(proveedor.percepcion_iva) || 0,
                 percepcion_iibb: Number(proveedor.percepcion_iibb) || 0,
+                tipo_descuento: proveedor.tipo_descuento === 'sobre_lista' ? 'sobre_lista' : 'cascada',
+                // null = el proveedor no lo tiene cargado (o falta la migración 20261117m): se toma 50 y se avisa
+                mixto_pct_factura: proveedor.mixto_pct_factura != null ? Number(proveedor.mixto_pct_factura) : null,
                 mails: mailsParaOrden(proveedor),
             },
             acuerdo_pago: acuerdoDeProveedorConLegado(proveedor),

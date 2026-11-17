@@ -2,6 +2,7 @@
 // y el mensaje que se le manda al proveedor (E-03). Reglas puras de lib/compras.
 import { describe, expect, it } from "vitest"
 import { netoRenglon, precioNeto, totalesOC, unidadesRenglon } from "../../../../lib/compras/oc-totales"
+import { netoCompra, tipoDescuentoDe } from "../../../../lib/compras/neto-compra"
 import {
   acuerdoDeProveedor, acuerdoDeProveedorConLegado, acuerdoDelCanal, formaPagoVencimiento, modalidadVencimiento, normalizarAcuerdo,
   normalizarCuotas, planDePagos, textoCanal, textoCondicionPago,
@@ -53,6 +54,29 @@ describe("totales de la orden de compra", () => {
   it("todo sin factura: sin IVA ni percepciones", () => {
     const t = totalesOC([{ cantidad_pedida: 5, tipo_cantidad: "unidad", precio_unitario: 110, iva_compras: "adquisicion_stock" }], { percepcion_iva: 3, percepcion_iibb: 3 })
     expect(t).toMatchObject({ neto: 550, iva: 0, percepciones: 0, total_blanco: 0, total_negro: 550, total: 550 })
+  })
+
+  it("descuentos del proveedor: en cascada o sobre precio de lista (Juan, 17/11)", () => {
+    expect(netoCompra(1000, [10, 5, 0, 0], "cascada")).toBeCloseTo(855, 6)
+    expect(netoCompra(1000, [10, 5, null, undefined], "sobre_lista")).toBeCloseTo(850, 6)
+    expect(netoCompra(1000, [10, 5])).toBeCloseTo(855, 6) // sin dato = cascada
+    expect(netoCompra(1000, [60, 60], "sobre_lista")).toBe(0) // nunca negativo
+    expect(tipoDescuentoDe("cualquiera")).toBe("cascada")
+    const r = { cantidad_pedida: 10, tipo_cantidad: "unidad", precio_unitario: 1000, descuento1: 10, descuento2: 5 }
+    expect(netoRenglon(r, "cascada")).toBe(8550)
+    expect(netoRenglon(r, "sobre_lista")).toBe(8500)
+    expect(totalesOC([r], { tipo_descuento: "sobre_lista" }).neto).toBe(8500)
+  })
+
+  it("mixto: la parte con factura depende del proveedor; sin dato, 50 % (misma orden que la prueba SQL)", () => {
+    const r = [{ cantidad_pedida: 10, tipo_cantidad: "unidad", precio_unitario: 1000, descuento1: 10, descuento2: 5, iva_compras: "mixto" }]
+    const t70 = totalesOC(r, { tipo_descuento: "sobre_lista", mixto_pct_factura: 70 })
+    expect(t70).toMatchObject({ neto: 8500, neto_blanco: 5950, neto_negro: 2550, total_blanco: 7199.5, total_negro: 2550, hay_mixto: true })
+    expect(totalesOC(r, { tipo_descuento: "sobre_lista" })).toMatchObject({ neto_blanco: 4250, neto_negro: 4250 })
+    expect(totalesOC(r, { tipo_descuento: "sobre_lista", mixto_pct_factura: 0 })).toMatchObject({ neto_blanco: 0, iva: 0, total: 8500 })
+    expect(totalesOC(r, { tipo_descuento: "sobre_lista", mixto_pct_factura: 250 as any }).neto_blanco).toBe(4250) // inválido = 50
+    // el neto (lo que ve el proveedor) no cambia con la proporción
+    expect(t70.neto).toBe(totalesOC(r, { tipo_descuento: "sobre_lista", mixto_pct_factura: 20 }).neto)
   })
 
   it("renglones en cero no cuentan", () => {
@@ -164,7 +188,8 @@ describe("mail de la orden al proveedor", () => {
     expect(asuntoOrden({ ...datos, reemplaza: true })).toMatch(/^ACTUALIZADA — /)
     const c = cuerpoOrden(datos)
     expect(c).toContain("orden de compra OC-000012")
-    expect(c).toContain("Total estimado: $87.079,04")
+    expect(c).toContain("Total: $87.079,04 (precios sin IVA)")
+    expect(c).not.toMatch(/factura:/i) // al proveedor no se le separa con / sin factura
     expect(c).toContain("Fecha de entrega pedida: 27/11/2026")
     expect(c).toContain("Condición de pago: Transferencia a 30 días")
     expect(c).toContain("Observaciones: Entregar por la mañana")

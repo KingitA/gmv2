@@ -15,6 +15,7 @@
 --   · observaciones_compra       texto libre
 --   · pago_blanco_cuotas / pago_negro_cuotas   plazo en varias cuotas ("30/60/90").
 --       pago_*_dias sigue siendo el plazo (o la primera cuota). Vacío = un solo pago.
+--   · mixto_pct_factura          % con factura de los artículos de compra mixta (el resto, sin)
 --   · medio de pago 'echeq' (se suma a transferencia / cheques / efectivo /
 --     cheques_y_efectivo).
 --
@@ -34,7 +35,18 @@ ALTER TABLE public.proveedores
   ADD COLUMN IF NOT EXISTS transporte_habitual     text,
   ADD COLUMN IF NOT EXISTS observaciones_compra    text,
   ADD COLUMN IF NOT EXISTS pago_blanco_cuotas      varchar(60),
-  ADD COLUMN IF NOT EXISTS pago_negro_cuotas       varchar(60);
+  ADD COLUMN IF NOT EXISTS pago_negro_cuotas       varchar(60),
+  ADD COLUMN IF NOT EXISTS mixto_pct_factura       numeric(5,2);
+
+COMMENT ON COLUMN public.proveedores.mixto_pct_factura IS
+  'Artículos de compra "mixta" (articulos.iva_compras = mixto): qué porcentaje viene CON factura; el resto, sin. Varía según el proveedor (Juan, 17/11/2026). NULL = no cargado: se toma 50 y la orden avisa.';
+
+DO $$
+BEGIN
+  ALTER TABLE public.proveedores ADD CONSTRAINT proveedores_mixto_pct_factura_check
+    CHECK (mixto_pct_factura IS NULL OR (mixto_pct_factura >= 0 AND mixto_pct_factura <= 100));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 COMMENT ON COLUMN public.proveedores.mail_ordenes_compra IS
   'Casilla a la que se envía la orden de compra (se pueden poner varias separadas por coma). Si está vacía, la pantalla propone mail_vendedor / mail_oficina / email y deja elegir.';

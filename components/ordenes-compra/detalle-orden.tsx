@@ -189,7 +189,7 @@ export function DetalleOrden({ ordenId, onCerrar, onEditar, onEnviar, onCambio, 
                               <div className="text-xs text-muted-foreground">
                                 {r.sku ? `SKU ${r.sku}` : ""}{r.ean13 ? ` · EAN ${r.ean13}` : ""}
                                 {r.iva_compras === "adquisicion_stock" && <span className="ml-1.5 rounded bg-neutral-200 px-1 text-neutral-700">sin factura</span>}
-                                {r.iva_compras === "mixto" && <span className="ml-1.5 rounded bg-amber-100 px-1 text-amber-800">mitad con factura</span>}
+                                {r.iva_compras === "mixto" && <span className="ml-1.5 rounded bg-amber-100 px-1 text-amber-800">mixto</span>}
                               </div>
                             </TableCell>
                             <TableCell className="text-right tabular-nums">
@@ -230,6 +230,9 @@ export function DetalleOrden({ ordenId, onCerrar, onEditar, onEnviar, onCambio, 
                     {t.percepciones > 0 && <div className="flex justify-between text-muted-foreground"><span>Percepciones (estimadas)</span><span>{moneda(t.percepciones)}</span></div>}
                     <div className="flex justify-between border-t pt-1 text-base font-bold"><span>Total estimado</span><span>{moneda(t.total)}</span></div>
                     {hayNegro && <div className="text-xs text-muted-foreground">Con factura {moneda(t.total_blanco)} · sin factura {moneda(t.total_negro)}</div>}
+                    {t.hay_mixto && <div className="text-xs text-muted-foreground">Artículos mixtos: {o.mixto_pct_factura ?? 50} % con factura{o.mixto_pct_factura == null ? " (el proveedor no lo tiene cargado)" : ""}.</div>}
+                    {oc.proveedor.tipo_descuento === "sobre_lista" && <div className="text-xs text-muted-foreground">Los descuentos de este proveedor se suman y se aplican sobre el precio de lista.</div>}
+                    <div className="border-t pt-1 text-xs text-muted-foreground">El proveedor recibe un solo pedido con el total sin impuestos ({moneda(t.neto)}); la separación con / sin factura es interna.</div>
                   </div>
                 </div>
               </>

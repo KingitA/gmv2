@@ -12,7 +12,7 @@
  *
  * Las columnas nuevas las agrega la migración 20261117m_proveedores_datos_compra.sql.
  */
-import { errorCuit, fecha, formatCuit, mismoCuit, normalizarCuit, parseFecha } from "@/lib/formato"
+import { errorCuit, fecha, formatCuit, mismoCuit, normalizarCuit, parseFecha, parseMonto } from "@/lib/formato"
 import { normalizarCodigo } from "@/lib/codigos"
 import { ENTREGAS_PAGO, MEDIOS_PAGO, normalizarCuotas } from "@/lib/compras/acuerdo-pago"
 import type { DesdePago, EntregaPago, MedioPago } from "@/lib/compras/acuerdo-pago"
@@ -26,7 +26,7 @@ export const CLAVES_EXCEL = [
   "blanco_medio", "blanco_dias", "blanco_desde", "blanco_plazo_cheque", "blanco_entrega",
   "negro_medio", "negro_dias", "negro_desde", "negro_plazo_cheque", "negro_entrega",
   "acepta_cheques_terceros", "acepta_echeq", "ganancias", "exento_hasta",
-  "transporte_habitual", "dias_entrega", "observaciones",
+  "transporte_habitual", "dias_entrega", "observaciones", "mixto_pct",
 ] as const
 export type ClaveExcel = (typeof CLAVES_EXCEL)[number]
 
@@ -60,6 +60,7 @@ export const NOMBRE_COLUMNA: Record<ClaveExcel, string> = {
   transporte_habitual: "Transporte habitual",
   dias_entrega: "Días que tarda en entregar",
   observaciones: "Observaciones",
+  mixto_pct: "Mixto: % con factura",
 }
 
 /** Fila del Excel tal cual se leyó: texto por clave + número de fila de Excel (la 1 es el encabezado). */
@@ -87,6 +88,8 @@ export function claveDeEncabezado(encabezado: unknown): ClaveExcel | null {
     if (tiene("dias", "plazo")) return `${canal}_dias`
     return null
   }
+  // "Mixto: % con factura" (columna opcional, Juan 17/11: la proporción varía según el proveedor)
+  if (n.startsWith("mixto")) return "mixto_pct"
   if (n.startsWith("codigo") || n === "cod") return "codigo"
   if (n === "proveedor" || n === "nombre" || n === "razon_social") return "nombre"
   if (tiene("cuit")) return "cuit"
@@ -166,7 +169,8 @@ export function leerFilasExcel(matriz: unknown[][]): LecturaExcel {
     filas,
     error: filas.length === 0 ? "El Excel no tiene ninguna fila con datos." : null,
     columnasDesconocidas: desconocidas,
-    columnasFaltantes: CLAVES_EXCEL.filter((k) => !columnaDe.has(k)).map((k) => NOMBRE_COLUMNA[k]),
+    // "Mixto: % con factura" es opcional: se agregó después de armar el Excel que completa Juan
+    columnasFaltantes: CLAVES_EXCEL.filter((k) => k !== "mixto_pct" && !columnaDe.has(k)).map((k) => NOMBRE_COLUMNA[k]),
   }
 }
 
@@ -217,6 +221,7 @@ export interface ValoresProveedor {
   transporte_habitual?: string
   dias_entrega?: number
   observaciones_compra?: string
+  mixto_pct_factura?: number
 }
 export type CampoProveedor = keyof ValoresProveedor
 
@@ -251,6 +256,7 @@ export const ETIQUETA_CAMPO: Record<CampoProveedor, string> = {
   transporte_habitual: "Transporte habitual",
   dias_entrega: "Días que tarda en entregar",
   observaciones_compra: "Observaciones",
+  mixto_pct_factura: "Mixto: % con factura",
 }
 export const CAMPOS_IMPORTABLES = Object.keys(ETIQUETA_CAMPO) as CampoProveedor[]
 
@@ -461,6 +467,13 @@ export function validarFila(cruda: FilaCruda): FilaValidada {
     else valores.dias_entrega = n
   }
 
+  // Artículos mixtos: qué % viene con factura
+  if (dato("mixto_pct")) {
+    const pct = parseMonto(dato("mixto_pct").replace("%", "").trim())
+    if (pct === null || pct < 0 || pct > 100) error("mixto_pct", `tiene que ser un porcentaje de 0 a 100 ("${dato("mixto_pct")}")`)
+    else valores.mixto_pct_factura = Math.round(pct * 100) / 100
+  }
+
   return { codigo, nombreExcel: dato("nombre") || null, valores, errores, avisos }
 }
 
@@ -469,7 +482,7 @@ export function validarFila(cruda: FilaCruda): FilaValidada {
 export type ValorCampo = string | number | boolean | null
 export interface Cambio { campo: CampoProveedor; etiqueta: string; antes: ValorCampo; despues: ValorCampo }
 
-const NUMERICOS = new Set<CampoProveedor>(["pago_blanco_dias", "pago_negro_dias", "pago_blanco_plazo_cheque", "pago_negro_plazo_cheque", "dias_entrega"])
+const NUMERICOS = new Set<CampoProveedor>(["pago_blanco_dias", "pago_negro_dias", "pago_blanco_plazo_cheque", "pago_negro_plazo_cheque", "dias_entrega", "mixto_pct_factura"])
 const BOOLEANOS = new Set<CampoProveedor>(["acepta_cheques_terceros", "acepta_echeq"])
 
 /** Valor de la base llevado a algo comparable (texto vacío = null). */

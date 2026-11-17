@@ -77,6 +77,13 @@ function proveedor(extra = {}) {
 }
 
 console.log("\nEncabezados")
+prueba("columna opcional Mixto: % con factura (Juan 17/11)", () => {
+  igual(claveDeEncabezado("Mixto: % con factura"), "mixto_pct")
+  igual(validarFila({ codigo: "134", mixto_pct: "70" }).valores.mixto_pct_factura, 70)
+  igual(validarFila({ codigo: "134", mixto_pct: "70 %" }).valores.mixto_pct_factura, 70)
+  igual(validarFila({ codigo: "134", mixto_pct: "150" }).errores.length, 1)
+  igual(validarFila({ codigo: "134" }).valores.mixto_pct_factura, undefined)
+})
 prueba("los 28 encabezados del Excel se reconocen", () => {
   igual(ENCABEZADOS.map(claveDeEncabezado), CLAVES)
 })

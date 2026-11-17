@@ -155,6 +155,12 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
                 </SelectContent>
               </Select>
             </Campo>
+            <Campo label="Artículos mixtos: % con factura" nota="el resto viene sin factura; vacío = 50 %">
+              <ConUnidad unidad="%">
+                <InputMonto id="mixto_pct_factura" decimales={0} soloPositivos className="tabular-nums" value={formData.mixto_pct_factura ?? null}
+                  onChange={v => set('mixto_pct_factura', v == null ? null : Math.min(100, Math.max(0, v)))} placeholder="50" />
+              </ConUnidad>
+            </Campo>
             <Campo label="Unidad de facturación" nota="si el artículo no tiene una propia" ancho={2}>
               <Select value={formData.default_unidad_factura} onValueChange={v => set('default_unidad_factura', v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>

@@ -8,6 +8,7 @@ import { unidadesPorBultoDe } from "@/lib/deposito/unidades"
 import { acuerdoDeProveedorConLegado, acuerdoDelCanal, normalizarAcuerdo, textoCanal, textoCondicionPago, type AcuerdoPago, type CanalPago } from "@/lib/compras/acuerdo-pago"
 import { netoRenglon, precioNeto, regimenDe, totalesOC, unidadesRenglon, type RegimenCompra, type TotalesOC } from "@/lib/compras/oc-totales"
 import { ESTADOS_OC_ABIERTA, mailsParaOrden } from "@/lib/compras/orden-compra"
+import { tipoDescuentoDe, type TipoDescuento } from "@/lib/compras/neto-compra"
 
 export interface RenglonOrden {
   articulo_id: string
@@ -56,6 +57,8 @@ export interface OrdenCompleta {
     observaciones: string | null
     condicion_pago: string
     acuerdo_pago: AcuerdoPago
+    /** % con factura de los artículos mixtos de esta orden (null = no se cargó: 50) */
+    mixto_pct_factura: number | null
     /** La orden no tenía acuerdo guardado (orden vieja): se muestra el de la ficha del proveedor */
     acuerdo_de_ficha: boolean
     creada_por: string | null
@@ -81,6 +84,8 @@ export interface OrdenCompleta {
     mails_sugeridos: ReturnType<typeof mailsParaOrden>
     percepcion_iva: number
     percepcion_iibb: number
+    /** Cómo aplica sus descuentos: cascada | sobre_lista */
+    tipo_descuento: TipoDescuento
   }
   renglones: RenglonOrden[]
   totales: TotalesOC
@@ -132,7 +137,7 @@ export async function cargarOrdenCompleta(supabase: any, ordenId: string): Promi
       unidades_por_bulto: unidadesPorBultoDe(d.articulo?.unidades_por_bulto),
       iva_compras: d.iva_compras || d.articulo?.iva_compras,
     }
-    const neto = precioNeto(base)
+    const neto = precioNeto(base, p.tipo_descuento)
     const netoFicha = d.precio_neto_ficha != null ? num(d.precio_neto_ficha) : null
     const ean = Array.isArray(d.articulo?.ean13) ? d.articulo.ean13[0] : d.articulo?.ean13
     return {
@@ -148,7 +153,7 @@ export async function cargarOrdenCompleta(supabase: any, ordenId: string): Promi
       descuentos: [base.descuento1, base.descuento2, base.descuento3, base.descuento4],
       precio_neto: neto,
       precio_neto_bulto: base.tipo_cantidad === "bulto" && base.unidades_por_bulto > 1 ? neto * base.unidades_por_bulto : null,
-      total: netoRenglon(base),
+      total: netoRenglon(base, p.tipo_descuento),
       iva_compras: regimenDe(base.iva_compras),
       precio_neto_ficha: netoFicha,
       difiere_de_ficha: netoFicha != null && Math.abs(netoFicha - neto) > 0.005,
@@ -159,7 +164,7 @@ export async function cargarOrdenCompleta(supabase: any, ordenId: string): Promi
     cantidad_pedida: num(d.cantidad_pedida), tipo_cantidad: d.tipo_cantidad, precio_unitario: num(d.precio_unitario),
     descuento1: d.descuento1, descuento2: d.descuento2, descuento3: d.descuento3, descuento4: d.descuento4,
     unidades_por_bulto: d.articulo?.unidades_por_bulto, iva_compras: d.iva_compras || d.articulo?.iva_compras,
-  })), p)
+  })), { percepcion_iva: p.percepcion_iva, percepcion_iibb: p.percepcion_iibb, tipo_descuento: p.tipo_descuento, mixto_pct_factura: o.mixto_pct_factura ?? null })
 
   const guardado = normalizarAcuerdo(o.acuerdo_pago)
   const acuerdo = guardado ?? acuerdoDeProveedorConLegado(p)
@@ -187,6 +192,7 @@ export async function cargarOrdenCompleta(supabase: any, ordenId: string): Promi
       observaciones: o.observaciones ?? null,
       condicion_pago: guardado && o.condicion_pago ? o.condicion_pago : textoCondicionPago(acuerdo, hay),
       acuerdo_pago: acuerdo,
+      mixto_pct_factura: o.mixto_pct_factura != null ? Number(o.mixto_pct_factura) : null,
       acuerdo_de_ficha: !guardado,
       creada_por: nombre(o.usuario_creador),
       enviada_at: o.enviada_at ?? null,
@@ -211,6 +217,7 @@ export async function cargarOrdenCompleta(supabase: any, ordenId: string): Promi
       mails_sugeridos: mailsParaOrden(p),
       percepcion_iva: num(p.percepcion_iva),
       percepcion_iibb: num(p.percepcion_iibb),
+      tipo_descuento: tipoDescuentoDe(p.tipo_descuento),
     },
     renglones,
     totales,
