@@ -1,1307 +1,278 @@
 "use client"
 
-import { useSearchParams } from "next/navigation"
+// Órdenes de compra — listado (E-12, E-96). Liviano: una sola llamada a /api/ordenes-compra/listado
+// con las columnas que se muestran. Crear / editar, ver el detalle, enviar al proveedor y cancelar
+// están en components/ordenes-compra/*; todo lo que escribe pasa por el servidor (funciones SQL).
 
-import { useState, useEffect } from "react"
-import { useDebounced } from "@/lib/hooks/use-debounced"
-import { createClient } from "@/lib/supabase/client"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
+import { AlertTriangle, CheckCircle2, Eye, FileText, Pencil, Plus, Search, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Search, Send, FileText, CheckCircle2, AlertCircle, Clock, Trash2, Pencil } from "lucide-react"
-import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
+import { CargaProgreso } from "@/components/ui/carga-progreso"
+import { createClient } from "@/lib/supabase/client"
 import { localMatch } from "@/lib/search/local-match"
-import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
-import type { Proveedor, OrdenCompra } from "@/lib/types"
-import { ImportOrderDialog } from "@/components/ordenes/ImportOrderDialog"
-import { nowArgentina, todayArgentina, formatCurrency, formatDateAR } from "@/lib/utils"
-import { InputMonto } from "@/components/ui/input-monto"
-import { DateInputAR } from "@/components/ui/date-input-ar"
-import { entero, fecha, fechaISO, hoyISO } from "@/lib/formato"
-import { bultosParaCubrir, unidadesPorBultoDe } from "@/lib/deposito/unidades"
-import { toast } from "sonner"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { fecha, fechaCorta, hoyISO, moneda } from "@/lib/formato"
+import { ESTADOS_OC_ABIERTA } from "@/lib/compras/orden-compra"
+import { ImportOrderDialog, type ResultadoImportacionOC } from "@/components/ordenes/ImportOrderDialog"
+import { EstadoOC } from "@/components/ordenes-compra/estado-oc"
+import { DialogoOrden, type InicioOrden } from "@/components/ordenes-compra/dialogo-orden"
+import { DetalleOrden } from "@/components/ordenes-compra/detalle-orden"
+import { DialogoEnviarOrden } from "@/components/ordenes-compra/dialogo-enviar"
 
-function CargarComprobanteForm({
-  ordenId,
-  proveedorId,
-  onSuccess,
-}: { ordenId: string; proveedorId: string; onSuccess: () => void }) {
-  const [tipoComprobante, setTipoComprobante] = useState<string>("none")
-  const [numeroComprobante, setNumeroComprobante] = useState("")
-  const [fechaComprobante, setFechaComprobante] = useState(todayArgentina())
-  const [totalFacturaDeclarado, setTotalFacturaDeclarado] = useState<number>(0)
-  const [descuentoFueraFactura, setDescuentoFueraFactura] = useState<number>(0)
-
-  const TIPOS_COMPROBANTE = [
-    { value: "FA", label: "Factura A" },
-    { value: "FB", label: "Factura B" },
-    { value: "FC", label: "Factura C" },
-    { value: "NCA", label: "Nota de Crédito A" },
-    { value: "NCB", label: "Nota de Crédito B" },
-    { value: "NCC", label: "Nota de Crédito C" },
-    { value: "NDA", label: "Nota de Débito A" },
-    { value: "NDB", label: "Nota de Débito B" },
-    { value: "NDC", label: "Nota de Débito C" },
-    { value: "ADQ", label: "Adquisición (IVA 0%)" },
-    { value: "REV", label: "Reversa (IVA 0%)" },
-  ]
-
-  const crearComprobante = async () => {
-    if (tipoComprobante === "none" || !numeroComprobante.trim() || totalFacturaDeclarado <= 0) {
-      alert("Completá todos los campos obligatorios")
-      return
-    }
-
-    const { data, error } = await supabase
-      .from("comprobantes_compra")
-      .insert({
-        orden_compra_id: ordenId,
-        tipo_comprobante: tipoComprobante,
-        numero_comprobante: numeroComprobante,
-        fecha_comprobante: fechaComprobante,
-        proveedor_id: proveedorId,
-        total_factura_declarado: totalFacturaDeclarado,
-        total_calculado: 0,
-        descuento_fuera_factura: descuentoFueraFactura,
-        estado: "pendiente_recepcion",
-        diferencia_centavos: 0,
-      })
-      .select()
-      .single()
-
-    if (error) {
-      alert(`Error al crear el comprobante: ${error.message}`)
-      return
-    }
-
-    alert("Comprobante creado exitosamente")
-    onSuccess()
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label>Tipo de Comprobante *</Label>
-          <Select value={tipoComprobante} onValueChange={setTipoComprobante}>
-            <SelectTrigger>
-              <SelectValue placeholder="Seleccionar tipo" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">Seleccionar tipo</SelectItem>
-              {TIPOS_COMPROBANTE.map((tipo) => (
-                <SelectItem key={tipo.value} value={tipo.value}>
-                  {tipo.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
-          <Label>Número de Comprobante *</Label>
-          <Input
-            placeholder="0001-00000001"
-            value={numeroComprobante}
-            onChange={(e) => setNumeroComprobante(e.target.value)}
-          />
-        </div>
-      </div>
-
-      <div>
-        <Label>Fecha del Comprobante *</Label>
-        <DateInputAR value={fechaComprobante} onChange={setFechaComprobante} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label>Total de la Factura (según papel) *</Label>
-          <InputMonto
-            pesos
-            placeholder="0,00"
-            value={totalFacturaDeclarado || null}
-            onChange={(n) => setTotalFacturaDeclarado(n ?? 0)}
-          />
-        </div>
-
-        <div>
-          <Label>Descuento Fuera de Factura (%)</Label>
-          <InputMonto
-            porciento
-            placeholder="0,00"
-            value={descuentoFueraFactura || null}
-            onChange={(n) => setDescuentoFueraFactura(n ?? 0)}
-          />
-        </div>
-      </div>
-
-      <div className="flex justify-end gap-2">
-        <Button onClick={crearComprobante}>Crear Comprobante</Button>
-      </div>
-    </div>
-  )
+interface FilaOrden {
+  id: string
+  numero_orden: string
+  proveedor_id: string
+  proveedor_nombre: string
+  fecha_orden: string | null
+  fecha_estimada_recepcion: string | null
+  estado: string
+  observaciones: string | null
+  condicion_pago: string | null
+  creada_por: string | null
+  total: number | null
+  neto: number | null
+  renglones: number | null
+  enviada_at: string | null
+  enviada_a: string | null
+  envios: number
+  cambio_sin_enviar: boolean
+  cancelada_at: string | null
+  motivo_cancelacion: string | null
+  comprobantes: number
+  comprobantes_validados: number
 }
 
-function DetalleOrdenDialog({ orden, onClose }: { orden: OrdenCompra; onClose: () => void }) {
-  const [comprobantes, setComprobantes] = useState<any[]>([])
+const FILTROS: { valor: string; nombre: string; incluye: (o: FilaOrden) => boolean }[] = [
+  { valor: "abiertas", nombre: "Abiertas (sin recibir)", incluye: (o) => (ESTADOS_OC_ABIERTA as readonly string[]).includes(o.estado) },
+  { valor: "sin_enviar", nombre: "Sin enviar al proveedor", incluye: (o) => o.estado === "pendiente" },
+  { valor: "enviadas", nombre: "Enviadas / en camino", incluye: (o) => ["enviada", "confirmada", "en_camino"].includes(o.estado) },
+  { valor: "recepcion", nombre: "Recibidas (a verificar)", incluye: (o) => ["recibida_parcial", "recibida_completa", "recibida"].includes(o.estado) },
+  { valor: "finalizadas", nombre: "Finalizadas", incluye: (o) => o.estado === "finalizada" },
+  { valor: "canceladas", nombre: "Canceladas", incluye: (o) => o.estado === "cancelada" },
+  { valor: "todas", nombre: "Todas", incluye: () => true },
+]
 
+function OrdenesCompra() {
+  const busqueda = useSearchParams()
+  const [ordenes, setOrdenes] = useState<FilaOrden[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [migracion, setMigracion] = useState<string | null>(null)
+  const [texto, setTexto] = useState("")
+  const [filtro, setFiltro] = useState("todas")
+  const [proveedores, setProveedores] = useState<{ id: string; nombre: string }[]>([])
+
+  const [inicio, setInicio] = useState<InicioOrden | null>(null)
+  const [dialogoAbierto, setDialogoAbierto] = useState(false)
+  const [detalleId, setDetalleId] = useState<string | null>(null)
+  const [enviarId, setEnviarId] = useState<string | null>(null)
+  const [version, setVersion] = useState(0)
+
+  const cargar = useCallback(async () => {
+    setError(null)
+    try {
+      const r = await fetch("/api/ordenes-compra/listado", { cache: "no-store" })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setError(d.error || "No se pudieron traer las órdenes."); setOrdenes((o) => o ?? []); return }
+      setOrdenes(d.ordenes || [])
+      setMigracion(d.migracion_pendiente || null)
+    } catch {
+      setError("No se pudieron traer las órdenes. Revisá la conexión.")
+      setOrdenes((o) => o ?? [])
+    }
+  }, [])
+
+  useEffect(() => { cargar() }, [cargar])
+
+  // Solo nombre e id: los usa el diálogo de importar desde archivo
   useEffect(() => {
-    loadComprobantes()
-  }, [orden.id])
+    createClient().from("proveedores").select("id, nombre").eq("activo", true).order("nombre")
+      .then(({ data }) => setProveedores((data as any[]) || []))
+  }, [])
 
-  const loadComprobantes = async () => {
-    const { data } = await supabase
-      .from("comprobantes_compra")
-      .select(`
-        *,
-        detalle:comprobantes_compra_detalle(
-          *,
-          articulo:articulos(descripcion, sku, unidades_por_bulto)
-        )
-      `)
-      .eq("orden_compra_id", orden.id)
-      .order("fecha_comprobante", { ascending: false })
+  // Desde Jarvis (Playroom → "Armar orden de compra"): ?nueva=1&proveedor=…&sugerir=1&origen=jarvis
+  // abre la orden con el proveedor elegido y la sugerencia ya cargada. No guarda nada.
+  useEffect(() => {
+    if (busqueda.get("nueva") !== "1") return
+    setInicio({
+      proveedorId: busqueda.get("proveedor"),
+      aplicarSugerencia: busqueda.get("sugerir") === "1",
+      observaciones: busqueda.get("origen") === "jarvis" ? "Sugerida por Jarvis (Playroom). Revisada antes de guardar." : "",
+    })
+    setDialogoAbierto(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-    if (data) setComprobantes(data)
+  const abrirNueva = () => { setInicio({}); setDialogoAbierto(true) }
+  const abrirEditar = (id: string) => { setDetalleId(null); setInicio({ ordenId: id }); setDialogoAbierto(true) }
+  const abrirEnviar = (id: string) => setEnviarId(id)
+
+  const alImportar = (r: ResultadoImportacionOC) => {
+    setInicio({ proveedorId: r.proveedorId, importados: r.items, sinArticulo: r.sinArticulo, unidadImportada: r.unidad })
+    setDialogoAbierto(true)
   }
 
-  const totalFacturado = comprobantes.reduce((sum, comp) => sum + comp.total_factura_declarado, 0)
-  const totalCalculado = comprobantes.reduce((sum, comp) => sum + comp.total_calculado, 0)
+  const alGuardar = (r: { ordenId: string; numero: string; enviar: boolean }) => {
+    setDialogoAbierto(false)
+    setInicio(null)
+    setVersion((v) => v + 1)
+    cargar()
+    if (r.enviar && r.ordenId) setEnviarId(r.ordenId)
+  }
 
-  // Calcular cantidades por artículo
-  const cantidadesPorArticulo = new Map()
-  comprobantes.forEach((comp) => {
-    comp.detalle?.forEach((item: any) => {
-      const key = item.articulo_id
-      const cantidadActual = cantidadesPorArticulo.get(key) || {
-        articulo: item.articulo,
-        facturada: 0,
-        recibida: 0,
-      }
-      cantidadActual.facturada += item.cantidad_facturada
-      cantidadActual.recibida += item.cantidad_recibida
-      cantidadesPorArticulo.set(key, cantidadActual)
-    })
-  })
+  const hoy = hoyISO()
+  const cuentas = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const f of FILTROS) m[f.valor] = (ordenes || []).filter(f.incluye).length
+    return m
+  }, [ordenes])
+
+  const filtradas = useMemo(() => {
+    const f = FILTROS.find((x) => x.valor === filtro) ?? FILTROS[FILTROS.length - 1]
+    return (ordenes || []).filter((o) => f.incluye(o) && (!texto.trim() || localMatch(texto, o.numero_orden, o.proveedor_nombre)))
+  }, [ordenes, filtro, texto])
+
+  const totalFiltradas = filtradas.reduce((s, o) => s + (o.estado === "cancelada" ? 0 : o.total || 0), 0)
 
   return (
-    <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-      <DialogHeader>
-        <DialogTitle>Detalle de Orden {orden.numero_orden}</DialogTitle>
-      </DialogHeader>
+    <div className="container mx-auto space-y-5 p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-3xl font-bold">Órdenes de compra</h1>
+        <div className="flex gap-2">
+          <ImportOrderDialog proveedores={proveedores} onImportSuccess={alImportar} />
+          <Button onClick={abrirNueva}><Plus className="mr-2 h-4 w-4" /> Nueva orden</Button>
+        </div>
+      </div>
 
-      <div className="space-y-6">
-        {/* Resumen de comprobantes */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Comprobantes Asociados ({comprobantes.length})</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Número</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Total Declarado</TableHead>
-                  <TableHead>Total Calculado</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {comprobantes.map((comp) => (
-                  <TableRow key={comp.id}>
-                    <TableCell>{comp.tipo_comprobante}</TableCell>
-                    <TableCell className="font-medium">{comp.numero_comprobante}</TableCell>
-                    <TableCell>{formatDateAR(comp.fecha_comprobante)}</TableCell>
-                    <TableCell>{formatCurrency(comp.total_factura_declarado)}</TableCell>
-                    <TableCell>{formatCurrency(comp.total_calculado)}</TableCell>
-                    <TableCell>
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs ${comp.estado === "pendiente_recepcion"
-                          ? "bg-yellow-100 text-yellow-800"
-                          : comp.estado === "recibido"
-                            ? "bg-blue-100 text-blue-800"
-                            : comp.estado === "validado"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-gray-100 text-gray-800"
-                          }`}
-                      >
-                        {comp.estado}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/verificacion`)}
-                      >
-                        Verificar
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+      {migracion && (
+        <div className="flex gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <AlertTriangle className="h-4 w-4 shrink-0" /> {migracion}
+        </div>
+      )}
+      {error && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
 
-            <div className="mt-4 space-y-2 border-t pt-4">
-              <div className="flex justify-between text-lg">
-                <span>Total Facturado (todos los comprobantes):</span>
-                <span className="font-bold">{formatCurrency(totalFacturado)}</span>
-              </div>
-              <div className="flex justify-between text-lg">
-                <span>Total Calculado (todos los comprobantes):</span>
-                <span className="font-bold">{formatCurrency(totalCalculado)}</span>
-              </div>
-              <div className="flex justify-between text-xl font-bold">
-                <span>Diferencia:</span>
-                <span className={Math.abs(totalFacturado - totalCalculado) < 0.01 ? "text-green-600" : "text-red-600"}>
-                  {formatCurrency((totalFacturado - totalCalculado))}
-                </span>
-              </div>
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative min-w-[240px] flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Buscar por número de orden o proveedor…" value={texto} onChange={(e) => setTexto(e.target.value)} className="pl-10" />
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Resumen de cantidades por artículo */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Cantidades Totales por Artículo</CardTitle>
-          </CardHeader>
-          <CardContent>
+            <Select value={filtro} onValueChange={setFiltro}>
+              <SelectTrigger className="w-64"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {FILTROS.map((f) => <SelectItem key={f.valor} value={f.valor}>{f.nombre}{ordenes ? ` (${cuentas[f.valor] ?? 0})` : ""}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {ordenes && <div className="text-sm text-muted-foreground tabular-nums">{filtradas.length} órdenes · {moneda(totalFiltradas)}</div>}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {ordenes === null ? (
+            <CargaProgreso mensajes={["Buscando las órdenes de compra…", "Sumando totales…", "Ya casi está…"]} />
+          ) : filtradas.length === 0 ? (
+            <div className="py-10 text-center text-sm text-muted-foreground">
+              {ordenes.length === 0 ? "Todavía no hay órdenes de compra." : "Ninguna orden coincide con la búsqueda o el filtro."}
+            </div>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Artículo</TableHead>
-                  <TableHead>Cant. Facturada (Total)</TableHead>
-                  <TableHead>Cant. Recibida (Total)</TableHead>
-                  <TableHead>Diferencia</TableHead>
+                  <TableHead>N° de orden</TableHead>
+                  <TableHead>Proveedor</TableHead>
+                  <TableHead>Creada</TableHead>
+                  <TableHead>Entrega estimada</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Envío al proveedor</TableHead>
+                  <TableHead className="text-right">Total estimado</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {Array.from(cantidadesPorArticulo.values()).map((item: any, index) => {
-                  const diferencia = item.facturada - item.recibida
+                {filtradas.map((o) => {
+                  const abierta = (ESTADOS_OC_ABIERTA as readonly string[]).includes(o.estado)
+                  const atrasada = abierta && !!o.fecha_estimada_recepcion && o.fecha_estimada_recepcion < hoy
+                  const enRecepcion = ["recibida_parcial", "recibida_completa", "recibida"].includes(o.estado)
                   return (
-                    <TableRow key={index}>
+                    <TableRow key={o.id} className={`cursor-pointer ${o.estado === "cancelada" ? "text-muted-foreground" : ""}`} onClick={() => setDetalleId(o.id)}>
+                      <TableCell className="font-mono text-sm font-semibold">{o.numero_orden}</TableCell>
                       <TableCell>
-                        <div className="font-medium">{item.articulo.descripcion}</div>
-                        <div className="text-sm text-muted-foreground">
-                          SKU: {item.articulo.sku} | {item.articulo.unidades_por_bulto} unid/bulto
-                        </div>
+                        <div className="font-medium">{o.proveedor_nombre}</div>
+                        {o.renglones != null && <div className="text-xs text-muted-foreground">{o.renglones} artículos</div>}
                       </TableCell>
-                      <TableCell>{item.facturada} bultos</TableCell>
-                      <TableCell>{item.recibida} bultos</TableCell>
                       <TableCell>
-                        <span className={diferencia === 0 ? "text-green-600" : "text-red-600"}>
-                          {diferencia > 0 ? `+${diferencia}` : diferencia} bultos
-                        </span>
+                        <div>{fecha(o.fecha_orden)}</div>
+                        {o.creada_por && <div className="text-xs text-muted-foreground">{o.creada_por}</div>}
+                      </TableCell>
+                      <TableCell>
+                        {o.fecha_estimada_recepcion ? (
+                          <>
+                            <div className={atrasada ? "font-semibold text-red-600" : ""}>{fecha(o.fecha_estimada_recepcion)}</div>
+                            {atrasada && <div className="text-xs text-red-600">atrasada</div>}
+                          </>
+                        ) : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell><EstadoOC estado={o.estado} /></TableCell>
+                      <TableCell>
+                        {o.estado === "cancelada" ? <span className="text-xs">{o.motivo_cancelacion || "—"}</span>
+                          : o.enviada_at ? (
+                            <>
+                              <div className="flex items-center gap-1 text-sm text-green-700"><CheckCircle2 className="h-3.5 w-3.5" /> {fechaCorta(o.enviada_at)}{o.envios > 1 ? ` · ${o.envios} envíos` : ""}</div>
+                              {o.cambio_sin_enviar
+                                ? <div className="text-xs font-semibold text-amber-700">cambió después: reenviar</div>
+                                : <div className="max-w-[220px] truncate text-xs text-muted-foreground" title={o.enviada_a || ""}>{o.enviada_a}</div>}
+                            </>
+                          ) : abierta ? <span className="text-sm font-medium text-amber-700">Sin enviar</span>
+                          : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{o.total != null ? moneda(o.total) : "—"}</TableCell>
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <Button variant="outline" size="sm" onClick={() => setDetalleId(o.id)}><Eye className="mr-1 h-4 w-4" /> Ver</Button>
+                          {abierta && (
+                            <>
+                              <Button variant="outline" size="sm" onClick={() => abrirEditar(o.id)} title="Editar la orden"><Pencil className="h-4 w-4" /></Button>
+                              <Button variant={o.enviada_at && !o.cambio_sin_enviar ? "outline" : "default"} size="sm" onClick={() => abrirEnviar(o.id)}>
+                                <Send className="mr-1 h-4 w-4" /> {o.enviada_at ? "Reenviar" : "Enviar"}
+                              </Button>
+                            </>
+                          )}
+                          {enRecepcion && (
+                            <Button size="sm" onClick={() => { window.location.href = `/ordenes-compra/${o.id}/verificacion` }}>
+                              <CheckCircle2 className="mr-1 h-4 w-4" /> Verificar
+                            </Button>
+                          )}
+                          {o.estado === "finalizada" && (
+                            <Button variant="outline" size="sm" onClick={() => { window.location.href = `/ordenes-compra/${o.id}/verificacion` }}>
+                              <FileText className="mr-1 h-4 w-4" /> Verificación
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   )
                 })}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-
-        <div className="flex justify-end">
-          <Button onClick={onClose}>Cerrar</Button>
-        </div>
-      </div>
-    </DialogContent>
-  )
-}
-
-// Columnas del artículo que usa la orden de compra (sin vectores ni campos que no se muestran)
-const COLS_ARTICULO_OC = "id, descripcion, sku, ean13, unidades_por_bulto, precio_compra, descuento1, descuento2, descuento3, descuento4"
-
-export default function OrdenesCompraPage() {
-  const supabase = createClient()
-  const [ordenes, setOrdenes] = useState<OrdenCompra[]>([])
-  const [proveedores, setProveedores] = useState<Proveedor[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
-  const [isCreating, setIsCreating] = useState(false)
-  const busqueda = useSearchParams()
-  useEffect(() => {
-    if (busqueda.get("nueva") !== "1") return
-    setIsCreating(true)
-    // Desde Jarvis (Playroom → "Armar orden de compra"): ?proveedor=…&sugerir=1&origen=jarvis
-    // abre la orden con el proveedor elegido y la cantidad sugerida ya cargada. No guarda nada.
-    const prov = busqueda.get("proveedor")
-    if (!prov) return
-    ;(async () => {
-      await handleProveedorChange(prov)
-      if (busqueda.get("sugerir") === "1") await cargarSugerencia(prov, true)
-      if (busqueda.get("origen") === "jarvis") setObservaciones(o => o || "Sugerida por Jarvis (Playroom). Revisada antes de guardar.")
-    })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const [selectedProveedor, setSelectedProveedor] = useState<string>("")
-  const [articulosTabla, setArticulosTabla] = useState<any[]>([])
-  const [observaciones, setObservaciones] = useState("")
-  const [searchArticulo, setSearchArticulo] = useState("")
-  const [ordenSeleccionada, setOrdenSeleccionada] = useState<OrdenCompra | null>(null)
-  const [mostrarCargarComprobante, setMostrarCargarComprobante] = useState(false)
-  const [ordenParaDetalle, setOrdenParaDetalle] = useState<OrdenCompra | null>(null)
-  const [ordenParaEliminar, setOrdenParaEliminar] = useState<OrdenCompra | null>(null)
-  const [ordenParaEditar, setOrdenParaEditar] = useState<OrdenCompra | null>(null)
-
-  // Sugerencia
-  const [sugerenciaData, setSugerenciaData] = useState<any[]>([])
-  const [loadingSugerencia, setLoadingSugerencia] = useState(false)
-  const [fechaDesde, setFechaDesde] = useState(() => { const d = new Date(`${hoyISO()}T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() - 3); return fechaISO(d) })
-  const [fechaHasta, setFechaHasta] = useState(() => hoyISO())
-  const [tipoVenta, setTipoVenta] = useState<'vendida' | 'facturada'>('vendida')
-
-  // External article search
-  const [showBuscarArticulo, setShowBuscarArticulo] = useState(false)
-  const [searchArticuloExterno, setSearchArticuloExterno] = useState("")
-  const [articulosExternos, setArticulosExternos] = useState<any[]>([])
-  const [loadingArticulosExternos, setLoadingArticulosExternos] = useState(false)
-
-  useEffect(() => {
-    loadOrdenes()
-    loadProveedores()
-  }, [])
-
-  const loadOrdenes = async () => {
-    const { data, error } = await supabase
-      .from("ordenes_compra")
-      .select(`
-        *,
-        proveedor:proveedores(nombre, email),
-        detalle:ordenes_compra_detalle(
-          *,
-          articulo:articulos(descripcion, sku, unidades_por_bulto)
-        ),
-        comprobantes:comprobantes_compra(id, estado, total_factura_declarado)
-      `)
-      .order("fecha_orden", { ascending: false })
-
-    if (!error && data) {
-      setOrdenes(data)
-    }
-  }
-
-  const loadProveedores = async () => {
-    const { data } = await supabase.from("proveedores").select("*").eq("activo", true).order("nombre")
-    if (data) setProveedores(data)
-  }
-
-  const handleProveedorChange = async (proveedorId: string) => {
-    setSelectedProveedor(proveedorId)
-
-    if (!proveedorId) {
-      setArticulosTabla([])
-      return
-    }
-
-    // Solo lo que usa la tabla: con * venían los vectores de búsqueda (~10 MB, P2-49)
-    const { data } = await supabase
-      .from("articulos")
-      .select(COLS_ARTICULO_OC)
-      .eq("activo", true)
-      .eq("proveedor_id", proveedorId)
-      .order("descripcion")
-
-    if (data) {
-      const articulosConCantidad = data.map((art: any) => ({
-        articulo_id: art.id,
-        articulo: art,
-        cantidad_pedida: 0,
-        tipo_cantidad: "bulto",
-        precio_unitario: art.precio_compra || 0,
-        descuento1: art.descuento1 || 0,
-        descuento2: art.descuento2 || 0,
-        descuento3: art.descuento3 || 0,
-        descuento4: art.descuento4 || 0,
-      }))
-      setArticulosTabla(articulosConCantidad)
-    }
-  }
-
-  /** aplicar = además de mostrar la sugerencia, cargarla como cantidad pedida (lo usa Jarvis) */
-  const cargarSugerencia = async (proveedorId: string = selectedProveedor, aplicar = false) => {
-    if (!proveedorId) return
-    setLoadingSugerencia(true)
-    try {
-      const params = new URLSearchParams({ proveedor_id: proveedorId, fecha_desde: fechaDesde, fecha_hasta: fechaHasta, tipo_venta: tipoVenta, dias_objetivo: '45' })
-      const res = await fetch(`/api/ordenes-compra/sugerencia?${params}`)
-      const data = await res.json()
-      if (res.ok && data.items) {
-        setSugerenciaData(data.items)
-        const porId: Record<string, number> = {}
-        for (const s of data.items) porId[s.articulo_id] = s.cantidad_sugerida
-        // La sugerencia viene en UNIDADES: al aplicarla (Jarvis) se pasa a bultos si el artículo tiene bulto
-        setArticulosTabla(prev => prev.map(a => ({ ...a, cantidad_sugerida: porId[a.articulo_id] ?? 0, ...(aplicar && porId[a.articulo_id] ? sugerenciaEnBultos(a, porId[a.articulo_id]) : {}) })))
-      }
-    } finally {
-      setLoadingSugerencia(false)
-    }
-  }
-
-  // Búsqueda de artículo externo: debounce de 300 ms + abort de la búsqueda anterior
-  const searchArticuloExternoDeb = useDebounced(searchArticuloExterno, 300)
-  useEffect(() => {
-    const term = searchArticuloExternoDeb
-    if (!term || term.length < 2) { setArticulosExternos([]); return }
-    const ctrl = new AbortController()
-    setLoadingArticulosExternos(true)
-    // Motor unificado (léxico trigram + vector de fallback)
-    fetch(`/api/articulos/buscar?q=${encodeURIComponent(term)}`, { signal: ctrl.signal })
-      .then(res => (res.ok ? res.json() : []))
-      .then(data => { if (!ctrl.signal.aborted) setArticulosExternos(Array.isArray(data) ? data.slice(0, 20) : []) })
-      .catch(() => {})
-      .finally(() => { if (!ctrl.signal.aborted) setLoadingArticulosExternos(false) })
-    return () => { ctrl.abort(); setLoadingArticulosExternos(false) }
-  }, [searchArticuloExternoDeb])
-
-  const agregarArticuloExterno = (art: any) => {
-    if (articulosTabla.some(a => a.articulo_id === art.id)) { alert('Este artículo ya está en la tabla'); return }
-    setArticulosTabla(prev => [...prev, {
-      articulo_id: art.id,
-      articulo: art,
-      cantidad_pedida: 0,
-      tipo_cantidad: 'bulto',
-      precio_unitario: art.precio_compra || 0,
-      descuento1: art.descuento1 || 0,
-      descuento2: art.descuento2 || 0,
-      descuento3: art.descuento3 || 0,
-      descuento4: art.descuento4 || 0,
-      esExterno: true,
-    }])
-    setShowBuscarArticulo(false)
-    setSearchArticuloExterno("")
-    setArticulosExternos([])
-  }
-
-  const actualizarArticulo = (index: number, campo: string, valor: any) => {
-    const nuevosArticulos = [...articulosTabla]
-    nuevosArticulos[index][campo] = valor
-    setArticulosTabla(nuevosArticulos)
-  }
-
-  /**
-   * La sugerencia viene SIEMPRE en unidades (E-02). Para cargarla como cantidad pedida:
-   * artículo con bulto ⇒ bultos enteros hacia arriba; sin unidades por bulto ⇒ se pide por unidad.
-   * Único camino para Jarvis y para el botón "usar".
-   */
-  const sugerenciaEnBultos = (a: any, unidades: number) => {
-    const ub = unidadesPorBultoDe(a.articulo?.unidades_por_bulto)
-    return ub > 1 ? { cantidad_pedida: bultosParaCubrir(unidades, ub), tipo_cantidad: "bulto" } : { cantidad_pedida: unidades, tipo_cantidad: "unidad" }
-  }
-
-  /** Botón "usar" de la sugerencia: respeta lo que el usuario eligió (bulto / unidad) y convierte. */
-  const usarSugerencia = (index: number) => {
-    setArticulosTabla(prev => prev.map((a, i) => {
-      if (i !== index || !(a.cantidad_sugerida > 0)) return a
-      if (a.tipo_cantidad === "unidad") return { ...a, cantidad_pedida: a.cantidad_sugerida }
-      return { ...a, ...sugerenciaEnBultos(a, a.cantidad_sugerida) }
-    }))
-  }
-
-  const calcularSubtotal = (item: any) => {
-    if (item.cantidad_pedida === 0) return 0
-
-    let precio = item.precio_unitario
-    precio = precio * (1 - item.descuento1 / 100)
-    precio = precio * (1 - item.descuento2 / 100)
-    precio = precio * (1 - item.descuento3 / 100)
-    precio = precio * (1 - item.descuento4 / 100)
-
-    const cantidadReal =
-      item.tipo_cantidad === "bulto"
-        ? item.cantidad_pedida * (item.articulo.unidades_por_bulto || 1)
-        : item.cantidad_pedida
-
-    return precio * cantidadReal
-  }
-
-  const crearOrden = async () => {
-    const articulosConCantidad = articulosTabla.filter((item) => item.cantidad_pedida > 0)
-
-    if (!selectedProveedor || articulosConCantidad.length === 0) {
-      toast.error("Seleccioná un proveedor y agregá cantidades a al menos un artículo")
-      return
-    }
-    // E-13: un renglón importado que no se pudo vincular al catálogo no puede ir a la orden
-    const sinVincular = articulosConCantidad.filter((item) => !item.articulo_id)
-    if (sinVincular.length > 0) {
-      toast.error(`Hay ${sinVincular.length} renglón(es) sin artículo vinculado: ${sinVincular.slice(0, 3).map((i) => i.articulo?.descripcion || "sin descripción").join(" · ")}${sinVincular.length > 3 ? "…" : ""}. Poneles cantidad 0 o vinculalos antes de crear la orden.`, { duration: 10000 })
-      return
-    }
-
-    const res = await fetch('/api/ordenes-compra/crear', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        proveedor_id: selectedProveedor,
-        observaciones,
-        items: articulosConCantidad.map(item => ({
-          articulo_id: item.articulo_id,
-          cantidad_pedida: item.cantidad_pedida,
-          tipo_cantidad: item.tipo_cantidad,
-          precio_unitario: item.precio_unitario,
-          descuento1: item.descuento1,
-          descuento2: item.descuento2,
-          descuento3: item.descuento3,
-          descuento4: item.descuento4,
-          // las unidades por bulto NO se mandan: el servidor las lee de la base (E-13)
-        }))
-      })
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) { toast.error(`No se creó la orden: ${data.error || `error ${res.status}`}`, { duration: 10000 }); return }
-
-    toast.success(`Orden ${data.numeroOrden} creada. Recepción estimada: ${fecha(data.fechaEstimada)}`)
-    setIsCreating(false)
-    setSelectedProveedor("")
-    setArticulosTabla([])
-    setObservaciones("")
-    setSugerenciaData([])
-    loadOrdenes()
-  }
-
-  const abrirEditarOrden = async (orden: OrdenCompra) => {
-    const { data: detalles } = await supabase
-      .from("ordenes_compra_detalle")
-      .select(`
-        *,
-        articulo:articulos(${COLS_ARTICULO_OC})
-      `)
-      .eq("orden_compra_id", orden.id)
-
-    if (detalles) {
-      const articulosConDatos = detalles.map((det: any) => ({
-        articulo_id: det.articulo_id,
-        articulo: det.articulo,
-        cantidad_pedida: det.cantidad_pedida,
-        tipo_cantidad: det.tipo_cantidad || "bulto",
-        precio_unitario: det.precio_unitario,
-        descuento1: det.descuento1 || 0,
-        descuento2: det.descuento2 || 0,
-        descuento3: det.descuento3 || 0,
-        descuento4: det.descuento4 || 0,
-      }))
-      setArticulosTabla(articulosConDatos)
-      setSelectedProveedor(orden.proveedor_id)
-      setObservaciones(orden.observaciones || "")
-      setOrdenParaEditar(orden)
-      setIsCreating(true)
-    }
-  }
-
-  const actualizarOrden = async () => {
-    if (!ordenParaEditar) return
-
-    const articulosConCantidad = articulosTabla.filter((item) => item.cantidad_pedida > 0)
-
-    if (!selectedProveedor || articulosConCantidad.length === 0) {
-      alert("Seleccioná un proveedor y agregá cantidades a al menos un artículo")
-      return
-    }
-
-    const { error: errorOrden } = await supabase
-      .from("ordenes_compra")
-      .update({
-        proveedor_id: selectedProveedor,
-        observaciones: observaciones,
-        updated_at: nowArgentina(),
-      })
-      .eq("id", ordenParaEditar.id)
-
-    if (errorOrden) {
-      alert("Error al actualizar la orden")
-      return
-    }
-
-    await supabase.from("ordenes_compra_detalle").delete().eq("orden_compra_id", ordenParaEditar.id)
-
-    const detalleParaInsertar = articulosConCantidad.map((item) => ({
-      orden_compra_id: ordenParaEditar.id,
-      articulo_id: item.articulo_id,
-      cantidad_pedida: item.cantidad_pedida,
-      tipo_cantidad: item.tipo_cantidad,
-      precio_unitario: item.precio_unitario,
-      descuento1: item.descuento1,
-      descuento2: item.descuento2,
-      descuento3: item.descuento3,
-      descuento4: item.descuento4,
-    }))
-
-    const { error: errorDetalle } = await supabase.from("ordenes_compra_detalle").insert(detalleParaInsertar)
-
-    if (errorDetalle) {
-      alert("Error al actualizar el detalle de la orden")
-      return
-    }
-
-    // --- ACTUALIZAR EN CUENTA CORRIENTE ---
-    await supabase
-      .from("cuenta_corriente_proveedores")
-      .delete()
-      .eq("referencia_id", ordenParaEditar.id)
-      .eq("referencia_tipo", "orden_compra")
-    await supabase.from("cuenta_corriente_proveedores").insert({
-      proveedor_id: selectedProveedor,
-      tipo_movimiento: "orden_compra",
-      monto: totalOrden,
-      descripcion: `Provisión OC: ${ordenParaEditar.numero_orden}`,
-      referencia_id: ordenParaEditar.id,
-      referencia_tipo: "orden_compra",
-      fecha: nowArgentina(),
-    })
-    // --------------------------------------
-
-    for (const item of articulosConCantidad) {
-      await supabase
-        .from("articulos")
-        .update({
-          precio_compra: item.precio_unitario,
-          descuento1: item.descuento1,
-          descuento2: item.descuento2,
-          descuento3: item.descuento3,
-          descuento4: item.descuento4,
-        })
-        .eq("id", item.articulo_id)
-    }
-
-    alert(`Orden ${ordenParaEditar.numero_orden} actualizada exitosamente`)
-    setIsCreating(false)
-    setOrdenParaEditar(null)
-    setSelectedProveedor("")
-    setArticulosTabla([])
-    setObservaciones("")
-    loadOrdenes()
-  }
-
-  // Descarga la OC como PDF o Excel (un solo archivo con cantidades totales,
-  // EAN13/SKU/descripción/precios/descuentos/IVA) para enviar al proveedor.
-  const descargarOrden = (orden: OrdenCompra, formato: "pdf" | "xlsx") => {
-    window.open(`/api/ordenes-compra/${orden.id}/pdf${formato === "xlsx" ? "?formato=xlsx" : ""}`, "_blank")
-  }
-
-  const eliminarOrden = async (orden: OrdenCompra) => {
-    // Clean up kardex pendiente entries for this OC
-    await supabase.from("kardex").delete().eq("orden_compra_id", orden.id).eq("estado", "pendiente")
-
-    const { error } = await supabase.from("ordenes_compra").delete().eq("id", orden.id)
-
-    if (error) {
-      alert(`Error al eliminar la orden: ${error.message}`)
-      return
-    }
-
-    // --- ELIMINAR DE CUENTA CORRIENTE ---
-    await supabase
-      .from("cuenta_corriente_proveedores")
-      .delete()
-      .eq("referencia_id", orden.id)
-      .eq("referencia_tipo", "orden_compra")
-    // ------------------------------------
-
-    alert(`Orden ${orden.numero_orden} eliminada exitosamente`)
-    setOrdenParaEliminar(null)
-    loadOrdenes()
-  }
-
-  const calcularEstadoFactura = (orden: OrdenCompra) => {
-    const comprobantes = orden.comprobantes || []
-    if (comprobantes.length === 0) return "sin_factura"
-
-    const tieneValidado = comprobantes.some((c: any) => c.estado === "validado" || c.estado === "cerrado")
-    const tienePendiente = comprobantes.some((c: any) => c.estado === "pendiente_recepcion" || c.estado === "recibido")
-
-    if (tieneValidado && !tienePendiente) return "completo"
-    if (comprobantes.length > 0) return "parcial"
-    return "sin_factura"
-  }
-
-  const calcularEstadoRecepcion = (orden: OrdenCompra) => {
-    const comprobantes = orden.comprobantes || []
-    if (comprobantes.length === 0) return "sin_recepcion"
-
-    const tieneRecibido = comprobantes.some(
-      (c: any) => c.estado === "recibido" || c.estado === "validado" || c.estado === "cerrado",
-    )
-    const tienePendiente = comprobantes.some((c: any) => c.estado === "pendiente_recepcion")
-
-    if (tieneRecibido && !tienePendiente) return "completo"
-    if (tieneRecibido) return "parcial"
-    return "sin_recepcion"
-  }
-
-  const EstadoIndicador = ({ estado }: { estado: string }) => {
-    if (estado === "completo") {
-      return <CheckCircle2 className="h-5 w-5 text-green-600" />
-    }
-    if (estado === "parcial") {
-      return <Clock className="h-5 w-5 text-yellow-600" />
-    }
-    return <AlertCircle className="h-5 w-5 text-red-600" />
-  }
-
-  const abrirCargarComprobante = (orden: OrdenCompra) => {
-    setOrdenSeleccionada(orden)
-    setMostrarCargarComprobante(true)
-  }
-
-  const irARecepcion = (orden: OrdenCompra) => {
-    // Flujo moderno: la verificación triple (OC vs físico vs facturado)
-    window.location.href = `/ordenes-compra/${orden.id}/verificacion`
-  }
-
-  const handleImportSuccess = async (items: any[], proveedorId: string) => {
-    setSelectedProveedor(proveedorId)
-    // E-13: el archivo no trae las unidades por bulto (el diálogo ponía 1 fijo): se leen del
-    // catálogo para que el subtotal y el "× N u" de la tabla muestren lo que realmente se pide.
-    const ids = [...new Set(items.map((i) => i.articulo_id).filter(Boolean))]
-    const reales = new Map<string, any>()
-    for (let i = 0; i < ids.length; i += 200) {
-      const { data } = await supabase.from("articulos").select(COLS_ARTICULO_OC).in("id", ids.slice(i, i + 200))
-      for (const a of data || []) reales.set(a.id, a)
-    }
-    // Map items to table format
-    const tableItems = items.map(item => ({
-      articulo_id: item.articulo_id || null, // null = no se pudo vincular: no se puede pedir hasta vincularlo
-      articulo: reales.get(item.articulo_id) || item.articulo, // datos reales del catálogo si existe
-      cantidad_pedida: item.cantidad_pedida,
-      tipo_cantidad: "bulto", // Defaulting to bulto as requested in logic
-      precio_unitario: item.precio_unitario,
-      descuento1: item.descuento1,
-      descuento2: item.descuento2,
-      descuento3: item.descuento3,
-      descuento4: item.descuento4,
-    }))
-    setArticulosTabla(tableItems)
-    setIsCreating(true)
-  }
-
-  const filteredOrdenes = ordenes.filter(
-    (orden) => !searchTerm.trim() || localMatch(searchTerm, orden.numero_orden, orden.proveedor?.nombre),
-  )
-
-  const articulosFiltrados = searchArticulo
-    ? articulosTabla.filter(
-      (item) => localMatch(searchArticulo, item.articulo.descripcion, item.articulo.sku, item.articulo.ean13),
-    )
-    : articulosTabla
-
-  const totalOrden = articulosTabla.reduce((sum, item) => sum + calcularSubtotal(item), 0)
-  const articulosConCantidad = articulosTabla.filter((item) => item.cantidad_pedida > 0).length
-
-  return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Órdenes de Compra</h1>
-        <div className="flex gap-2">
-          <ImportOrderDialog proveedores={proveedores} onImportSuccess={handleImportSuccess} />
-          <Dialog
-            open={isCreating}
-            onOpenChange={(open) => {
-              setIsCreating(open)
-              if (!open) {
-                setOrdenParaEditar(null)
-                setSelectedProveedor("")
-                setArticulosTabla([])
-                setObservaciones("")
-              }
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Nueva Orden
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="w-full sm:max-w-[98vw] h-[95vh] flex flex-col p-0 bg-white dark:bg-slate-900 shadow-2xl z-[100]">
-              <DialogHeader className="px-6 pt-6 pb-4 border-b">
-                <DialogTitle>
-                  {ordenParaEditar ? `Editar Orden ${ordenParaEditar.numero_orden}` : "Crear Orden de Compra"}
-                </DialogTitle>
-              </DialogHeader>
-
-              <div className="flex-1 overflow-y-auto px-6 py-4">
-                <div className="space-y-4">
-                  <div>
-                    <Label>Proveedor</Label>
-                    <EntitySearchSelect
-                      entity="proveedores"
-                      placeholder="Seleccionar proveedor..."
-                      value={selectedProveedor ? ((proveedores.find((pr: any) => pr.id === selectedProveedor) as any) ?? null) : null}
-                      onSelect={(p: any) => handleProveedorChange(p ? p.id : "")}
-                    />
-                  </div>
-
-                  {selectedProveedor && (
-                    <div className="bg-blue-50 border border-blue-200 p-3 rounded-md flex flex-wrap gap-3 items-end">
-                      <div>
-                        <Label className="text-xs">Desde</Label>
-                        <DateInputAR value={fechaDesde} onChange={setFechaDesde} className="w-36 h-8 text-sm" />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Hasta</Label>
-                        <DateInputAR value={fechaHasta} onChange={setFechaHasta} className="w-36 h-8 text-sm" />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Vendida / Facturada</Label>
-                        <Select value={tipoVenta} onValueChange={(v: any) => setTipoVenta(v)}>
-                          <SelectTrigger className="w-32 h-8 text-sm"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="vendida">Vendida</SelectItem>
-                            <SelectItem value="facturada">Facturada</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => cargarSugerencia()} disabled={loadingSugerencia}>
-                        {loadingSugerencia ? 'Calculando...' : 'Cargar sugerencia'}
-                      </Button>
-                      {sugerenciaData.length > 0 && (
-                        <span className="text-xs text-blue-700 self-center">{sugerenciaData.length} artículos con historial de venta</span>
-                      )}
-                    </div>
-                  )}
-
-                  {selectedProveedor && articulosTabla.length > 0 && (
-                    <>
-                      <div className="bg-muted p-3 rounded-md flex items-center justify-between sticky top-0 z-10">
-                        <div className="text-sm">
-                          <strong>{articulosTabla.length}</strong> artículos disponibles |
-                          <strong className="ml-2 text-primary">{articulosConCantidad}</strong> con cantidad asignada
-                        </div>
-                        <div className="flex gap-4 items-center">
-                          <div className="text-lg font-bold">Total: {formatCurrency(totalOrden)}</div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setShowBuscarArticulo(true)}
-                          >
-                            <Plus className="mr-2 h-4 w-4" />
-                            Buscar artículo externo
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <Label>Buscar en la tabla</Label>
-                        <div className="relative">
-                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                          <Input
-                            placeholder="Filtrar por descripción, SKU o EAN13..."
-                            value={searchArticulo}
-                            onChange={(e) => setSearchArticulo(e.target.value)}
-                            className="pl-10"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="border rounded-md">
-                        <div className="max-h-[calc(95vh-400px)] overflow-y-auto">
-                          <Table>
-                            <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
-                              <TableRow>
-                                <TableHead className="min-w-[300px]">Artículo</TableHead>
-                                <TableHead className="w-36">Tipo</TableHead>
-                                {sugerenciaData.length > 0 && <TableHead className="w-24 text-blue-700">Sugerido</TableHead>}
-                                <TableHead className="w-36">Cantidad</TableHead>
-                                <TableHead className="w-28">Precio Unit.</TableHead>
-                                <TableHead className="w-24">D1%</TableHead>
-                                <TableHead className="w-24">D2%</TableHead>
-                                <TableHead className="w-24">D3%</TableHead>
-                                <TableHead className="w-24">D4%</TableHead>
-                                <TableHead className="w-36">Subtotal</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {articulosFiltrados.map((item, index) => {
-                                const indexReal = articulosTabla.findIndex((a) => a.articulo_id === item.articulo_id)
-                                return (
-                                  <TableRow key={item.articulo_id} className={item.cantidad_pedida > 0 ? "bg-accent/50" : ""}>
-                                    <TableCell className="min-w-[300px]">
-                                      <div className="font-medium flex items-center gap-1">
-                                        {item.articulo.descripcion}
-                                        {item.esExterno && <span className="text-xs bg-amber-100 text-amber-700 px-1 rounded">externo</span>}
-                                      </div>
-                                      <div className="text-sm text-muted-foreground">
-                                        SKU: {item.articulo.sku} | {item.articulo.unidades_por_bulto} unid/bulto
-                                        {item.articulo.ean13 && ` | EAN: ${item.articulo.ean13}`}
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="w-36">
-                                      <Select
-                                        value={item.tipo_cantidad}
-                                        onValueChange={(value) => actualizarArticulo(indexReal, "tipo_cantidad", value)}
-                                      >
-                                        <SelectTrigger className="w-full">
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="bulto">Bulto</SelectItem>
-                                          <SelectItem value="unidad">Unidad</SelectItem>
-                                        </SelectContent>
-                                      </Select>
-                                    </TableCell>
-                                    {sugerenciaData.length > 0 && (
-                                      <TableCell className="w-24">
-                                        {item.cantidad_sugerida != null && item.cantidad_sugerida > 0 ? (
-                                          <div className="flex flex-col items-center gap-1">
-                                            <span className="text-blue-700 font-medium">{entero(item.cantidad_sugerida)} u</span>
-                                            {unidadesPorBultoDe(item.articulo?.unidades_por_bulto) > 1 && (
-                                              <span className="text-[10px] text-muted-foreground">= {entero(bultosParaCubrir(item.cantidad_sugerida, item.articulo?.unidades_por_bulto))} bultos</span>
-                                            )}
-                                            <Button
-                                              variant="ghost"
-                                              size="sm"
-                                              className="h-5 text-xs text-blue-600 p-0"
-                                              title={item.tipo_cantidad === "unidad" ? "Carga la sugerencia en unidades" : "La sugerencia está en unidades: se carga en bultos enteros (hacia arriba)"}
-                                              onClick={() => usarSugerencia(indexReal)}
-                                            >usar</Button>
-                                          </div>
-                                        ) : <span className="text-muted-foreground text-xs">—</span>}
-                                      </TableCell>
-                                    )}
-                                    <TableCell className="w-36">
-                                      <InputMonto
-                                        decimales={0}
-                                        soloPositivos
-                                        value={item.cantidad_pedida || null}
-                                        onChange={(v) =>
-                                          actualizarArticulo(
-                                            indexReal,
-                                            "cantidad_pedida",
-                                            v ?? 0,
-                                          )
-                                        }
-                                        className={`w-full ${item.cantidad_pedida > 0 ? "border-primary" : ""}`}
-                                      />
-                                      {item.tipo_cantidad === "bulto" && item.cantidad_pedida > 0 && (
-                                        <div className="text-xs text-muted-foreground mt-1">
-                                          = {entero(item.cantidad_pedida * item.articulo.unidades_por_bulto)} unidades
-                                        </div>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="w-28">
-                                      <InputMonto
-                                        soloPositivos
-                                        value={item.precio_unitario || null}
-                                        onChange={(v) =>
-                                          actualizarArticulo(
-                                            indexReal,
-                                            "precio_unitario",
-                                            v ?? 0,
-                                          )
-                                        }
-                                        className="w-full"
-                                      />
-                                    </TableCell>
-                                    <TableCell className="w-24">
-                                      <InputMonto
-                                        soloPositivos
-                                        value={item.descuento1 || null}
-                                        onChange={(v) =>
-                                          actualizarArticulo(indexReal, "descuento1", v ?? 0)
-                                        }
-                                        className="w-full"
-                                      />
-                                    </TableCell>
-                                    <TableCell className="w-24">
-                                      <InputMonto
-                                        soloPositivos
-                                        value={item.descuento2 || null}
-                                        onChange={(v) =>
-                                          actualizarArticulo(indexReal, "descuento2", v ?? 0)
-                                        }
-                                        className="w-full"
-                                      />
-                                    </TableCell>
-                                    <TableCell className="w-24">
-                                      <InputMonto
-                                        soloPositivos
-                                        value={item.descuento3 || null}
-                                        onChange={(v) =>
-                                          actualizarArticulo(indexReal, "descuento3", v ?? 0)
-                                        }
-                                        className="w-full"
-                                      />
-                                    </TableCell>
-                                    <TableCell className="w-24">
-                                      <InputMonto
-                                        soloPositivos
-                                        value={item.descuento4 || null}
-                                        onChange={(v) =>
-                                          actualizarArticulo(indexReal, "descuento4", v ?? 0)
-                                        }
-                                        className="w-full"
-                                      />
-                                    </TableCell>
-                                    <TableCell className="w-36 font-medium">
-                                      {item.cantidad_pedida > 0 ? `${formatCurrency(calcularSubtotal(item))}` : "-"}
-                                    </TableCell>
-                                  </TableRow>
-                                )
-                              })}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {selectedProveedor && articulosTabla.length === 0 && (
-                    <div className="bg-amber-50 border border-amber-200 p-4 rounded-md text-center space-y-2">
-                      <p className="text-amber-800">No hay artículos asignados a este proveedor.</p>
-                      <Button variant="outline" size="sm" onClick={() => setShowBuscarArticulo(true)}>
-                        <Plus className="mr-2 h-4 w-4" /> Agregar artículo del catálogo
-                      </Button>
-                    </div>
-                  )}
-
-                  <div>
-                    <Label>Observaciones</Label>
-                    <Input
-                      placeholder="Observaciones adicionales..."
-                      value={observaciones}
-                      onChange={(e) => setObservaciones(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="px-6 py-4 border-t bg-background flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setIsCreating(false)
-                    setOrdenParaEditar(null)
-                  }}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  onClick={ordenParaEditar ? actualizarOrden : crearOrden}
-                  disabled={!selectedProveedor || articulosConCantidad === 0}
-                >
-                  {ordenParaEditar ? "Actualizar Orden" : `Crear Orden (${articulosConCantidad} artículos)`}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-              <Input
-                placeholder="Buscar por número de orden o proveedor..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Proveedor</TableHead>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>N° Orden</TableHead>
-                <TableHead>Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredOrdenes.map((orden) => {
-                const estadoFactura = calcularEstadoFactura(orden)
-                const estadoRecepcion = calcularEstadoRecepcion(orden)
-                const cantidadComprobantes = orden.comprobantes?.length || 0
-
-                return (
-                  <TableRow key={orden.id}>
-                    <TableCell className="font-medium">{orden.proveedor?.nombre}</TableCell>
-                    <TableCell>{formatDateAR(orden.fecha_orden ?? orden.fecha_emision)}</TableCell>
-                    <TableCell>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        orden.estado === "pendiente" ? "bg-yellow-100 text-yellow-800" 
-                        : orden.estado === "enviada" || orden.estado === "confirmada" ? "bg-blue-100 text-blue-800"
-                        : orden.estado === "en_camino" ? "bg-purple-100 text-purple-800"
-                        : orden.estado === "recibida" || orden.estado === "recibida_completa" ? "bg-orange-100 text-orange-800"
-                        : orden.estado === "recibida_parcial" ? "bg-orange-100 text-orange-700"
-                        : orden.estado === "finalizada" ? "bg-green-100 text-green-800"
-                        : orden.estado === "cancelada" ? "bg-red-100 text-red-800"
-                        : "bg-gray-100 text-gray-800"
-                      }`}>
-                        {orden.estado === "pendiente" ? "Pendiente"
-                          : orden.estado === "enviada" ? "Enviada"
-                          : orden.estado === "confirmada" ? "Confirmada"
-                          : orden.estado === "en_camino" ? "En camino"
-                          : orden.estado === "recibida" || orden.estado === "recibida_completa" ? "Recibida"
-                          : orden.estado === "recibida_parcial" ? "Recibida parcial"
-                          : orden.estado === "finalizada" ? "Finalizada"
-                          : orden.estado === "cancelada" ? "Cancelada"
-                          : orden.estado}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        {orden.numero_orden && (
-                          <span className="text-xs font-mono text-muted-foreground self-center mr-2">{orden.numero_orden}</span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2 flex-wrap">
-                        {/* PENDIENTE: editar artículos + enviar */}
-                        {orden.estado === "pendiente" && (
-                          <Button variant="outline" size="sm" onClick={() => abrirEditarOrden(orden)}>
-                            <Pencil className="h-4 w-4 mr-1" /> Editar
-                          </Button>
-                        )}
-                        <Button variant="outline" size="sm" title="Descargar PDF para enviar al proveedor" onClick={() => descargarOrden(orden, "pdf")}>
-                          <Send className="h-4 w-4 mr-1" /> PDF
-                        </Button>
-                        <Button variant="outline" size="sm" title="Descargar Excel para enviar al proveedor" onClick={() => descargarOrden(orden, "xlsx")}>
-                          Excel
-                        </Button>
-
-                        {/* ENVIADA / EN CAMINO: cargar comprobantes */}
-                        {(orden.estado === "enviada" || orden.estado === "confirmada" || orden.estado === "en_camino") && (
-                          <>
-                            <Button variant="outline" size="sm"
-                              onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/verificacion`)}>
-                              <FileText className="h-4 w-4 mr-1" /> Cargar comprobante
-                            </Button>
-                          </>
-                        )}
-
-                        {/* RECIBIDA: ver verificación triple (artículos vs factura vs depósito) */}
-                        {(orden.estado === "recibida" || orden.estado === "recibida_completa" || orden.estado === "recibida_parcial") && (
-                          <>
-                            <Button variant="default" size="sm"
-                              onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/verificacion`)}>
-                              <CheckCircle2 className="h-4 w-4 mr-1" /> Verificar
-                            </Button>
-                            <Button variant="outline" size="sm"
-                              onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/verificacion`)}>
-                              <FileText className="h-4 w-4 mr-1" /> Comprobantes
-                            </Button>
-                          </>
-                        )}
-
-                        {/* Eliminar solo si pendiente */}
-                        {orden.estado === "pendiente" && (
-                          <Button variant="outline" size="sm"
-                            onClick={() => setOrdenParaEliminar(orden)}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+          )}
         </CardContent>
       </Card>
 
-      <Dialog open={!!ordenParaDetalle} onOpenChange={() => setOrdenParaDetalle(null)}>
-        {ordenParaDetalle && <DetalleOrdenDialog orden={ordenParaDetalle} onClose={() => setOrdenParaDetalle(null)} />}
-      </Dialog>
-
-      <AlertDialog open={!!ordenParaEliminar} onOpenChange={() => setOrdenParaEliminar(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar orden de compra?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Estás por eliminar la orden <strong>{ordenParaEliminar?.numero_orden}</strong>. Esta acción:
-              <ul className="list-disc list-inside mt-2 space-y-1">
-                <li>Eliminará la orden y todos sus artículos asociados</li>
-                <li>Los comprobantes cargados se mantendrán pero se desvincularan de esta orden</li>
-                <li>Esta acción no se puede deshacer</li>
-              </ul>
-              <p className="mt-3 text-amber-600 font-medium">
-                Nota: El email de cancelación al proveedor debe enviarse manualmente.
-              </p>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => ordenParaEliminar && eliminarOrden(ordenParaEliminar)}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              Eliminar Orden
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* External article search dialog */}
-      <Dialog open={showBuscarArticulo} onOpenChange={setShowBuscarArticulo}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>Buscar artículo del catálogo</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-              <Input
-                placeholder="Buscar por descripción o SKU..."
-                value={searchArticuloExterno}
-                onChange={(e) => { setSearchArticuloExterno(e.target.value); if (e.target.value.length < 2) setArticulosExternos([]) }}
-                className="pl-10"
-                autoFocus
-              />
-            </div>
-            {loadingArticulosExternos && <p className="text-sm text-muted-foreground text-center">Buscando...</p>}
-            {articulosExternos.length > 0 && (
-              <div className="border rounded-md max-h-80 overflow-y-auto">
-                <Table>
-                  <TableBody>
-                    {articulosExternos.map((art: any) => (
-                      <TableRow key={art.id} className="cursor-pointer hover:bg-accent" onClick={() => agregarArticuloExterno(art)}>
-                        <TableCell>
-                          <ArticuloResultRow articulo={art} size="sm" />
-                          <div className="text-xs text-muted-foreground mt-0.5">{formatCurrency(art.precio_compra || 0)}</div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="sm">Agregar</Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-            {searchArticuloExterno.length >= 2 && !loadingArticulosExternos && articulosExternos.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center">Sin resultados</p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DialogoOrden abierto={dialogoAbierto} inicio={inicio} onCerrar={() => { setDialogoAbierto(false); setInicio(null) }} onGuardada={alGuardar} />
+      <DetalleOrden ordenId={detalleId} version={version} onCerrar={() => setDetalleId(null)} onEditar={abrirEditar} onEnviar={abrirEnviar} onCambio={cargar} />
+      <DialogoEnviarOrden ordenId={enviarId} onCerrar={() => setEnviarId(null)} onEnviada={() => { setVersion((v) => v + 1); cargar() }} />
     </div>
   )
 }
 
-
+export default function OrdenesCompraPage() {
+  return (
+    <Suspense fallback={<div className="container mx-auto p-6"><CargaProgreso mensajes={["Abriendo órdenes de compra…"]} /></div>}>
+      <OrdenesCompra />
+    </Suspense>
+  )
+}
