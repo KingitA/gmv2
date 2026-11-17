@@ -39,12 +39,19 @@ export async function POST(
             if (!cuentaBancoId) cuentaBancoId = det?.find(d => d.cuenta_origen_tipo === 'BANCO' && d.cuenta_origen_id)?.cuenta_origen_id ?? null
         }
 
-        const { data, error } = await supabase.rpc('op_confirmar', {
-            p_op_id: opId,
-            p_usuario_id: auth.user?.id ?? null,
-            p_caja_id: cajaId,
-            p_cuenta_banco_id: cuentaBancoId,
-        })
+        const args = { p_op_id: opId, p_usuario_id: auth.user?.id ?? null, p_caja_id: cajaId, p_cuenta_banco_id: cuentaBancoId }
+        // E-57: la retención se calcula con el día de la confirmación. Si cambió desde que se armó
+        // la orden y la pantalla ya lo mostró y se aceptó (aceptar_retencion), se actualiza y se
+        // confirma en la misma transacción. Sin la migración 20261117p_ordenes_pago_t1d.sql, o sin
+        // aceptar, se confirma como siempre (y si cambió, la base corta con el motivo).
+        let res = body.aceptar_retencion === true
+            ? await supabase.rpc('op_confirmar_ajustando', args)
+            : await supabase.rpc('op_confirmar', args)
+        if (res.error && body.aceptar_retencion === true
+            && (res.error.code === 'PGRST202' || res.error.code === '42883') && /op_confirmar_ajustando/.test(res.error.message || '')) {
+            res = await supabase.rpc('op_confirmar', args)
+        }
+        const { data, error } = res
         if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
         // Quién hizo salir la plata (Jarvis: "¿quién pagó / autorizó este pago?")
@@ -54,4 +61,30 @@ export async function POST(
         console.error('Error confirming OP:', error)
         return NextResponse.json({ error: error.message }, { status: 500 })
     }
+}
+
+/**
+ * GET /api/ordenes-pago/[id]/confirmar — antes de confirmar: qué retención de Ganancias
+ * corresponde HOY (E-57: manda la fecha de confirmación) y si cambió respecto de la que se
+ * guardó al armar la orden. No cambia nada.
+ * → { cambia, retencion_guardada, retencion_hoy, neto_guardado, neto_hoy, se_puede_ajustar,
+ *     medio_que_se_ajusta, fecha_pago, fecha_orden }
+ */
+export async function GET(
+    request: Request,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const auth = await requirePermiso('ordenes_pago_confirmar')
+    if (auth.error) return auth.error
+    const { id: opId } = await params
+    const supabase = createAdminClient()
+    const { data, error } = await supabase.rpc('op_retencion_al_confirmar', { p_op_id: opId })
+    if (error) {
+        // Sin la migración: no hay vista previa; se confirma como siempre
+        if ((error.code === 'PGRST202' || error.code === '42883') && /op_retencion_al_confirmar/.test(error.message || '')) {
+            return NextResponse.json({ cambia: false, disponible: false })
+        }
+        return NextResponse.json({ error: error.message }, { status: error.code === 'P0001' ? 400 : 500 })
+    }
+    return NextResponse.json({ ...(data as any), disponible: true })
 }

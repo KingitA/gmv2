@@ -16,10 +16,11 @@
 --         (Juan, 17/11): la diferencia va a monto_ajuste.
 --   E-56  Una sola fuente de saldo: la cuenta corriente. comprobantes_compra.saldo_pendiente
 --         se relee de ahí al confirmar y al anular. Las NC descontadas quedan asentadas.
---   E-57  Acumulado, retenido y fecha del certificado: por la fecha de la orden de pago.
+--   E-57  Retención de Ganancias por la FECHA DE CONFIRMACIÓN (Juan, 17/11): acumulado del mes,
+--         lo ya retenido, certificado y SICORE. Una orden pendiente se recalcula al confirmar.
 --   E-58  Comprobante fiscal sin neto: base estimada (A: ÷ 1,21; B y C: el importe).
 --   E-61  Períodos presentados ante ARCA: no se elimina una orden con certificado de ese
---         período, ni se crea o confirma una orden con retención fechada ahí.
+--         período, ni se confirma una orden con retención dentro de él.
 --   E-62  Cheque propio / e-cheq con cuenta bancaria real; el banco baja al debitarse.
 --   E-66  Una orden pendiente reserva los cheques de tercero que eligió.
 --   Además: los vencimientos ESTIMADOS de una orden de compra no se pagan; las cuotas
@@ -27,13 +28,13 @@
 --
 -- Cómo están hechas las funciones que ya existían: cuerpo EXACTO de su versión anterior
 -- con los cambios marcados en comentarios ("v2", "v7", "v10"…), generado por script.
---   op_confirmar            v11  (base: v6 de 20261116q)
+--   op_confirmar            v12  (base: v6 de 20261116q)
 --   op_anular               v5   (base: v3 de 20260806)
 --   op_eliminar             v2   (base: 20260807)
---   op_crear                v4   (base: 20261116p)
+--   op_crear                v5   (base: 20261116p)
 --   op_normalizar_imputaciones v2, op_validar_imputaciones v2 (base: 20261116p)
 --   op_ganancias_bases      v8   (base: v6 de 20261117a)
---   ganancias_calcular      v3   (base: v2 de 20261116p)
+--   ganancias_calcular      v4   (base: v2 de 20261116p)
 --   vencimientos_mantener        (base: 20261102) — solo de dónde copia el importe
 -- ═════════════════════════════════════════════════════════════════════════════
 
@@ -60,6 +61,12 @@ COMMENT ON COLUMN public.vencimientos.monto_pagado IS
   'Lo ya pagado de este vencimiento por órdenes de pago confirmadas.';
 COMMENT ON COLUMN public.vencimientos.monto_ajuste IS
   'Descuento / ajuste: parte del vencimiento que NO se pagó y se dio por cancelada al pagarlo por orden de pago ("con este pago queda cancelado").';
+
+-- E-57: día (Argentina) en que la orden se confirmó = fecha del PAGO. Es la fecha que manda
+-- para la retención de Ganancias: acumulado del mes, lo ya retenido, certificado y SICORE.
+ALTER TABLE public.ordenes_pago ADD COLUMN IF NOT EXISTS fecha_confirmacion date;
+COMMENT ON COLUMN public.ordenes_pago.fecha_confirmacion IS
+  'Día en que se confirmó la orden (salió la plata). Para la retención de Ganancias cuenta este día, no la fecha de la orden. NULL = pendiente, o confirmada antes de que existiera la columna (ahí vale "fecha").';
 
 ALTER TABLE public.ordenes_pago_imputaciones ADD COLUMN IF NOT EXISTS cancela_vencimiento boolean NOT NULL DEFAULT false;
 COMMENT ON COLUMN public.ordenes_pago_imputaciones.cancela_vencimiento IS
@@ -640,19 +647,18 @@ BEGIN
   FROM ordenes_pago
   WHERE proveedor_id = p_proveedor_id
     AND estado = 'pagada'
-    AND date_trunc('month', fecha) = date_trunc('month', v_fecha)
+    -- v4 (E-57, Juan 17/11: "según fecha de confirmación"): cuenta el día en que la orden
+    -- se CONFIRMÓ (fecha_confirmacion), no la fecha de la orden. Antes una orden fechada a
+    -- fin de mes y confirmada al mes siguiente sumaba su base en un mes y su retención en otro.
+    AND date_trunc('month', COALESCE(fecha_confirmacion, fecha)) = date_trunc('month', v_fecha)
     AND (p_excluir_op IS NULL OR id <> p_excluir_op);
 
-  -- v3 (E-57): lo ya retenido en el mes se cuenta por la FECHA DE LA ORDEN DE PAGO, la
-  -- misma con la que se cuenta el acumulado de bases de arriba. Antes se contaba por la
-  -- fecha del certificado (el día que se confirmó): una orden fechada a fin de mes y
-  -- confirmada al mes siguiente sumaba su base en un mes y su retención en otro.
+  -- Lo ya retenido en el mes: por la fecha del certificado, que es el día de la confirmación
   SELECT COALESCE(sum(re.monto), 0) INTO v_ret_previa
   FROM retenciones_emitidas re
-  LEFT JOIN ordenes_pago o ON o.id = re.orden_pago_id
   WHERE re.proveedor_id = p_proveedor_id
     AND re.estado = 'emitida'
-    AND date_trunc('month', COALESCE(o.fecha, re.fecha)) = date_trunc('month', v_fecha)
+    AND date_trunc('month', re.fecha) = date_trunc('month', v_fecha)
     AND (p_excluir_op IS NULL OR re.orden_pago_id <> p_excluir_op);
 
   IF v_prov.condicion_ganancias = 'no_inscripto' THEN
@@ -1077,7 +1083,9 @@ BEGIN
   END IF;
 
   -- Retención de Ganancias RG 830
-  v_calc := op_ganancias_preview(v_prov, v_imps, v_fecha);
+  -- v5 (E-57): la retención se calcula con la fecha de HOY (día en que se arma). Si la orden
+  -- queda pendiente y se confirma otro día, se recalcula al confirmar.
+  v_calc := op_ganancias_preview(v_prov, v_imps, public.hoy_ar());
   v_base := COALESCE((v_calc->>'base')::numeric, 0);
   v_ret_gan := COALESCE((v_calc->>'retencion')::numeric, 0);
   IF v_manual THEN
@@ -1086,13 +1094,8 @@ BEGIN
     END IF;
     v_ret_gan := round(COALESCE(NULLIF(p_payload->>'retencion_ganancias', '')::numeric, 0), 2);
   END IF;
-  -- v4: una orden que entra en el cálculo de retenciones (tiene base o retiene) no puede
-  -- llevar una fecha de un período que ya se presentó ante ARCA (SICORE).
-  v_presentado := retenciones_presentado_hasta();
-  IF v_presentado IS NOT NULL AND v_fecha <= v_presentado AND (v_base > 0 OR v_ret_gan > 0) THEN
-    RAISE EXCEPTION 'La fecha de la orden (%) cae en un período de retenciones que ya se presentó ante ARCA (hasta el %). Usá una fecha posterior.',
-      to_char(v_fecha, 'DD/MM/YYYY'), to_char(v_presentado, 'DD/MM/YYYY');
-  END IF;
+  -- (El control de "período ya presentado ante ARCA" va al CONFIRMAR, contra el día de la
+  --  confirmación: op_confirmar. La fecha de la orden no cuenta para la retención.)
   IF v_ret_gan < 0 OR v_ret_iibb < 0 OR v_ret_iva < 0 OR v_ret_suss < 0 THEN
     RAISE EXCEPTION 'Las retenciones no pueden ser negativas';
   END IF;
@@ -1260,10 +1263,11 @@ BEGIN
     RAISE EXCEPTION 'La orden de pago % está %: solo se puede confirmar una orden pendiente.', v_op.numero_op, COALESCE(v_op.estado, 'sin estado');
   END IF;
 
-  -- v11: no se emite un certificado con fecha de un período ya presentado ante ARCA
-  IF COALESCE(v_op.retencion_ganancias, 0) > 0 AND v_op.fecha <= COALESCE(retenciones_presentado_hasta(), '0001-01-01'::date) THEN
-    RAISE EXCEPTION 'La orden % tiene fecha % y retención de Ganancias, pero ese período ya se presentó ante ARCA. Eliminá la orden y armala de nuevo con la fecha de hoy.',
-      v_op.numero_op, to_char(v_op.fecha, 'DD/MM/YYYY');
+  -- v12 (E-57): la fecha del pago es HOY (día de la confirmación). No se emite un certificado
+  -- en un período que ya se presentó ante ARCA.
+  IF COALESCE(v_op.retencion_ganancias, 0) > 0 AND v_hoy_ar <= COALESCE(retenciones_presentado_hasta(), '0001-01-01'::date) THEN
+    RAISE EXCEPTION 'No se puede confirmar la orden % con retención de Ganancias: las retenciones ya están presentadas ante ARCA hasta el %.',
+      v_op.numero_op, to_char(retenciones_presentado_hasta(), 'DD/MM/YYYY');
   END IF;
 
   -- ── v6 (E-52 / E-54) ──────────────────────────────────────────────────────
@@ -1297,14 +1301,15 @@ BEGIN
   END IF;
 
   IF COALESCE(v_op.base_ganancias, 0) > 0 AND NOT COALESCE(v_op.ganancias_ajuste_manual, false) THEN
-    v_calc := ganancias_calcular(v_op.proveedor_id, v_op.base_ganancias, v_op.fecha, p_op_id);
+    -- v12 (E-57): se recalcula con el día de HOY (la confirmación), no con la fecha de la orden
+    v_calc := ganancias_calcular(v_op.proveedor_id, v_op.base_ganancias, v_hoy_ar, p_op_id);
     v_ret_calc := (v_calc->>'retencion')::numeric;
     IF abs(v_ret_calc - COALESCE(v_op.retencion_ganancias, 0)) > 0.01 THEN
-      RAISE EXCEPTION 'op_confirmar: la retención calculada cambió desde que se creó la OP (era %, ahora corresponde % por el acumulado del mes). Anulá y recreá la OP, o ajustá manualmente con motivo.',
-        COALESCE(v_op.retencion_ganancias, 0), v_ret_calc;
+      RAISE EXCEPTION 'La retención de Ganancias cambió desde que se armó la orden: era % y hoy corresponde % (por lo pagado en el mes). Confirmala de nuevo aceptando la retención nueva, o eliminala y armala otra vez.',
+        fmt_moneda(COALESCE(v_op.retencion_ganancias, 0)), fmt_moneda(v_ret_calc);
     END IF;
   ELSIF COALESCE(v_op.retencion_ganancias, 0) > 0 THEN
-    v_calc := ganancias_calcular(v_op.proveedor_id, COALESCE(v_op.base_ganancias, 0), v_op.fecha, p_op_id);
+    v_calc := ganancias_calcular(v_op.proveedor_id, COALESCE(v_op.base_ganancias, 0), v_hoy_ar, p_op_id);
   END IF;
 
   -- ── 1. CC proveedor: pago + retenciones (guard) ──
@@ -1410,7 +1415,7 @@ BEGIN
     ) VALUES (
       p_op_id, v_op.proveedor_id,
       NULLIF(v_calc->>'regimen_id', '')::uuid,
-      v_op.fecha,   -- v9 (E-57): el certificado lleva la fecha de la orden de pago (antes: el día de la confirmación)
+      v_hoy_ar,   -- v12 (E-57): el certificado lleva el día de la confirmación
       COALESCE(v_op.base_ganancias, 0),
       NULLIF(v_calc->>'acumulado_total_mes', '')::numeric,
       COALESCE(NULLIF(v_calc->>'alicuota', '')::numeric, 0),
@@ -1576,7 +1581,7 @@ BEGIN
   PERFORM op_asentar_creditos(p_op_id, v_pago_mov);
   PERFORM op_sincronizar_saldos_comprobantes(p_op_id);
 
-  UPDATE ordenes_pago SET estado = 'pagada', updated_at = now() WHERE id = p_op_id;
+  UPDATE ordenes_pago SET estado = 'pagada', fecha_confirmacion = v_hoy_ar, updated_at = now() WHERE id = p_op_id;   -- v12: + fecha_confirmacion
 
   RETURN jsonb_build_object(
     'success', true, 'ya_confirmada', false,
@@ -1845,9 +1850,92 @@ BEGIN
 END;
 $function$;
 
-COMMENT ON FUNCTION public.op_confirmar(uuid, uuid, uuid, uuid) IS 'op_confirmar v11 (20261117p_ordenes_pago_t1d)';
+-- ── E-57: una orden PENDIENTE que se confirma otro día puede tener otra retención ──
+-- op_retencion_al_confirmar: solo mira. Dice qué retención corresponde HOY y si cambió.
+CREATE OR REPLACE FUNCTION public.op_retencion_al_confirmar(p_op_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_op     ordenes_pago%ROWTYPE;
+  v_guard  numeric;
+  v_hoy    numeric;
+  v_dif    numeric;
+  v_linea  record;
+BEGIN
+  SELECT * INTO v_op FROM ordenes_pago WHERE id = p_op_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'La orden de pago no existe.';
+  END IF;
+  v_guard := COALESCE(v_op.retencion_ganancias, 0);
+  v_hoy := v_guard;
+  IF v_op.estado = 'pendiente' AND COALESCE(v_op.base_ganancias, 0) > 0 AND NOT COALESCE(v_op.ganancias_ajuste_manual, false) THEN
+    v_hoy := COALESCE((ganancias_calcular(v_op.proveedor_id, v_op.base_ganancias, public.hoy_ar(), p_op_id)->>'retencion')::numeric, 0);
+  END IF;
+  v_dif := round(v_hoy - v_guard, 2);
+
+  -- La diferencia se ajusta en una transferencia, efectivo o depósito (un cheque no se puede cambiar)
+  SELECT id, medio, monto INTO v_linea FROM ordenes_pago_detalle
+   WHERE orden_pago_id = p_op_id AND medio IN ('transferencia', 'efectivo', 'deposito') AND monto - v_dif > 0
+   ORDER BY monto DESC, id LIMIT 1;
+
+  RETURN jsonb_build_object(
+    'cambia', abs(v_dif) > 0.01,
+    'retencion_guardada', v_guard, 'retencion_hoy', v_hoy,
+    'neto_guardado', v_op.neto_a_pagar, 'neto_hoy', round(COALESCE(v_op.neto_a_pagar, 0) - v_dif, 2),
+    'se_puede_ajustar', v_linea.id IS NOT NULL,
+    'medio_que_se_ajusta', v_linea.medio, 'linea_id', v_linea.id,
+    'fecha_pago', public.hoy_ar(), 'fecha_orden', v_op.fecha
+  );
+END;
+$function$;
+
+-- op_confirmar_ajustando: si la retención cambió, la actualiza (y ajusta el importe de la
+-- transferencia / efectivo por la diferencia) y confirma, todo en la misma transacción.
+-- Si no cambió, es lo mismo que op_confirmar.
+CREATE OR REPLACE FUNCTION public.op_confirmar_ajustando(p_op_id uuid, p_usuario_id uuid, p_caja_id uuid DEFAULT NULL, p_cuenta_banco_id uuid DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_r   jsonb;
+  v_dif numeric;
+BEGIN
+  PERFORM 1 FROM ordenes_pago WHERE id = p_op_id FOR UPDATE;
+  v_r := op_retencion_al_confirmar(p_op_id);
+  IF (v_r->>'cambia')::boolean THEN
+    IF NOT (v_r->>'se_puede_ajustar')::boolean THEN
+      RAISE EXCEPTION 'La retención de Ganancias cambió de % a % y el pago no tiene una transferencia ni efectivo donde ajustar la diferencia. Eliminá la orden y armala de nuevo.',
+        fmt_moneda((v_r->>'retencion_guardada')::numeric), fmt_moneda((v_r->>'retencion_hoy')::numeric);
+    END IF;
+    v_dif := round((v_r->>'retencion_hoy')::numeric - (v_r->>'retencion_guardada')::numeric, 2);
+    UPDATE ordenes_pago_detalle SET monto = round(monto - v_dif, 2) WHERE id = (v_r->>'linea_id')::uuid;
+    UPDATE ordenes_pago
+       SET retencion_ganancias = (v_r->>'retencion_hoy')::numeric,
+           total_retenciones = round(COALESCE(total_retenciones, 0) + v_dif, 2),
+           neto_a_pagar = round(COALESCE(neto_a_pagar, 0) - v_dif, 2),
+           updated_at = now()
+     WHERE id = p_op_id;
+  END IF;
+  RETURN op_confirmar(p_op_id, p_usuario_id, p_caja_id, p_cuenta_banco_id)
+      || jsonb_build_object('retencion_ajustada', (v_r->>'cambia')::boolean,
+                            'retencion_antes', v_r->'retencion_guardada', 'retencion_ahora', v_r->'retencion_hoy');
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.op_retencion_al_confirmar(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.op_retencion_al_confirmar(uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.op_confirmar_ajustando(uuid, uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.op_confirmar_ajustando(uuid, uuid, uuid, uuid) TO service_role;
+
+COMMENT ON FUNCTION public.op_confirmar(uuid, uuid, uuid, uuid) IS 'op_confirmar v12 (20261117p_ordenes_pago_t1d)';
 COMMENT ON FUNCTION public.op_anular(uuid, uuid, text) IS 'op_anular v5 (20261117p_ordenes_pago_t1d)';
-COMMENT ON FUNCTION public.op_crear(jsonb, text) IS 'op_crear v4 (20261117p_ordenes_pago_t1d)';
+COMMENT ON FUNCTION public.op_crear(jsonb, text) IS 'op_crear v5 (20261117p_ordenes_pago_t1d)';
 COMMENT ON FUNCTION public.op_eliminar(uuid, uuid, text) IS 'op_eliminar v2 (20261117p_ordenes_pago_t1d)';
 
 REVOKE ALL ON FUNCTION public.op_normalizar_imputaciones(jsonb) FROM PUBLIC, anon, authenticated;

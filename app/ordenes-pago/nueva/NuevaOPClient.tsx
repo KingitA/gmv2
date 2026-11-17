@@ -566,7 +566,7 @@ function NuevaOrdenPagoContent() {
         : { medio: fp.pago_blanco_medio, plazoCheque: fp.pago_blanco_plazo_cheque, entrega: fp.pago_blanco_entrega }
     const MEDIO_FICHA: Record<string, string> = {
         transferencia: "Transferencia", cheques: "Cheques", efectivo: "Efectivo",
-        cheques_y_efectivo: "Cheques + efectivo",
+        cheques_y_efectivo: "Cheques + efectivo", echeq: "E-cheq",
     }
     const ENTREGA_FICHA: Record<string, string> = {
         transferencia: "por transferencia", deposito_bancario: "lo deposito en su cuenta",
@@ -578,7 +578,7 @@ function NuevaOrdenPagoContent() {
         const medio = fp[`pago_${canal}_medio`], plazo = fp[`pago_${canal}_plazo_cheque`], entrega = fp[`pago_${canal}_entrega`]
         const dias = fp[`pago_${canal}_dias`], desde = fp[`pago_${canal}_desde`]
         if (!medio && !entrega && dias == null) return null
-        const usaCh = medio === "cheques" || medio === "cheques_y_efectivo"
+        const usaCh = medio === "cheques" || medio === "cheques_y_efectivo" || medio === "echeq"
         return [
             medio ? `${MEDIO_FICHA[medio] ?? medio}${usaCh ? (Number(plazo ?? 0) > 0 ? ` a ${plazo} días` : " al día") : ""}` : null,
             entrega ? (ENTREGA_FICHA[entrega] ?? entrega) : null,
@@ -587,6 +587,8 @@ function NuevaOrdenPagoContent() {
     }
     const usaChequeTercero = medios.some(m => m.medio === "cheque" && m.cheque_id)
     const fichaUsaCheques = cfgPago.medio === "cheques" || cfgPago.medio === "cheques_y_efectivo"
+    // El acuerdo dice e-cheq (medio que agrega la ficha del proveedor): se sugiere emitir uno propio
+    const fichaUsaEcheq = cfgPago.medio === "echeq"
 
     // ── Cheques de cartera: ventana por fecha (editable) + filtro por color ──
     // Al día (plazo 0): default = solo cheques ya exigibles (365 antes / 0 después).
@@ -1243,7 +1245,7 @@ function NuevaOrdenPagoContent() {
                         {proveedorId && (cfgPago.medio || cfgPago.entrega) && (
                             <p className="text-sm text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-md px-3 py-1.5 mt-1">
                                 Según la ficha {soloNegro && hayCfgNegro ? "(canal negro)" : ""}: <b>{MEDIO_FICHA[cfgPago.medio] ?? "sin medio configurado"}</b>
-                                {fichaUsaCheques ? (plazoCheque > 0 ? ` a ${plazoCheque} días` : " al día") : ""}
+                                {fichaUsaCheques || fichaUsaEcheq ? (plazoCheque > 0 ? ` a ${plazoCheque} días` : " al día") : ""}
                                 {cfgPago.entrega ? ` · ${ENTREGA_FICHA[cfgPago.entrega] ?? cfgPago.entrega}` : ""}
                             </p>
                         )}
@@ -1376,9 +1378,10 @@ function NuevaOrdenPagoContent() {
                             <Button variant="outline" size="sm" onClick={() => agregarChequePropio(false)} className="gap-1.5">
                                 <Plus className="h-4 w-4" /> Cheque propio
                             </Button>
-                            <Button variant="outline" size="sm" onClick={() => agregarChequePropio(true)} className="gap-1.5">
+                            <Button variant={fichaUsaEcheq ? "default" : "outline"} size="sm" onClick={() => agregarChequePropio(true)} className="gap-1.5">
                                 <Plus className="h-4 w-4" /> E-cheq
                             </Button>
+                            {fichaUsaEcheq && <Badge className="bg-indigo-600">según ficha</Badge>}
                             <span className="text-[11px] text-muted-foreground">
                                 {restante != null && restante > 0
                                     ? `Hay que hacerlo por ${formatCurrency(restante)} con fecha de pago ${fmtFechaCorta(fechaObjetivoCheque)}${plazoCheque > 0 ? ` (acuerdo: cheques a ${plazoCheque} días)` : " (acuerdo: al día)"}. Se puede cambiar.`
@@ -1565,7 +1568,8 @@ function NuevaOrdenPagoContent() {
                             </Button>
                         </div>
                         <p className="mt-2 text-right text-xs text-muted-foreground">
-                            <b>Pagar ahora</b> crea la orden y registra el pago en el mismo paso. <b>Dejar pendiente</b> solo la arma.
+                            <b>Pagar ahora</b> crea la orden y registra el pago en el mismo paso. <b>Dejar pendiente</b> solo la arma:
+                            la retención de Ganancias cuenta por el día en que se confirma, así que si se confirma otro día puede cambiar (lo muestra antes de aceptar).
                         </p>
                     </CardContent>
                 </Card>
