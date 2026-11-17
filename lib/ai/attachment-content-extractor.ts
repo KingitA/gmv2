@@ -8,6 +8,7 @@ import { downloadAttachment, type ParsedEmail } from './gmail'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { GEMINI_MODEL } from './gemini-model'
 import { getSupabaseAdmin } from './supabase-admin'
+import { hojasVisibles } from "@/lib/xlsx/hojas-visibles"
 
 // SEGURIDAD: Solo usar variables server-side. NUNCA usar NEXT_PUBLIC_ para API keys.
 const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ''
@@ -220,7 +221,7 @@ async function extractTextFromExcel(buffer: Buffer, filename: string): Promise<s
         const workbook = xlsx.read(buffer, { type: 'buffer' })
         const textParts: string[] = []
 
-        for (const sheetName of workbook.SheetNames) {
+        for (const sheetName of hojasVisibles(workbook)) { // las hojas ocultas no se importan
             const worksheet = workbook.Sheets[sheetName]
             const rows = xlsx.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as string[][]
 
