@@ -41,8 +41,14 @@ interface Vencimiento {
     estado: string
     observaciones: string | null
     orden_pago_id?: string | null
+    // Vencimiento ESTIMADO de una orden de compra (todavía sin factura): es_estimado + referencia a la OC
+    es_estimado?: boolean | null
+    referencia_tipo?: string | null
     proveedores?: { id: string; nombre: string; sigla: string | null } | null
 }
+
+/** Estimado de una orden de compra: se ve distinto (rayado, atenuado) y dice "Estimado OC-…". */
+const esEstimadoOC = (v: { es_estimado?: boolean | null; referencia_tipo?: string | null }) => v.es_estimado === true && v.referencia_tipo === "orden_compra"
 
 interface ChequeCartera {
     id: string
@@ -502,20 +508,26 @@ export function CalendarioPagos({
                                                     {pagos.map((p) => {
                                                         const f = FORMAS[formaDe(p)]
                                                         const sel = seleccion.has(p.id)
-                                                        const nombre = p.proveedores?.nombre || p.concepto
+                                                        const estOC = esEstimadoOC(p)
+                                                        const nombre = estOC
+                                                            ? `Estimado ${String(p.concepto || "").replace(/^ESTIMADO +/i, "")}${p.proveedores?.nombre ? ` · ${p.proveedores.nombre}` : ""}`
+                                                            : (p.proveedores?.nombre || p.concepto)
                                                         return (
-                                                            <div key={p.id} className="group/chip relative">
+                                                            <div key={p.id} className={`group/chip relative ${estOC && !sel ? "opacity-60" : ""}`}>
                                                                 <button
                                                                     draggable
                                                                     onDragStart={(e) => { setArrastrandoVenc(p.id); e.dataTransfer.effectAllowed = "move" }}
                                                                     onDragEnd={() => { setArrastrandoVenc(null); setSobreDia(null) }}
                                                                     onClick={() => toggleSel(p.id)}
-                                                                    title={`${p.concepto} · ${f.label} · ${formatCurrency(Number(p.monto))}${p.fecha_validez ? ` · validez ${fmtCorta(p.fecha_validez)}` : ""}${p.modalidad ? ` · ${p.modalidad}` : ""}${!p.descuentos_aplicados ? " · ⚠ chequear NC/retenciones" : ""}`}
+                                                                    title={`${estOC ? "ESTIMADO, todavía sin factura · " : ""}${p.concepto} · ${f.label} · ${formatCurrency(Number(p.monto))}${p.fecha_validez ? ` · validez ${fmtCorta(p.fecha_validez)}` : ""}${p.modalidad ? ` · ${p.modalidad}` : ""}${!p.descuentos_aplicados ? " · ⚠ chequear NC/retenciones" : ""}`}
                                                                     className="w-full rounded-md border px-1.5 py-1 text-left transition-all hover:-translate-y-px hover:shadow"
                                                                     style={{
                                                                         borderColor: f.color,
                                                                         borderLeftWidth: 3,
-                                                                        background: sel ? f.color : `${f.color}18`,
+                                                                        borderStyle: estOC ? "dashed" : undefined,
+                                                                        background: sel ? f.color : estOC
+                                                                            ? `repeating-linear-gradient(135deg, ${f.color}22 0 5px, transparent 5px 10px)`
+                                                                            : `${f.color}18`,
                                                                     }}
                                                                 >
                                                                     <span className={`flex items-center gap-1 text-[10px] font-semibold leading-tight ${sel ? "text-white" : "text-slate-700"}`}>
