@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.5.2 (versionCode 16) — 2026-11-17
+
+- Recepcion: muestra bultos y su equivalente en unidades (2 bultos x 24 u = 48 u); el stock entra siempre en unidades
+
 ## v0.5.1 (versionCode 15) — 2026-11-05
 
 - Inicio ordenado por uso: Preparar pedidos grande arriba con la cola; clientes de Cargar pedido se descargan al entrar
