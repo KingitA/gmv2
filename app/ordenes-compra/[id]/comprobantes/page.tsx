@@ -1,15 +1,15 @@
 import { redirect } from "next/navigation"
 
 /**
- * Pantalla RETIRADA (E-47 / E-15, 17/11/2026).
+ * Pantalla RETIRADA (E-15, 17/11/2026).
  *
- * La vieja "Comprobantes de la orden" creaba y editaba comprobantes de compra escribiendo
- * directo desde el navegador: sin control de duplicados, sin la regla de que los renglones
- * sumen el total y sin pasar por la validación del servidor. Nadie enlazaba a ella. Todo eso
- * se hace ahora desde la verificación de la orden (subir, cargar a mano, editar, validar).
+ * La vieja pantalla de comprobantes de la orden de compra quedó huérfana: ningún botón ni
+ * link del sistema llevaba a ella, y duplicaba (con reglas viejas) lo que hace la
+ * verificación. Los comprobantes de una orden se cargan, revisan y validan en un solo lugar:
+ * `/ordenes-compra/[id]/verificacion`.
  *
- * Queda la ruta para que un link viejo no dé 404. `revisar-matches.tsx`, en esta misma
- * carpeta, sigue en uso: lo importa la verificación.
+ * `revisar-matches.tsx`, en esta misma carpeta, SIGUE EN USO: lo importa la verificación.
+ * Queda la ruta para que los links viejos (favoritos, historial) no den 404.
  */
 export default async function ComprobantesDeLaOrdenRetirada({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params

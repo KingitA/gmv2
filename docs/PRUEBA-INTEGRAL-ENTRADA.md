@@ -52,6 +52,14 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 14. **Mercadería de más (sobrante)** — «En caso de que llegue mercadería de más debe aparecer un cartel para ver si se recibe y esperamos factura, o solo se recibe, ajusta stock pero no se paga de más. Esto para cuando envían mercadería bonificada.» → **Hecho en `entrada-t1b-diferencias`**: al resolver un sobrante la ventana pregunta, sin opción por defecto: (a) *Se recibe y esperamos la factura* → queda una nota de débito esperada (`comprobantes_compra` tipo ND, estado `esperada`, origen `sobrante`) por las unidades de más al precio neto de la orden + IVA, asociada a la factura; se ve en "Notas esperadas" y se quita cuando se carga la factura real; (b) *Se recibe sin cargo (bonificado)* → el stock queda como entró, sin deuda ni nota, y el `ultimo_costo` baja prorrateado (neto facturado × unidades pagadas ÷ unidades recibidas), sin tocar la lista; (c) *Se devuelve* → sale del stock. En los tres casos la deuda sigue siendo el total de la factura.
 15. **Cómo se aplican los descuentos del proveedor** — «Lo aclara en la ficha del proveedor, hay dos opciones: En cascada / sobre precio lista.» → **Hecho en `entrada-t1b-diferencias`**: el neto de compra sale de una sola función, `netoCompra(lista, descuentos, tipo)` en `lib/compras/diferencias.ts`, que usa `proveedores.tipo_descuento` (`cascada`: uno sobre el otro; `sobre_lista`: se suman y se aplican sobre la lista; sin dato: cascada). La usan la verificación, las diferencias de precio, la regla de suma (también la función SQL de `20261117d`), el costo al validar y el kardex de la corrección de conteo. T1-A arma la misma función con la misma firma: se unifican al integrar. Fuera de esta rama (son de T1-A): el total de la orden al crearla y el PDF de la orden, que siguen en cascada.
 
+### Respuestas de Juan a las dudas de la Tanda 1-A (17/11, textuales)
+
+16. **¿La orden que recibe el proveedor separa lo que viene con y sin factura?** — «No, la orden de compra debe figurar un solo pedido, 10 en negro 5 en blanco, la orden de compra = 15. Si te referís a orden de pago sí, debe distinguir entre blanco y negro.» → **Hecho T1-A**: el PDF, el Excel y el mail al proveedor muestran un solo pedido (artículos, cantidades, precios) y un solo total sin impuestos, con una sola condición de pago. La separación blanco / negro queda interna: provisión en cuenta corriente, vencimientos estimados y nuestra pantalla.
+17. **¿"Mixto" es mitad con factura y mitad sin?** — «Sí, la proporción varía según proveedor.» → **Hecho T1-A**: `proveedores.mixto_pct_factura` (% con factura; el resto sin), en la ficha, en el importador del Excel (columna opcional "Mixto: % con factura") y copiado a la orden (`ordenes_compra.mixto_pct_factura`, editable). Sin dato: 50 % y aviso.
+18. **¿Hay proveedores cuyos descuentos se suman en vez de ir en cascada?** — «Lo aclara en la ficha del proveedor, hay dos opciones: En cascada / sobre precio lista.» → **Hecho T1-A**: la orden respeta `proveedores.tipo_descuento`. Función única y pura `netoCompra(lista, descuentos, tipo)` en `lib/compras/neto-compra.ts` (en SQL: `oc_neto_unitario`). **T1-B tiene que usarla en la verificación** (hoy calcula siempre en cascada).
+19. **¿Hacen falta los estados "confirmada" y "en camino"?** — «No los agregamos, es indistinto, la orden de compra llega cuando depósito comienza con el scaneo.» → **Hecho T1-A**: no se muestran. Estados visibles: sin enviar, enviada, recibida en parte / recibida (los marca el depósito), finalizada, cancelada. La base los sigue admitiendo; si una orden los tuviera se ve como Enviada.
+20. **¿De qué cuenta salen las órdenes y cómo se prueba sin molestar a los proveedores?** — «megasur.proveedores@gmail.com es la cuenta, ojo igual, si hacemos pruebas con mails reales de los proveedores nos puede llegar una compra con la que estamos haciendo pruebas. Todos los mails de prueba deben salir de megasur.proveedores@gmail.com a juancruzrossi072@gmail.com, cuando pasemos a producción se pasan a los mail que corresponde.» → **Hecho T1-A**: ajuste único en la base (`compras_envio_ajustes`, migración 20261117n): cuenta de envío, **MODO PRUEBA encendido por defecto** y dirección de prueba (editable). Con el modo prueba encendido TODO mail de orden de compra va solo a la dirección de prueba (ni proveedor ni copias), con "[PRUEBA]" en el asunto y un cartel en la vista previa; en la orden queda la dirección real a la que salió. Se apaga solo desde "Envío de órdenes" en el listado de órdenes, solo un admin, escribiendo la frase "A partir de ahora los mails van a los proveedores reales"; cada cambio queda con quién y cuándo (`compras_envio_ajustes_historial`). Si el ajuste no se puede leer, no se envía nada. Si la cuenta de envío no está conectada, el botón lo dice y explica cómo conectarla.
+
 ## Problemas
 
 ### A. Orden de compra
@@ -60,26 +68,26 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 |---|---|---|
 | ~~E-01~~ | ~~Pantalla vieja `app/ordenes-compra/[id]/articulos` suma stock (`incrementar_stock`) en cada guardado y borra el detalle. Se entra desde la cuenta corriente del proveedor.~~ **Hecho T0-A: la pantalla redirige a la verificación; el link de la cuenta corriente también.** | C |
 | ~~E-02~~ | ~~"Usar sugerencia" copia unidades como bultos (pide N bultos en vez de N unidades).~~ **Hecho T0-A: "usar" convierte a bultos enteros hacia arriba (mismo camino que Jarvis).** | C |
-| E-03 | No existe el envío por mail. PDF/Excel solo descargan; el ícono es "Send". | C |
-| E-04 | La OC no tiene condición de pago (columnas existen, nadie las escribe); no se ve en el PDF. | C, B |
-| E-05 | La OC no genera vencimientos; nacen recién al validar la factura. | C, B |
-| E-06 | Tres fuentes de plazo distintas: `pago_blanco_*`/`dias_vencimiento` (validar), `plazo_dias`/`plazo_desde` (mail), ficha (`plazo_dias`). | C |
-| E-07 | Crear/editar OC sin transacción; numeración con carrera; editar reescribe la provisión sin impuestos y no actualiza el kardex pendiente. | C |
-| E-08 | Provisión mal calculada: IVA fijo 21 %, suma el % de retención de Ganancias como deuda. | C |
-| E-09 | Estados `enviada`, `confirmada`, `en_camino`, `cancelada`, `finalizada` no se escriben o los rechaza el CHECK. No hay cancelar (solo borrar). **CHECK hecho T0-A (migración 20261116b, sin aplicar); estados y cancelar siguen para T1-A.** | C, B |
-| E-10 | Fecha estimada de entrega usa días de pago; RPC `calcular_avg_dias_recepcion` no existe; no se edita. | C, B |
-| E-11 | Crear la OC pisa `articulos.precio_compra` y descuentos sin historial. | C |
-| E-12 | Diálogo de OC: muestra todo el catálogo sin stock ni venta; sin total, sin guardar-en-curso, doble click crea dos; listado sin total/fecha/creador; `select *` pesado. | C |
+| ~~E-03~~ | ~~No existe el envío por mail. PDF/Excel solo descargan; el ícono es "Send".~~ **Hecho T1-A: botón “Enviar al proveedor” con vista previa editable; sale por Gmail con el PDF (y Excel opcional), registra cuándo / quién / a quién y pasa la orden a `enviada`; se puede reenviar.** | C |
+| ~~E-04~~ | ~~La OC no tiene condición de pago (columnas existen, nadie las escribe); no se ve en el PDF.~~ **Hecho T1-A: la orden copia el acuerdo de pago del proveedor (`ordenes_compra.acuerdo_pago` + `condicion_pago`), editable en la orden, impreso en el PDF y en el mail.** | C, B |
+| ~~E-05~~ | ~~La OC no genera vencimientos; nacen recién al validar la factura.~~ **Hecho T1-A: al guardar nacen vencimientos ESTIMADOS (`es_estimado`, `referencia_tipo = 'orden_compra'`), uno por canal o por cuota. Falta que validar llame a `oc_vencimiento_estimado_reemplazar` (T1-B).** | C, B |
+| ~~E-06~~ | ~~Tres fuentes de plazo distintas: `pago_blanco_*`/`dias_vencimiento` (validar), `plazo_dias`/`plazo_desde` (mail), ficha (`plazo_dias`).~~ **Hecho T1-A (parcial): fuente única en `lib/compras/acuerdo-pago.ts`; ya no leen plazos de legado la OC, el PDF, los mails de facturas, el recálculo de vencimientos ni la ficha. Falta `armarPlan` de validar (T1-B, usa `dias_vencimiento` de respaldo).** | C |
+| ~~E-07~~ | ~~Crear/editar OC sin transacción; numeración con carrera; editar reescribe la provisión sin impuestos y no actualiza el kardex pendiente.~~ **Hecho T1-A: `oc_guardar` (migración 20261117n): número por secuencia, cabecera, detalle, provisión, vencimientos estimados y en camino, todo o nada; editar pasa por la misma función.** | C |
+| ~~E-08~~ | ~~Provisión mal calculada: IVA fijo 21 %, suma el % de retención de Ganancias como deuda.~~ **Hecho T1-A: provisión por canal (con factura: neto + IVA 21 % + percepciones; sin factura: neto), según `articulos.iva_compras`; sin la retención de Ganancias.** | C |
+| ~~E-09~~ | ~~Estados `enviada`, `confirmada`, `en_camino`, `cancelada`, `finalizada` no se escriben o los rechaza el CHECK. No hay cancelar (solo borrar).~~ **Hecho: CHECK en T0-A (20261116b). T1-A: `oc_cancelar` (no borra; revierte provisión, en camino y estimados; solo sin recepción ni comprobantes), `enviada` al mandar el mail, detalle de la orden en cualquier estado. `confirmada` y `en_camino` se muestran pero nadie las escribe todavía (duda para Juan).** | C, B |
+| ~~E-10~~ | ~~Fecha estimada de entrega usa días de pago; RPC `calcular_avg_dias_recepcion` no existe; no se edita.~~ **Hecho T1-A: fecha de entrega editable; por defecto el promedio real de las últimas recepciones del proveedor, si no `proveedores.dias_entrega`, si no 7 días.** | C, B |
+| ~~E-11~~ | ~~Crear la OC pisa `articulos.precio_compra` y descuentos sin historial.~~ **Hecho T1-A: la orden ya no toca `articulos.precio_compra` ni los descuentos; guarda el precio de ficha al momento y muestra la diferencia. El costo lo actualiza la factura validada (T1-B, E-23).** | C |
+| ~~E-12~~ | ~~Diálogo de OC: muestra todo el catálogo sin stock ni venta; sin total, sin guardar-en-curso, doble click crea dos; listado sin total/fecha/creador; `select *` pesado.~~ **Hecho T1-A: diálogo con stock, en camino, venta y sugerencia por artículo, precio por unidad y por bulto, filtros, totales con y sin impuestos, guardado con estado y clave contra el doble click; listado liviano con total, entrega, creador, envío, buscador y filtro.** | C |
 | ~~E-13~~ | ~~OC de faltantes e importación desde archivo asumen 1 unidad por bulto; ítems sin artículo llegan al insert.~~ **Hecho T0-A: el servidor lee las unidades por bulto de la base y rechaza renglones sin artículo.** | C |
-| E-14 | Proveedor del artículo: la tabla usa `articulos.proveedor_id`, la sugerencia `articulos_proveedores` (18 filas). | C, B |
-| E-15 | Código muerto en `app/ordenes-compra/page.tsx` y pantalla huérfana `[id]/comprobantes`. | C |
+| ~~E-14~~ | ~~Proveedor del artículo: la tabla usa `articulos.proveedor_id`, la sugerencia `articulos_proveedores` (18 filas).~~ **Hecho T1-A: una sola fuente (`idsArticulosDeProveedor`): ficha + vinculados, para la tabla y la sugerencia.** | C, B |
+| ~~E-15~~ | ~~Código muerto en `app/ordenes-compra/page.tsx` y pantalla huérfana `[id]/comprobantes`.~~ **Hecho T1-A: `page.tsx` reescrito sin el código muerto; `[id]/comprobantes` redirige a la verificación (`revisar-matches.tsx` sigue en uso).** | C |
 
 ### B. Precios de compra
 
 | id | Problema | Verif. |
 |---|---|---|
 | E-20 | Aplicar lista de proveedor ignora la fecha de vigencia, no usa `precios_programados`, marca `aplicada` con errores, descuento 0 = "no tocar", link roto al archivo, no acepta PDF. | C |
-| E-21 | `precios_compra_historial` vacío (0 filas): el insert falla en silencio. No hay historial de costo. | C, B |
+| E-21 | `precios_compra_historial` vacío (0 filas): el insert falla en silencio. No hay historial de costo. **T1-A: la orden ya no cambia el costo (E-11), así que no hay nada que historiar ahí; el historial va con quien actualiza el costo al validar la factura (T1-B, E-23).** | C, B |
 | E-22 | Listas que llegan por mail van a `importaciones_articulos`, circuito paralelo a `listas_proveedores` (0 filas). | C, B |
 | E-23 | El costo no se actualiza al recibir ni al validar la factura; `ultimo_costo` queda en 0. | C, B |
 
@@ -157,10 +165,10 @@ Probado OK en pantalla: E-02 (sugerencia en bultos), E-30/E-40 (2 bultos × 24 �
 | E-93 | App: Finalizar no pide confirmación ni muestra resumen aunque falte mercadería. Tocar un renglón no deja cargar cantidad (hay que ir a Buscar artículo). | T1-C |
 | E-94 | "Resolver diferencia" abre siempre en "mercadería" aunque la diferencia sea de precio, no muestra los precios ni el importe de la diferencia ni el impacto. | T1-B |
 | E-95 | Quedan `confirm()` nativos en verificación (eliminar comprobante, validar, finalizar). El error del OCR se muestra crudo en inglés y desaparece al recargar (el documento "no leído" no queda a la vista). | T1-B |
-| E-96 | Lentitud: listado de OC ~7 s en blanco, verificación 12–35 s ("Ya casi está…"). | T1-A / T1-B |
+| E-96 | Lentitud: ~~listado de OC ~7 s en blanco~~ **(hecho T1-A: una llamada liviana + indicador de carga)**, verificación 12–35 s ("Ya casi está…"). | T1-B |
 | E-97 | Tras eliminar un comprobante queda el aviso "2 ítems sin vincular". Columnas de NC esperada con encabezado `ESPERADA-1794…`. "Total facturado" resta NC sin IVA. Total OC $179.288,70 al crear vs $179.288,40 en verificación. Subtítulo "HO — Triple verificación". | T1-B |
 | E-98 | Kardex de compra sin `precio_costo` y `ultimo_costo` en 0 después de validar; quedan kardex `compra` pendientes con fecha futura (fecha estimada) además del de la recepción. | T1-B |
-| E-99 | El vencimiento que nace al validar no tiene forma de pago si el proveedor no tiene acuerdo cargado. Una OC finalizada queda sin acceso a la verificación. En Nueva OP dos vencimientos del mismo día e importe se ven idénticos (no muestra forma de pago). | T1-A / T1-D |
+| E-99 | El vencimiento que nace al validar no tiene forma de pago si el proveedor no tiene acuerdo cargado. ~~Una OC finalizada queda sin acceso a la verificación.~~ **(hecho T1-A: botón Verificación en el listado y en el detalle)** En Nueva OP dos vencimientos del mismo día e importe se ven idénticos (no muestra forma de pago). | T1-A / T1-D |
 | E-100 | Una leyenda como "sin valor fiscal" en la factura hace que el OCR la clasifique como Adquisición (negro) y no lea neto/IVA. Pedir confirmación del tipo cuando hay CUIT + CAE + letra. | T2-B |
 | E-101 | Gemini sin crédito el 17/11 (402): OCR caído sin que nadie se entere. Falta un vigía/alerta de saldo o de fallas de OCR. | T2-B |
 
@@ -287,3 +295,58 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 **Dudas de negocio abiertas para Juan:**
 1. ~~Factura con un impuesto sin campo para cargarlo.~~ Resuelto: las columnas `impuestos_internos` y `otros_impuestos` ya existían; ahora entran en el control y se pueden cargar.
 2. ~~Sobrante aceptado sin anotar que el proveedor lo va a facturar.~~ Resuelto con la decisión 14.
+
+## Tanda 1-A — orden de compra y envío al proveedor (17/11, rama `entrada-t1a-orden-compra`)
+
+**Migraciones (escritas, SIN aplicar; idempotentes; probadas en una base Postgres local de prueba). Orden: m y después n (son independientes, pero ese es el orden natural).**
+
+| Archivo | Qué agrega | Sin aplicarla |
+|---|---|---|
+| `20261117m_proveedores_datos_compra.sql` | Columnas en `proveedores`: `mail_ordenes_compra`, `cbu`, `cbu_alias`, `banco_titular`, `acepta_cheques_terceros`, `acepta_echeq`, `dias_entrega`, `transporte_habitual`, `observaciones_compra`, `pago_blanco_cuotas`, `pago_negro_cuotas`; medio de pago `echeq` | Todo anda salvo: guardar el mail para OC en la ficha (avisa) y el importador del Excel (avisa y no guarda nada) |
+| `20261117n_oc_guardar.sql` | Columnas en `ordenes_compra` (acuerdo, totales, envío, cancelación, clave), en el detalle (régimen de IVA, precio de ficha), `cuenta_corriente_proveedores.canal` y `configuracion_empresa.mail_compras`; secuencia de numeración posicionada; funciones `oc_guardar`, `oc_cancelar`, `oc_marcar_enviada`, `oc_totales`, `oc_provision_sincronizar`, `oc_vencimientos_estimados_sincronizar`, `oc_vencimiento_estimado_reemplazar`, `oc_kardex_pendiente_sincronizar` | **El merge DEPENDE de ella**: sin la migración el listado, el detalle, el PDF y la recepción siguen andando, pero no se puede crear, editar, cancelar ni enviar órdenes (la pantalla lo avisa con un cartel rojo). Es compatible con el código viejo: **aplicarla ANTES del merge** |
+
+**Reglas que quedaron escritas (una sola vez cada una):**
+
+- **Plata de la orden** — `lib/compras/oc-totales.ts` y, igual, `oc_totales` en SQL: precio SIEMPRE por unidad; renglón = unidades × neto sin redondear, redondeado por renglón; blanco / negro por `articulos.iva_compras` (factura / adquisicion_stock / mixto = el % con factura del proveedor); IVA 21 % y percepciones solo sobre lo blanco; la retención de Ganancias no es deuda. Descuentos como los aplica el proveedor (`proveedores.tipo_descuento`): `netoCompra` en `lib/compras/neto-compra.ts`. Mixto: `mixto_pct_factura` de la orden (sin dato, 50 %).
+- **Acuerdo de pago** — `lib/compras/acuerdo-pago.ts`: única fuente del plazo. La orden lo copia (`acuerdo_pago` jsonb: `{blanco: {medio, dias, cuotas, desde, plazo_cheque, entrega}, negro | null}`; negro null = igual que blanco).
+- **Vencimiento estimado** — fecha estimada de entrega + días (o una fila por cuota "30/60/90"). Concepto `ESTIMADO OC-000012 — falta la factura`, `es_estimado = true`. Nunca se toca un vencimiento que no sea estimado de esa orden; uno que ya se pagó o se imputó en una OP no se borra ni se regenera.
+- **Editar / cancelar** — se edita y se cancela en `pendiente / enviada / confirmada / en_camino`, sin recepción en depósito ni comprobantes cargados. El proveedor de una orden no se cambia.
+
+**Para las otras tandas (avisado a T1-B por mensaje):**
+
+- **T1-B — `lib/deposito/recepciones.ts:157`** lista para recibir solo `pendiente` y `recibida_parcial`: una orden **enviada** deja de verse en depósito. Hay que sumar `enviada`, `confirmada`, `en_camino`. **Sin ese cambio no conviene usar "Enviar al proveedor" en una orden que se va a recibir.**
+- **T1-B** — al validar la factura, llamar `oc_vencimiento_estimado_reemplazar(orden, canal, monto)` en la misma transacción (y sin monto al finalizar la orden). Hoy solo lo hace la factura que entra por mail.
+- **T1-B** — kardex pendiente aislado en `oc_kardex_pendiente_sincronizar` (E-31): vaciarla si pasa a haber otra fuente.
+- **T1-B** — la provisión son hasta 2 movimientos por orden (con / sin factura); el total de la orden está en `ordenes_compra.total_*` (E-97).
+- **T1-D** — los estimados aparecen en el calendario y en "Nueva OP" como vencimientos sin comprobante: marcarlos como estimados (o no dejarlos pagar) y mostrar la forma de pago. El calendario hoy no distingue `es_estimado` a la vista: se distinguen por el concepto.
+- **T1-D** — CBU / alias / titular / acepta cheques de terceros / e-cheq ya tienen columna (migración m) para E-67.
+
+**Gmail (E-03):** `users.messages.send` acepta, según la referencia de Google, cualquiera de `mail.google.com`, `gmail.modify`, `gmail.compose`, `gmail.send`. El sistema ya pide `gmail.modify` (`lib/ai/gmail.ts`), así que **no hay que agregar permisos ni reautorizar**. Si una cuenta quedó conectada sin ese permiso, el envío falla con un mensaje que dice que hay que volver a conectarla desde el asistente ("Conectar Gmail").
+
+**Importador del Excel de proveedores:** Fichas de proveedores → "Importar datos de compra (Excel)" (solo admin). Vista previa fila por fila (antes → después), lo vacío no se modifica, una fila con error no se importa. `lib/proveedores/importar-datos.ts`, `app/api/proveedores/importar-datos`, `components/proveedores/ImportarDatosProveedoresDialog.tsx`. Necesita la migración m.
+
+**Sin probar en pantalla:** todo lo de esta tanda se verificó con typecheck, tests (reglas puras + armado del mail) y las funciones SQL contra una base local; no se abrió en el navegador ni se mandó ningún mail.
+
+### Revisión del 17/11 (arreglos pedidos por el orquestador)
+
+- **Editar con comprobantes cargados (1):** la orden no se edita si tiene algún comprobante que no esté `esperada` (antes: solo si estaba validado). Misma regla que cancelar, en `oc_guardar` y en la pantalla (el botón Editar desaparece y se dice por qué). Evita la deuda y el vencimiento duplicados cuando la factura ya entró por mail.
+- **Orden mixta por mail (2):** las provisiones llevan `cuenta_corriente_proveedores.canal` (columna nueva, migración n). La factura que entra por mail toma la provisión de SU canal (factura → blanco, adquisición → negro); una provisión vieja sin canal vale para cualquiera; si solo queda la del otro canal no la toca.
+- **Importar desde archivo (3):** se pregunta también si el PRECIO del archivo es por bulto o por unidad (por defecto, igual que la cantidad). Por bulto se divide por las unidades por bulto del catálogo.
+- **Plazo de un proveedor sin acuerdo (4):** si no tiene `pago_blanco_dias` (ni cuotas), la regla cae al dato viejo (`plazo_dias` + `plazo_desde`) en vez de 30 fijos, marcado `de_legado`: la orden, el detalle y el vencimiento dicen "acuerdo de pago sin cargar". Vale para la orden y para las facturas por mail. Sin migración de datos. **Proveedores donde el acuerdo y el dato viejo se contradicen (queda el acuerdo; Juan tiene que confirmarlos en el Excel):** ARNANUK S.A, COTY ARGENTINA SA, NEWELL BRANDS S.A. (viejo: 30 desde recepción · acuerdo: 30 desde factura); BUYANOR S.A, DESES PLAST (viejo: 30 desde recepción · acuerdo: 0 desde recepción). **Sin acuerdo, siguen con el dato viejo:** BHUO GREEN (8 desde recepción), GAETA (20 desde recepción), LUQUE WALTER (TYLFOT) (contado), OLMEDO PLUMEROS (30 desde factura).
+- **E-cheq (5):** mapeo único en `lib/compras/acuerdo-pago.ts` (`formaPagoVencimiento`): e-cheq → `forma_pago = 'cheque'`. El CHECK de vencimientos solo admite efectivo / transferencia / cheque; se eligió 'cheque' porque el e-cheq tiene fecha de pago diferida y necesita `fecha_validez` (como 'transferencia' la perdería). Que sea electrónico queda en el acuerdo. Ya lo usan recalcular vencimiento y la ficha fiscal (opción E-cheq). **Falta en archivos ajenos:** `comprobantes-compra/[id]/validar/route.ts` ~88 (T1-B: con echeq deja forma_pago NULL) y `NuevaOPClient.tsx` ~496 (T1-D).
+- **Estimado en el formulario de vencimiento (6):** editar el monto de un estimado de orden de compra ya no le saca la marca.
+- **Fechas pasadas (7):** si la fecha de entrega de la orden ya pasó, el plazo de los estimados corre desde hoy (base y pantalla).
+- **Cuenta de envío (8):** reemplazado por la decisión 16 de Juan: la cuenta sale del ajuste único de envío (`compras_envio_ajustes.cuenta_envio`), no se elige en cada envío.
+- **Guardar mail en la ficha (9):** solo viene tildado cuando el proveedor no tiene ningún mail.
+- **Listado (10):** sin `.in()` con cientos de ids ni `.limit(5000)`: proveedores y usuarios por tandas, comprobantes paginados, detalle solo de las órdenes viejas sin total guardado. No hizo falta una vista.
+- **Eliminar físico (11):** no queda ninguno en la pantalla de órdenes; solo `/cancelar`.
+
+### Importador de proveedores: plantilla del sistema (17/11, pedido del orquestador)
+
+Juan va a renovar todos los datos de los proveedores con el Excel. Fichas de proveedores → "Importar datos de compra (Excel)" (solo admin):
+
+- **Descargar plantilla**: la arma el sistema, una fila por proveedor activo con lo que tiene cargado hoy y una hoja "Cómo completar" con lo que se puede escribir en cada columna. No hay una plantilla aparte que mantener (`COLUMNAS_PLANTILLA`, `filaPlantilla`, `ayudaPlantilla` en `lib/proveedores/importar-datos.ts`). Lo que se descarga se puede volver a subir tal cual y no cambia nada (hay un test de ida y vuelta).
+- **Columnas** (32): código, proveedor, CUIT, tipo, mail para la orden de compra, mail de administración, teléfono del vendedor, **cómo aplica los descuentos (cascada / sobre_lista)**, **mixto: % con factura**, **percepción IVA %**, **percepción IIBB %**, acuerdo BLANCO y NEGRO (medio, días o cuotas, desde, plazo del cheque, entrega), banco, CBU, alias, titular, acepta cheques de terceros, acepta e-cheq, retención de Ganancias, vencimiento del certificado de exento, transporte habitual, días de entrega, observaciones.
+- **Plantilla anterior** (`docs/entrada/proveedores-para-completar.xlsx`): se acepta. Las columnas que no trae se ignoran (esos datos no se modifican) y la vista previa las nombra.
+- **Vista previa**: resumen arriba (con cambios / sin cambios / con errores / códigos que no existen) y, proveedor por proveedor, cada campo que cambia "antes → después". Lo vacío no pisa nada; una fila con error no se importa.
+- Lo que el Excel no puede expresar y por eso sale vacío (no se toca): proveedor "no inscripto" en Ganancias, régimen de servicios, y un CUIT que hoy está guardado con error.

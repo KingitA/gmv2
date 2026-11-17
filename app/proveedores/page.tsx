@@ -22,6 +22,14 @@ import { PROVINCIAS_ARGENTINA, TIPOS_IVA_DJ, CONDICIONES_PAGO } from "@/lib/cons
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { errorCuit, formatCuit, normalizarCuit } from "@/lib/formato"
 import { normalizarCodigo, esCodigoDuplicado } from "@/lib/codigos"
+import { toast } from "sonner"
+import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
+import { mailsInvalidos, separarMails } from "@/lib/compras/orden-compra"
+import { ImportarDatosProveedoresDialog } from "@/components/proveedores/ImportarDatosProveedoresDialog"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 export default function ProveedoresPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
@@ -31,6 +39,7 @@ export default function ProveedoresPage() {
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isHistorialOpen, setIsHistorialOpen] = useState(false)
   const [fichaFiscal, setFichaFiscal] = useState<{ id: string; nombre: string } | null>(null)
+  const [paraBaja, setParaBaja] = useState<Proveedor | null>(null)
   const [formData, setFormData] = useState({
     nombre: "",
     sigla: "",
@@ -46,6 +55,8 @@ export default function ProveedoresPage() {
     telefono_vendedor: "",
     mail_vendedor: "",
     mail_oficina: "",
+    mail_ordenes_compra: "",
+    mixto_pct_factura: null as number | null,
     cuit: "",
     tipo_iva: 2,
     condicion_pago_tipo: "cuenta_corriente" as "cuenta_corriente" | "contado" | "anticipado",
@@ -106,21 +117,37 @@ export default function ProveedoresPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const errCuit = errorCuit(formData.cuit)
-    if (errCuit) { alert(errCuit); return }
+    if (errCuit) { toast.error(errCuit); return }
+    const mailsMalos = mailsInvalidos(formData.mail_ordenes_compra)
+    if (mailsMalos.length > 0) { toast.error(`El mail para órdenes de compra está mal escrito: ${mailsMalos.join(", ")}`); return }
     // Código de proveedor: NUNCA repetido (se vuelve a consultar al guardar)
     const codigo = normalizarCodigo(formData.codigo_proveedor)
     if (codigo) {
       const qs = new URLSearchParams({ entidad: "proveedor", codigo, ...(editingProveedor ? { excluir: editingProveedor.id } : {}) })
       const chk = await fetch(`/api/codigos?${qs}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
       if (chk?.ocupado_por) {
-        alert(`El código ${codigo} ya lo tiene "${chk.ocupado_por.nombre}"${chk.ocupado_por.activo ? "" : " (dado de baja)"}. Elegí otro: el primero libre es el ${chk.sugerido}.`)
+        toast.error(`El código ${codigo} ya lo tiene "${chk.ocupado_por.nombre}"${chk.ocupado_por.activo ? "" : " (dado de baja)"}. Elegí otro: el primero libre es el ${chk.sugerido}.`, { duration: 10000 })
         return
       }
     }
     // Código vacío = la base asigna el primer número libre (trigger de 20261014_codigos_unicos)
-    const datos = { ...formData, codigo_proveedor: codigo, cuit: normalizarCuit(formData.cuit) }
+    // El mail para órdenes de compra es una columna nueva (migración 20261117m). Va aparte: si la
+    // migración todavía no está, el resto de la ficha se guarda igual y se avisa.
+    const { mail_ordenes_compra: mailOC, mixto_pct_factura: mixtoPct, ...resto } = formData
+    const mailOCLimpio = separarMails(mailOC).join(", ") || null
+    const datos = { ...resto, codigo_proveedor: codigo, cuit: normalizarCuit(formData.cuit) }
+    const guardarMailOC = async (id: string) => {
+      const antes: any = editingProveedor || {}
+      const sinCambios = (mailOCLimpio ?? null) === (antes.mail_ordenes_compra ?? null)
+        && (mixtoPct ?? null) === (antes.mixto_pct_factura != null ? Number(antes.mixto_pct_factura) : null)
+      if (sinCambios) return
+      const { error } = await createClient().from("proveedores").update({ mail_ordenes_compra: mailOCLimpio, mixto_pct_factura: mixtoPct ?? null }).eq("id", id)
+      if (error) toast.warning(faltaLaColumna(error)
+        ? "La ficha se guardó, pero el mail para órdenes de compra y el % con factura de los mixtos todavía no se pueden guardar: falta aplicar la migración 20261117m_proveedores_datos_compra.sql."
+        : `La ficha se guardó, pero no el mail para órdenes de compra ni el % de mixtos: ${error.message}`, { duration: 12000 })
+    }
     const supabase = createClient()
-    const avisarError = (error: any) => alert(esCodigoDuplicado(error) ? `El código ${codigo} ya lo tiene otro proveedor. Elegí otro.` : `Error al guardar: ${error.message}`)
+    const avisarError = (error: any) => toast.error(esCodigoDuplicado(error) ? `El código ${codigo} ya lo tiene otro proveedor. Elegí otro.` : `No se guardó: ${error.message}`, { duration: 10000 })
 
     if (editingProveedor) {
       const { error } = await supabase.from("proveedores").update(datos).eq("id", editingProveedor.id)
@@ -130,6 +157,7 @@ export default function ProveedoresPage() {
         avisarError(error)
         return
       }
+      await guardarMailOC(editingProveedor.id)
       fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "proveedores", id: editingProveedor.id }) }).catch(() => {})
     } else {
       const { data: newProv, error } = await supabase.from("proveedores").insert(datos).select("id").single()
@@ -139,6 +167,7 @@ export default function ProveedoresPage() {
         avisarError(error)
         return
       }
+      if (newProv?.id) await guardarMailOC(newProv.id)
       if (newProv?.id) fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "proveedores", id: newProv.id }) }).catch(() => {})
     }
 
@@ -148,13 +177,12 @@ export default function ProveedoresPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("¿Está seguro de eliminar este proveedor?")) return
-
     const supabase = createClient()
     const { error } = await supabase.from("proveedores").update({ activo: false }).eq("id", id)
 
     if (error) {
       console.error("[v0] Error deleting proveedor:", error)
+      toast.error(`No se pudo dar de baja: ${error.message}`)
       return
     }
 
@@ -177,6 +205,8 @@ export default function ProveedoresPage() {
       telefono_vendedor: "",
       mail_vendedor: "",
       mail_oficina: "",
+      mail_ordenes_compra: "",
+      mixto_pct_factura: null,
       cuit: "",
       tipo_iva: 2,
       condicion_pago_tipo: "cuenta_corriente",
@@ -215,6 +245,8 @@ export default function ProveedoresPage() {
       telefono_vendedor: proveedor.telefono_vendedor || "",
       mail_vendedor: proveedor.mail_vendedor || "",
       mail_oficina: proveedor.mail_oficina || "",
+      mail_ordenes_compra: (proveedor as any).mail_ordenes_compra || "",
+      mixto_pct_factura: (proveedor as any).mixto_pct_factura != null ? Number((proveedor as any).mixto_pct_factura) : null,
       cuit: proveedor.cuit || "",
       tipo_iva: proveedor.tipo_iva || 2,
       condicion_pago_tipo: proveedor.condicion_pago_tipo || "cuenta_corriente",
@@ -323,6 +355,23 @@ export default function ProveedoresPage() {
                   <History className="h-4 w-4" />
                   Historial
                 </Button>
+                <ImportarDatosProveedoresDialog onImportado={loadProveedores} />
+                <AlertDialog open={!!paraBaja} onOpenChange={(a) => { if (!a) setParaBaja(null) }}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>¿Dar de baja a {paraBaja?.nombre}?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        El proveedor deja de aparecer para comprar. No se borra: su historial, su cuenta corriente y sus órdenes quedan como están.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={() => { const id = paraBaja?.id; setParaBaja(null); if (id) handleDelete(id) }}>
+                        Dar de baja
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
                 <ImportProveedoresDialog
                   open={isImportDialogOpen}
                   onOpenChange={setIsImportDialogOpen}
@@ -441,7 +490,7 @@ export default function ProveedoresPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => handleDelete(proveedor.id)}
+                              onClick={() => setParaBaja(proveedor)}
                               className="hover:bg-red-50 hover:text-red-600"
                             >
                               <Trash2 className="h-4 w-4" />

@@ -1,3 +1,5 @@
+"use client"
+
 import { useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -7,11 +9,28 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AlertCircle, CheckCircle2, FileText, Loader2, Upload, AlertTriangle } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { moneda, porcentaje } from "@/lib/formato"
+import { moneda, numero, porcentaje } from "@/lib/formato"
+import { toast } from "sonner"
+
+/** Lo que el archivo deja listo para la orden (E-13) */
+export interface ResultadoImportacionOC {
+    proveedorId: string
+    /** En qué vienen las cantidades del archivo: lo elige el usuario, no se adivina */
+    unidad: "bulto" | "unidad"
+    /**
+     * A qué corresponde el PRECIO del archivo. En el sistema el precio es siempre por unidad:
+     * si el archivo lo trae por bulto, la orden lo divide por las unidades por bulto del catálogo.
+     */
+    precioPor: "bulto" | "unidad"
+    /** Renglones vinculados a un artículo del catálogo */
+    items: { articulo_id: string; cantidad: number; precio: number | null; descuento1: number | null }[]
+    /** Renglones que no se pudieron vincular: van a revisión dentro de la orden, no se pueden guardar así */
+    sinArticulo: { descripcion: string; codigo: string | null; cantidad: number; precio: number }[]
+}
 
 interface ImportOrderDialogProps {
     proveedores: any[]
-    onImportSuccess: (items: any[], proveedorId: string) => void
+    onImportSuccess: (r: ResultadoImportacionOC) => void
 }
 
 export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderDialogProps) {
@@ -22,6 +41,10 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
     const [previewItems, setPreviewItems] = useState<any[]>([])
     const [stats, setStats] = useState<any>(null)
     const [step, setStep] = useState<"upload" | "preview">("upload")
+    const [unidad, setUnidad] = useState<"bulto" | "unidad" | "">("")
+    // por defecto, el precio viene en la misma unidad que la cantidad
+    const [precioPor, setPrecioPor] = useState<"bulto" | "unidad" | "">("")
+    const precioPorFinal: "bulto" | "unidad" | "" = precioPor || unidad
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -53,60 +76,38 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
             setStats(data.stats)
             setStep("preview")
         } catch (error: any) {
-            alert(error.message)
+            toast.error(error.message || "No se pudo leer el archivo.", { duration: 10000 })
         } finally {
             setIsLoading(false)
         }
     }
 
     const confirmImport = () => {
-        // Filter only valid items or all? 
-        // User might want to import unmapped items to map them manually later?
-        // Current requirement: "Pre-fill order".
-        // Use all items, but map them to the format expected by parent.
-
-        const mappedForParent = previewItems.map(item => ({
-            articulo_id: item.articulo_id, // Might be null
-            articulo: {
-                id: item.articulo_id,
-                descripcion: item.articulo_desc || item.original_desc, // Fallback
-                sku: item.articulo_sku || item.original_code, // Fallback
-                unidades_por_bulto: 1, // Default if not found
-                // We need more article data ideally, but parent will fetch or we use what we have.
-                // Parent `loadOrdenes` fetches `articulo(...)`. 
-                // Parent `handleProveedorChange` fetches `articulos` and maps them.
-                // Here we might verify if parent needs full article object.
-                // Parent uses: `item.articulo.descripcion`, `item.articulo.unidades_por_bulto`
-            },
-            cantidad_pedida: item.cantidad_pedida,
-            tipo_cantidad: "bulto", // Check this! Import usually gives "unidades" or "bultos" depending on conversion.
-            // Our API returned `cantidad_pedida` after conversion? 
-            // API matching logic returned raw quantity?
-            // `ocr.ts` matching logic applies conversion to `cantidad_documentada`.
-            // `import/route.ts` just maps.
-            // Let's assume quantity is in "unidades" if factor applied, or we assume "bulto" if typical?
-            // Safest: "unidad" if we don't know pack size, "bulto" if we do. 
-            // Parent default is "bulto".
-
-            // Let's use "bulto" but we might need to adjust quantity if it was units.
-            // THIS IS TRICKY. 
-            // MATCHING SERVICE applied conversion? 
-            // No, `import/route.ts` didn't call `resolveFactorConversion`.
-            // It just called `matchItems`. `matchItems` returns raw items with `match_result`.
-            // So `cantidad_pedida` is RAW from excel/ocr.
-
-            precio_unitario: item.precio_unitario,
-            descuento1: item.descuento1,
-            descuento2: item.descuento2,
-            descuento3: item.descuento3,
-            descuento4: item.descuento4,
-
-            // Extra flags for UI
-            is_manual: item.status === "not_found",
-            original_data: item
+        if (unidad !== "bulto" && unidad !== "unidad") {
+            toast.error("Elegí si las cantidades del archivo son bultos o unidades.")
+            return
+        }
+        // E-13: lo vinculado va a la orden; lo que no tiene artículo NO entra como renglón:
+        // queda en una lista de revisión dentro de la orden (vincular o descartar).
+        // Las unidades por bulto no salen del archivo: las pone el catálogo.
+        const conCantidad = previewItems.filter((item) => Number(item.cantidad_pedida) > 0)
+        const items = conCantidad.filter((item) => item.articulo_id).map((item) => ({
+            articulo_id: item.articulo_id as string,
+            cantidad: Number(item.cantidad_pedida),
+            precio: Number(item.precio_unitario) > 0 ? Number(item.precio_unitario) : null,
+            descuento1: Number(item.descuento1) > 0 ? Number(item.descuento1) : null,
         }))
-
-        onImportSuccess(mappedForParent, proveedorId)
+        const sinArticulo = conCantidad.filter((item) => !item.articulo_id).map((item) => ({
+            descripcion: String(item.original_desc || ""),
+            codigo: item.original_code ? String(item.original_code) : null,
+            cantidad: Number(item.cantidad_pedida),
+            precio: Number(item.precio_unitario) || 0,
+        }))
+        if (items.length === 0 && sinArticulo.length === 0) {
+            toast.error("El archivo no tiene renglones con cantidad.")
+            return
+        }
+        onImportSuccess({ proveedorId, unidad, precioPor: precioPorFinal === "unidad" ? "unidad" : "bulto", items, sinArticulo })
         setOpen(false)
         resetState()
     }
@@ -116,6 +117,8 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
         setPreviewItems([])
         setStats(null)
         setStep("upload")
+        setUnidad("")
+        setPrecioPor("")
     }
 
     return (
@@ -123,7 +126,7 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
             <DialogTrigger asChild>
                 <Button variant="outline" className="gap-2">
                     <Upload className="h-4 w-4" />
-                    Importar (Beta)
+                    Importar desde archivo
                 </Button>
             </DialogTrigger>
             <DialogContent className="max-w-4xl max-h-[90vh]">
@@ -214,12 +217,12 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
                                                     </div>
                                                 ) : <span className="text-muted-foreground italic">Sin coincidencia</span>}
                                             </TableCell>
-                                            <TableCell>{item.cantidad_pedida}</TableCell>
+                                            <TableCell>{numero(item.cantidad_pedida, 0, 2)}</TableCell>
                                             <TableCell>{moneda(item.precio_unitario)}</TableCell>
                                             <TableCell>
                                                 {item.status === 'found' && <span className="text-green-600 text-xs font-bold">Encontrado</span>}
                                                 {item.status === 'suggested' && <span className="text-yellow-600 text-xs font-bold">Sug. {porcentaje(item.match_confidence * 100, 0)}</span>}
-                                                {item.status === 'not_found' && <span className="text-red-400 text-xs">Nuevo</span>}
+                                                {item.status === 'not_found' && <span className="text-red-500 text-xs font-bold">Sin artículo</span>}
                                             </TableCell>
                                         </TableRow>
                                     ))}
@@ -228,12 +231,35 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
                         </div>
 
                         <div className="flex justify-between items-center pt-2">
-                            <div className="text-sm text-muted-foreground">
-                                Los productos no encontrados se agregarán como líneas manuales para revisar.
+                            <div className="space-y-1.5 text-sm">
+                                <div className="flex items-center gap-2">
+                                    <span className="font-medium">Las cantidades del archivo son:</span>
+                                    <Select value={unidad} onValueChange={(v) => setUnidad(v === "unidad" ? "unidad" : "bulto")}>
+                                        <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Elegir…" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="bulto">bultos</SelectItem>
+                                            <SelectItem value="unidad">unidades</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-medium">Los precios del archivo son por:</span>
+                                    <Select value={precioPorFinal} onValueChange={(v) => setPrecioPor(v === "unidad" ? "unidad" : "bulto")}>
+                                        <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Elegir…" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="bulto">bulto</SelectItem>
+                                            <SelectItem value="unidad">unidad</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <span className="text-xs text-muted-foreground">(si es por bulto, se divide por las unidades por bulto del artículo)</span>
+                                </div>
+                                <div className="text-muted-foreground">
+                                    Lo que no tiene artículo queda a revisión dentro de la orden: hay que vincularlo o descartarlo antes de guardar.
+                                </div>
                             </div>
                             <div className="flex gap-2">
                                 <Button variant="outline" onClick={() => setStep("upload")}>Atrás</Button>
-                                <Button onClick={confirmImport}>Confirmar e Importar</Button>
+                                <Button onClick={confirmImport} disabled={!unidad}>Pasar a la orden</Button>
                             </div>
                         </div>
                     </div>

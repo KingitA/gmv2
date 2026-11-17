@@ -3,6 +3,7 @@
 // Processes supplier invoices from emails
 // =====================================================
 
+import { acuerdoDeProveedorConLegado, acuerdoDelCanal, diasDePago, formaPagoVencimiento, modalidadVencimiento, normalizarAcuerdo } from '@/lib/compras/acuerdo-pago'
 import { downloadAttachment, type ParsedEmail } from './gmail'
 import { analyzeXlsxInvoice } from './claude-xlsx-analyzer'
 import type { AttachmentContent } from './attachment-content-extractor'
@@ -417,14 +418,13 @@ export async function processEmailAsInvoice(
             const montoFinal = isCredit ? -Math.abs(monto) : Math.abs(monto)
             const descripcion = [tipoComp, invoiceData.numero_comprobante, invoiceData.razon_social_emisor].filter(Boolean).join(' — ')
 
-            // Find existing OC movement in CC
-            const { data: existingCC } = await db.from('cuenta_corriente_proveedores')
-                .select('id')
-                .eq('proveedor_id', proveedorId)
-                .eq('referencia_tipo', 'orden_compra')
-                .eq('referencia_id', pendingOC.id)
-                .limit(1)
-                .maybeSingle()
+            // Provisión de la orden que esta factura convierte en deuda. Una orden mixta tiene DOS
+            // (con factura / sin factura): se toma la del canal del comprobante (factura → blanco,
+            // adquisición → negro), nunca "la primera que aparezca". Las provisiones anteriores al
+            // 17/11 no tienen canal: valen para cualquiera. Si solo queda la del otro canal, no se
+            // toca y la deuda entra como movimiento nuevo.
+            const canalComprobante: 'blanco' | 'negro' = tipoComp === 'ADQ' ? 'negro' : 'blanco'
+            const existingCC = await provisionDelCanal(db, proveedorId, pendingOC.id, canalComprobante)
 
             let ccResult: any = null
             if (existingCC) {
@@ -457,13 +457,11 @@ export async function processEmailAsInvoice(
             // Calculate and set vencimiento on the CC movement
             if (ccResult && !isCredit) {
                 try {
-                    const { data: prov } = await db.from('proveedores')
-                        .select('plazo_dias, plazo_desde, nombre')
-                        .eq('id', proveedorId)
-                        .single()
-
-                    const plazoDias = prov?.plazo_dias || 30
-                    const plazoDesde = prov?.plazo_desde || 'fecha_factura'
+                    // E-06: el plazo sale del acuerdo de pago (el de la orden si lo tiene; si no, el de la
+                    // ficha del proveedor). plazo_dias / plazo_desde son legado y ya no se leen.
+                    const plazo = await plazoDePago(db, proveedorId, pendingOC.id, canalComprobante)
+                    const plazoDias = plazo.dias
+                    const plazoDesde = plazo.desde === 'recepcion' ? 'fecha_recepcion' : 'fecha_factura'
 
                     let fechaBase = invoiceData.fecha_comprobante || fechaHoy
                     // If plazo is from recepcion, check if there's a finished recepcion
@@ -496,7 +494,15 @@ export async function processEmailAsInvoice(
                         referencia_id: ccResult.id,
                         referencia_tipo: 'cuenta_corriente',
                         dias_alerta: 3,
+                        forma_pago: plazo.forma_pago,
+                        modalidad: plazo.modalidad,
+                        canal: canalComprobante,
+                        observaciones: plazo.aviso,
                     })
+                    // Llegó el vencimiento real: se descuenta del ESTIMADO que generó la orden (E-05).
+                    // Si la función todavía no está en la base (migración 20261117n), no pasa nada.
+                    const { error: errEst } = await db.rpc('oc_vencimiento_estimado_reemplazar', { p_orden_id: pendingOC.id, p_canal: canalComprobante, p_monto: Math.abs(montoFinal) })
+                    if (errEst) console.warn('[InvoiceProcessor] No se reemplazó el vencimiento estimado de la orden:', errEst.message)
                 } catch (vErr) {
                     console.error('[InvoiceProcessor] Error creating vencimiento for OC invoice:', vErr)
                 }
@@ -836,11 +842,13 @@ async function createCCMovement(
         try {
             // Get proveedor payment terms
             const { data: prov } = await db.from('proveedores')
-                .select('plazo_dias, plazo_desde, nombre, sigla')
+                .select('nombre, sigla')
                 .eq('id', proveedorId)
                 .single()
 
-            const plazoDias = prov?.plazo_dias || 30
+            // E-06: plazo del acuerdo de pago de la ficha (no más plazo_dias)
+            const plazo = await plazoDePago(db, proveedorId, null, tipoComp === 'ADQ' ? 'negro' : 'blanco')
+            const plazoDias = plazo.dias
             const fechaBase = invoiceData.fecha_comprobante || fechaHoy
 
             // Use fecha_vencimiento from invoice if available, otherwise calculate
@@ -858,6 +866,9 @@ async function createCCMovement(
                 referencia_id: data.id,
                 referencia_tipo: 'cuenta_corriente',
                 dias_alerta: 3,
+                forma_pago: plazo.forma_pago,
+                modalidad: plazo.modalidad,
+                observaciones: plazo.aviso,
             })
         } catch (vencError) {
             console.error('[InvoiceProcessor] Error creating vencimiento:', vencError)
@@ -866,6 +877,54 @@ async function createCCMovement(
     }
 
     return data
+}
+
+// ── Helper: plazo de pago (E-06) ───────────────────────
+/**
+ * Cuántos días hay para pagar una factura y desde cuándo corren.
+ * Fuente: el acuerdo de pago — el que quedó copiado en la orden de compra y, si no hay orden o
+ * es anterior, el de la ficha del proveedor (pago_blanco_* / pago_negro_*).
+ * Proveedor SIN plazo en el acuerdo: se sigue usando el dato viejo de su ficha (plazo_dias +
+ * plazo_desde), como hasta ahora, y el vencimiento queda anotado "acuerdo de pago sin cargar".
+ * Sin ninguno de los dos: 30 días desde la factura.
+ */
+async function plazoDePago(db: any, proveedorId: string, ordenCompraId: string | null, canalPago: 'blanco' | 'negro' = 'blanco') {
+    let acuerdo = null as ReturnType<typeof normalizarAcuerdo>
+    if (ordenCompraId) {
+        const { data: oc, error } = await db.from('ordenes_compra').select('acuerdo_pago').eq('id', ordenCompraId).maybeSingle()
+        if (!error) acuerdo = normalizarAcuerdo(oc?.acuerdo_pago)
+    }
+    if (!acuerdo) {
+        const { data: prov } = await db.from('proveedores').select('*').eq('id', proveedorId).maybeSingle()
+        acuerdo = acuerdoDeProveedorConLegado(prov)
+    }
+    const canal = acuerdoDelCanal(acuerdo, canalPago)
+    const dias = diasDePago(canal)
+    return {
+        dias: dias.length > 0 ? dias[0] : 30,
+        desde: canal.desde,
+        forma_pago: formaPagoVencimiento(canal.medio),
+        modalidad: modalidadVencimiento(canal.entrega),
+        aviso: canal.de_legado || dias.length === 0
+            ? 'Acuerdo de pago sin cargar: el plazo salió del dato viejo de la ficha del proveedor. Cargar el acuerdo en la ficha fiscal y revisar esta fecha.'
+            : null,
+    }
+}
+
+/** La provisión de una orden de compra que corresponde a un canal (ver el uso). Solo lee. */
+async function provisionDelCanal(db: any, proveedorId: string, ordenCompraId: string, canal: 'blanco' | 'negro'): Promise<{ id: string } | null> {
+    const leer = (columnas: string) => db.from('cuenta_corriente_proveedores')
+        .select(columnas)
+        .eq('proveedor_id', proveedorId)
+        .eq('referencia_tipo', 'orden_compra')
+        .eq('referencia_id', ordenCompraId)
+        .eq('tipo_movimiento', 'orden_compra')
+        .order('created_at', { ascending: true })
+    let { data, error } = await leer('id, canal')
+    // base sin la columna canal (migración 20261117n sin aplicar): había una sola provisión por orden
+    if (error) ({ data, error } = await leer('id'))
+    const filas: any[] = data || []
+    return filas.find((m) => m.canal === canal) ?? filas.find((m) => m.canal == null) ?? null
 }
 
 // ── Helper: Map invoice type ───────────────────────────

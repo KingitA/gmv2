@@ -1,3 +1,4 @@
+import { formaPagoVencimiento, modalidadVencimiento } from '@/lib/compras/acuerdo-pago'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth, getUserRoles } from '@/lib/auth'
@@ -81,19 +82,15 @@ export async function POST(
       return NextResponse.json({ error: 'La ficha del proveedor no tiene acuerdo de pago configurado' }, { status: 400 })
     }
 
-    const formaPago = cfg.medio === 'transferencia' ? 'transferencia'
-      : cfg.medio === 'efectivo' ? 'efectivo'
-      : (cfg.medio === 'cheques' || cfg.medio === 'cheques_y_efectivo') ? 'cheque'
-      : null
-    const modalidad = cfg.entrega === 'deposito_bancario' ? 'deposito'
-      : cfg.entrega === 'retira_oficina' ? 'entrega'
-      : cfg.entrega === 'envio_grimar' ? 'grimar'
-      : null
+    // Mapeo único del medio y la entrega (lib/compras/acuerdo-pago.ts): reconoce el e-cheq
+    const formaPago = formaPagoVencimiento(cfg.medio)
+    const modalidad = modalidadVencimiento(cfg.entrega)
 
     // Fecha: si la ficha define plazo (incluido 0 = contado), manda la ficha;
     // si no, se conserva la fecha actual del vencimiento.
     let fechaVencimiento: string = venc.fecha_vencimiento
-    if (cfg.dias != null || Number(p.dias_vencimiento ?? 0) > 0) {
+    // E-06: el plazo sale SOLO del acuerdo de pago (pago_blanco_* / pago_negro_*); dias_vencimiento es legado.
+    if (cfg.dias != null) {
       let fechaBase: string | null = comprobante?.fecha_comprobante
         ? String(comprobante.fecha_comprobante).slice(0, 10)
         : null
@@ -108,7 +105,7 @@ export async function POST(
         const f = (rec as any)?.fecha_fin || (rec as any)?.fecha_inicio || (rec as any)?.created_at
         if (f) fechaBase = fechaISO(f) || null // timestamptz → día argentino
       }
-      const dias = Number(cfg.dias ?? p.dias_vencimiento ?? 0)
+      const dias = Number(cfg.dias)
       if (fechaBase) {
         fechaVencimiento = sumarDiasISO(fechaBase, dias)
       }
