@@ -10,12 +10,14 @@
  *     "confirmado" y quedaban DOS compras del mismo artículo (la de la recepción y esta, con
  *     fecha futura). Ahora el pendiente refleja solo lo que falta recibir: baja con cada
  *     entrega y desaparece cuando llegó todo o la orden se cierra.
- *   · articulos.ultimo_costo = neto por unidad de la última factura validada.
- *     articulos.precio_compra (la lista) NO se toca acá: cambia solo cuando alguien acepta un
- *     precio distinto al resolver la diferencia, y queda en precios_compra_historial.
+ *   · articulos.ultimo_costo = neto por unidad de la última factura validada, con el descuento
+ *     al pie de la factura ya repartido. Cada cambio queda en precios_compra_historial.
+ *     articulos.precio_compra (la lista) NO se toca acá: cambia SOLO cuando alguien elige "la
+ *     empresa asume" al resolver una diferencia de precio (y también queda en el historial).
  */
 
 import { netoDocumento } from "./diferencias"
+import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
 import { esComprobanteConPrecios } from "./finalizar-oc"
 import { pendientesDeOrden } from "@/lib/deposito/recepciones"
 import { unidadesPorBultoDe } from "@/lib/deposito/unidades"
@@ -38,7 +40,14 @@ export async function sincronizarKardexEnCamino(supabase: any, ordenId: string, 
   if (error) throw error
   if (!filas || filas.length === 0) return { borrados: 0, ajustados: 0 }
 
-  const pendientes = opts.cerrada ? new Map<string, { base: number }>() : await pendientesDeOrden(supabase, ordenId)
+  // Una orden finalizada o cancelada no tiene nada en camino, la llame quien la llame: quien
+  // CANCELA una orden tiene que llamar a esta función después de cambiarle el estado.
+  let cerrada = !!opts.cerrada
+  if (!cerrada) {
+    const { data: oc } = await supabase.from("ordenes_compra").select("estado").eq("id", ordenId).maybeSingle()
+    cerrada = !oc || ["finalizada", "cancelada"].includes(oc.estado)
+  }
+  const pendientes = cerrada ? new Map<string, { base: number }>() : await pendientesDeOrden(supabase, ordenId)
   const borrar: string[] = []
   let ajustados = 0
   const vistos = new Set<string>()
@@ -66,6 +75,8 @@ export interface ResultadoCosto {
   costos_actualizados: number
   /** Movimientos de kardex de la recepción valorizados con esta factura */
   kardex_valorizados: number
+  /** Cambios de último costo que NO se pudieron anotar en el historial (se avisa en pantalla) */
+  historial_fallas: number
   /** Suma de los renglones (neto) y neto del comprobante, para avisar si no cierran (E-46) */
   neto_renglones: number
   neto_comprobante: number
@@ -92,7 +103,7 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
       ? num(comprobante.total_neto)
       : num(comprobante.total_factura_declarado) - num(comprobante.total_iva) - num(comprobante.percepcion_iva_monto) - num(comprobante.percepcion_iibb_monto),
   )
-  const resultado: ResultadoCosto = { costos_actualizados: 0, kardex_valorizados: 0, neto_renglones: netoRenglones, neto_comprobante: netoComprobante }
+  const resultado: ResultadoCosto = { costos_actualizados: 0, kardex_valorizados: 0, historial_fallas: 0, neto_renglones: netoRenglones, neto_comprobante: netoComprobante }
   if (!esComprobanteConPrecios(comprobante.tipo_comprobante)) return resultado
 
   const conArticulo = lineas.filter((l) => !!l.articulo_id)
@@ -106,15 +117,20 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
     const { data: its } = await supabase.from("recepciones_items").select("id, factor_conversion").in("id", itemIds)
     for (const it of its || []) factorItem.set(it.id, num(it.factor_conversion))
   }
-  const { data: arts, error: artErr } = await supabase.from("articulos").select("id, unidades_por_bulto, ultimo_costo").in("id", idsArt)
+  const { data: arts, error: artErr } = await supabase.from("articulos").select("id, unidades_por_bulto, ultimo_costo, precio_compra, descuento1, descuento2, descuento3, descuento4").in("id", idsArt)
   if (artErr) throw artErr
   const art = new Map<string, any>((arts || []).map((a: any) => [a.id, a]))
+
+  // Descuento al pie de la factura (un % sobre todos los renglones): también baja el costo. Se
+  // reparte parejo, que es como lo aplica el proveedor. La lista del renglón no cambia.
+  const dtoPie = num(comprobante.descuento_fuera_factura)
+  const factorPie = dtoPie > 0 && dtoPie <= 100 ? 1 - dtoPie / 100 : 1
 
   // Precio por unidad de cada artículo: el primer renglón CON cargo (lo bonificado no baja el costo)
   const precio = new Map<string, { lista: number; neto: number }>()
   for (const l of conArticulo) {
     if (precio.has(l.articulo_id)) continue
-    const neto = netoDocumento(l.precio_unitario, descuentos(l))
+    const neto = netoDocumento(l.precio_unitario, descuentos(l)) * factorPie
     if (!(neto > 0)) continue
     const f = l.tipo_cantidad === "bulto" ? ((factorItem.get(l.recepcion_item_id) || 0) > 1 ? factorItem.get(l.recepcion_item_id)! : unidadesPorBultoDe(art.get(l.articulo_id)?.unidades_por_bulto)) : 1
     precio.set(l.articulo_id, { lista: r4(num(l.precio_unitario) / f), neto: r4(neto / f) })
@@ -127,16 +143,38 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
     const { error } = await supabase.from("articulos").update({ ultimo_costo: p.neto }).eq("id", articuloId)
     if (error) throw error
     resultado.costos_actualizados++
+    const a = art.get(articuloId)
+    const anotado = await registrarCostoEnHistorial(supabase, {
+      articulo_id: articuloId, proveedor_id: comprobante.proveedor_id ?? null,
+      // la lista no cambió: se anota la que el artículo tiene, y el último costo nuevo al lado
+      precio_compra: num(a?.precio_compra), descuentos: [a?.descuento1, a?.descuento2, a?.descuento3, a?.descuento4].map(num),
+      ultimo_costo: p.neto, origen: "factura", comprobante_compra_id: comprobante.id, orden_compra_id: ocId,
+    })
+    if (!anotado) resultado.historial_fallas++
   }
 
   // ── Kardex de la recepción de esta orden: queda valorizado con lo facturado ──
   if (ocId) {
     const { data: recs } = await supabase.from("recepciones").select("id").eq("orden_compra_id", ocId).neq("estado", "cancelada")
     const recIds = (recs || []).map((r: any) => r.id)
+    // Entregas que ESTA factura documenta, por artículo (por la línea de recepción a la que quedó
+    // ligado cada renglón). Con dos facturas y dos entregas, cada una valoriza la suya.
+    const entregasDe = new Map<string, Set<string>>()
+    const ligados = [...new Set(conArticulo.filter((l) => l.recepcion_item_id).map((l) => l.recepcion_item_id as string))]
+    if (ligados.length > 0) {
+      const { data: its } = await supabase.from("recepciones_items").select("id, recepcion_id").in("id", ligados)
+      const recDe = new Map<string, string>((its || []).map((i: any) => [i.id, i.recepcion_id]))
+      for (const l of conArticulo) {
+        const rid = l.recepcion_item_id ? recDe.get(l.recepcion_item_id) : null
+        if (!rid) continue
+        if (!entregasDe.has(l.articulo_id)) entregasDe.set(l.articulo_id, new Set())
+        entregasDe.get(l.articulo_id)!.add(rid)
+      }
+    }
     if (recIds.length > 0) {
       const { data: movs, error: movErr } = await supabase
         .from("kardex")
-        .select("id, articulo_id, cantidad, precio_unitario_final, precio_costo, comprobante_compra_id")
+        .select("id, articulo_id, cantidad, precio_unitario_final, precio_costo, comprobante_compra_id, recepcion_id")
         .in("recepcion_id", recIds)
         .eq("tipo_movimiento", "compra")
         .in("articulo_id", [...precio.keys()])
@@ -144,6 +182,12 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
       const esAdquisicion = comprobante.tipo_comprobante === "Adquisicion"
       for (const k of movs || []) {
         const p = precio.get(k.articulo_id)!
+        // Lo que ya valorizó OTRA factura de la misma orden no se pisa (la segunda factura no
+        // revaloriza la mercadería de la primera)
+        if (k.comprobante_compra_id && k.comprobante_compra_id !== comprobante.id) continue
+        // Si la factura está ligada a entregas concretas, solo valoriza esas
+        const entregas = entregasDe.get(k.articulo_id)
+        if (entregas && entregas.size > 0 && k.recepcion_id && !entregas.has(k.recepcion_id)) continue
         // Ya valorizado por este mismo comprobante: no se toca
         if (k.comprobante_compra_id === comprobante.id && Math.abs(num(k.precio_unitario_final) - p.neto) < 0.00005 && Math.abs(num(k.precio_costo) - p.neto) < 0.00005) continue
         const subtotal = r2(p.neto * num(k.cantidad))
@@ -165,15 +209,40 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
   return resultado
 }
 
-/** Deja registro de un cambio de costo de lista (precios_compra_historial). Nunca frena la operación. */
-export async function registrarCostoEnHistorial(supabase: any, p: { articulo_id: string; proveedor_id: string | null; precio_compra: number; descuentos: number[] }) {
+/**
+ * Deja registro de un cambio de costo en precios_compra_historial: de la LISTA (precio_compra y
+ * descuentos) o solo del ÚLTIMO COSTO (`ultimo_costo` + `origen`, columnas de la migración
+ * 20261117b). No frena la operación: devuelve false si no se pudo anotar, y quien llama lo
+ * muestra en pantalla.
+ */
+export async function registrarCostoEnHistorial(supabase: any, p: {
+  articulo_id: string; proveedor_id: string | null; precio_compra: number; descuentos: number[]
+  ultimo_costo?: number | null; origen?: string | null; comprobante_compra_id?: string | null; orden_compra_id?: string | null; usuario_id?: string | null
+}): Promise<boolean> {
   const [d1 = 0, d2 = 0, d3 = 0, d4 = 0] = p.descuentos
   // Columnas reales de la tabla (scripts/001): el insert viejo usaba otras y fallaba en silencio (E-21)
-  const { error } = await supabase.from("precios_compra_historial").insert({
+  const fila = {
     articulo_id: p.articulo_id,
     proveedor_id: p.proveedor_id,
     precio_compra: r2(p.precio_compra),
     descuento1: d1, descuento2: d2, descuento3: d3, descuento4: d4,
-  })
-  if (error) console.error("[costo] no se pudo guardar el historial de costo:", error.message)
+  }
+  const conExtras = p.ultimo_costo != null || !!p.origen
+  const extras = { ultimo_costo: p.ultimo_costo ?? null, origen: p.origen ?? null, comprobante_compra_id: p.comprobante_compra_id ?? null, orden_compra_id: p.orden_compra_id ?? null, usuario_id: p.usuario_id ?? null }
+  const { error } = await supabase.from("precios_compra_historial").insert(conExtras ? { ...fila, ...extras } : fila)
+  if (!error) return true
+  if (conExtras && faltaLaColumna(error)) {
+    // Migración 20261117b sin aplicar. Un cambio de LISTA se anota igual con las columnas de siempre;
+    // un cambio de solo último costo no tiene dónde anotarse todavía (no es una falla de la operación).
+    if (p.origen !== "factura" && p.origen !== "bonificado") {
+      const viejo = await supabase.from("precios_compra_historial").insert(fila)
+      if (!viejo.error) return true
+      console.error("[costo] no se pudo guardar el historial de costo:", viejo.error.message)
+      return false
+    }
+    console.warn("[costo] historial de último costo: falta la migración 20261117b")
+    return true
+  }
+  console.error("[costo] no se pudo guardar el historial de costo:", error.message)
+  return false
 }

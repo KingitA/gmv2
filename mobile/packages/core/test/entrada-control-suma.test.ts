@@ -57,7 +57,8 @@ describe("neto + impuestos = total", () => {
   it("el total no da: lo dice con los dos números", () => {
     const r = controlSuma(fa({ total_neto: 1000, total_iva: 210, total_factura_declarado: 1300 }), [ren(10, 100)])
     expect(r.ok).toBe(false)
-    expect(r.faltas[0]).toMatch(/da \$1\.210,00 y el total del comprobante dice \$1\.300,00: falta \$90,00/)
+    expect(r.faltas).toHaveLength(1)
+    expect(r.faltas[0]).toMatch(/^Los datos del comprobante no cierran: neto \$1\.000,00 más impuestos \$210,00 da \$1\.210,00 y el total dice \$1\.300,00 \(falta \$90,00\)/)
   })
   it("adquisición (sin IVA): neto = total", () => {
     expect(controlSuma({ tipo_comprobante: "Adquisicion", total_factura_declarado: 500, total_neto: 500, total_iva: 0 }, [ren(5, 100)]).ok).toBe(true)
@@ -71,5 +72,35 @@ describe("neto + impuestos = total", () => {
   })
   it("remito: no se controla nada", () => {
     expect(controlSuma({ tipo_comprobante: "Remito", total_factura_declarado: 0 }, [ren(4, 0)]).ok).toBe(true)
+  })
+})
+
+describe("revisión de la rama (17/11)", () => {
+  it("la retención de Ganancias no entra en el total de una factura", () => {
+    const c = { ...fa({ total_neto: 1000, total_iva: 210, total_factura_declarado: 1210 }), retencion_ganancias_monto: 50 }
+    expect(controlSuma(c, [ren(10, 100)]).ok).toBe(true)
+  })
+  it("redondeo: 600 u a $1.572,276 con 10 % — cierra con el importe del renglón redondeado una vez", () => {
+    // lista × descuento = 1.415,0484 por unidad ⇒ renglón $849.029,04; con el neto por unidad
+    // ya redondeado (1.415,05) daría $849.030,00: $0,96 de diferencia que antes, sumados, rechazaban
+    const neto = 849029.04 * 2
+    const r = controlSuma(fa({ total_neto: neto, total_iva: 0, otros_impuestos: 0, total_factura_declarado: neto }), [ren(600, 1572.276, 10), ren(600, 1572.276, 10)])
+    expect(r.ok).toBe(true)
+  })
+  it("redondeo: también cierra si el proveedor factura con el neto por unidad ya redondeado", () => {
+    const neto = 849030 * 2
+    expect(controlSuma(fa({ total_neto: neto, total_iva: 0, total_factura_declarado: neto }), [ren(600, 1572.276, 10), ren(600, 1572.276, 10)]).ok).toBe(true)
+  })
+  it("factura B / C (no discrimina IVA): los renglones se comparan contra el total", () => {
+    const c = { tipo_comprobante: "FB", total_factura_declarado: 1210, total_neto: 1210, total_iva: 0 }
+    expect(controlSuma(c, [ren(10, 121)]).ok).toBe(true)
+    const mal = controlSuma(c, [ren(10, 100)])
+    expect(mal.ok).toBe(false)
+    expect(mal.faltas[0]).toBe("Los renglones suman $1.000,00 y la factura dice $1.210,00 en total: falta $210,00. Revisá los renglones leídos.")
+  })
+  it("si la cabecera no cierra, se dice eso y no se culpa a los renglones", () => {
+    const r = controlSuma(fa({ total_neto: 1000, total_iva: 0, total_factura_declarado: 1210 }), [ren(10, 121)])
+    expect(r.faltas).toHaveLength(1)
+    expect(r.faltas[0]).toMatch(/^Los datos del comprobante no cierran/)
   })
 })

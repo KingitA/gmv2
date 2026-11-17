@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { calcularDiferencia, combinarLineasOC, cuentaSobrante, TOPE_DIFERENCIA_PESOS } from "../../../../lib/compras/diferencias"
 import { armarVerificacion } from "../../../../lib/compras/verificacion"
 import { faltaLaFuncion } from "../../../../lib/utils/migracion-pendiente"
+import { abreEntregaSiguiente } from "../../../../lib/deposito/unidades"
 
 describe("faltante Y diferencia de precio en el mismo artículo: no se reclama dos veces", () => {
   // pedido 200 a $100; facturado 200 a $110; llegaron 150
@@ -166,5 +167,22 @@ describe("las notas de débito esperadas no se mezclan con las de crédito", () 
       ],
     })
     expect(v.resumen).toMatchObject({ total_facturado: 1000, nc_esperadas: 100, nd_esperadas: 605 })
+  })
+})
+
+describe("recepción en parte con dos equipos: cuándo se abre la entrega siguiente", () => {
+  const cierre = "2026-11-17T15:00:00.000Z"
+  it("un conteo o un cierre tardío (no piden abrir) nunca abren otra entrega", () => {
+    expect(abreEntregaSiguiente(undefined, cierre)).toBe(false)
+    expect(abreEntregaSiguiente({ capturadoAt: "2026-11-18T10:00:00.000Z" }, cierre)).toBe(false)
+  })
+  it("iniciar recepción DESPUÉS del cierre: abre", () => {
+    expect(abreEntregaSiguiente({ abrirSiguiente: true, capturadoAt: "2026-11-18T10:00:00.000Z" }, cierre)).toBe(true)
+  })
+  it("un 'iniciar' de antes del cierre que llega tarde: no abre", () => {
+    expect(abreEntregaSiguiente({ abrirSiguiente: true, capturadoAt: "2026-11-17T14:59:00.000Z" }, cierre)).toBe(false)
+  })
+  it("desde la web (sin hora de captura): abre", () => {
+    expect(abreEntregaSiguiente({ abrirSiguiente: true }, cierre)).toBe(true)
   })
 })

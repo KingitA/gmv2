@@ -238,6 +238,18 @@ export default function VerificacionOCPage() {
                 </div>
             )}
 
+            {(datos.conteos_tardios || []).length > 0 && (
+                <div className="mb-4 p-4 border-2 border-amber-400 bg-amber-50 rounded-lg">
+                    <p className="font-bold text-amber-900">Conteos del depósito que llegaron tarde y NO entraron al stock</p>
+                    <p className="text-sm text-amber-900 mt-1">Otro equipo contó esto cuando la entrega ya estaba cerrada (estaba sin señal). Revisá con el depósito si esa mercadería llegó de verdad; si llegó, corregí lo recibido con el botón "Corregir" del artículo.</p>
+                    <ul className="text-sm text-amber-900 mt-2 list-disc pl-5">
+                        {(datos.conteos_tardios || []).map((a: any) => (
+                            <li key={a.id}>{a.sku ? <strong>{a.sku}</strong> : null} {a.descripcion || "Artículo"}: contó {a.cantidad ?? "?"}{a.unidad ? ` (${a.unidad === "bulto" ? "bultos" : "unidades"})` : ""}{a.entrega ? ` — entrega ${a.entrega}` : ""}</li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
             {!soloLectura && datos.descuadres.length > 0 && (
                 <div className="mb-4 p-4 border-2 border-red-400 bg-red-50 rounded-lg">
                     <p className="font-bold text-red-900">Los renglones no suman lo que dice el comprobante</p>

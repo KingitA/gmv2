@@ -10,7 +10,8 @@
 -- de escribir nada:
 --   A. factura / adquisición: suma de los renglones netos (todos, también los marcados
 --      "no es mercadería") = neto del comprobante;
---   B. neto + IVA + percepciones + retención + impuestos internos + otros impuestos = total.
+--   B. neto + IVA + percepciones + impuestos internos + otros impuestos = total (la retención
+--      de Ganancias no cuenta: no viene en la factura).
 -- Se toleran centavos de redondeo (diferencia MENOR a $1). Si no cierra, rechaza con los
 -- dos números y no valida.
 --
@@ -51,6 +52,7 @@ DECLARE
   v_fecha_valid  date;
   v_adoptar      uuid;
   v_suma         numeric;
+  v_suma2        numeric;
   v_neto_comp    numeric;
   v_impuestos    numeric;
   v_dto          numeric;
@@ -106,26 +108,41 @@ BEGIN
   -- ── E-46 (regla de Juan, 17/11): los renglones tienen que sumar lo que dice el comprobante ──
   -- Misma cuenta que lib/compras/control-suma.ts. Se toleran centavos: la diferencia tiene que
   -- ser MENOR a $1 (20 contra 21 ya es un error).
-  v_impuestos := coalesce(v.total_iva, 0) + coalesce(v.percepcion_iva_monto, 0) + coalesce(v.percepcion_iibb_monto, 0) + coalesce(v.retencion_ganancias_monto, 0)
+  -- Lo que una factura trae además del neto. La retención de Ganancias NO va: no viene en la
+  -- factura, la hacemos nosotros al pagar.
+  v_impuestos := coalesce(v.total_iva, 0) + coalesce(v.percepcion_iva_monto, 0) + coalesce(v.percepcion_iibb_monto, 0)
                + coalesce(v.impuestos_internos, 0) + coalesce(v.otros_impuestos, 0);
   v_neto_comp := round(CASE WHEN coalesce(v.total_neto, 0) > 0 THEN v.total_neto ELSE v_total - v_impuestos END, 2);
+
+  -- B. Primero la cabecera: neto + impuestos contra el total. Si no cierra, lo que está mal son
+  --    los datos del comprobante, no los renglones.
+  IF v_total > 0 AND abs(round(v_neto_comp + v_impuestos, 2) - v_total) >= 1 THEN
+    RAISE EXCEPTION 'Los datos del comprobante no cierran: neto $% más impuestos $% da $% y el total dice $%. Corregí neto, IVA, percepciones u otros impuestos. No se validó.', v_neto_comp, round(v_impuestos, 2), round(v_neto_comp + v_impuestos, 2), v_total
+      USING ERRCODE = 'P0001', DETAIL = 'renglones_no_suman';
+  END IF;
+
+  -- A. Renglones contra el neto. El importe de un renglón se arma de dos formas (cantidad × lista ×
+  --    descuentos redondeado una vez, o cantidad × neto por unidad ya redondeado); con muchas
+  --    unidades difieren en centavos. Pasa si CUALQUIERA de las dos cierra.
   IF v.tipo_comprobante IN ('FA', 'FB', 'FC', 'Adquisicion') THEN
-    SELECT coalesce(sum(round(coalesce(d.cantidad_facturada, 0) * round(coalesce(d.precio_unitario, 0)
+    SELECT coalesce(sum(round(coalesce(d.cantidad_facturada, 0) * coalesce(d.precio_unitario, 0)
+             * (1 - coalesce(d.descuento1, 0) / 100.0) * (1 - coalesce(d.descuento2, 0) / 100.0)
+             * (1 - coalesce(d.descuento3, 0) / 100.0) * (1 - coalesce(d.descuento4, 0) / 100.0), 2)), 0),
+           coalesce(sum(round(coalesce(d.cantidad_facturada, 0) * round(coalesce(d.precio_unitario, 0)
              * (1 - coalesce(d.descuento1, 0) / 100.0) * (1 - coalesce(d.descuento2, 0) / 100.0)
              * (1 - coalesce(d.descuento3, 0) / 100.0) * (1 - coalesce(d.descuento4, 0) / 100.0), 2), 2)), 0)
-      INTO v_suma
+      INTO v_suma, v_suma2
       FROM comprobantes_compra_detalle d
      WHERE d.comprobante_id = p_comprobante_id;
     v_dto := coalesce(v.descuento_fuera_factura, 0);
-    IF abs(v_suma - v_neto_comp) >= 1
-       AND NOT (v_dto > 0 AND v_dto <= 100 AND abs(round(v_suma * (1 - v_dto / 100.0), 2) - v_neto_comp) < 1) THEN
-      RAISE EXCEPTION 'Los renglones suman $% y la factura dice $% neto: hay $% de diferencia. Revisá los renglones leídos. No se validó.', v_suma, v_neto_comp, abs(v_neto_comp - v_suma)
+    IF NOT (
+         abs(v_suma - v_neto_comp) < 1 OR abs(v_suma2 - v_neto_comp) < 1
+         OR (v_dto > 0 AND v_dto <= 100 AND (abs(round(v_suma * (1 - v_dto / 100.0), 2) - v_neto_comp) < 1
+                                             OR abs(round(v_suma2 * (1 - v_dto / 100.0), 2) - v_neto_comp) < 1))
+       ) THEN
+      RAISE EXCEPTION 'Los renglones suman $% y la factura dice $%: hay $% de diferencia. Revisá los renglones leídos. No se validó.', v_suma, v_neto_comp, abs(v_neto_comp - v_suma)
         USING ERRCODE = 'P0001', DETAIL = 'renglones_no_suman';
     END IF;
-  END IF;
-  IF v_total > 0 AND abs(round(v_neto_comp + v_impuestos, 2) - v_total) >= 1 THEN
-    RAISE EXCEPTION 'El neto más los impuestos da $% y el total del comprobante dice $%: hay $% de diferencia. Revisá neto, IVA, percepciones y otros impuestos. No se validó.', round(v_neto_comp + v_impuestos, 2), v_total, abs(v_total - round(v_neto_comp + v_impuestos, 2))
-      USING ERRCODE = 'P0001', DETAIL = 'renglones_no_suman';
   END IF;
 
   v_oc := v.orden_compra_id;

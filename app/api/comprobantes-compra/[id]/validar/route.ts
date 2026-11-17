@@ -502,12 +502,14 @@ export async function POST(
         if (!resultado.sin_deuda && !esRemito) {
             try {
                 if (ocId) await sincronizarKardexEnCamino(supabase, ocId);
-                const costo = await aplicarCostoDeFactura(supabase, comprobante, ocId);
-                // E-46: los renglones tienen que sumar lo mismo que el neto del comprobante
-                const dif = Math.round((costo.neto_renglones - costo.neto_comprobante) * 100) / 100;
-                if (!resultado.ya_validado && !esCredito && costo.neto_renglones > 0 && costo.neto_comprobante > 0
-                    && Math.abs(dif) > Math.max(1, costo.neto_comprobante * 0.005)) {
-                    avisos.push(`Los renglones suman ${moneda(costo.neto_renglones)} neto y el comprobante dice ${moneda(costo.neto_comprobante)} neto: hay ${moneda(Math.abs(dif))} de diferencia. Revisá si falta un renglón, sobra uno o hay un precio mal cargado.`);
+                // El costo se aplica UNA vez, cuando el comprobante pasa a validado. Volver a tocar
+                // "Validar" en una factura vieja no pisa el último costo que dejó una más nueva.
+                // (Que los renglones sumen el neto ya se controló antes de validar: control-suma.ts.)
+                if (!resultado.ya_validado) {
+                    const costo = await aplicarCostoDeFactura(supabase, comprobante, ocId);
+                    if (costo.historial_fallas > 0) {
+                        avisos.push(`El último costo de ${costo.historial_fallas} artículo(s) se actualizó, pero no se pudo anotar el cambio en el historial de costos. Avisá a sistemas.`);
+                    }
                 }
             } catch (e: any) {
                 console.error('[Validar Comprobante] costo y kardex:', e?.message || e);

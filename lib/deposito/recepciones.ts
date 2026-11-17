@@ -16,7 +16,7 @@ import { nowArgentina } from "@/lib/utils"
 import { estadoLineaRecepcion } from "./bonificados"
 import { ErrorDeposito } from "./picking"
 import { faltaLaColumna, faltaLaFuncion } from "@/lib/utils/migracion-pendiente"
-import { aUnidadesBase, conversionLinea, esUnidadConteo, pendienteDeLinea, unidadesPorBultoDe, type ConversionLinea, type UnidadConteo } from "./unidades"
+import { aUnidadesBase, conversionLinea, esUnidadConteo, pendienteDeLinea, unidadesPorBultoDe, type ConversionLinea, type UnidadConteo, abreEntregaSiguiente } from "./unidades"
 
 const SELECT_FULL = `*, recepciones_items(*), recepciones_documentos(*)`
 /** Un finalizador que lleva más que esto sin terminar se considera caído y se retoma */
@@ -113,7 +113,9 @@ export async function pendientesDeOrden(supabase: any, orden_compra_id: string):
   if (recIds.length > 0) {
     const { data: items, error: itErr } = await supabase.from("recepciones_items").select("*").in("recepcion_id", recIds)
     if (itErr) throw itErr
-    const filas: any[] = (items || []).filter((i: any) => Number(i.cantidad_fisica) > 0)
+    // Una línea "fuera de la orden" (el depósito contó algo que esa entrega no esperaba) NO descuenta
+    // lo pendiente de la orden: la oficina la resuelve en la verificación como mercadería no pedida.
+    const filas: any[] = (items || []).filter((i: any) => Number(i.cantidad_fisica) > 0 && !i.fuera_de_oc)
     const { porItem } = await conversionesDeRecepcion(supabase, orden_compra_id, filas)
     for (const i of filas) {
       const base = i.cantidad_fisica_base != null ? Number(i.cantidad_fisica_base) : aUnidadesBase(i.cantidad_fisica, porItem.get(i.id)?.factorConteo ?? 1)
@@ -249,8 +251,13 @@ export async function cargarOrdenesPendientes(supabase: any, ordenId?: string): 
   )
 }
 
-/** Crear o retomar la recepción de una OC (POST /api/deposito/recepciones). */
-export async function obtenerOCrearRecepcion(supabase: any, orden_compra_id: string, usuarioId?: string | null) {
+/**
+ * Crear o retomar la recepción de una OC (POST /api/deposito/recepciones).
+ * `abrirSiguiente`: la última entrega ya se finalizó y falta mercadería ⇒ abrir la siguiente.
+ * Solo lo piden "Iniciar recepción" (app: `recepcion.iniciar`; web: entrar a la orden). Sin eso se
+ * devuelve la entrega finalizada tal cual, y quien llama decide (rechazar el conteo tardío, etc.).
+ */
+export async function obtenerOCrearRecepcion(supabase: any, orden_compra_id: string, usuarioId?: string | null, opts?: { abrirSiguiente?: boolean; capturadoAt?: string | null }) {
   if (!orden_compra_id) throw new ErrorDeposito("orden_compra_id requerido", 400)
 
   // Entrega en curso → retomarla.
@@ -269,6 +276,7 @@ export async function obtenerOCrearRecepcion(supabase: any, orden_compra_id: str
     // E-39: la entrega anterior ya se finalizó. Se abre OTRA sobre la misma orden solo si la
     // orden sigue abierta y falta mercadería; la entrega nueva lleva únicamente lo que falta.
     // Si la oficina ya la cerró (finalizada / cancelada) o no falta nada, no se abre nada.
+    if (!abreEntregaSiguiente(opts, ultima.fecha_fin)) return ultima
     if (!ESTADOS_A_RECIBIR.includes(ocData.estado)) return ultima
     const pendientes = await pendientesDeOrden(supabase, orden_compra_id)
     if (pendientes.size === 0) return ultima

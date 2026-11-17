@@ -136,6 +136,11 @@ async function contexto(supabase: any, item: any, ocId: string | null): Promise<
 /** Qué se va a hacer, con los importes ya calculados. Lanza Rechazo si no corresponde. */
 function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destino, d: any, sku: string, descuentoAlPie: boolean) {
     const devolver = Math.max(0, Number(d.devolver_unidades) || 0);
+    // Devolver mercadería baja stock: solo tiene sentido en una diferencia de CANTIDAD que se le
+    // reclama al proveedor o que asume la empresa. En cualquier otra combinación se rechaza.
+    if (devolver > 0 && (tipo !== 'cantidad' || (destino !== 'proveedor' && destino !== 'empresa'))) {
+        throw new Rechazo('Devolver mercadería solo se puede en una diferencia de cantidad, reclamándola al proveedor o asumiéndola la empresa. No se cambió nada.', 'devolucion_no_corresponde');
+    }
     if (devolver > dif.recibido_unidades + 0.0001) {
         throw new Rechazo(`No se pueden devolver ${devolver} unidades: de este artículo entraron ${dif.recibido_unidades}.`, 'devolucion_mayor_a_lo_recibido');
     }
@@ -245,8 +250,8 @@ async function resolverSinFuncion(supabase: any, item: any, hermanas: any[], tip
 
     // Aceptar el precio facturado: es el único cambio además de la marca. Si falla, la marca se saca.
     if (tipo === 'precio' && p.costo) {
-        const cambios = p.costo.precio_compra > 0
-            ? { precio_compra: p.costo.precio_compra, descuento1: p.costo.descuento1, descuento2: p.costo.descuento2, descuento3: p.costo.descuento3, descuento4: p.costo.descuento4, actualizado_por: usuarioId }
+        const cambios: Record<string, unknown> | null = p.costo.precio_compra > 0
+            ? { precio_compra: p.costo.precio_compra, descuento1: p.costo.descuento1, descuento2: p.costo.descuento2, descuento3: p.costo.descuento3, descuento4: p.costo.descuento4, actualizado_por: usuarioId, ...(p.costo.ultimo_costo > 0 ? { ultimo_costo: p.costo.ultimo_costo } : {}) }
             : p.costo.ultimo_costo > 0 ? { ultimo_costo: p.costo.ultimo_costo } : null;
         if (cambios) {
             const { error } = await supabase.from('articulos').update(cambios).eq('id', item.articulo_id);
@@ -310,7 +315,7 @@ export async function POST(
                 // select('*'): trae también unidad_conteo / cantidad_fisica_base si la migración 20261116a está aplicada
                 const { data: item, error: itemErr } = await supabase
                     .from('recepciones_items')
-                    .select(`*, articulo:articulos(sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas)`)
+                    .select(`*, articulo:articulos(sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, precio_compra, descuento1, descuento2, descuento3, descuento4)`)
                     .eq('id', item_id)
                     .maybeSingle();
                 if (itemErr) throw itemErr;
@@ -327,21 +332,30 @@ export async function POST(
                 }
 
                 let r: any;
+                let sinFuncion = false;
                 const rpc = await supabase.rpc('recepcion_resolver_diferencia', {
                     p_item_id: item_id, p_tipo: tipo, p_destino: destino, p_usuario_id: auth.user.id, p_datos: p,
                 });
                 if (!rpc.error) r = rpc.data;
-                else if (faltaLaFuncion(rpc.error, 'recepcion_resolver_diferencia')) r = await resolverSinFuncion(supabase, item, hermanas, tipo, destino, p, auth.user.id);
+                else if (faltaLaFuncion(rpc.error, 'recepcion_resolver_diferencia')) { sinFuncion = true; r = await resolverSinFuncion(supabase, item, hermanas, tipo, destino, p, auth.user.id); }
                 else if (rpc.error.code === 'P0001' || rpc.error.code === 'P0002') throw new Rechazo(rpc.error.message, String(rpc.error.details || 'rechazado'));
                 else throw rpc.error;
 
-                // Cambió el costo de lista del artículo (se aceptó el precio facturado): queda en el historial
+                // Historial de costos: con la migración 20261117b lo anota la MISMA función, en la misma
+                // transacción que cambia el costo (si no se puede anotar, no cambia nada). Sin la
+                // migración se anota acá, y si falla se dice en pantalla.
                 const costo = (p as { costo?: { precio_compra: number; descuento1: number; descuento2: number; descuento3: number; descuento4: number; ultimo_costo?: number } }).costo;
-                if (!r.ya_resuelta && destino === 'empresa' && tipo === 'precio' && costo && costo.precio_compra > 0) {
-                    await registrarCostoEnHistorial(supabase, {
-                        articulo_id: item.articulo_id, proveedor_id: rec.proveedorId, precio_compra: costo.precio_compra,
-                        descuentos: [costo.descuento1, costo.descuento2, costo.descuento3, costo.descuento4],
+                let avisoHistorial = '';
+                if (sinFuncion && !r.ya_resuelta && destino === 'empresa' && tipo === 'precio' && costo && (costo.precio_compra > 0 || (costo.ultimo_costo ?? 0) > 0)) {
+                    const anotado = await registrarCostoEnHistorial(supabase, {
+                        articulo_id: item.articulo_id, proveedor_id: rec.proveedorId,
+                        precio_compra: costo.precio_compra > 0 ? costo.precio_compra : Number(articuloInfo?.precio_compra || 0),
+                        descuentos: costo.precio_compra > 0
+                            ? [costo.descuento1, costo.descuento2, costo.descuento3, costo.descuento4]
+                            : [articuloInfo?.descuento1, articuloInfo?.descuento2, articuloInfo?.descuento3, articuloInfo?.descuento4].map((x: unknown) => Number(x) || 0),
+                        ultimo_costo: (costo.ultimo_costo ?? 0) > 0 ? costo.ultimo_costo : null, origen: 'diferencia_precio', orden_compra_id: rec.ocId, usuario_id: auth.user.id,
                     });
+                    if (!anotado) avisoHistorial = ' ATENCIÓN: el costo del artículo cambió pero no se pudo anotar en el historial de costos; avisá a sistemas.';
                 }
 
                 // Kardex de la devolución: solo si de verdad se devolvió mercadería que había entrado
@@ -394,7 +408,7 @@ export async function POST(
                                     : 'Se tomó el precio facturado como costo del artículo.')
                                 : 'La diferencia quedó asumida por la empresa.';
                 const devueltas = !r.ya_resuelta && Number(r.unidades_devueltas) > 0 ? ` Salieron ${Number(r.unidades_devueltas)} unidades del stock (mercadería devuelta).` : "";
-                results.push({ item_id, tipo, destino, accion: decision.accion, success: true, ...r, unidades: p.unidades, mensaje: mensaje + devueltas + avisoKardex });
+                results.push({ item_id, tipo, destino, accion: decision.accion, success: true, ...r, unidades: p.unidades, mensaje: mensaje + devueltas + avisoKardex + avisoHistorial });
             } catch (e: any) {
                 if (e instanceof Rechazo) results.push({ item_id, tipo, destino, accion: decision.accion, error: e.message, codigo: e.codigo });
                 else {

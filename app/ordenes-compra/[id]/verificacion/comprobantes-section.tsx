@@ -467,7 +467,7 @@ export function ComprobantesSection({
                                         onChange={n => setEditando((p: any) => ({ ...p, otros_impuestos: n }))} />
                                 </div>
                             </div>
-                            <p className="text-xs text-muted-foreground">Neto + IVA + percepciones + retención + impuestos internos + otros impuestos tiene que dar el total; si no, el comprobante no se puede validar.</p>
+                            <p className="text-xs text-muted-foreground">Neto + IVA + percepciones + impuestos internos + otros impuestos tiene que dar el total; si no, el comprobante no se puede validar. (La retención de Ganancias no cuenta: no viene en la factura, se hace al pagar.) En una factura B o C, que no discrimina IVA, el neto es el total y el IVA va en 0.</p>
                         </div>
                     )}
                     <DialogFooter>

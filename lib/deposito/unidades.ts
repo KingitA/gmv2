@@ -129,3 +129,17 @@ export function textoCantidad(cantidad: unknown, unidad: UnidadConteo, unidadesP
   if (upb === 1) return `${bultos} (sin unidades por bulto cargadas)`
   return `${bultos} × ${n(upb)} u = ${n(aUnidadesBase(c, upb))} u`
 }
+
+/**
+ * ¿Se abre la entrega siguiente de una orden recibida en parte? Solo si alguien la INICIÓ (entró a
+ * la orden en la app o en la web) y lo hizo DESPUÉS de que se cerró la anterior. Un conteo o un
+ * cierre que llegan tarde de otro equipo (estaba sin señal mientras el primero cerraba) nunca
+ * abren una entrega nueva, y un "iniciar" viejo que llega tarde tampoco.
+ */
+export function abreEntregaSiguiente(opts: { abrirSiguiente?: boolean; capturadoAt?: string | null } | undefined, fechaFinAnterior: string | null | undefined): boolean {
+  if (!opts?.abrirSiguiente) return false
+  if (!opts.capturadoAt || !fechaFinAnterior) return true
+  const cap = Date.parse(opts.capturadoAt), fin = Date.parse(fechaFinAnterior)
+  if (!Number.isFinite(cap) || !Number.isFinite(fin)) return true
+  return cap > fin
+}

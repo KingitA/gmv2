@@ -110,12 +110,22 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
     const meta = p.ocr.comprobante;
     const numero = meta?.numero_comprobante && !esNumeroProvisorio(meta.numero_comprobante) ? String(meta.numero_comprobante).trim() : '';
     const tipoComp = inferirTipoComprobante(p.ocr, p.tipo_documento);
-    const sinIva = tipoComp === 'Adquisicion' || tipoComp === 'Remito';
+    const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
     const totalFactura = Number(meta?.total_factura || 0);
-    const totalNeto = sinIva ? totalFactura : (Number(meta?.subtotal_neto || 0) || (totalFactura > 0 ? totalFactura / 1.21 : 0));
-    const totalIva = sinIva ? 0 : (Number(meta?.total_iva || 0) || (totalNeto > 0 && totalFactura > 0 ? totalFactura - totalNeto : 0));
     const percIva = Number(meta?.percepcion_iva || 0);
     const percIibb = Number(meta?.percepcion_iibb || 0);
+    const ivaLeido = Number(meta?.total_iva || 0);
+    const netoLeido = Number(meta?.subtotal_neto || 0);
+    // Lo que el total trae además de neto e IVA (para que la cabecera siempre cierre: neto + impuestos = total)
+    const extras = percIva + percIibb + Number(meta?.impuestos_internos || 0) + Number(meta?.otros_impuestos || 0);
+    // No discrimina IVA: adquisición, remito, o una factura B / C a la que no se le leyó IVA. Ahí
+    // neto = total (menos percepciones) e IVA = 0: antes se inventaba neto = total ÷ 1,21 y el control
+    // de suma rechazaba los renglones cuando lo que estaba mal era la cabecera.
+    const sinIva = tipoComp === 'Adquisicion' || tipoComp === 'Remito' || ((tipoComp === 'FB' || tipoComp === 'FC') && !(ivaLeido > 0));
+    const totalNeto = sinIva
+        ? r2(Math.max(0, totalFactura - extras))
+        : r2(netoLeido > 0 ? netoLeido : ivaLeido > 0 ? totalFactura - ivaLeido - extras : (totalFactura > 0 ? (totalFactura - extras) / 1.21 : 0));
+    const totalIva = sinIva ? 0 : r2(ivaLeido > 0 ? ivaLeido : (totalNeto > 0 && totalFactura > 0 ? totalFactura - extras - totalNeto : 0));
     const retGanancias = Number(meta?.retencion_ganancias || 0);
     const internos = Number(meta?.impuestos_internos || 0);
     const otros = Number(meta?.otros_impuestos || 0);
@@ -128,7 +138,8 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
         retencion_ganancias_monto: retGanancias,
         impuestos_internos: internos,
         otros_impuestos: otros,
-        total_calculado: totalNeto + totalIva + percIva + percIibb + retGanancias + internos + otros,
+        // la retención de Ganancias no es parte del total de una factura (se hace al pagar)
+        total_calculado: totalNeto + totalIva + percIva + percIibb + internos + otros,
     };
 
     let comprobante: any = null;

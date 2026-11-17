@@ -94,6 +94,15 @@ GRANT ALL ON public.recepciones_diferencias TO service_role;
 --              (precios distintos o descuento al pie): queda solo ultimo_costo.
 --     devolver_unidades,                                ← SOLO si se devuelve mercadería que entró
 --     detalle: { … } }
+-- Historial de costos: además del cambio de LISTA (precio_compra + descuentos), guarda los cambios
+-- de ÚLTIMO COSTO y de dónde salieron ('diferencia_precio' = la empresa asumió el precio facturado;
+-- 'bonificado' = sobrante sin cargo; 'factura' = al validar una factura, lo escribe la aplicación).
+ALTER TABLE public.precios_compra_historial ADD COLUMN IF NOT EXISTS ultimo_costo          numeric;
+ALTER TABLE public.precios_compra_historial ADD COLUMN IF NOT EXISTS origen                text;
+ALTER TABLE public.precios_compra_historial ADD COLUMN IF NOT EXISTS comprobante_compra_id uuid;
+ALTER TABLE public.precios_compra_historial ADD COLUMN IF NOT EXISTS orden_compra_id       uuid;
+ALTER TABLE public.precios_compra_historial ADD COLUMN IF NOT EXISTS usuario_id            uuid;
+
 CREATE OR REPLACE FUNCTION public.recepcion_resolver_diferencia(
   p_item_id    uuid,
   p_tipo       text,
@@ -131,6 +140,13 @@ BEGIN
   END IF;
   IF p_destino NOT IN ('empresa', 'proveedor', 'transporte', 'descuento_fuera_factura', 'espera_factura', 'bonificado') THEN
     RAISE EXCEPTION 'Destino inválido: %', p_destino USING ERRCODE = 'P0001', DETAIL = 'destino_invalido';
+  END IF;
+
+  -- Devolver mercadería baja stock: solo en una diferencia de CANTIDAD, reclamada al proveedor o
+  -- asumida por la empresa.
+  IF v_devolver > 0 AND (p_tipo <> 'cantidad' OR p_destino NOT IN ('proveedor', 'empresa')) THEN
+    RAISE EXCEPTION 'Devolver mercadería solo se puede en una diferencia de cantidad, reclamándola al proveedor o asumiéndola la empresa. No se cambió nada.'
+      USING ERRCODE = 'P0001', DETAIL = 'devolucion_no_corresponde';
   END IF;
 
   SELECT * INTO v_it FROM recepciones_items WHERE id = p_item_id;
@@ -190,7 +206,7 @@ BEGIN
        WHERE orden_compra_id = v_oc
          AND tipo_comprobante NOT IN ('NC', 'NCA', 'NCB', 'NCC', 'Reversa', 'Remito')
          AND estado <> 'esperada'
-       ORDER BY fecha_comprobante DESC, created_at DESC
+       ORDER BY fecha_comprobante DESC NULLS LAST, created_at DESC
        LIMIT 1;
     END IF;
     INSERT INTO comprobantes_compra (
@@ -221,7 +237,7 @@ BEGIN
        WHERE orden_compra_id = v_oc
          AND tipo_comprobante NOT IN ('NC', 'NCA', 'NCB', 'NCC', 'Reversa', 'Remito')
          AND estado <> 'esperada'
-       ORDER BY fecha_comprobante DESC, created_at DESC
+       ORDER BY fecha_comprobante DESC NULLS LAST, created_at DESC
        LIMIT 1;
     END IF;
     INSERT INTO comprobantes_compra (
@@ -239,6 +255,11 @@ BEGIN
   IF p_destino = 'bonificado' AND v_costo IS NOT NULL AND v_it.articulo_id IS NOT NULL
      AND coalesce(nullif(v_costo ->> 'ultimo_costo', '')::numeric, 0) > 0 THEN
     UPDATE articulos SET ultimo_costo = (v_costo ->> 'ultimo_costo')::numeric WHERE id = v_it.articulo_id;
+    -- Queda en el historial de costos, en esta misma transacción
+    INSERT INTO precios_compra_historial (articulo_id, proveedor_id, precio_compra, descuento1, descuento2, descuento3, descuento4, ultimo_costo, origen, orden_compra_id, usuario_id)
+    SELECT a.id, v_prov, round(coalesce(a.precio_compra, 0), 2), coalesce(a.descuento1, 0), coalesce(a.descuento2, 0), coalesce(a.descuento3, 0), coalesce(a.descuento4, 0),
+           a.ultimo_costo, 'bonificado', v_oc, p_usuario_id
+      FROM articulos a WHERE a.id = v_it.articulo_id;
   END IF;
 
   -- ── Transporte: cargo en su cuenta corriente, por el TOTAL con impuestos ──
@@ -275,6 +296,13 @@ BEGIN
     END IF;
     IF v_ultimo > 0 THEN
       UPDATE articulos SET ultimo_costo = v_ultimo WHERE id = v_it.articulo_id;
+    END IF;
+    IF v_lista > 0 OR v_ultimo > 0 THEN
+      -- Queda en el historial de costos, en esta misma transacción
+      INSERT INTO precios_compra_historial (articulo_id, proveedor_id, precio_compra, descuento1, descuento2, descuento3, descuento4, ultimo_costo, origen, orden_compra_id, usuario_id)
+      SELECT a.id, v_prov, round(coalesce(a.precio_compra, 0), 2), coalesce(a.descuento1, 0), coalesce(a.descuento2, 0), coalesce(a.descuento3, 0), coalesce(a.descuento4, 0),
+             a.ultimo_costo, 'diferencia_precio', v_oc, p_usuario_id
+        FROM articulos a WHERE a.id = v_it.articulo_id;
     END IF;
   END IF;
 

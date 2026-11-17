@@ -6,6 +6,7 @@ import { aUnidadesBase, cant } from '@/lib/deposito/unidades';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
 import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 import { nowArgentina } from '@/lib/utils';
+import { netoDocumento } from '@/lib/compras/diferencias';
 
 // POST /api/recepciones/[id]/corregir  { item_id, unidades, motivo }
 // Corrige desde la oficina lo que contó el depósito en UNA línea (siempre en unidades).
@@ -32,7 +33,7 @@ export async function POST(
         const supabase = createAdminClient();
         const { data: item, error: itemErr } = await supabase
             .from('recepciones_items')
-            .select('*, articulo:articulos(sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, precio_compra)')
+            .select('*, articulo:articulos(sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, precio_compra, descuento1, descuento2, descuento3, descuento4, ultimo_costo)')
             .eq('id', body.item_id)
             .eq('recepcion_id', recepcion_id)
             .maybeSingle();
@@ -78,10 +79,21 @@ export async function POST(
         const r: any = rpc.data;
         const ajuste = Number(r.ajuste_stock || 0);
 
-        // Kardex del ajuste (solo si se movió stock). Valorizado al costo del artículo.
+        // Kardex del ajuste (solo si se movió stock). Valorizado al NETO, igual que la compra que
+        // corrige: el neto con el que quedó esa compra en el kardex de esta recepción (el de la
+        // factura si ya se validó); si no hay, el último costo; si no, lista menos descuentos.
         if (ajuste !== 0) {
             const a: any = Array.isArray(item.articulo) ? item.articulo[0] : item.articulo;
-            const precio = Number(a?.precio_compra || 0);
+            const lista = Number(a?.precio_compra || 0);
+            let precio = 0;
+            try {
+                const { data: compra } = await supabase.from('kardex').select('precio_unitario_final')
+                    .eq('recepcion_id', recepcion_id).eq('articulo_id', item.articulo_id).eq('tipo_movimiento', 'compra')
+                    .order('fecha', { ascending: false }).limit(1);
+                precio = Number(compra?.[0]?.precio_unitario_final || 0);
+            } catch { /* sigue con el costo del artículo */ }
+            if (!(precio > 0)) precio = Number(a?.ultimo_costo || 0);
+            if (!(precio > 0)) precio = netoDocumento(lista, [a?.descuento1, a?.descuento2, a?.descuento3, a?.descuento4].map((x: unknown) => Number(x) || 0));
             const subtotal = Math.round(precio * Math.abs(ajuste) * 100) / 100;
             try {
                 await insertarKardex(supabase, {
@@ -90,7 +102,7 @@ export async function POST(
                     fecha: nowArgentina(),
                     articulo_id: item.articulo_id,
                     cantidad: Math.abs(ajuste),
-                    precio_lista: precio,
+                    precio_lista: lista > 0 ? lista : precio,
                     precio_unitario_final: precio,
                     subtotal_neto: subtotal,
                     subtotal_total: subtotal,
