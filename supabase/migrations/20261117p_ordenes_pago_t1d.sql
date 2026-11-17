@@ -29,7 +29,7 @@
 -- Cómo están hechas las funciones que ya existían: cuerpo EXACTO de su versión anterior
 -- con los cambios marcados en comentarios ("v2", "v7", "v10"…), generado por script.
 --   op_confirmar            v12  (base: v6 de 20261116q)
---   op_anular               v5   (base: v3 de 20260806)
+--   op_anular               v6   (base: v3 de 20260806)
 --   op_eliminar             v2   (base: 20260807)
 --   op_crear                v5   (base: 20261116p)
 --   op_normalizar_imputaciones v2, op_validar_imputaciones v2 (base: 20261116p)
@@ -363,6 +363,13 @@ BEGIN
   v_pagado := GREATEST(0, COALESCE(v.monto_pagado, 0) - p_monto);
   v_total  := COALESCE(v.monto_original, v.monto, 0);
 
+  IF v.estado = 'pagado' AND v.orden_pago_id IS NULL THEN
+    -- Después del pago parcial alguien lo marcó PAGADO A MANO desde el calendario (sin orden):
+    -- esa decisión no se pisa. Solo se descuenta lo que había pagado esta orden.
+    UPDATE vencimientos SET monto_pagado = v_pagado, updated_at = now() WHERE id = p_vencimiento_id;
+    RETURN;
+  END IF;
+
   IF v.estado = 'pagado' AND v.orden_pago_id IS DISTINCT FROM p_op_id THEN
     -- Lo terminó de pagar OTRA orden y se anula una anterior (100 = A 40 + B 60, se anula A):
     -- lo que A había pagado vuelve a faltar ⇒ el vencimiento vuelve a PENDIENTE por eso.
@@ -659,7 +666,7 @@ BEGIN
   WHERE re.proveedor_id = p_proveedor_id
     AND re.estado = 'emitida'
     AND date_trunc('month', re.fecha) = date_trunc('month', v_fecha)
-    AND (p_excluir_op IS NULL OR re.orden_pago_id <> p_excluir_op);
+    AND (p_excluir_op IS NULL OR re.orden_pago_id IS DISTINCT FROM p_excluir_op);
 
   IF v_prov.condicion_ganancias = 'no_inscripto' THEN
     v_alicuota := v_reg.alicuota_no_inscripto;
@@ -854,6 +861,9 @@ BEGIN
         v_nombre := COALESCE(NULLIF(v_cc.numero_comprobante, ''), NULLIF(v_cc.descripcion, ''), 'comprobante');
         IF v_cc.proveedor_id IS DISTINCT FROM p_proveedor_id THEN
           RAISE EXCEPTION 'El comprobante % es de otro proveedor.', v_nombre;
+        END IF;
+        IF v_cc.tipo_movimiento = 'orden_compra' THEN
+          RAISE EXCEPTION '"%" es mercadería pedida que todavía no tiene factura (comprometido por una orden de compra): no es deuda y no se puede pagar. Se paga cuando se valida la factura.', v_nombre;
         END IF;
         IF v_cc.monto <= 0 THEN
           RAISE EXCEPTION 'El movimiento % no es una deuda (es un pago o un crédito): no se puede pagar.', v_nombre;
@@ -1113,7 +1123,9 @@ BEGIN
       RAISE EXCEPTION 'Un medio de pago tiene importe negativo';
     END IF;
     IF v_medio = 'cheque' AND NULLIF(v_m->>'cheque_id', '') IS NOT NULL THEN
-      SELECT numero, estado INTO v_cheque FROM cheques WHERE id = (v_m->>'cheque_id')::uuid;
+      -- La fila del cheque queda bloqueada hasta el final: dos órdenes (aunque sean de proveedores
+      -- distintos) no pueden reservar el mismo cheque a la vez.
+      SELECT numero, estado INTO v_cheque FROM cheques WHERE id = (v_m->>'cheque_id')::uuid FOR UPDATE;
       IF NOT FOUND THEN
         RAISE EXCEPTION 'Uno de los cheques elegidos ya no existe. Volvé a cargar la pantalla.';
       END IF;
@@ -1139,8 +1151,10 @@ BEGIN
       IF NULLIF(v_m->>'cheque_fecha_vencimiento', '') IS NULL THEN
         RAISE EXCEPTION 'Al cheque propio N° % le falta la fecha de pago.', v_m->>'cheque_numero';
       END IF;
-      IF NULLIF(v_m->>'cuenta_origen_id', '') IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM cuentas_bancarias WHERE id = (v_m->>'cuenta_origen_id')::uuid) THEN
+      IF NULLIF(v_m->>'cuenta_origen_id', '') IS NULL OR COALESCE(v_m->>'cuenta_origen_tipo', '') <> 'BANCO' THEN
+        RAISE EXCEPTION 'Al cheque propio N° % le falta la cuenta bancaria de la que sale.', v_m->>'cheque_numero';
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM cuentas_bancarias WHERE id = (v_m->>'cuenta_origen_id')::uuid) THEN
         RAISE EXCEPTION 'La cuenta bancaria del cheque propio N° % no existe.', v_m->>'cheque_numero';
       END IF;
     END IF;
@@ -1608,6 +1622,7 @@ DECLARE
   v_comp_id uuid;
   v_revs int := 0;
   v_certs int := 0;
+  v_debitados text;   -- v6
 BEGIN
   SELECT * INTO v_op FROM ordenes_pago WHERE id = p_op_id FOR UPDATE;
   IF NOT FOUND THEN
@@ -1615,6 +1630,12 @@ BEGIN
   END IF;
   IF v_op.estado <> 'pagada' THEN
     RAISE EXCEPTION 'op_anular: la OP está % — solo se anulan OP pagadas', v_op.estado;
+  END IF;
+  -- v6: un cheque propio de esta orden que YA se debitó del banco no se puede deshacer desde acá
+  SELECT string_agg(numero, ', ') INTO v_debitados FROM cheques
+   WHERE orden_pago_id = p_op_id AND tipo::text = 'PROPIO' AND estado::text = 'COBRADO';
+  IF v_debitados IS NOT NULL THEN
+    RAISE EXCEPTION 'El cheque N° % ya se debitó del banco: para anular la orden primero registrá el rechazo/devolución del cheque.', v_debitados;
   END IF;
 
   FOR v_k IN
@@ -1934,7 +1955,7 @@ REVOKE ALL ON FUNCTION public.op_confirmar_ajustando(uuid, uuid, uuid, uuid) FRO
 GRANT EXECUTE ON FUNCTION public.op_confirmar_ajustando(uuid, uuid, uuid, uuid) TO service_role;
 
 COMMENT ON FUNCTION public.op_confirmar(uuid, uuid, uuid, uuid) IS 'op_confirmar v12 (20261117p_ordenes_pago_t1d)';
-COMMENT ON FUNCTION public.op_anular(uuid, uuid, text) IS 'op_anular v5 (20261117p_ordenes_pago_t1d)';
+COMMENT ON FUNCTION public.op_anular(uuid, uuid, text) IS 'op_anular v6 (20261117p_ordenes_pago_t1d)';
 COMMENT ON FUNCTION public.op_crear(jsonb, text) IS 'op_crear v5 (20261117p_ordenes_pago_t1d)';
 COMMENT ON FUNCTION public.op_eliminar(uuid, uuid, text) IS 'op_eliminar v2 (20261117p_ordenes_pago_t1d)';
 
@@ -1986,7 +2007,11 @@ BEGIN
   END IF;
 
   v_cuenta := COALESCE(v_ch.cuenta_banco_id, p_cuenta_banco_id);
-  IF v_cuenta IS NOT NULL AND NOT EXISTS (SELECT 1 FROM cuentas_bancarias WHERE id = v_cuenta) THEN
+  -- Sin cuenta no se debita: el saldo del banco no se movería y el cheque quedaría "cobrado".
+  IF v_cuenta IS NULL THEN
+    RAISE EXCEPTION 'El cheque % no tiene cargada la cuenta bancaria de la que sale. Indicá de qué cuenta se debitó.', v_ch.numero;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM cuentas_bancarias WHERE id = v_cuenta) THEN
     RAISE EXCEPTION 'La cuenta bancaria indicada no existe.';
   END IF;
 
