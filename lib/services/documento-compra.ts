@@ -78,7 +78,10 @@ export function mensajeDuplicado(dup: ComprobanteDuplicado, ordenActualId?: stri
     return `El comprobante ${dup.tipo_comprobante} ${dup.numero_comprobante} de este proveedor ya está cargado ${donde}${estado}. No se cargó de nuevo.${otraHoja}`;
 }
 
-/** null = la lectura sirve; texto = por qué el documento queda como "no leído". */
+/** Lo que se le dice a la persona cuando un documento no se pudo leer (el detalle técnico va aparte, en `motivo`). E-95 */
+export const AVISO_NO_LEIDO = "No se pudo leer el archivo. Probá de nuevo o cargá el comprobante a mano.";
+
+/** null = la lectura sirve; texto = el motivo TÉCNICO por el que el documento queda como "no leído". */
 export function motivoNoLeido(ocr: ParseResult): string | null {
     if (ocr.error) return `La lectura automática falló: ${ocr.error}`;
     if (!ocr.items || ocr.items.length === 0) return 'La lectura automática no encontró ningún renglón en el documento.';

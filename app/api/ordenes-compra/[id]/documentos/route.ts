@@ -2,7 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { processWithGemini , inferirTipoComprobante } from '@/lib/services/ocr';
-import { buscarComprobanteDuplicado, comprobanteDesdeOCR, datosNoLeido, mensajeDuplicado, motivoNoLeido } from '@/lib/services/documento-compra';
+import { AVISO_NO_LEIDO, buscarComprobanteDuplicado, comprobanteDesdeOCR, datosNoLeido, mensajeDuplicado, motivoNoLeido } from '@/lib/services/documento-compra';
 
 
 // GET /api/ordenes-compra/[id]/documentos
@@ -187,7 +187,8 @@ export async function POST(
         return NextResponse.json({
             success: true,
             no_leido: true,
-            aviso: `${noLeido} El archivo quedó guardado como "no leído" y NO generó comprobante: subilo de nuevo (más nítido, o el PDF original) o cargá el comprobante a mano.`,
+            aviso: AVISO_NO_LEIDO,
+            motivo: noLeido,
             documento: { ...doc, signed_url: signedUrl || publicUrl },
             comprobante: null,
             recepcion_id: recepcion.id,
@@ -273,3 +274,79 @@ export async function DELETE(
     return NextResponse.json({ success: true });
 }
 
+
+// PATCH /api/ordenes-compra/[id]/documentos   { documento_id }
+// Reintentar la lectura automática de un documento que quedó "no leído" (E-95): vuelve a
+// leer el MISMO archivo guardado. Si ahora se lee, crea el comprobante como una carga normal;
+// si no, queda igual, con el motivo nuevo.
+export async function PATCH(
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const auth = await requireAuth();
+    if (auth.error) return auth.error;
+
+    try {
+        const { id: ordenId } = await params;
+        const { documento_id } = await request.json().catch(() => ({}));
+        if (!documento_id) return NextResponse.json({ error: 'documento_id requerido' }, { status: 400 });
+
+        const supabase = createAdminClient();
+        const { data: oc } = await supabase.from('ordenes_compra').select('id, proveedor_id').eq('id', ordenId).maybeSingle();
+        if (!oc) return NextResponse.json({ error: 'Orden de compra no encontrada' }, { status: 404 });
+
+        const { data: doc } = await supabase
+            .from('recepciones_documentos')
+            .select('id, recepcion_id, comprobante_id, tipo_documento, nombre_archivo, tipo_mime, storage_path, procesado')
+            .eq('id', documento_id)
+            .maybeSingle();
+        if (!doc) return NextResponse.json({ error: 'El documento ya no existe.' }, { status: 404 });
+        const { data: rec } = await supabase.from('recepciones').select('id, orden_compra_id').eq('id', doc.recepcion_id).maybeSingle();
+        if (rec?.orden_compra_id !== ordenId) return NextResponse.json({ error: 'Ese documento no es de esta orden.' }, { status: 400 });
+        if (doc.procesado || doc.comprobante_id) return NextResponse.json({ error: 'Ese documento ya tiene su comprobante cargado.' }, { status: 409 });
+        if (!doc.storage_path) return NextResponse.json({ error: 'No quedó guardado el archivo de este documento: subilo de nuevo.' }, { status: 409 });
+
+        const { data: blob, error: bajarErr } = await supabase.storage.from('comprobantes').download(doc.storage_path);
+        if (bajarErr || !blob) return NextResponse.json({ error: 'No se pudo abrir el archivo guardado: subilo de nuevo.' }, { status: 409 });
+        const file = new File([blob], doc.nombre_archivo || 'documento', { type: doc.tipo_mime || blob.type || 'application/octet-stream' });
+
+        const { data: prov } = await supabase.from('proveedores').select('nombre, razon_social').eq('id', oc.proveedor_id).maybeSingle();
+        const tipo_documento = doc.tipo_documento || 'factura';
+        const ocrResult = await processWithGemini(file, { proveedorNombre: prov?.nombre || prov?.razon_social, tipoDocumento: tipo_documento });
+        const noLeido = motivoNoLeido(ocrResult);
+        if (noLeido) {
+            await supabase.from('recepciones_documentos').update({ datos_ocr: datosNoLeido(ocrResult, noLeido) }).eq('id', doc.id);
+            return NextResponse.json({ success: true, no_leido: true, aviso: AVISO_NO_LEIDO, motivo: noLeido });
+        }
+
+        if (ocrResult.comprobante?.numero_comprobante) {
+            const dup = await buscarComprobanteDuplicado(supabase, {
+                proveedor_id: oc.proveedor_id,
+                tipo: inferirTipoComprobante(ocrResult, tipo_documento),
+                numero: ocrResult.comprobante.numero_comprobante,
+            });
+            if (dup) return NextResponse.json({ error: mensajeDuplicado(dup, ordenId), codigo: 'comprobante_duplicado', comprobante_id: dup.id }, { status: 409 });
+        }
+
+        await supabase.from('recepciones_documentos').update({ datos_ocr: ocrResult, procesado: true }).eq('id', doc.id);
+        const { data: signed } = await supabase.storage.from('comprobantes').createSignedUrl(doc.storage_path, 3600);
+        const r = await comprobanteDesdeOCR(supabase, {
+            orden_compra_id: ordenId,
+            proveedor_id: oc.proveedor_id,
+            recepcion_id: doc.recepcion_id,
+            documento_id: doc.id,
+            ocr: ocrResult,
+            tipo_documento,
+            foto_url: signed?.signedUrl || null,
+        });
+        if (r.error) {
+            // No quedó comprobante: el documento vuelve a "no leído" para que se pueda reintentar o cargar a mano
+            await supabase.from('recepciones_documentos').update({ datos_ocr: datosNoLeido(ocrResult, r.error), procesado: false }).eq('id', doc.id);
+            return NextResponse.json({ error: `El archivo se leyó pero no se pudo crear el comprobante. Detalle para sistemas: ${r.error}` }, { status: 500 });
+        }
+        return NextResponse.json({ success: true, comprobante: r.comprobante, items_detectados: ocrResult.items.length });
+    } catch (error: any) {
+        console.error('[Docs OC] reintentar:', error);
+        return NextResponse.json({ error: `No se pudo reintentar la lectura. Detalle para sistemas: ${error.message || error}` }, { status: 500 });
+    }
+}

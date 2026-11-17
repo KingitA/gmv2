@@ -1,7 +1,7 @@
 // E-90 / E-91 — la cuenta de una diferencia de compra: netos por unidad + IVA discriminado.
 // Casos reales de la prueba en pantalla del 17/11 (OC-000011).
 import { describe, expect, it } from "vitest"
-import { calcularDiferencia, importe, netoDocumento, precioNeto } from "../../../../lib/compras/diferencias"
+import { calcularDiferencia, importe, netoDocumento, precioNeto, reclamablePorDevolucion } from "../../../../lib/compras/diferencias"
 
 describe("precio neto", () => {
   it("descuentos en cascada", () => {
@@ -97,6 +97,56 @@ describe("otros casos", () => {
   })
   it("adquisición (sin IVA): el importe no lleva IVA", () => {
     expect(importe(1000, 0)).toEqual({ neto: 1000, iva: 0, total: 1000 })
+  })
+  it("E-42 bonificados: 10 cobradas + 2 sin cargo NO es diferencia de precio", () => {
+    const d = calcularDiferencia({
+      oc: { cantidad_pedida: 10, factor: 1, precio_unitario: 100, descuentos: [] },
+      factura: [
+        { cantidad_facturada: 10, factor: 1, precio_unitario: 100, descuentos: [], iva_porcentaje: 21 },
+        { cantidad_facturada: 2, factor: 1, precio_unitario: 100, descuentos: [100], iva_porcentaje: 21 },
+      ],
+      recibido_unidades: 12,
+    })
+    expect(d.precio).toBeNull()
+    expect(d.cantidad).toBeNull()
+    expect(d.factura).toMatchObject({ unidades: 12, bonificadas: 2, neto_unidad: 100 })
+  })
+  it("todo bonificado: sin diferencia de precio", () => {
+    const d = calcularDiferencia({
+      oc: { cantidad_pedida: 5, factor: 1, precio_unitario: 100, descuentos: [] },
+      factura: [{ cantidad_facturada: 5, factor: 1, precio_unitario: 0, descuentos: [], iva_porcentaje: 21 }],
+      recibido_unidades: 5,
+    })
+    expect(d.precio).toBeNull()
+  })
+  it("E-92 pendiente contra la orden: pedido 96, llegó y se facturó 72 ⇒ faltan recibir 24 (no es plata)", () => {
+    const d = calcularDiferencia({
+      oc: { cantidad_pedida: 4, factor: 24, precio_unitario: 100, descuentos: [] },
+      factura: [{ cantidad_facturada: 3, factor: 24, precio_unitario: 2400, descuentos: [], iva_porcentaje: 21 }],
+      recibido_unidades: 72,
+    })
+    expect(d.pendiente_oc).toBe(24)
+    expect(d.cantidad).toBeNull()
+  })
+  it("facturado completo y recibido de menos: es faltante reclamable, no pendiente de la orden", () => {
+    const d = calcularDiferencia({
+      oc: { cantidad_pedida: 200, factor: 1, precio_unitario: 10, descuentos: [] },
+      factura: [{ cantidad_facturada: 200, factor: 1, precio_unitario: 10, descuentos: [], iva_porcentaje: 21 }],
+      recibido_unidades: 150,
+    })
+    expect(d.pendiente_oc).toBe(0)
+    expect(d.cantidad).toMatchObject({ tipo: "faltante", unidades: 50 })
+  })
+  it("devolución: se reclama lo facturado que no nos quedamos; un sobrante devuelto no genera NC", () => {
+    const facturado10 = { oc: null, factura: [{ cantidad_facturada: 10, factor: 1, precio_unitario: 100, descuentos: [], iva_porcentaje: 21 }] }
+    // llegaron las 10 y se rechazan 4
+    expect(reclamablePorDevolucion(calcularDiferencia({ ...facturado10, recibido_unidades: 10 }), 4)).toMatchObject({ unidades: 4, neto: 400, total: 484 })
+    // llegaron 12 (2 de más) y se devuelven las 2 que sobran: nada que reclamar
+    expect(reclamablePorDevolucion(calcularDiferencia({ ...facturado10, recibido_unidades: 12 }), 2)).toMatchObject({ unidades: 0, total: 0 })
+    // llegaron 8 (faltan 2) y además se rechazan 3: se reclaman 5
+    expect(reclamablePorDevolucion(calcularDiferencia({ ...facturado10, recibido_unidades: 8 }), 3)).toMatchObject({ unidades: 5, neto: 500 })
+    // no se puede devolver más de lo que entró
+    expect(reclamablePorDevolucion(calcularDiferencia({ ...facturado10, recibido_unidades: 8 }), 50)).toMatchObject({ unidades: 10 })
   })
   it("el artículo en dos renglones de la factura: se suman", () => {
     const d = calcularDiferencia({

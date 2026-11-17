@@ -70,6 +70,8 @@ export interface DiferenciaLinea {
     lista_unidad: number
     descuentos: number[]
     iva_porcentaje: number
+    /** Unidades facturadas SIN cargo (bonificadas: precio 0 o 100 % de descuento). E-42 */
+    bonificadas: number
   } | null
   /** Facturado a otro precio que el acordado. null = no hay diferencia (o falta una de las dos puntas). */
   precio: ({ por_unidad: number; unidades: number; a_favor: "nuestro" | "proveedor" } & Importe) | null
@@ -78,6 +80,12 @@ export interface DiferenciaLinea {
    * lo facturado. null = coinciden, o todavía no hay factura.
    */
   cantidad: ({ unidades: number; tipo: "faltante" | "sobrante" } & Importe) | null
+  /**
+   * Unidades de la orden que no llegaron ni se facturaron (el proveedor no las mandó). No es
+   * plata: es mercadería que falta recibir. Sigue abierta hasta que llegue el resto o se dé la
+   * orden por cerrada sin él. E-92
+   */
+  pendiente_oc: number
 }
 
 /** Redondeos chicos del OCR / de pasar descuentos a porcentaje no son una diferencia de precio. */
@@ -104,21 +112,29 @@ export function calcularDiferencia(p: {
   const lineas = p.factura.filter((l) => num(l.cantidad_facturada) > 0)
   if (lineas.length > 0) {
     let unidades = 0
+    let conCargo = 0
     let netoTotal = 0
     for (const l of lineas) {
       const f = num(l.factor) || 1
       const u = num(l.cantidad_facturada) * f
+      const neto = netoDocumento(l.precio_unitario, l.descuentos)
       unidades += u
-      netoTotal += u * (netoDocumento(l.precio_unitario, l.descuentos) / f)
+      // Lo bonificado (sin cargo) cuenta como mercadería facturada pero NO baja el precio:
+      // el precio se compara solo sobre lo que se cobra (E-42).
+      if (neto > 0) {
+        conCargo += u
+        netoTotal += u * (neto / f)
+      }
     }
-    // Lista, descuentos e IVA: los del renglón con precio (el primero)
-    const ref = lineas.find((l) => num(l.precio_unitario) > 0) ?? lineas[0]!
+    // Lista, descuentos e IVA: los del primer renglón con cargo
+    const ref = lineas.find((l) => netoDocumento(l.precio_unitario, l.descuentos) > 0) ?? lineas[0]!
     factura = {
       unidades: r4(unidades),
-      neto_unidad: unidades > 0 ? r4(netoTotal / unidades) : 0,
+      neto_unidad: conCargo > 0 ? r4(netoTotal / conCargo) : 0,
       lista_unidad: r4(num(ref.precio_unitario) / (num(ref.factor) || 1)),
       descuentos: ref.descuentos.map(num),
       iva_porcentaje: num(ref.iva_porcentaje),
+      bonificadas: r4(unidades - conCargo),
     }
   }
 
@@ -128,12 +144,13 @@ export function calcularDiferencia(p: {
   if (oc && factura && oc.neto_unidad > 0 && factura.neto_unidad > 0) {
     const dif = factura.neto_unidad - oc.neto_unidad
     if (Math.abs(dif) / oc.neto_unidad > TOLERANCIA_PRECIO) {
+      const cobradas = r4(factura.unidades - factura.bonificadas)
       precio = {
         por_unidad: r4(Math.abs(dif)),
-        unidades: factura.unidades,
+        unidades: cobradas,
         // facturado más caro que lo acordado ⇒ la diferencia es a NUESTRO favor (se reclama)
         a_favor: dif > 0 ? "nuestro" : "proveedor",
-        ...importe(Math.abs(dif) * factura.unidades, factura.iva_porcentaje),
+        ...importe(Math.abs(dif) * cobradas, factura.iva_porcentaje),
       }
     }
   }
@@ -150,5 +167,20 @@ export function calcularDiferencia(p: {
     }
   }
 
-  return { oc, recibido_unidades: recibido, factura, precio, cantidad }
+  const pendiente_oc = oc ? r4(Math.max(0, oc.unidades - Math.max(recibido, factura?.unidades ?? 0))) : 0
+
+  return { oc, recibido_unidades: recibido, factura, precio, cantidad, pendiente_oc: pendiente_oc > TOLERANCIA_CANTIDAD ? pendiente_oc : 0 }
+}
+
+/**
+ * Devolver mercadería que SÍ entró (rechazo, sobrante): cuántas de esas unidades se le pueden
+ * reclamar al proveedor = lo facturado menos lo que nos quedamos. Lo que se devuelve y no
+ * estaba facturado (un sobrante) no genera nota de crédito.
+ */
+export function reclamablePorDevolucion(dif: DiferenciaLinea, devolverUnidades: number): { unidades: number } & Importe {
+  const devolver = Math.max(0, Math.min(num(devolverUnidades), dif.recibido_unidades))
+  if (!dif.factura) return { unidades: 0, neto: 0, iva: 0, total: 0 }
+  const nosQuedamos = dif.recibido_unidades - devolver
+  const unidades = r4(Math.max(0, dif.factura.unidades - nosQuedamos))
+  return { unidades, ...importe(unidades * dif.factura.neto_unidad, dif.factura.iva_porcentaje) }
 }

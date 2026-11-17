@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { conversionesDeRecepcion } from '@/lib/deposito/recepciones';
 import { aUnidadesBase, unidadesPorBultoDe } from '@/lib/deposito/unidades';
-import { calcularDiferencia, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
+import { calcularDiferencia, reclamablePorDevolucion, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
 import { TIPOS_CON_PRECIOS } from '@/lib/compras/finalizar-oc';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
 import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
@@ -156,6 +156,16 @@ function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destin
     // cantidad
     if (destino === 'descuento_fuera_factura') throw new Rechazo('"Descuento fuera de factura" es solo para diferencias de precio.', 'destino_invalido');
     const c = dif.cantidad;
+    // Devolución al proveedor de mercadería que SÍ entró (rechazo, o un artículo que no se pidió):
+    // se reclama lo facturado que no nos quedamos (incluye el faltante, si lo había).
+    if (devolver > 0 && destino === 'proveedor') {
+        const rec = reclamablePorDevolucion(dif, devolver);
+        if (!(rec.total > 0)) {
+            throw new Rechazo('Lo que se devuelve no estaba facturado: no corresponde una nota de crédito. Elegí devolverlo sin reclamo.', 'devolucion_sin_factura');
+        }
+        return { ...base, unidades: rec.unidades, neto: rec.neto, iva: rec.iva, total: rec.total, origen_nc: 'devolucion',
+            descripcion: base.descripcion || `Devolución ${sku}: ${devolver} u devueltas${c?.tipo === 'faltante' ? ` + ${c.unidades} u facturadas y no recibidas` : ''}` };
+    }
     if (!c) {
         // Sin factura (o coincide con lo recibido): no hay plata en juego. Solo se puede dar por cerrada.
         if (destino !== 'empresa') {
@@ -169,7 +179,7 @@ function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destin
         return { ...base, unidades: faltaVsOC, neto: 0, iva: 0, total: 0, origen_nc: null };
     }
     if (c.tipo === 'sobrante' && destino !== 'empresa') {
-        throw new Rechazo(`Llegaron ${c.unidades} unidades MÁS de las facturadas: no corresponde una nota de crédito. Por ahora solo se puede dar por aceptado ("Empresa").`, 'sobrante');
+        throw new Rechazo(`Llegaron ${c.unidades} unidades MÁS de las facturadas: no corresponde una nota de crédito ni un cargo al transporte. Se puede aceptar el sobrante o devolverlo.`, 'sobrante');
     }
     if (destino === 'empresa') return { ...base, unidades: c.unidades, neto: c.neto, iva: c.iva, total: c.total, origen_nc: null };
     return { ...base, unidades: c.unidades, neto: c.neto, iva: c.iva, total: c.total,
@@ -369,7 +379,8 @@ export async function POST(
                             : tipo === 'precio'
                                 ? 'Se tomó el precio facturado como costo del artículo.'
                                 : 'La diferencia quedó asumida por la empresa.';
-                results.push({ item_id, tipo, destino, accion: decision.accion, success: true, ...r, unidades: p.unidades, mensaje });
+                const devueltas = !r.ya_resuelta && Number(r.unidades_devueltas) > 0 ? ` Salieron ${Number(r.unidades_devueltas)} unidades del stock (mercadería devuelta).` : "";
+                results.push({ item_id, tipo, destino, accion: decision.accion, success: true, ...r, unidades: p.unidades, mensaje: mensaje + devueltas });
             } catch (e: any) {
                 if (e instanceof Rechazo) results.push({ item_id, tipo, destino, accion: decision.accion, error: e.message, codigo: e.codigo });
                 else {
