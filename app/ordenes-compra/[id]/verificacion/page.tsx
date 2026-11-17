@@ -61,6 +61,8 @@ export default function VerificacionOCPage() {
     const [rows, setRows] = useState<VerRow[]>([])
     const [comprobantes, setComprobantes] = useState<CompData[]>([])
     const [sinMatch, setSinMatch] = useState(0)
+    // Qué falta para poder finalizar la orden (lo decide el servidor: GET /api/ordenes-compra/[id]/finalizar)
+    const [controlFin, setControlFin] = useState<{ puede: boolean; faltas: string[]; falta_factura: boolean } | null>(null)
     const [otrosConceptos, setOtrosConceptos] = useState<{ comprobante: string; descripcion: string; importe: number }[]>([])
     const [loading, setLoading] = useState(true)
     const [recepcionId, setRecepcionId] = useState<string | null>(null)
@@ -340,6 +342,10 @@ export default function VerificacionOCPage() {
 
         setRows(verRows)
         setLoading(false)
+        fetch(`/api/ordenes-compra/${ordenId}/finalizar`)
+            .then(r => (r.ok ? r.json() : null))
+            .then(c => setControlFin(c && Array.isArray(c.faltas) ? c : null))
+            .catch(() => setControlFin(null))
     }
 
     async function ajustarPrecio(articuloId: string, precio: number) {
@@ -449,10 +455,12 @@ export default function VerificacionOCPage() {
             : ""
         if (!confirm(`¿Finalizar esta OC?\n\nSe validan los comprobantes pendientes: la provisión de la cuenta corriente se reemplaza por los comprobantes reales y se generan los vencimientos de pago.${aviso}`)) return
 
+        // Los remitos no se validan (solo controlan cantidades): no entran en la lista
         const { data: pendientes } = await supabase
             .from("comprobantes_compra")
             .select("id, tipo_comprobante, numero_comprobante")
             .eq("orden_compra_id", ordenId)
+            .neq("tipo_comprobante", "Remito")
             .not("estado", "in", "(validado,cerrado,esperada)")
 
         const avisos: string[] = []
@@ -468,10 +476,13 @@ export default function VerificacionOCPage() {
             for (const a of (data.avisos || []) as string[]) avisos.push(`${comp.tipo_comprobante} ${comp.numero_comprobante}: ${a}`)
         }
 
-        // E-09: la base rechazaba 'finalizada' y nadie se enteraba (falta la migración 20261116b)
-        const { error: errEstado } = await supabase.from("ordenes_compra").update({ estado: "finalizada" }).eq("id", ordenId)
-        if (errEstado) {
-            toast.error(`Los comprobantes quedaron validados, pero la orden NO pasó a "finalizada": ${errEstado.message}`, { duration: 15000 })
+        // El cierre lo hace el servidor, que controla que haya una factura validada que cubra lo
+        // recibido: con solo remitos la orden queda abierta (decisión de Juan, 17/11).
+        const resFin = await fetch(`/api/ordenes-compra/${ordenId}/finalizar`, { method: "POST" })
+        const fin = await resFin.json().catch(() => ({}))
+        if (!resFin.ok) {
+            toast.error(fin.error || `La orden no se finalizó (error ${resFin.status})`, { duration: 20000 })
+            if (avisos.length > 0) toast.warning(avisos.join(" · "), { duration: 15000 })
             loadAll()
             return
         }
@@ -571,6 +582,8 @@ export default function VerificacionOCPage() {
                     )}
                     {tieneComps && orden?.estado !== "finalizada" && (
                         <Button onClick={finalizarOC}
+                            disabled={!!controlFin?.falta_factura}
+                            title={controlFin?.falta_factura ? "Falta la factura para controlar precios: con solo el remito la orden queda abierta" : undefined}
                             className={`gap-2 ${allOK ? "bg-green-600 hover:bg-green-700" : "bg-orange-500 hover:bg-orange-600"}`}>
                             <CheckCircle2 className="h-4 w-4" /> Finalizar OC
                         </Button>
@@ -582,6 +595,17 @@ export default function VerificacionOCPage() {
                     )}
                 </div>
             </div>
+
+            {controlFin && !controlFin.puede && orden?.estado !== "finalizada" && (
+                <div className="mb-4 p-3 border border-sky-300 bg-sky-50 rounded-lg">
+                    <p className="text-sm font-semibold text-sky-900">
+                        {controlFin.falta_factura ? "Falta la factura para controlar precios" : "Todavía no se puede finalizar la orden"}
+                    </p>
+                    <ul className="text-sm text-sky-900 mt-1 list-disc pl-5">
+                        {controlFin.faltas.map((f, i) => <li key={i}>{f}</li>)}
+                    </ul>
+                </div>
+            )}
 
             {sinMatch > 0 && (
                 <div className="mb-4 p-3 border border-amber-300 bg-amber-50 rounded-lg">
@@ -781,6 +805,7 @@ export default function VerificacionOCPage() {
                                 {comprobantes.map(c => (
                                     <TableHead key={`h-cant-${c.id}`} className="text-right text-xs">
                                         Cant. {c.tipo}<br /><span className="text-[10px] text-muted-foreground">{c.numero}</span>
+                                        {c.tipo === "Remito" && <><br /><span className="text-[10px] text-sky-700">controla cantidades</span></>}
                                     </TableHead>
                                 ))}
                                 {showMultipleComps && (
