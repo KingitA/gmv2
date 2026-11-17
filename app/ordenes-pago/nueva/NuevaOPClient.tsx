@@ -45,6 +45,8 @@ interface MedioPago {
     observaciones?: string
     cuenta_origen_tipo?: "CAJA" | "BANCO"
     cuenta_origen_id?: string
+    // Cheque propio electrónico (E-62)
+    es_echeq?: boolean
 }
 
 interface Imputacion {
@@ -140,6 +142,8 @@ function NuevaOrdenPagoContent() {
     const claveFirmaRef = useRef("")
 
     const [cheques, setCheques] = useState<any[]>([])
+    // E-66: cheque de tercero → número de la orden PENDIENTE que ya lo tiene elegido
+    const [chequesReservados, setChequesReservados] = useState<Map<string, string>>(new Map())
     const [submitting, setSubmitting] = useState(false)
     // E-67: pagar en un paso. Antes de sacar la plata se pide confirmación; al terminar
     // se muestra el resultado con el detalle listo para copiar y mandarle al proveedor.
@@ -162,6 +166,11 @@ function NuevaOrdenPagoContent() {
     useEffect(() => {
         loadProveedores()
         loadCheques()
+        fetch("/api/ordenes-pago?estado=pendiente").then(r => r.json()).then(d => {
+            const m = new Map<string, string>()
+            for (const op of (Array.isArray(d) ? d : [])) for (const det of (op.ordenes_pago_detalle || [])) if (det.cheque_id) m.set(det.cheque_id, op.numero_op)
+            setChequesReservados(m)
+        }).catch(() => setChequesReservados(new Map()))
         fetch("/api/finanzas/cajas").then(r => r.json())
             .then(d => setCuentasFondos(d.cuentas || []))
             .catch(() => setCuentasFondos([]))
@@ -236,7 +245,11 @@ function NuevaOrdenPagoContent() {
             if (mov) tomadoPorMov.set(mov, op.numero_op)
         }
     }
-    const vencSinComprobante = vencimientosProv.filter((v: any) => !movDeVenc(v))
+    // Vencimiento ESTIMADO de una orden de compra (todavía sin factura): no se paga. Se muestra
+    // aparte, deshabilitado; se reemplaza por el real cuando se valida la factura.
+    const esEstimadoOC = (v: any) => v?.es_estimado === true && v?.referencia_tipo === "orden_compra"
+    const vencEstimadosOC = vencimientosProv.filter(esEstimadoOC)
+    const vencSinComprobante = vencimientosProv.filter((v: any) => !movDeVenc(v) && !esEstimadoOC(v))
     // Vencimientos cuyo comprobante ya figura pagado en la cuenta corriente (quedaron colgados)
     const vencComprobantePagado = vencimientosProv.filter((v: any) => {
         const mov = movDeVenc(v)
@@ -259,6 +272,10 @@ function NuevaOrdenPagoContent() {
         const venc = vencimientosProv.find((v: any) => v.id === vencId)
         if (!venc) {
             toast.warning("Ese vencimiento ya no está pendiente para este proveedor: no se preseleccionó nada.")
+            return
+        }
+        if (esEstimadoOC(venc)) {
+            toast.warning("Ese vencimiento es un ESTIMADO de una orden de compra: todavía no hay factura, no se puede pagar. Cuando se valide la factura aparece el vencimiento real.", { duration: 12000 })
             return
         }
         if (tomadoPorVenc.has(vencId)) {
@@ -387,6 +404,25 @@ function NuevaOrdenPagoContent() {
             medio,
             monto: 0
         }])
+    }
+    // E-62: cheque propio / e-cheq. Sugerencia "cuánto y cuándo": lo que falta cubrir y la
+    // fecha de pago según el plazo de cheques del acuerdo del proveedor (hoy + plazo).
+    function agregarChequePropio(echeq: boolean) {
+        const unico = bancosFondos.length === 1 ? bancosFondos[0] : null
+        setMedios(prev => [...prev, {
+            id: crypto.randomUUID(),
+            medio: "cheque_propio",
+            monto: restante != null && restante > 0 ? redondear(restante) : 0,
+            cheque_fecha_vencimiento: fechaObjetivoCheque,
+            es_echeq: echeq,
+            ...(unico ? { cuenta_origen_tipo: "BANCO" as const, cuenta_origen_id: unico.cuenta_id, cheque_banco: unico.nombre } : {}),
+        }])
+    }
+    function elegirBancoCheque(medioId: string, cuentaId: string) {
+        const cta = bancosFondos.find((b: any) => b.cuenta_id === cuentaId)
+        setMedios(prev => prev.map(m => m.id === medioId
+            ? { ...m, cuenta_origen_tipo: cta ? "BANCO" as const : undefined, cuenta_origen_id: cta?.cuenta_id, cheque_banco: cta?.nombre }
+            : m))
     }
 
     function actualizarMedio(id: string, field: string, value: any) {
@@ -593,6 +629,10 @@ function NuevaOrdenPagoContent() {
         cheque_fecha_vencimiento: ch.fecha_vencimiento,
     })
     const toggleCheque = (ch: any) => {
+        if (chequesReservados.has(ch.id) && !medios.some(m => m.cheque_id === ch.id)) {
+            toast.warning(`Ese cheque ya está reservado por la orden de pago pendiente ${chequesReservados.get(ch.id)}. Elegí otro, o confirmá o eliminá esa orden.`)
+            return
+        }
         setMedios(prev => prev.some(m => m.cheque_id === ch.id)
             ? prev.filter(m => m.cheque_id !== ch.id)
             : [...prev, chequeAMedio(ch)])
@@ -604,7 +644,7 @@ function NuevaOrdenPagoContent() {
         const objetivo = restante ?? 0
         if (objetivo <= 0) return
         const candidatos = cheques
-            .filter((ch: any) => enVentana(ch) && !medios.some(m => m.cheque_id === ch.id))
+            .filter((ch: any) => enVentana(ch) && !medios.some(m => m.cheque_id === ch.id) && !chequesReservados.has(ch.id))
         const greedy = (pool: any[], objetivoBolsa: number) => {
             let rem = objetivoBolsa + 0.009
             const picks: any[] = []
@@ -700,6 +740,14 @@ function NuevaOrdenPagoContent() {
         if (medios.length === 0) { toast.warning("Agregá al menos un medio de pago"); return false }
         if (totalMedios <= 0) { toast.warning("El total de medios de pago debe ser mayor a 0"); return false }
         if (gananciasManual && !gananciasMotivo.trim()) { toast.warning("Indicá el motivo del ajuste manual de la retención"); return false }
+        for (const m of medios) {
+            if (m.medio !== "cheque_propio") continue
+            const que = m.es_echeq ? "e-cheq" : "cheque propio"
+            if (!m.cuenta_origen_id) { toast.warning(`Elegí de qué cuenta bancaria sale el ${que}.`); return false }
+            if (!String(m.cheque_numero || "").trim()) { toast.warning(`Cargá el número del ${que}.`); return false }
+            if (!m.cheque_fecha_vencimiento) { toast.warning(`Cargá la fecha de pago del ${que}.`); return false }
+            if (!(Number(m.monto) > 0)) { toast.warning(`Cargá el importe del ${que}.`); return false }
+        }
         if (calcLoading) { toast.warning("Esperá un segundo: se está calculando la retención."); return false }
         if (sinContestar.length > 0) {
             toast.warning(`Falta contestar si corresponde retener Ganancias en: ${sinContestar.map(i => i.descripcion).join(", ")}. Elegí Sí o No.`)
@@ -756,7 +804,8 @@ function NuevaOrdenPagoContent() {
                         cbu: m.cbu || null,
                         observaciones: m.observaciones || null,
                         cuenta_origen_tipo: m.cuenta_origen_tipo || null,
-                        cuenta_origen_id: m.cuenta_origen_id || null
+                        cuenta_origen_id: m.cuenta_origen_id || null,
+                        es_echeq: m.es_echeq === true
                     })),
                     imputaciones: imputaciones.map(i => ({
                         movimiento_cc_id: i.movimiento_cc_id || null,
@@ -1105,6 +1154,24 @@ function NuevaOrdenPagoContent() {
                                     </div>
                                 </div>
                             )}
+                            {vencEstimadosOC.length > 0 && (
+                                <div>
+                                    <h4 className="mb-1 text-sm font-medium text-muted-foreground">Estimados de órdenes de compra (todavía sin factura: no se pagan)</h4>
+                                    <div className="space-y-1">
+                                        {vencEstimadosOC.map((v: any) => (
+                                            <div key={v.id} className="flex cursor-not-allowed items-center gap-3 rounded-lg border border-dashed p-2 opacity-60">
+                                                <Checkbox checked={false} disabled />
+                                                <div className="flex-1">
+                                                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-600">ESTIMADO</span>
+                                                    <span className="ml-2 text-sm text-muted-foreground">{String(v.concepto || "").replace(/^ESTIMADO +/i, "")}</span>
+                                                    <span className="ml-2 text-xs text-muted-foreground">Vence: {fmtFecha(v.fecha_vencimiento)} · estimado: todavía sin factura</span>
+                                                </div>
+                                                <span className="text-sm text-muted-foreground">{formatCurrency(Number(v.monto))}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                             {vencComprobantePagado.length > 0 && (
                                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
                                     {vencComprobantePagado.length === 1 ? "Hay un vencimiento pendiente" : `Hay ${vencComprobantePagado.length} vencimientos pendientes`} cuyo comprobante ya figura pagado en la cuenta corriente
@@ -1225,13 +1292,15 @@ function NuevaOrdenPagoContent() {
                                             {chequesFiltrados.map((ch: any) => {
                                                 const sel = medios.some(m => m.cheque_id === ch.id)
                                                 const col = colorDeCheque(ch)
+                                                const reservado = sel ? undefined : chequesReservados.get(ch.id)
                                                 return (
                                                     <div key={ch.id} onClick={() => toggleCheque(ch)}
-                                                        className={`flex items-center gap-2.5 rounded-md border px-2.5 py-1.5 text-sm cursor-pointer transition-colors ${sel ? "border-indigo-400 bg-indigo-50" : "bg-white hover:border-indigo-200"}`}>
-                                                        <Checkbox checked={sel} />
+                                                        className={`flex items-center gap-2.5 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${reservado ? "cursor-not-allowed opacity-60" : "cursor-pointer"} ${sel ? "border-indigo-400 bg-indigo-50" : "bg-white hover:border-indigo-200"}`}>
+                                                        <Checkbox checked={sel} disabled={!!reservado} />
                                                         <span className="h-2.5 w-2.5 rounded-full border border-slate-300 shrink-0" style={{ background: COLOR_CHEQUE[col]?.dot }} />
                                                         <span className="font-medium text-slate-700 truncate">{ch.banco} #{ch.numero}</span>
                                                         <span className="text-xs text-muted-foreground shrink-0">vence {fmtFechaCorta(ch.fecha_vencimiento)}</span>
+                                                        {reservado && <span className="text-xs font-semibold text-amber-700 shrink-0">reservado por la OP {reservado}</span>}
                                                         <span className="ml-auto font-semibold tabular-nums shrink-0">{formatCurrency(Number(ch.monto))}</span>
                                                     </div>
                                                 )
@@ -1295,11 +1364,16 @@ function NuevaOrdenPagoContent() {
                         })}
 
                         <div className="flex items-center gap-2">
-                            <Button variant="ghost" size="sm" onClick={() => agregarMedio("cheque_propio")} className="text-muted-foreground gap-1.5">
+                            <Button variant="outline" size="sm" onClick={() => agregarChequePropio(false)} className="gap-1.5">
                                 <Plus className="h-4 w-4" /> Cheque propio
                             </Button>
+                            <Button variant="outline" size="sm" onClick={() => agregarChequePropio(true)} className="gap-1.5">
+                                <Plus className="h-4 w-4" /> E-cheq
+                            </Button>
                             <span className="text-[11px] text-muted-foreground">
-                                Si al proveedor se le deposita, la entrega ya lo dice la ficha — el pago se arma igual con cheques/efectivo.
+                                {restante != null && restante > 0
+                                    ? `Hay que hacerlo por ${formatCurrency(restante)} con fecha de pago ${fmtFechaCorta(fechaObjetivoCheque)}${plazoCheque > 0 ? ` (acuerdo: cheques a ${plazoCheque} días)` : " (acuerdo: al día)"}. Se puede cambiar.`
+                                    : "Cheque o e-cheq de una cuenta nuestra. El banco baja cuando se debita."}
                             </span>
                         </div>
 
@@ -1318,10 +1392,18 @@ function NuevaOrdenPagoContent() {
                                             </>
                                         ) : m.medio === "cheque_propio" ? (
                                             <>
-                                                <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">CH. PROPIO</Badge>
-                                                <Input className="h-7 w-28 text-xs" placeholder="Banco" value={m.cheque_banco || ""} onChange={e => actualizarMedio(m.id, "cheque_banco", e.target.value)} />
-                                                <Input className="h-7 w-24 text-xs" placeholder="Número" value={m.cheque_numero || ""} onChange={e => actualizarMedio(m.id, "cheque_numero", e.target.value)} />
-                                                <DateInputAR className="h-7 w-32 text-xs" value={m.cheque_fecha_vencimiento || ""} onChange={v => actualizarMedio(m.id, "cheque_fecha_vencimiento", v)} />
+                                                <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">{m.es_echeq ? "E-CHEQ" : "CH. PROPIO"}</Badge>
+                                                <select className={`h-7 rounded-md border px-1.5 text-xs ${m.cuenta_origen_id ? "" : "border-red-400"}`} value={m.cuenta_origen_id || ""}
+                                                    onChange={e => elegirBancoCheque(m.id, e.target.value)} title="Cuenta bancaria de la que sale">
+                                                    <option value="">¿De qué cuenta?</option>
+                                                    {bancosFondos.map((b: any) => <option key={b.cuenta_id} value={b.cuenta_id}>{b.nombre}</option>)}
+                                                </select>
+                                                <Input className={`h-7 w-24 text-xs ${m.cheque_numero ? "" : "border-red-400"}`} placeholder="Número" value={m.cheque_numero || ""} onChange={e => actualizarMedio(m.id, "cheque_numero", e.target.value)} />
+                                                <span className="text-[11px] text-muted-foreground">fecha de pago</span>
+                                                <DateInputAR className={`h-7 w-32 text-xs ${m.cheque_fecha_vencimiento ? "" : "border-red-400"}`} value={m.cheque_fecha_vencimiento || ""} onChange={v => actualizarMedio(m.id, "cheque_fecha_vencimiento", v)} />
+                                                <label className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground">
+                                                    <input type="checkbox" className="h-3.5 w-3.5" checked={m.es_echeq === true} onChange={e => actualizarMedio(m.id, "es_echeq", e.target.checked)} /> e-cheq
+                                                </label>
                                                 <InputMonto className="h-7 w-28 text-xs ml-auto" value={m.monto} onChange={n => actualizarMedio(m.id, "monto", n ?? 0)} />
                                             </>
                                         ) : (
