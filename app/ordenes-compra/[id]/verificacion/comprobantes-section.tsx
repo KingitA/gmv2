@@ -242,7 +242,12 @@ export function ComprobantesSection({
                                             </TableCell>
                                             <TableCell className="text-right font-mono font-bold">{formatCurrency(comp.total_factura_declarado || 0)}</TableCell>
                                             <TableCell>
-                                                {comp.estado === "validado" ? (
+                                                {comp.tipo_comprobante === "Remito" ? (
+                                                    // Un remito no se valida: no trae precios (decisión de Juan, 17/11)
+                                                    <Badge className="bg-sky-100 text-sky-800 border-sky-300" variant="outline" title="Sirve para comparar las cantidades con lo recibido. No trae precios: no se valida, no genera deuda y no alcanza para finalizar la orden (hace falta la factura).">
+                                                        Remito: controla cantidades
+                                                    </Badge>
+                                                ) : comp.estado === "validado" ? (
                                                     <Badge className="bg-green-100 text-green-700 border-green-300" variant="outline">
                                                         <CheckCircle2 className="h-3 w-3 mr-1" /> Validado
                                                     </Badge>
@@ -253,10 +258,12 @@ export function ComprobantesSection({
                                             <TableCell className="text-right">
                                                 {comp.estado !== "validado" && (
                                                     <div className="flex gap-1 justify-end">
-                                                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Validar (CC + vencimiento + kardex)"
-                                                            onClick={() => validar(comp)}>
-                                                            <CheckCircle2 className="h-4 w-4 text-green-600" />
-                                                        </Button>
+                                                        {comp.tipo_comprobante !== "Remito" && (
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Validar (CC + vencimiento + kardex)"
+                                                                onClick={() => validar(comp)}>
+                                                                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                                            </Button>
+                                                        )}
                                                         <Button variant="ghost" size="icon" className="h-7 w-7" title="Agregar línea que el OCR no leyó"
                                                             onClick={() => abrirAgregarLinea(comp)}>
                                                             <Plus className="h-4 w-4 text-blue-600" />

@@ -15,8 +15,9 @@ import { faltaLaColumna, faltaLaFuncion } from '@/lib/utils/migracion-pendiente'
 //   · Con renglones sin artículo no se valida (salvo los marcados "no es mercadería": flete, etc.).
 //   · La deuda es SIEMPRE el total del comprobante (con flete, IVA y percepciones), tenga o no
 //     orden de compra; nunca la suma de los renglones de mercadería.
-//   · Sin total no se valida, salvo que sea un Remito: el remito queda validado como
-//     respaldo de cantidades, sin deuda, sin vencimiento y sin tocar la provisión.
+//   · Sin total no se valida.
+//   · Un REMITO no se valida nunca (17/11): solo controla cantidades. La orden no se puede
+//     finalizar sin una factura validada (POST /api/ordenes-compra/[id]/finalizar).
 //   · La provisión de la OC baja por lo que se va facturando y se elimina recién cuando
 //     no quedan comprobantes de deuda sin validar en esa OC.
 //   · Nota de débito = deuda (suma); nota de crédito / reversa = crédito (resta).
@@ -219,7 +220,10 @@ async function validarSinFuncion(supabase: any, comprobante: any, proveedorId: s
     const esCredito = CREDITO.includes(comprobante.tipo_comprobante);
     const esNotaDebito = NOTA_DEBITO.includes(comprobante.tipo_comprobante);
     const esRemito = comprobante.tipo_comprobante === 'Remito';
-    if (!esRemito && total <= 0) {
+    if (esRemito) {
+        throw new Rechazo('Un remito no se valida: solo sirve para controlar las cantidades contra lo recibido. Para controlar los precios y registrar la deuda hace falta la factura.', 'remito_no_se_valida');
+    }
+    if (total <= 0) {
         throw new Rechazo(`El comprobante ${comprobante.tipo_comprobante} ${comprobante.numero_comprobante} no tiene total. Cargale el total (lápiz de editar) antes de validarlo; si es solo un remito, cambiale el tipo a Remito.`, 'sin_total');
     }
 
@@ -247,7 +251,6 @@ async function validarSinFuncion(supabase: any, comprobante: any, proveedorId: s
     if (updErr) throw updErr;
     if (!ganado || ganado.length === 0) return { ya_validado: true, movimiento_cc_id: await movimientoPropio() };
 
-    if (esRemito) return { ya_validado: false, sin_deuda: true, movimiento_cc_id: null, vencimiento_id: null, provision: 'intacta' };
 
     // Lo que hay que deshacer si algo falla de acá en adelante
     let movCreado: string | null = null;
@@ -514,6 +517,17 @@ export async function POST(
         const esRemito = comprobante.tipo_comprobante === 'Remito';
         const esCredito = CREDITO.includes(comprobante.tipo_comprobante);
 
+        // Un remito NO se valida (decisión de Juan, 17/11): solo trae cantidades. Validar es dar por
+        // buenas cantidades Y precios, y eso lo hace la factura. Se rechaza acá, antes de la función
+        // SQL, así vale igual con o sin la migración 20261117a. (Uno que ya figuraba validado de antes
+        // sigue de largo y contesta "ya estaba validado": no generó deuda.)
+        if (esRemito && !yaEstaba) {
+            return NextResponse.json({
+                error: 'Un remito no se valida: solo sirve para controlar las cantidades contra lo recibido. Para controlar los precios y registrar la deuda hace falta la factura.',
+                codigo: 'remito_no_se_valida',
+            }, { status: 422 });
+        }
+
         // El plan solo hace falta para generar el vencimiento de una deuda nueva
         const plan: PlanVencimiento = yaEstaba || esRemito || esCredito
             ? { canal: 'blanco', fecha_vencimiento: null, forma_pago: null, modalidad: null, fecha_validez: null, numero_orden: oc?.numero_orden || null }
@@ -568,7 +582,6 @@ export async function POST(
 
         const avisos: string[] = [];
         if (resultado.ya_validado) avisos.push('Este comprobante ya estaba validado: no se generó ninguna deuda ni vencimiento nuevo.');
-        if (resultado.sin_deuda) avisos.push('Es un remito: quedó validado como respaldo de las cantidades, sin deuda ni vencimiento.');
         if (!resultado.ya_validado && resultado.vencimiento_id && resultado.vencimiento_nuevo === false
             && resultado.vencimiento_monto != null && Math.abs(Number(resultado.vencimiento_monto) - total) > 0.01) {
             avisos.push(`Este comprobante ya tenía un vencimiento cargado por ${moneda(resultado.vencimiento_monto)} y el comprobante es por ${moneda(total)}: el vencimiento NO se modificó, revisalo en Finanzas.`);
