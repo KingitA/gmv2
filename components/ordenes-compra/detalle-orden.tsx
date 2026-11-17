@@ -119,6 +119,9 @@ export function DetalleOrden({ ordenId, onCerrar, onEditar, onEnviar, onCambio, 
                         {c.texto}
                       </div>
                     ))}
+                    {(o.acuerdo_pago.blanco.de_legado || o.acuerdo_pago.negro?.de_legado) && (
+                      <div className="mt-1 text-xs font-medium text-amber-700">Acuerdo de pago sin cargar: el plazo salió del dato viejo de la ficha del proveedor.</div>
+                    )}
                     {o.acuerdo_de_ficha && <div className="mt-1 text-xs text-muted-foreground">Orden anterior al cambio: se muestra el acuerdo de la ficha del proveedor.</div>}
                   </div>
 
@@ -159,7 +162,7 @@ export function DetalleOrden({ ordenId, onCerrar, onEditar, onEnviar, onCambio, 
                     </div>
                   )}
                   <div className="mt-2 text-xs text-muted-foreground">
-                    Fecha estimada de entrega + los días acordados. Cuando se valida la factura se reemplazan por el vencimiento real.
+                    Fecha estimada de entrega + los días acordados (si esa fecha ya pasó, desde el día en que se guardó). Cuando se valida la factura se reemplazan por el vencimiento real.
                   </div>
                 </div>
 

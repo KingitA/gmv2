@@ -17,6 +17,11 @@ export interface ResultadoImportacionOC {
     proveedorId: string
     /** En qué vienen las cantidades del archivo: lo elige el usuario, no se adivina */
     unidad: "bulto" | "unidad"
+    /**
+     * A qué corresponde el PRECIO del archivo. En el sistema el precio es siempre por unidad:
+     * si el archivo lo trae por bulto, la orden lo divide por las unidades por bulto del catálogo.
+     */
+    precioPor: "bulto" | "unidad"
     /** Renglones vinculados a un artículo del catálogo */
     items: { articulo_id: string; cantidad: number; precio: number | null; descuento1: number | null }[]
     /** Renglones que no se pudieron vincular: van a revisión dentro de la orden, no se pueden guardar así */
@@ -37,6 +42,9 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
     const [stats, setStats] = useState<any>(null)
     const [step, setStep] = useState<"upload" | "preview">("upload")
     const [unidad, setUnidad] = useState<"bulto" | "unidad" | "">("")
+    // por defecto, el precio viene en la misma unidad que la cantidad
+    const [precioPor, setPrecioPor] = useState<"bulto" | "unidad" | "">("")
+    const precioPorFinal: "bulto" | "unidad" | "" = precioPor || unidad
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -99,7 +107,7 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
             toast.error("El archivo no tiene renglones con cantidad.")
             return
         }
-        onImportSuccess({ proveedorId, unidad, items, sinArticulo })
+        onImportSuccess({ proveedorId, unidad, precioPor: precioPorFinal === "unidad" ? "unidad" : "bulto", items, sinArticulo })
         setOpen(false)
         resetState()
     }
@@ -110,6 +118,7 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
         setStats(null)
         setStep("upload")
         setUnidad("")
+        setPrecioPor("")
     }
 
     return (
@@ -232,6 +241,17 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
                                             <SelectItem value="unidad">unidades</SelectItem>
                                         </SelectContent>
                                     </Select>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-medium">Los precios del archivo son por:</span>
+                                    <Select value={precioPorFinal} onValueChange={(v) => setPrecioPor(v === "unidad" ? "unidad" : "bulto")}>
+                                        <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Elegir…" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="bulto">bulto</SelectItem>
+                                            <SelectItem value="unidad">unidad</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <span className="text-xs text-muted-foreground">(si es por bulto, se divide por las unidades por bulto del artículo)</span>
                                 </div>
                                 <div className="text-muted-foreground">
                                     Lo que no tiene artículo queda a revisión dentro de la orden: hay que vincularlo o descartarlo antes de guardar.

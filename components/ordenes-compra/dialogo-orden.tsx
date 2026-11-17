@@ -59,6 +59,8 @@ export interface InicioOrden {
   importados?: { articulo_id: string; cantidad: number; precio: number | null; descuento1: number | null }[]
   /** En qué vienen las cantidades del archivo */
   unidadImportada?: "bulto" | "unidad"
+  /** A qué corresponde el precio del archivo (en el sistema el precio es siempre por unidad) */
+  precioImportadoPor?: "bulto" | "unidad"
   sinArticulo?: RenglonSinArticulo[]
 }
 
@@ -80,6 +82,14 @@ const renglonDe = (a: ArticuloParaPedir, f: Fila) => ({
   unidades_por_bulto: a.unidades_por_bulto, iva_compras: a.iva_compras,
 })
 const TOPE_FILAS = 150
+
+/**
+ * Precio de un archivo importado → precio POR UNIDAD (lo único que guarda el sistema).
+ * Si el archivo lo trae por bulto se divide por las unidades por bulto del catálogo; con un
+ * artículo sin unidades por bulto (1) queda igual y la fila lo marca en rojo.
+ */
+const precioPorUnidad = (precio: number, por: "bulto" | "unidad" | undefined, unidadesPorBulto: number) =>
+  por === "bulto" && unidadesPorBulto > 1 ? Math.round((precio / unidadesPorBulto) * 1e6) / 1e6 : precio
 
 // ─── Una fila de la tabla (memo: escribir en una no redibuja las otras) ────────────────────
 const FilaArticulo = memo(function FilaArticulo({ a, f, onCambio, onUsar }: {
@@ -326,6 +336,7 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
         const p = await preparar(inicio.proveedorId, { conservar: false, aplicar: !!inicio.aplicarSugerencia })
         if (!vivo || !p || !inicio.importados?.length) return
         const unidad = inicio.unidadImportada === "unidad" ? "unidad" : "bulto"
+        const ubDe = new Map(p.articulos.map((a) => [a.id, a.unidades_por_bulto]))
         setFilas((prev) => {
           const out = { ...prev }
           for (const i of inicio.importados!) {
@@ -334,7 +345,7 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
             // las cantidades del archivo se suman si el artículo viene repetido
             out[i.articulo_id] = {
               ...base, tipo: unidad, cantidad: (base.cantidad || 0) + (Number(i.cantidad) || 0),
-              precio: i.precio != null && i.precio > 0 ? i.precio : base.precio,
+              precio: i.precio != null && i.precio > 0 ? precioPorUnidad(i.precio, inicio.precioImportadoPor, ubDe.get(i.articulo_id) ?? 1) : base.precio,
               d1: i.descuento1 != null && i.descuento1 > 0 ? i.descuento1 : base.d1,
             }
           }
@@ -397,15 +408,17 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
   const vincular = async (indice: number, art: any | null) => {
     if (!art || !proveedor) return
     const pendiente = sinArticulo[indice]
+    let ub = porId.get(art.id)?.unidades_por_bulto ?? 1
     if (!porId.has(art.id)) {
       extras.current = [...extras.current, art.id]
-      await preparar(proveedor.id, { conservar: true })
+      const p = await preparar(proveedor.id, { conservar: true })
+      ub = p?.articulos.find((a) => a.id === art.id)?.unidades_por_bulto ?? 1
     }
     const unidad = inicio?.unidadImportada === "unidad" ? "unidad" : "bulto"
     setFilas((prev) => {
       const base = prev[art.id]
       if (!base) return prev
-      return { ...prev, [art.id]: { ...base, tipo: unidad, cantidad: (base.cantidad || 0) + pendiente.cantidad, precio: pendiente.precio > 0 ? pendiente.precio : base.precio } }
+      return { ...prev, [art.id]: { ...base, tipo: unidad, cantidad: (base.cantidad || 0) + pendiente.cantidad, precio: pendiente.precio > 0 ? precioPorUnidad(pendiente.precio, inicio?.precioImportadoPor, ub) : base.precio } }
     })
     setSinArticulo((l) => l.filter((_, i) => i !== indice))
     toast.success(`"${pendiente.descripcion}" quedó vinculado a ${art.descripcion}.`)
@@ -430,14 +443,17 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
   // Cuándo se paga: lo mismo que va a generar la base como vencimientos estimados
   const pagos = useMemo(() => {
     if (!acuerdo || !fechaEntrega) return []
+    // fecha de entrega ya pasada (orden vieja): el plazo corre desde hoy, igual que en la base
+    const base = fechaEntrega < hoyISO() ? hoyISO() : fechaEntrega
     return [
-      ...planDePagos(totales.total_blanco, fechaEntrega, acuerdoDelCanal(acuerdo, "blanco")).map((p) => ({ ...p, canal: "blanco" as const })),
-      ...planDePagos(totales.total_negro, fechaEntrega, acuerdoDelCanal(acuerdo, "negro")).map((p) => ({ ...p, canal: "negro" as const })),
+      ...planDePagos(totales.total_blanco, base, acuerdoDelCanal(acuerdo, "blanco")).map((p) => ({ ...p, canal: "blanco" as const })),
+      ...planDePagos(totales.total_negro, base, acuerdoDelCanal(acuerdo, "negro")).map((p) => ({ ...p, canal: "negro" as const })),
     ].sort((a, b) => a.fecha.localeCompare(b.fecha))
   }, [acuerdo, fechaEntrega, totales.total_blanco, totales.total_negro])
   const hayNegro = totales.total_negro > 0
   const hayBlanco = totales.total_blanco > 0
   const sinPlazo = pagos.some((p) => p.sin_plazo)
+  const deLegado = !!acuerdo && (!!acuerdo.blanco.de_legado || !!acuerdo.negro?.de_legado)
 
   const guardar = async (enviar: boolean) => {
     if (guardando || !proveedor) return
@@ -521,7 +537,7 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
                   )}
                   {editarPago && (
                     <div className="space-y-2">
-                      <EditorCanal titulo="Lo que viene con factura" c={acuerdo.blanco} onChange={(c) => setAcuerdo({ ...acuerdo, blanco: c })} />
+                      <EditorCanal titulo="Lo que viene con factura" c={acuerdo.blanco} onChange={(c) => setAcuerdo({ ...acuerdo, blanco: { ...c, de_legado: undefined } })} />
                       <label className="flex items-center gap-2 text-sm">
                         <Checkbox checked={!acuerdo.negro} onCheckedChange={(v) => setAcuerdo({ ...acuerdo, negro: v ? null : { ...canalVacio(), ...acuerdo.blanco } })} />
                         Lo que viene sin factura se paga igual
@@ -538,6 +554,12 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
                           <b>{fecha(p.fecha)}</b> · {moneda(p.monto)}{p.forma_pago ? ` · ${p.forma_pago}` : ""}{hayNegro && hayBlanco ? ` · ${p.canal === "blanco" ? "con factura" : "sin factura"}` : ""}
                         </span>
                       ))}
+                    </div>
+                  )}
+                  {deLegado && (
+                    <div className="mt-1.5 flex items-start gap-1.5 text-xs font-medium text-amber-700">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      Acuerdo de pago sin cargar: el plazo salió del dato viejo de la ficha del proveedor. Revisalo con “Cambiar” y cargá el acuerdo en la ficha fiscal.
                     </div>
                   )}
                   {sinPlazo && conCantidad.length > 0 && (

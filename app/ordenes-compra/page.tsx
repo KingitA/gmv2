@@ -112,7 +112,7 @@ function OrdenesCompra() {
   const abrirEnviar = (id: string) => setEnviarId(id)
 
   const alImportar = (r: ResultadoImportacionOC) => {
-    setInicio({ proveedorId: r.proveedorId, importados: r.items, sinArticulo: r.sinArticulo, unidadImportada: r.unidad })
+    setInicio({ proveedorId: r.proveedorId, importados: r.items, sinArticulo: r.sinArticulo, unidadImportada: r.unidad, precioImportadoPor: r.precioPor })
     setDialogoAbierto(true)
   }
 
