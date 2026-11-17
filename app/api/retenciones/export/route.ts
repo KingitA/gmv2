@@ -82,6 +82,15 @@ export async function GET(request: Request) {
         )
       })
       const contenido = lineas.map((l) => l + '\r\n').join('')
+      // E-61: queda anotado que este período se exportó a SICORE. Desde ahí, una orden con
+      // certificado de ese período no se puede eliminar (se anula). Si la tabla todavía no
+      // existe (migración 20261117t), la descarga sigue igual.
+      const { error: expErr } = await supabase.from('retenciones_exportaciones').insert({
+        formato: 'txt', desde, hasta, certificados: emitidas.length,
+        total: emitidas.reduce((s: number, c: any) => s + Number(c.monto ?? 0), 0),
+        usuario_id: auth.user.id,
+      })
+      if (expErr) console.warn('[retenciones/export] no se anotó la exportación:', expErr.message)
       const nombre = `RET_OP_GAN_${desde.slice(0, 7).replace('-', '')}.TXT`
       return new NextResponse(contenido, {
         headers: {

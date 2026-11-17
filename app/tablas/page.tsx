@@ -61,6 +61,7 @@ const GRUPOS: Grupo[] = [
     items: [
       { href: "/tablas/bancos", icon: Building2, title: "Bancos y cuentas", desc: "Cuentas propias y CBU/CVU para reconocer pagos" },
       { href: "/tablas/padron-iibb", icon: FileSpreadsheet, title: "Padrón de IIBB", desc: "Alícuotas de percepción por CUIT" },
+      { href: "/tablas/retenciones", icon: FileSpreadsheet, title: "Retención de Ganancias", desc: "Alícuotas y mínimos de cada régimen (RG 830)", soloAdmin: true },
     ],
   },
 ]
