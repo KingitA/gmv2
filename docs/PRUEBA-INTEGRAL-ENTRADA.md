@@ -49,6 +49,7 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 
 12. **Cargo al transporte: ¿con IVA o neto?** — «Respecto a lo del transporte sí, debe cobrarse todo, neto + impuestos» → **Hecho en `entrada-t1b-diferencias`**: el cargo al transporte va por el total con IVA.
 13. **Tolerancia de precio y suma de renglones** — «Bien, siempre y cuando no afecte al total de la factura... por ejemplo, dos ítems de $10 cada uno deberían sumar $20. Si el subtotal es $21 hay un error, no hay problema con redondear centavos, el tema es que a través de este redondeo podemos llegar a tener diferencia entre la suma de los ítems y el total del comprobante.» → **Hecho en la rama**: (a) tolerancia de precio de 0,5 % por unidad con tope de $1.000 netos por línea (`TOLERANCIA_PRECIO` / `TOPE_DIFERENCIA_PESOS` en `lib/compras/diferencias.ts`); (b) regla dura E-46: los renglones (todos, también los "no es mercadería") tienen que sumar el neto del comprobante, y neto + IVA + percepciones el total; solo se toleran centavos (diferencia menor a $1: `TOLERANCIA_SUMA_PESOS` en `lib/compras/control-suma.ts`). Si no cierra, la verificación lo muestra arriba en rojo con los dos números y el comprobante NO se puede validar (lo controla la ruta y la función SQL, migración `20261117d`); (c) ningún redondeo cambia la deuda: es siempre el total de la factura.
+14. **Mercadería de más (sobrante)** — «En caso de que llegue mercadería de más debe aparecer un cartel para ver si se recibe y esperamos factura, o solo se recibe, ajusta stock pero no se paga de más. Esto para cuando envían mercadería bonificada.» → **Hecho en `entrada-t1b-diferencias`**: al resolver un sobrante la ventana pregunta, sin opción por defecto: (a) *Se recibe y esperamos la factura* → queda una nota de débito esperada (`comprobantes_compra` tipo ND, estado `esperada`, origen `sobrante`) por las unidades de más al precio neto de la orden + IVA, asociada a la factura; se ve en "Notas esperadas" y se quita cuando se carga la factura real; (b) *Se recibe sin cargo (bonificado)* → el stock queda como entró, sin deuda ni nota, y el `ultimo_costo` baja prorrateado (neto facturado × unidades pagadas ÷ unidades recibidas), sin tocar la lista; (c) *Se devuelve* → sale del stock. En los tres casos la deuda sigue siendo el total de la factura.
 
 ## Problemas
 
@@ -253,7 +254,9 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 
 **No se retiró, y por qué:** `processOCRData` (en `/api/recepciones/[id]/ocr`) solo corre para recepciones SIN orden de compra, que ya no se pueden crear (las creaba `/api/recepciones`): queda para las que existan. `runArticleLevelOCR` (`lib/ai/email-invoice-processor.ts`) sigue en uso por las facturas que entran por mail; hace lo mismo que `matchAndCreateDetalle` con otra lógica y habría que unificarlo cuando se toque el circuito de mails (ya cumple la convención de cantidades).
 
-**Queda:** nota de débito esperada para un sobrante aceptado (espera la respuesta de Juan), y la devolución con su kardex dentro de la misma transacción (hoy el stock y el registro van en la transacción y el kardex se anota después; si falla, avisa).
+**Sobrante (decisión 14 de Juan):** hecho; la pantalla de notas de crédito pasó a llamarse "Notas esperadas de proveedores" y lista aparte la mercadería de más que falta facturar. Una nota de débito esperada no se puede registrar como nota de crédito (la ruta lo rechaza). La conciliación con la factura real es manual: se carga la factura en la orden y se quita la esperada de la lista.
+
+**Queda:** la devolución con su kardex dentro de la misma transacción (hoy el stock y el registro van en la transacción y el kardex se anota después; si falla, avisa).
 
 **Coordinación con T1-A (orden de compra), pendiente hasta que su migración `20261117n` esté en main:**
 - Hecho acá: el depósito también ve órdenes `enviada`, `confirmada` y `en_camino` (`ESTADOS_A_RECIBIR`).
@@ -262,4 +265,4 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 
 **Dudas de negocio abiertas para Juan:**
 1. ~~Factura con un impuesto sin campo para cargarlo.~~ Resuelto: las columnas `impuestos_internos` y `otros_impuestos` ya existían; ahora entran en el control y se pueden cargar.
-2. Sobrante aceptado: hoy queda aceptado sin anotar que el proveedor lo va a facturar. Recomendación: dejar una "nota de débito esperada" cuando se haga la parte de pagos.
+2. ~~Sobrante aceptado sin anotar que el proveedor lo va a facturar.~~ Resuelto con la decisión 14.

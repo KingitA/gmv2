@@ -210,3 +210,28 @@ export function reclamablePorDevolucion(dif: DiferenciaLinea, devolverUnidades: 
   const unidades = r4(Math.max(0, dif.factura.unidades - nosQuedamos))
   return { unidades, ...importe(unidades * dif.factura.neto_unidad, dif.factura.iva_porcentaje) }
 }
+
+/**
+ * Llegó más mercadería que la facturada (sobrante). Decisión de Juan, 17/11/2026: "debe aparecer
+ * un cartel para ver si se recibe y esperamos factura, o solo se recibe, ajusta stock pero no se
+ * paga de más. Esto para cuando envían mercadería bonificada."
+ *
+ *   · espera_factura: lo que el proveedor va a facturar por esas unidades = unidades de más al
+ *     precio neto de la ORDEN (si el artículo no estaba en la orden, al facturado) + IVA. Queda
+ *     como nota de débito esperada. No es deuda todavía: la deuda es lo que dicen los comprobantes.
+ *   · bonificado: no se paga nada más. El costo real por unidad baja, porque lo pagado se reparte
+ *     entre más unidades: neto facturado × (unidades pagadas ÷ unidades recibidas). Va solo al
+ *     último costo; el precio de lista del artículo no se toca.
+ * null = no hay sobrante.
+ */
+export function cuentaSobrante(dif: DiferenciaLinea): { unidades: number; espera_factura: Importe; ultimo_costo_bonificado: number } | null {
+  if (!dif.cantidad || dif.cantidad.tipo !== "sobrante" || !dif.factura) return null
+  const unidades = dif.cantidad.unidades
+  const precio = dif.oc && dif.oc.neto_unidad > 0 ? dif.oc.neto_unidad : dif.factura.neto_unidad
+  const pagadas = Math.max(0, dif.factura.unidades - dif.factura.bonificadas)
+  return {
+    unidades,
+    espera_factura: importe(unidades * precio, dif.factura.iva_porcentaje),
+    ultimo_costo_bonificado: dif.recibido_unidades > 0 ? r4((dif.factura.neto_unidad * pagadas) / dif.recibido_unidades) : 0,
+  }
+}

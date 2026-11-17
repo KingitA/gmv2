@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { conversionesDeRecepcion } from '@/lib/deposito/recepciones';
 import { aUnidadesBase, unidadesPorBultoDe } from '@/lib/deposito/unidades';
-import { calcularDiferencia, combinarLineasOC, reclamablePorDevolucion, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
+import { calcularDiferencia, combinarLineasOC, cuentaSobrante, reclamablePorDevolucion, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
 import { TIPOS_CON_PRECIOS } from '@/lib/compras/finalizar-oc';
 import { registrarCostoEnHistorial } from '@/lib/compras/costo-y-kardex';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
@@ -40,8 +40,9 @@ import { moneda } from '@/lib/formato';
 // (comprobantes_compra estado=esperada) que se confirma con ncp_registrar cuando llega el
 // documento y se imputa contra la factura con ccp_imputar_credito.
 
-type Destino = 'empresa' | 'proveedor' | 'transporte' | 'descuento_fuera_factura';
-const DESTINOS: Destino[] = ['empresa', 'proveedor', 'transporte', 'descuento_fuera_factura'];
+// espera_factura / bonificado: las dos formas de quedarse con un SOBRANTE (decisión de Juan, 17/11)
+type Destino = 'empresa' | 'proveedor' | 'transporte' | 'descuento_fuera_factura' | 'espera_factura' | 'bonificado';
+const DESTINOS: Destino[] = ['empresa', 'proveedor', 'transporte', 'descuento_fuera_factura', 'espera_factura', 'bonificado'];
 
 class Rechazo extends Error {
     constructor(message: string, public codigo: string) { super(message); }
@@ -140,6 +141,10 @@ function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destin
     }
     const base = { devolver_unidades: devolver, transporte_id: d.transporte_id || null, descripcion: (d.descripcion || '').trim() || null, detalle: dif };
 
+    if ((destino === 'espera_factura' || destino === 'bonificado') && (tipo !== 'cantidad' || dif.cantidad?.tipo !== 'sobrante')) {
+        throw new Rechazo('"Esperamos la factura" y "sin cargo (bonificado)" son solo para mercadería que llegó de más.', 'destino_invalido');
+    }
+
     if (tipo === 'precio') {
         const p = dif.precio;
         if (!p || !dif.factura) throw new Rechazo('Este artículo no tiene diferencia de precio entre la orden y la factura.', 'sin_diferencia');
@@ -188,8 +193,26 @@ function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destin
         const faltaVsOC = dif.oc ? Math.max(0, dif.oc.unidades - dif.recibido_unidades) : 0;
         return { ...base, unidades: faltaVsOC, neto: 0, iva: 0, total: 0, origen_nc: null };
     }
-    if (c.tipo === 'sobrante' && destino !== 'empresa') {
-        throw new Rechazo(`Llegaron ${c.unidades} unidades MÁS de las facturadas: no corresponde una nota de crédito ni un cargo al transporte. Se puede aceptar el sobrante o devolverlo.`, 'sobrante');
+    // ── SOBRANTE: llegó más de lo facturado. Hay que decir expresamente qué se hace (sin opción por defecto) ──
+    if (c.tipo === 'sobrante') {
+        const s = cuentaSobrante(dif)!;
+        if (destino === 'espera_factura') {
+            // Se recibe y el proveedor lo va a facturar: queda una nota de débito ESPERADA
+            if (devolver > 0) throw new Rechazo('Si se devuelve el sobrante no hay factura que esperar.', 'destino_invalido');
+            return { ...base, unidades: s.unidades, neto: s.espera_factura.neto, iva: s.espera_factura.iva, total: s.espera_factura.total, origen_nc: 'sobrante',
+                descripcion: base.descripcion || `Mercadería de más ${sku}: ${s.unidades} u recibidas sin facturar` };
+        }
+        if (destino === 'bonificado') {
+            // Se recibe sin cargo: no se paga de más; el costo real por unidad baja (solo último costo)
+            if (devolver > 0) throw new Rechazo('Si se devuelve el sobrante no queda como bonificado.', 'destino_invalido');
+            return { ...base, unidades: s.unidades, neto: 0, iva: 0, total: 0, origen_nc: null,
+                costo: { precio_compra: 0, descuento1: 0, descuento2: 0, descuento3: 0, descuento4: 0, ultimo_costo: s.ultimo_costo_bonificado } };
+        }
+        if (destino === 'empresa' && devolver > 0) {
+            // Se devuelve: sale del stock; no estaba facturado, no hay nada que reclamar
+            return { ...base, unidades: c.unidades, neto: 0, iva: 0, total: 0, origen_nc: null };
+        }
+        throw new Rechazo(`Llegaron ${c.unidades} unidades MÁS de las facturadas. Hay que elegir qué se hace: se recibe y se espera la factura, se recibe sin cargo (bonificado), o se devuelve.`, 'sobrante');
     }
     if (destino === 'empresa') return { ...base, unidades: c.unidades, neto: c.neto, iva: c.iva, total: c.total, origen_nc: null };
     return { ...base, unidades: c.unidades, neto: c.neto, iva: c.iva, total: c.total,
@@ -206,7 +229,7 @@ function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destin
  */
 async function resolverSinFuncion(supabase: any, item: any, hermanas: any[], tipo: 'precio' | 'cantidad', destino: Destino, p: any, usuarioId: string) {
     if (destino !== 'empresa' || p.devolver_unidades > 0) {
-        throw new Rechazo('Todavía no se puede reclamar al proveedor, cargar al transporte ni devolver mercadería desde acá: falta aplicar una actualización del sistema (migración 20261117b). No se cambió nada. Mientras tanto solo se puede elegir que la empresa lo asuma.', 'falta_migracion');
+        throw new Rechazo('Todavía no se puede reclamar al proveedor, cargar al transporte, resolver un sobrante ni devolver mercadería desde acá: falta aplicar una actualización del sistema (migración 20261117b). No se cambió nada. Mientras tanto solo se puede elegir que la empresa lo asuma.', 'falta_migracion');
     }
     // Ya resuelta en esta línea o en otra entrega del mismo artículo de la orden
     const yaEsta = (l: any) => (tipo === 'precio' ? !!l.precio_verificado : !!l.cantidad_diferencia_destino);
@@ -357,6 +380,10 @@ export async function POST(
 
                 const mensaje = r.ya_resuelta
                     ? 'Esta diferencia ya estaba resuelta: no se generó nada nuevo.'
+                    : destino === 'espera_factura'
+                        ? `La mercadería de más quedó recibida y se espera la factura del proveedor por ${moneda(p.total)} (${moneda(p.neto)} neto + ${moneda(p.iva)} de IVA). No es deuda hasta que llegue.`
+                    : destino === 'bonificado'
+                        ? `La mercadería de más quedó recibida sin cargo: no se paga nada más${costo && (costo.ultimo_costo ?? 0) > 0 ? ` y el último costo del artículo pasó a ${moneda(costo.ultimo_costo)} por unidad` : ''}. El precio de lista no se tocó.`
                     : destino === 'proveedor' || destino === 'descuento_fuera_factura'
                         ? `Quedó una nota de crédito esperada por ${moneda(p.total)} (${moneda(p.neto)} neto + ${moneda(p.iva)} de IVA).`
                         : destino === 'transporte'

@@ -42,6 +42,7 @@ const BANDERA: Record<Bandera, { texto: string; clase: string }> = {
 const DESTINO: Record<string, string> = {
     empresa: "lo asume la empresa", proveedor: "reclamo al proveedor", transporte: "cargo al transporte",
     descuento_fuera_factura: "descuento fuera de factura", resuelto: "resuelto",
+    espera_factura: "recibido, se espera la factura", bonificado: "recibido sin cargo (bonificado)",
 }
 
 export default function VerificacionOCPage() {
@@ -295,6 +296,7 @@ export default function VerificacionOCPage() {
                     <CardContent>
                         <div className="text-xl font-bold">{tieneComps ? moneda(v.resumen.total_facturado) : <span className="text-muted-foreground">Sin comprobantes</span>}</div>
                         {v.resumen.nc_esperadas > 0 && <div className="text-xs text-muted-foreground mt-1">Notas de crédito esperadas del proveedor: {moneda(v.resumen.nc_esperadas)}</div>}
+                        {v.resumen.nd_esperadas > 0 && <div className="text-xs text-muted-foreground mt-1">Mercadería de más que falta facturar: {moneda(v.resumen.nd_esperadas)}</div>}
                     </CardContent>
                 </Card>
                 <Card className="border-l-4 border-l-green-500">

@@ -12,7 +12,7 @@ import { Loader2, Scale } from "lucide-react"
 import { toast } from "sonner"
 import { moneda } from "@/lib/formato"
 import { cant } from "@/lib/deposito/unidades"
-import { reclamablePorDevolucion, type Importe } from "@/lib/compras/diferencias"
+import { cuentaSobrante, reclamablePorDevolucion, type Importe } from "@/lib/compras/diferencias"
 import type { FilaVerificacion } from "@/lib/compras/verificacion"
 
 // Ventana "Resolver diferencia" (E-94, E-44, E-43).
@@ -22,7 +22,7 @@ import type { FilaVerificacion } from "@/lib/compras/verificacion"
 // servidor (viene en la fila); acá solo se elige a quién se imputa.
 
 type DestinoPrecio = "empresa" | "proveedor" | "descuento_fuera_factura"
-type DestinoCantidad = "empresa" | "proveedor" | "transporte" | "devolver"
+type DestinoCantidad = "empresa" | "proveedor" | "transporte" | "devolver" | "espera_factura" | "bonificado"
 
 const pesos = (i: Importe) => `${moneda(i.total)} (${moneda(i.neto)} neto + ${moneda(i.iva)} de IVA)`
 
@@ -83,6 +83,7 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
         return 0
     }, [destinoCantidad, rechazo, noPedido, sobrante, dif])
     const reclamoDevolucion = devolver > 0 ? reclamablePorDevolucion(dif, devolver) : null
+    const sobra = sobrante ? cuentaSobrante(dif) : null
 
     // ── Vista previa: qué va a pasar ──
     const previa: string[] = []
@@ -97,7 +98,13 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
         }
     }
     if ((conCantidad || noPedido) && destinoCantidad) {
-        if (destinoCantidad === "empresa") {
+        if (destinoCantidad === "espera_factura" && sobra) {
+            previa.push(`La mercadería de más se queda en el stock y se espera la factura del proveedor por ${pesos(sobra.espera_factura)} (${cant(sobra.unidades)} u al precio de la orden).`)
+            previa.push("No es deuda todavía: la deuda sigue siendo el total de los comprobantes cargados. Queda anotada en \"Notas esperadas\" hasta que llegue.")
+        } else if (destinoCantidad === "bonificado" && sobra) {
+            previa.push("La mercadería de más se queda en el stock SIN cargo: no se paga nada más y no se espera ninguna factura.")
+            previa.push(`Último costo del artículo: baja a ${moneda(sobra.ultimo_costo_bonificado)} por unidad (lo pagado repartido entre todo lo recibido). El precio de lista no se toca.`)
+        } else if (destinoCantidad === "empresa") {
             previa.push(noPedido ? "El artículo queda aceptado como recibido (no estaba en la orden)." : sobrante ? "El sobrante queda aceptado: la mercadería se queda en el stock." : "La empresa asume el faltante: no se reclama nada.")
             previa.push("Stock y cuenta corriente: sin cambios.")
         } else if (destinoCantidad === "transporte") {
@@ -273,11 +280,14 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
                     {sobrante && (
                         <div className="space-y-2">
                             <Label>SOBRANTE: llegaron {cant(dif.cantidad!.unidades)} u más de las facturadas</Label>
+                            <p className="text-xs text-muted-foreground">Hay que elegir qué se hace con esa mercadería. En los tres casos la deuda con el proveedor sigue siendo el total de la factura.</p>
                             <div className="grid gap-2">
-                                <Opcion activa={destinoCantidad === "empresa"} onClick={() => setDestinoCantidad("empresa")}
-                                    titulo="Aceptar el sobrante" detalle="Se queda en el stock. Si el proveedor lo factura después, se carga esa factura como un comprobante más." />
+                                <Opcion activa={destinoCantidad === "espera_factura"} onClick={() => setDestinoCantidad("espera_factura")}
+                                    titulo="Se recibe y esperamos la factura" detalle={`Se queda en el stock. El proveedor lo va a facturar${sobra ? `: ${pesos(sobra.espera_factura)}` : ""}. Queda anotado como nota esperada.`} />
+                                <Opcion activa={destinoCantidad === "bonificado"} onClick={() => setDestinoCantidad("bonificado")}
+                                    titulo="Se recibe sin cargo (bonificado)" detalle="Se queda en el stock y NO se paga de más. Baja el último costo del artículo; el precio de lista no cambia." />
                                 <Opcion activa={destinoCantidad === "devolver"} onClick={() => setDestinoCantidad("devolver")}
-                                    titulo="Devolver el sobrante" detalle={`Salen ${cant(dif.cantidad!.unidades)} u del stock. No estaba facturado: sin nota de crédito.`} />
+                                    titulo="Se devuelve" detalle={`Salen ${cant(dif.cantidad!.unidades)} u del stock. No estaba facturado: sin nota de crédito.`} />
                             </div>
                         </div>
                     )}

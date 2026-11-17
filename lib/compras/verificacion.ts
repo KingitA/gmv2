@@ -103,6 +103,8 @@ export interface Verificacion {
     total_facturado: number
     /** Notas de crédito que se esperan del proveedor (todavía no llegaron), con IVA */
     nc_esperadas: number
+    /** Lo que el proveedor va a facturar por mercadería que llegó de más (notas de débito esperadas), con IVA */
+    nd_esperadas: number
     articulos: number
     ok: number
     con_diferencias: number
@@ -224,9 +226,13 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
   }
   let totalFacturado = 0
   let ncEsperadas = 0
+  let ndEsperadas = 0
   for (const c of d.comprobantes) {
     const total = num(c.total_factura_declarado)
-    if (c.estado === "esperada") ncEsperadas += total
+    if (c.estado === "esperada") {
+      if (ES_DEBITO_NOTA.includes(c.tipo_comprobante)) ndEsperadas += total
+      else ncEsperadas += total
+    }
     else if (esRemito(c.tipo_comprobante)) continue
     else if (ES_CREDITO.includes(c.tipo_comprobante)) totalFacturado -= total
     else if (ES_DEBITO_NOTA.includes(c.tipo_comprobante) || esComprobanteConPrecios(c.tipo_comprobante)) totalFacturado += total
@@ -240,6 +246,7 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
       total_oc: r2(totalOC),
       total_facturado: r2(totalFacturado),
       nc_esperadas: r2(ncEsperadas),
+      nd_esperadas: r2(ndEsperadas),
       articulos: filas.length,
       ok,
       con_diferencias: filas.length - ok,

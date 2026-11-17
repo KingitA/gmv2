@@ -23,11 +23,17 @@ export async function POST(
 
         const { data: nc } = await supabase
             .from('comprobantes_compra')
-            .select('id, estado, comprobante_asociado_id, ajusta_stock, proveedor_id')
+            .select('id, estado, tipo_comprobante, comprobante_asociado_id, ajusta_stock, proveedor_id')
             .eq('id', nc_id)
             .maybeSingle();
 
         if (!nc) return NextResponse.json({ error: 'NC no encontrada' }, { status: 404 });
+        // Una nota de DÉBITO esperada (mercadería que llegó de más y el proveedor va a facturar) no se
+        // registra por acá: esto ACREDITA la cuenta corriente. Cuando llega, se carga la factura o la
+        // nota de débito en la orden como un comprobante más y la esperada se quita de la lista.
+        if (['ND', 'NDA', 'NDB', 'NDC'].includes(nc.tipo_comprobante)) {
+            return NextResponse.json({ error: 'Es una nota de débito esperada (mercadería de más), no una nota de crédito. Cuando llegue, cargá la factura o la nota de débito del proveedor en la orden y quitá esta de la lista.' }, { status: 409 });
+        }
         if (nc.estado !== 'esperada') {
             return NextResponse.json({ error: `La NC está en estado ${nc.estado}, no 'esperada'` }, { status: 409 });
         }

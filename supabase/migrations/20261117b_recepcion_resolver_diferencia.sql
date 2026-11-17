@@ -37,8 +37,10 @@ CREATE TABLE IF NOT EXISTS public.recepciones_diferencias (
   articulo_id         uuid,
   tipo                text NOT NULL CHECK (tipo IN ('precio', 'cantidad')),
   -- empresa = se asume · proveedor = NC esperada · transporte = cargo al transporte ·
-  -- descuento_fuera_factura = NC esperada por descuento que llega aparte
-  destino             text NOT NULL CHECK (destino IN ('empresa', 'proveedor', 'transporte', 'descuento_fuera_factura')),
+  -- descuento_fuera_factura = NC esperada por descuento que llega aparte ·
+  -- espera_factura = sobrante que el proveedor va a facturar (ND esperada) ·
+  -- bonificado = sobrante recibido sin cargo
+  destino             text NOT NULL,
   unidades            numeric(18,4) NOT NULL DEFAULT 0,   -- unidades base de la diferencia
   importe_neto        numeric(14,2) NOT NULL DEFAULT 0,
   importe_iva         numeric(14,2) NOT NULL DEFAULT 0,
@@ -57,6 +59,10 @@ CREATE TABLE IF NOT EXISTS public.recepciones_diferencias (
 ALTER TABLE public.recepciones_diferencias ADD COLUMN IF NOT EXISTS orden_compra_id uuid REFERENCES public.ordenes_compra(id) ON DELETE CASCADE;
 ALTER TABLE public.recepciones_diferencias ALTER COLUMN articulo_id DROP NOT NULL;
 ALTER TABLE public.recepciones_diferencias DROP CONSTRAINT IF EXISTS recepciones_diferencias_unica;
+ALTER TABLE public.recepciones_diferencias DROP CONSTRAINT IF EXISTS recepciones_diferencias_destino_check;
+ALTER TABLE public.recepciones_diferencias
+  ADD CONSTRAINT recepciones_diferencias_destino_check
+  CHECK (destino IN ('empresa', 'proveedor', 'transporte', 'descuento_fuera_factura', 'espera_factura', 'bonificado'));
 
 -- Una resolución por orden + artículo + tipo…
 CREATE UNIQUE INDEX IF NOT EXISTS recepciones_diferencias_por_orden
@@ -123,7 +129,7 @@ BEGIN
   IF p_tipo NOT IN ('precio', 'cantidad') THEN
     RAISE EXCEPTION 'Tipo de diferencia inválido: %', p_tipo USING ERRCODE = 'P0001', DETAIL = 'tipo_invalido';
   END IF;
-  IF p_destino NOT IN ('empresa', 'proveedor', 'transporte', 'descuento_fuera_factura') THEN
+  IF p_destino NOT IN ('empresa', 'proveedor', 'transporte', 'descuento_fuera_factura', 'espera_factura', 'bonificado') THEN
     RAISE EXCEPTION 'Destino inválido: %', p_destino USING ERRCODE = 'P0001', DETAIL = 'destino_invalido';
   END IF;
 
@@ -197,6 +203,42 @@ BEGIN
       coalesce(nullif(p_datos ->> 'origen_nc', ''), CASE WHEN p_tipo = 'precio' THEN 'diferencia_precio' ELSE 'faltante' END),
       v_asociado, false
     ) RETURNING id INTO v_nc;
+  END IF;
+
+  -- ── Sobrante que se recibe y el proveedor va a facturar: nota de DÉBITO esperada ──
+  -- (decisión de Juan, 17/11). No es deuda: la deuda sigue siendo el total de los comprobantes
+  -- cargados. Cuando llega la factura o la nota de débito real se carga como un comprobante más
+  -- y esta se quita. Nunca se registra por ncp_registrar (eso ACREDITA la cuenta corriente).
+  IF p_destino = 'espera_factura' THEN
+    IF v_prov IS NULL THEN
+      RAISE EXCEPTION 'La recepción no tiene proveedor: no se puede dejar anotada la factura que se espera.' USING ERRCODE = 'P0001', DETAIL = 'sin_proveedor';
+    END IF;
+    IF v_total <= 0 THEN
+      RAISE EXCEPTION 'No se pudo valorizar la mercadería de más (el artículo no tiene precio en la orden ni en la factura).' USING ERRCODE = 'P0001', DETAIL = 'sin_importe';
+    END IF;
+    IF v_oc IS NOT NULL THEN
+      SELECT id INTO v_asociado FROM comprobantes_compra
+       WHERE orden_compra_id = v_oc
+         AND tipo_comprobante NOT IN ('NC', 'NCA', 'NCB', 'NCC', 'Reversa', 'Remito')
+         AND estado <> 'esperada'
+       ORDER BY fecha_comprobante DESC, created_at DESC
+       LIMIT 1;
+    END IF;
+    INSERT INTO comprobantes_compra (
+      orden_compra_id, proveedor_id, tipo_comprobante, numero_comprobante, fecha_comprobante,
+      total_factura_declarado, total_neto, total_iva, estado, origen_nc, comprobante_asociado_id, ajusta_stock
+    ) VALUES (
+      v_oc, v_prov, 'ND',
+      'ESPERADA-' || to_char(clock_timestamp() AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYMMDDHH24MISSMS'),
+      public.hoy_ar(), v_total, v_neto, v_iva, 'esperada', 'sobrante', v_asociado, false
+    ) RETURNING id INTO v_nc;
+  END IF;
+
+  -- ── Sobrante recibido SIN cargo (bonificado): no se paga de más. El costo real por unidad ──
+  -- baja (lo pagado se reparte entre todo lo recibido): solo el último costo, la lista no se toca.
+  IF p_destino = 'bonificado' AND v_costo IS NOT NULL AND v_it.articulo_id IS NOT NULL
+     AND coalesce(nullif(v_costo ->> 'ultimo_costo', '')::numeric, 0) > 0 THEN
+    UPDATE articulos SET ultimo_costo = (v_costo ->> 'ultimo_costo')::numeric WHERE id = v_it.articulo_id;
   END IF;
 
   -- ── Transporte: cargo en su cuenta corriente, por el TOTAL con impuestos ──

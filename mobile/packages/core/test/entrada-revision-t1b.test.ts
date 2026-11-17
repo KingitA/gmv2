@@ -1,6 +1,6 @@
 // Arreglos de la revisión de la 1ª entrega de T1-B (17/11).
 import { describe, expect, it } from "vitest"
-import { calcularDiferencia, combinarLineasOC, TOPE_DIFERENCIA_PESOS } from "../../../../lib/compras/diferencias"
+import { calcularDiferencia, combinarLineasOC, cuentaSobrante, TOPE_DIFERENCIA_PESOS } from "../../../../lib/compras/diferencias"
 import { armarVerificacion } from "../../../../lib/compras/verificacion"
 import { faltaLaFuncion } from "../../../../lib/utils/migracion-pendiente"
 
@@ -104,5 +104,67 @@ describe("faltaLaFuncion: firma distinta o caché vieja NO es 'falta la migraci�
   })
   it("si sugiere OTRA función, sigue siendo que falta la nuestra", () => {
     expect(faltaLaFuncion({ code: "PGRST202", message: `Could not find the function public.${F}(p_x) in the schema cache`, hint: "Perhaps you meant to call the function public.recepcion_aplicar_stock" }, F)).toBe(true)
+  })
+})
+
+describe("sobrante: llegó más mercadería que la facturada (decisión de Juan, 17/11)", () => {
+  // pedido 100 a $50 neto; facturado 100 a $50; llegaron 110
+  const d = calcularDiferencia({
+    oc: { cantidad_pedida: 100, factor: 1, precio_unitario: 50, descuentos: [] },
+    factura: [{ cantidad_facturada: 100, factor: 1, precio_unitario: 50, descuentos: [], iva_porcentaje: 21 }],
+    recibido_unidades: 110,
+  })
+  const s = cuentaSobrante(d)!
+  it("son 10 unidades de más", () => {
+    expect(d.cantidad).toMatchObject({ tipo: "sobrante", unidades: 10 })
+    expect(s.unidades).toBe(10)
+  })
+  it("se recibe y esperamos la factura: 10 u al precio neto de la orden + IVA", () => {
+    expect(s.espera_factura).toEqual({ neto: 500, iva: 105, total: 605 })
+  })
+  it("se recibe sin cargo (bonificado): lo pagado se reparte entre las 110 ⇒ último costo $45,4545", () => {
+    expect(s.ultimo_costo_bonificado).toBe(45.4545)
+  })
+  it("la factura vino más cara que la orden: lo esperado se valúa al precio de la ORDEN", () => {
+    const x = cuentaSobrante(calcularDiferencia({
+      oc: { cantidad_pedida: 100, factor: 1, precio_unitario: 50, descuentos: [] },
+      factura: [{ cantidad_facturada: 100, factor: 1, precio_unitario: 60, descuentos: [], iva_porcentaje: 21 }],
+      recibido_unidades: 104,
+    }))!
+    expect(x.espera_factura.neto).toBe(200)
+  })
+  it("artículo que no estaba en la orden: al precio facturado", () => {
+    const x = cuentaSobrante(calcularDiferencia({ oc: null, factura: [{ cantidad_facturada: 10, factor: 1, precio_unitario: 80, descuentos: [], iva_porcentaje: 21 }], recibido_unidades: 12 }))!
+    expect(x.espera_factura).toEqual({ neto: 160, iva: 33.6, total: 193.6 })
+  })
+  it("sin sobrante no hay cuenta", () => {
+    expect(cuentaSobrante(calcularDiferencia({ oc: null, factura: [{ cantidad_facturada: 10, factor: 1, precio_unitario: 80, descuentos: [], iva_porcentaje: 21 }], recibido_unidades: 10 }))).toBeNull()
+    expect(cuentaSobrante(calcularDiferencia({ oc: null, factura: [], recibido_unidades: 10 }))).toBeNull()
+  })
+  it("ya había unidades bonificadas en la factura: solo las cobradas cuentan como pagadas", () => {
+    const x = cuentaSobrante(calcularDiferencia({
+      oc: null,
+      factura: [
+        { cantidad_facturada: 10, factor: 1, precio_unitario: 100, descuentos: [], iva_porcentaje: 21 },
+        { cantidad_facturada: 2, factor: 1, precio_unitario: 100, descuentos: [100], iva_porcentaje: 21 },
+      ],
+      recibido_unidades: 20,
+    }))!
+    expect(x.unidades).toBe(8)
+    expect(x.ultimo_costo_bonificado).toBe(50) // $1.000 pagados ÷ 20 recibidas
+  })
+})
+
+describe("las notas de débito esperadas no se mezclan con las de crédito", () => {
+  it("la verificación las informa aparte y ninguna cambia el total facturado", () => {
+    const v = armarVerificacion({
+      ocItems: [], articulos: [], detalle: [], recItems: [], resoluciones: [],
+      comprobantes: [
+        { id: "fa", tipo_comprobante: "FA", numero_comprobante: "1-1", estado: "validado", total_factura_declarado: 1000 },
+        { id: "nc", tipo_comprobante: "NC", numero_comprobante: "ESPERADA-1", estado: "esperada", total_factura_declarado: 100 },
+        { id: "nd", tipo_comprobante: "ND", numero_comprobante: "ESPERADA-2", estado: "esperada", total_factura_declarado: 605 },
+      ],
+    })
+    expect(v.resumen).toMatchObject({ total_facturado: 1000, nc_esperadas: 100, nd_esperadas: 605 })
   })
 })
