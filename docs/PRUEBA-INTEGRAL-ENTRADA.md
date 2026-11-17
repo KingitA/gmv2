@@ -249,7 +249,11 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 | `20261117c_recepcion_corregir_conteo.sql` | Corregir lo recibido desde la oficina, con registro | El botón avisa que falta y no cambia nada |
 | `20261117d_validar_renglones_suman.sql` | La función de validar también controla la suma | El servidor ya lo controla antes de llamarla: es la segunda barrera |
 
-**Queda de la segunda entrega:** E-47 (retirar caminos viejos duplicados), E-45 (ligar el cargo al transporte con los bultos no conformes), ND esperada para un sobrante aceptado, y la devolución con su kardex dentro de la misma transacción (hoy el stock y el registro van en la transacción y el kardex se anota después; si falla, avisa).
+**Hecho después (17/11):** el control "neto + impuestos = total" suma también `impuestos_internos` y `otros_impuestos` (se cargan a mano y los pide la lectura automática); E-45: el cargo al transporte muestra y deja asentado el control de bultos de esa entrega; E-47: se retiraron `/api/deposito/recepciones/documento`, `/api/recepciones` (GET/POST) y `/api/recepciones/[id]` (GET), que nadie llamaba, y la pantalla huérfana `/ordenes-compra/[id]/comprobantes` ahora redirige a la verificación (escribía comprobantes directo desde el navegador, sin ningún control).
+
+**No se retiró, y por qué:** `processOCRData` (en `/api/recepciones/[id]/ocr`) solo corre para recepciones SIN orden de compra, que ya no se pueden crear (las creaba `/api/recepciones`): queda para las que existan. `runArticleLevelOCR` (`lib/ai/email-invoice-processor.ts`) sigue en uso por las facturas que entran por mail; hace lo mismo que `matchAndCreateDetalle` con otra lógica y habría que unificarlo cuando se toque el circuito de mails (ya cumple la convención de cantidades).
+
+**Queda:** nota de débito esperada para un sobrante aceptado (espera la respuesta de Juan), y la devolución con su kardex dentro de la misma transacción (hoy el stock y el registro van en la transacción y el kardex se anota después; si falla, avisa).
 
 **Coordinación con T1-A (orden de compra), pendiente hasta que su migración `20261117n` esté en main:**
 - Hecho acá: el depósito también ve órdenes `enviada`, `confirmada` y `en_camino` (`ESTADOS_A_RECIBIR`).
@@ -257,5 +261,5 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 - Para T1-A / E-99: la verificación ya abre una orden finalizada en solo lectura; falta el acceso desde el listado.
 
 **Dudas de negocio abiertas para Juan:**
-1. Una factura con un impuesto que el sistema no tiene campo para cargar (impuestos internos, por ejemplo) no va a cerrar el control "neto + impuestos = total". Recomendación: sumar un campo "otros impuestos" al comprobante.
+1. ~~Factura con un impuesto sin campo para cargarlo.~~ Resuelto: las columnas `impuestos_internos` y `otros_impuestos` ya existían; ahora entran en el control y se pueden cargar.
 2. Sobrante aceptado: hoy queda aceptado sin anotar que el proveedor lo va a facturar. Recomendación: dejar una "nota de débito esperada" cuando se haga la parte de pagos.

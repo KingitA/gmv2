@@ -466,7 +466,7 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
 | `/api/transportes`, proveedores, tipos de bulto/fracción | transportes, proveedores, tipos_* | R `deposito_catalogos` |
 | GET/POST `devoluciones` | devoluciones(_detalle), articulos, movimientos_stock | R `deposito_devoluciones` · O `devolucion.recibir` (idempotente) |
 | server actions `lib/actions/deposito` (stock, datos, INEXISTENTE, listados, adyacente) | articulos | R `deposito_articulos` + O `stock.ajustar` / `articulo.datos` (CAS por campo) / `articulo.inexistente`; listados y anterior/siguiente calculados localmente |
-| GET/POST `ajustes-stock`, POST `recepciones/documento` | — | no los usa ninguna pantalla web hoy: sin portar |
+| GET/POST `ajustes-stock` | — | no los usa ninguna pantalla web hoy: sin portar. (POST `recepciones/documento` se retiró el 17/11: nadie lo llamaba; las fotos van por `/api/recepciones/[id]/ocr`.) |
 | `/api/articulos/estado` (GET dado de baja por código · POST reactivar) | articulos, articulos_estado_historial | **L** `GET /api/mobile/deposito/articulo-baja` · O `articulo.reactivar` (idempotente, origen `app_deposito`) |
 
 ---
