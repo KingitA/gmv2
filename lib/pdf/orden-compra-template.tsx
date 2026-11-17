@@ -41,6 +41,9 @@ const s = StyleSheet.create({
   provRow:   { flexDirection: 'row', marginBottom: 1.5 },
   provLbl:   { fontFamily: 'Helvetica-Bold', width: 75, fontSize: 8 },
   provVal:   { fontSize: 8, color: '#444', flex: 1 },
+  pagoCol:   { width: 250, paddingLeft: 10, borderLeft: '1 solid #ccc' },
+  pagoTxt:   { fontSize: 8.5, color: '#111', lineHeight: 1.35, marginBottom: 2 },
+  pagoNota:  { fontSize: 7, color: '#777', marginTop: 2 },
 
   tableHead: { flexDirection: 'row', backgroundColor: '#111', padding: '4 3' },
   thText:    { color: '#fff', fontSize: 7, fontFamily: 'Helvetica-Bold', letterSpacing: 0.3 },
@@ -52,7 +55,7 @@ const s = StyleSheet.create({
   cEan:      { width: 66 },
   cSku:      { width: 36 },
   cDesc:     { flex: 1 },
-  cCant:     { width: 36, textAlign: 'center' },
+  cCant:     { width: 52, textAlign: 'center' },
   cUnid:     { width: 40, textAlign: 'center' },
   cPrecio:   { width: 48, textAlign: 'right' },
   cDesc4:    { width: 48, textAlign: 'center' },
@@ -70,7 +73,7 @@ const s = StyleSheet.create({
   totLbl:    { fontSize: 8, color: '#555' },
   totVal:    { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#111' },
   grand:     { flexDirection: 'row', justifyContent: 'space-between', borderTop: '2 solid #111', marginTop: 6, paddingTop: 5 },
-  grandLbl:  { fontSize: 12, fontFamily: 'Helvetica-Bold' },
+  grandLbl:  { fontSize: 10, fontFamily: 'Helvetica-Bold' },
   grandVal:  { fontSize: 14, fontFamily: 'Helvetica-Bold' },
   pie:       { padding: '4 12 8 12' },
   pieLegal:  { fontSize: 7, color: '#aaa', lineHeight: 1.5 },
@@ -117,13 +120,21 @@ export interface OrdenCompraPDFData {
   totales: {
     subtotal_neto: number
     iva: number
+    /** Neto sobre el que se calcula el IVA (puede ser menor al subtotal) */
+    base_iva?: number
+    /** Percepciones estimadas del proveedor */
+    percepciones?: number
     total: number
     unidades: number
   }
+  /** Condición de pago: una línea por cada acuerdo que aplica a la orden */
+  condiciones?: string[]
 }
 
 export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
   const { orden, empresa, proveedor, detalle, totales } = data
+  const condiciones = (data.condiciones && data.condiciones.length > 0) ? data.condiciones : (orden.condicion_pago ? [orden.condicion_pago] : [])
+  const ivaParcial = totales.base_iva != null && Math.abs(totales.base_iva - totales.subtotal_neto) > 0.005
   const fmtDesc = (ds: number[]) => {
     const activos = ds.filter(d => d > 0)
     return activos.length > 0 ? activos.map(d => porcentaje(d)).join('+') : '—'
@@ -150,10 +161,7 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
               <Text style={s.compNro}>N° {orden.numero_orden}</Text>
               <View style={s.compRow}><Text style={s.compLbl}>Fecha:</Text><Text style={s.compVal}>{fmtFechaISO(orden.fecha_orden)}</Text></View>
               {orden.fecha_estimada_recepcion && (
-                <View style={s.compRow}><Text style={s.compLbl}>Entrega est.:</Text><Text style={s.compVal}>{fmtFechaISO(orden.fecha_estimada_recepcion)}</Text></View>
-              )}
-              {orden.condicion_pago && (
-                <View style={s.compRow}><Text style={s.compLbl}>Cond. pago:</Text><Text style={s.compVal}>{orden.condicion_pago}</Text></View>
+                <View style={s.compRow}><Text style={s.compLbl}>Entrega pedida:</Text><Text style={s.compVal}>{fmtFechaISO(orden.fecha_estimada_recepcion)}</Text></View>
               )}
               <Text style={s.hojaText} render={({ pageNumber, totalPages }) =>
                 (totalPages ?? 1) > 1 ? `Hoja ${pageNumber} de ${totalPages}` : ''
@@ -169,6 +177,12 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
               {proveedor.direccion && <View style={s.provRow}><Text style={s.provLbl}>Domicilio:</Text><Text style={s.provVal}>{proveedor.direccion}</Text></View>}
               {proveedor.telefono && <View style={s.provRow}><Text style={s.provLbl}>Teléfono:</Text><Text style={s.provVal}>{proveedor.telefono}</Text></View>}
             </View>
+            <View style={s.pagoCol}>
+              <Text style={s.provTit}>CONDICIÓN DE PAGO</Text>
+              {condiciones.length > 0
+                ? condiciones.map((c, i) => <Text key={i} style={s.pagoTxt}>{c}</Text>)
+                : <Text style={s.pagoTxt}>A convenir</Text>}
+            </View>
           </View>
 
           <View style={s.tableHead}>
@@ -177,9 +191,9 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
             <Text style={[s.thText, s.cDesc]}>Descripción</Text>
             <Text style={[s.thText, s.cCant]}>Cant.</Text>
             <Text style={[s.thText, s.cUnid]}>Unid.</Text>
-            <Text style={[s.thText, s.cPrecio]}>P. Lista</Text>
+            <Text style={[s.thText, s.cPrecio]}>Lista x un.</Text>
             <Text style={[s.thText, s.cDesc4]}>Desc.</Text>
-            <Text style={[s.thText, s.cNeto]}>P. Neto</Text>
+            <Text style={[s.thText, s.cNeto]}>Neto x un.</Text>
             <Text style={[s.thText, s.cTotal]}>Total</Text>
           </View>
         </View>
@@ -190,7 +204,7 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
               <Text style={[s.td, s.cEan, { fontSize: 7, color: '#888' }]}>{l.ean13 ?? ''}</Text>
               <Text style={[s.td, s.cSku, { fontSize: 7, color: '#888' }]}>{l.sku ?? ''}</Text>
               <Text style={[s.tdBold, s.cDesc]}>{l.descripcion}</Text>
-              <Text style={[s.tdBold, s.cCant]}>{numero(l.cantidad, 0, 3)}{l.tipo_cantidad === 'bulto' ? ' BUL' : ''}</Text>
+              <Text style={[s.tdBold, s.cCant]}>{numero(l.cantidad, 0, 3)}{l.tipo_cantidad === 'bulto' ? (l.unidades_por_bulto > 1 ? ' bul x ' + entero(l.unidades_por_bulto) : ' bul') : ' un'}</Text>
               <Text style={[s.td, s.cUnid]}>{entero(l.unidades_totales)}</Text>
               <Text style={[s.td, s.cPrecio]}>{moneda(l.precio_unitario)}</Text>
               <Text style={[s.td, s.cDesc4]}>{fmtDesc(l.descuentos)}</Text>
@@ -218,18 +232,24 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
                 <Text style={s.totVal}>{moneda(totales.subtotal_neto)}</Text>
               </View>
               <View style={s.totRow}>
-                <Text style={s.totLbl}>IVA 21%</Text>
+                <Text style={s.totLbl}>{ivaParcial ? 'IVA 21% s/ ' + moneda(totales.base_iva) : 'IVA 21%'}</Text>
                 <Text style={s.totVal}>{moneda(totales.iva)}</Text>
               </View>
+              {(totales.percepciones ?? 0) > 0 && (
+                <View style={s.totRow}>
+                  <Text style={s.totLbl}>Percepciones (estimadas)</Text>
+                  <Text style={s.totVal}>{moneda(totales.percepciones)}</Text>
+                </View>
+              )}
               <View style={s.grand}>
-                <Text style={s.grandLbl}>TOTAL</Text>
+                <Text style={s.grandLbl}>TOTAL ESTIMADO</Text>
                 <Text style={s.grandVal}>{moneda(totales.total)}</Text>
               </View>
             </View>
           </View>
           <View style={s.pie}>
             <Text style={s.pieLegal}>
-              Orden de compra — documento no válido como factura. Precios netos sin IVA salvo indicación. Sujeta a confirmación del proveedor.
+              Orden de compra — documento no válido como factura. Los precios son POR UNIDAD y sin IVA; la columna Unid. es el total de unidades pedidas. Total estimado: el definitivo es el de la factura. Sujeta a confirmación del proveedor.
             </Text>
           </View>
         </View>

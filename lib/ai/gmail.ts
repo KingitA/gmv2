@@ -597,6 +597,59 @@ export async function getConnectedAccounts(userId?: string): Promise<string[]> {
     return data.map((t) => t.email)
 }
 
+// ─── Envío de mails ────────────────────────────────────
+
+/**
+ * ¿Desde qué cuenta se manda un mail del sistema? La cuenta de Gmail que conectó el usuario
+ * que lo envía; si no conectó ninguna, la cuenta conectada al sistema (la primera).
+ * Devuelve también las demás, para que la pantalla deje elegir.
+ */
+export async function cuentasParaEnviar(userId: string): Promise<{ predeterminada: string | null; todas: string[] }> {
+    const db = getSupabaseAdmin()
+    const { data, error } = await db
+        .from('google_tokens')
+        .select('email, user_id, updated_at')
+        .order('updated_at', { ascending: false })
+    if (error || !data) return { predeterminada: null, todas: [] }
+    const propias = data.filter((t: any) => t.user_id === userId).map((t: any) => t.email as string)
+    const todas = [...new Set<string>([...propias, ...data.map((t: any) => t.email as string)])]
+    return { predeterminada: todas[0] ?? null, todas }
+}
+
+/**
+ * Envía un mensaje ya armado (MIME en base64url, ver lib/compras/mail-orden.ts) desde una
+ * cuenta de Gmail conectada. Usa users.messages.send, que según la documentación de Google
+ * acepta cualquiera de estos permisos: mail.google.com, gmail.modify, gmail.compose o
+ * gmail.send. El sistema ya pide gmail.modify, así que NO hace falta reautorizar la cuenta.
+ * Si la cuenta se conectó sin ese permiso (o se lo quitaron), Google responde 403 y acá se
+ * traduce a un mensaje que dice qué hacer.
+ */
+export async function enviarMailGmail(email: string, raw: string, threadId?: string | null): Promise<{ id: string; threadId: string | null }> {
+    const gmail = await getGmailClient(email)
+    try {
+        const res = await gmail.users.messages.send({
+            userId: 'me',
+            requestBody: { raw, ...(threadId ? { threadId } : {}) },
+        })
+        if (!res.data.id) throw new Error('Gmail no devolvió el identificador del mensaje enviado.')
+        return { id: res.data.id, threadId: res.data.threadId ?? null }
+    } catch (err: any) {
+        const codigo = Number(err?.code ?? err?.response?.status)
+        const detalle = String(err?.response?.data?.error?.message || err?.message || '')
+        // el hilo guardado ya no existe (lo borraron): se manda como conversación nueva
+        if (threadId && (codigo === 404 || /thread|not found|invalid/i.test(detalle)) && codigo !== 401 && codigo !== 403) {
+            return enviarMailGmail(email, raw, null)
+        }
+        if (codigo === 403 && /insufficient|scope|permission/i.test(detalle)) {
+            throw new Error(`La cuenta ${email} está conectada sin permiso para enviar mails. Hay que volver a conectarla desde el asistente (botón "Conectar Gmail"), aceptando todos los permisos que pide Google.`)
+        }
+        if (codigo === 401 || /invalid_grant|invalid credentials/i.test(detalle)) {
+            throw new Error(`La conexión con la cuenta ${email} venció o fue revocada. Hay que volver a conectarla desde el asistente (botón "Conectar Gmail").`)
+        }
+        throw new Error(`Gmail no pudo enviar el mail: ${detalle || 'error desconocido'}`)
+    }
+}
+
 // ─── Push Notifications (Pub/Sub) ──────────────────────
 
 /**
