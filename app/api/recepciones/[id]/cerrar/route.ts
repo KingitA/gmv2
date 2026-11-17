@@ -5,6 +5,7 @@ import { conversionesDeRecepcion } from '@/lib/deposito/recepciones';
 import { aUnidadesBase, unidadesPorBultoDe } from '@/lib/deposito/unidades';
 import { calcularDiferencia, reclamablePorDevolucion, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
 import { TIPOS_CON_PRECIOS } from '@/lib/compras/finalizar-oc';
+import { registrarCostoEnHistorial } from '@/lib/compras/costo-y-kardex';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
 import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 import { nowArgentina } from '@/lib/utils';
@@ -338,6 +339,15 @@ export async function POST(
                 else if (faltaLaFuncion(rpc.error, 'recepcion_resolver_diferencia')) r = await resolverSinFuncion(supabase, item, rec, tipo, destino, p, auth.user.id);
                 else if (rpc.error.code === 'P0001' || rpc.error.code === 'P0002') throw new Rechazo(rpc.error.message, String(rpc.error.details || 'rechazado'));
                 else throw rpc.error;
+
+                // Cambió el costo de lista del artículo (se aceptó el precio facturado): queda en el historial
+                const costo = (p as { costo?: { precio_compra: number; descuento1: number; descuento2: number; descuento3: number; descuento4: number } }).costo;
+                if (!r.ya_resuelta && destino === 'empresa' && tipo === 'precio' && costo && costo.precio_compra > 0) {
+                    await registrarCostoEnHistorial(supabase, {
+                        articulo_id: item.articulo_id, proveedor_id: rec.proveedorId, precio_compra: costo.precio_compra,
+                        descuentos: [costo.descuento1, costo.descuento2, costo.descuento3, costo.descuento4],
+                    });
+                }
 
                 // Kardex de la devolución: solo si de verdad se devolvió mercadería que había entrado
                 if (!r.ya_resuelta && Number(r.unidades_devueltas) > 0 && dif.factura) {

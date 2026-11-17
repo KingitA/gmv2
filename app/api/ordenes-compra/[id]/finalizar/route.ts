@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { cargarVerificacionOC } from '@/lib/compras/cargar-verificacion';
 import { cant } from '@/lib/deposito/unidades';
+import { sincronizarKardexEnCamino } from '@/lib/compras/costo-y-kardex';
 
 // Finalizar (cerrar) una orden de compra. El control se hace ACÁ, en el servidor:
 //   · sin una factura validada que cubra lo recibido la orden queda abierta; con solo remitos
@@ -79,6 +80,12 @@ export async function POST(
         }
         if (!cambiada || cambiada.length === 0) {
             return NextResponse.json({ error: 'La orden cambió mientras se finalizaba. Actualizá la pantalla y volvé a intentar.', codigo: 'orden_cambio' }, { status: 409 });
+        }
+        // La orden está cerrada: ya no hay mercadería "en camino" (kardex pendiente de la orden)
+        try {
+            await sincronizarKardexEnCamino(supabase, id, { cerrada: true });
+        } catch (e: any) {
+            console.error('[OC finalizar] kardex en camino:', e?.message || e);
         }
         return NextResponse.json({ success: true, cerrada_sin_el_resto: control.pendientes.length > 0 });
     } catch (error: any) {

@@ -602,6 +602,14 @@ export async function finalizarRecepcion(supabase: any, recepcion_id: string, op
       .update({ estado: faltaRecibir > 0 ? "recibida_parcial" : "recibida_completa" })
       .eq("id", rec.orden_compra_id)
       .in("estado", ["pendiente", "recibida_parcial", "recibida_completa"])
+    // Lo que estaba "en camino" de esta orden (kardex pendiente) baja a lo que todavía falta recibir:
+    // lo que entró ya tiene su movimiento de compra de esta recepción (E-31). No frena la recepción.
+    try {
+      const { sincronizarKardexEnCamino } = await import("@/lib/compras/costo-y-kardex")
+      await sincronizarKardexEnCamino(createAdminClient(), rec.orden_compra_id)
+    } catch (e: any) {
+      console.error("[deposito] kardex en camino:", e?.message || e)
+    }
   }
   return { ok: true, ...(sinUnidadesPorBulto.length ? { sin_unidades_por_bulto: sinUnidadesPorBulto } : {}), ...(faltaRecibir > 0 ? { falta_recibir: faltaRecibir } : {}) }
 }

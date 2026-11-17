@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { nowArgentina } from '@/lib/utils';
 import { fechaISO, mediodiaAR, moneda, sumarDiasISO } from '@/lib/formato';
-import { unidadesPorBultoDe } from '@/lib/deposito/unidades';
+import { aplicarCostoDeFactura, sincronizarKardexEnCamino } from '@/lib/compras/costo-y-kardex';
 import { normalizarNumeroComprobante } from '@/lib/services/numero-comprobante';
 import { faltaLaColumna, faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 
@@ -391,103 +391,6 @@ async function validarSinFuncion(supabase: any, comprobante: any, proveedorId: s
     }
 }
 
-/**
- * Kardex de la compra: confirma lo pendiente de la OC y revaloriza lo que entró a $0.
- * No mueve plata y es repetible (lo ya confirmado / ya valorizado no se vuelve a tocar),
- * así que corre siempre, también cuando el comprobante ya estaba validado.
- */
-async function actualizarKardex(supabase: any, comprobante: any, ocId: string) {
-    const comprobante_id = comprobante.id;
-    // En OC mixtas (parte factura, parte adquisición de stock) cada comprobante confirma
-    // solo las líneas de su régimen: una factura confirma lo blanco, una adquisición lo
-    // negro; 'mixto' con cualquiera.
-    const esAdquisicion = ['Adquisicion', 'Reversa'].includes(comprobante.tipo_comprobante);
-    const { data: pendientes } = await supabase.from('kardex')
-        .select('id, articulo_iva_compras')
-        .eq('orden_compra_id', ocId)
-        .eq('estado', 'pendiente');
-
-    const idsAConfirmar = (pendientes || [])
-        .filter((k: any) => {
-            const regimen = k.articulo_iva_compras;
-            if (!regimen || regimen === 'mixto') return true;
-            return esAdquisicion ? regimen === 'adquisicion_stock' : regimen === 'factura';
-        })
-        .map((k: any) => k.id);
-
-    if (idsAConfirmar.length > 0) {
-        await supabase.from('kardex')
-            .update({
-                estado: 'confirmado',
-                comprobante_compra_id: comprobante_id,
-                // kardex.fecha es timestamptz: del comprobante solo se sabe el día
-                fecha: comprobante.fecha_comprobante ? mediodiaAR(comprobante.fecha_comprobante) : nowArgentina(),
-                color_dinero: esAdquisicion ? 'NEGRO' : 'BLANCO',
-            })
-            .in('id', idsAConfirmar);
-    }
-
-    // Revalorizar kardex ingresado a $0 (flujo depósito sin factura) con los precios de
-    // este comprobante. El kardex va en UNIDADES (E-30): si el renglón de la factura es
-    // por bulto, el precio se lleva a unidad con el factor con que se documentó.
-    const { data: detalle } = await supabase
-        .from('comprobantes_compra_detalle')
-        .select('articulo_id, precio_unitario, descuento1, tipo_cantidad, recepcion_item_id')
-        .eq('comprobante_id', comprobante_id)
-        .not('articulo_id', 'is', null);
-    if (!detalle || detalle.length === 0) return;
-
-    // El kardex de depósito lleva recepcion_id (no orden_compra_id)
-    const { data: recs } = await supabase.from('recepciones').select('id').eq('orden_compra_id', ocId);
-    const recIds = (recs || []).map((r: any) => r.id);
-    const orFilter = recIds.length > 0
-        ? `orden_compra_id.eq.${ocId},recepcion_id.in.(${recIds.join(',')})`
-        : `orden_compra_id.eq.${ocId}`;
-
-    const { data: kardexCero } = await supabase
-        .from('kardex')
-        .select('id, articulo_id, cantidad')
-        .or(orFilter)
-        .eq('tipo_movimiento', 'compra')
-        .eq('precio_unitario_final', 0);
-    if (!kardexCero || kardexCero.length === 0) return;
-
-    const porBulto = detalle.filter((d: any) => d.tipo_cantidad === 'bulto');
-    const factorItem = new Map<string, number>();
-    const upbArticulo = new Map<string, number>();
-    if (porBulto.length > 0) {
-        const itemIds = [...new Set(porBulto.map((d: any) => d.recepcion_item_id).filter(Boolean))];
-        if (itemIds.length > 0) {
-            const { data: its } = await supabase.from('recepciones_items').select('id, factor_conversion').in('id', itemIds);
-            for (const it of its || []) factorItem.set(it.id, Number(it.factor_conversion) || 0);
-        }
-        const { data: arts } = await supabase.from('articulos').select('id, unidades_por_bulto').in('id', [...new Set(porBulto.map((d: any) => d.articulo_id))]);
-        for (const a of arts || []) upbArticulo.set(a.id, unidadesPorBultoDe(a.unidades_por_bulto));
-    }
-    const factorDe = (d: any) => {
-        if (d.tipo_cantidad !== 'bulto') return 1;
-        const f = factorItem.get(d.recepcion_item_id) || 0;
-        return f > 1 ? f : (upbArticulo.get(d.articulo_id) || 1);
-    };
-
-    for (const k of kardexCero) {
-        const det = detalle.find((d: any) => d.articulo_id === k.articulo_id);
-        if (!det) continue;
-        const factor = factorDe(det);
-        const lista = Number(det.precio_unitario || 0) / factor;
-        const precio = lista * (1 - Number(det.descuento1 || 0) / 100);
-        if (precio <= 0) continue;
-        const cantidad = Number(k.cantidad || 0);
-        await supabase.from('kardex').update({
-            precio_lista: Math.round(lista * 10000) / 10000,
-            precio_unitario_final: Math.round(precio * 10000) / 10000,
-            subtotal_neto: Math.round(precio * cantidad * 100) / 100,
-            subtotal_total: Math.round(precio * cantidad * 100) / 100,
-            comprobante_compra_id: comprobante_id,
-        }).eq('id', k.id);
-    }
-}
-
 export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -571,16 +474,27 @@ export async function POST(
             }, { status: 500 });
         }
 
-        // Kardex: repetible, no mueve plata. Un remito no confirma ni valoriza nada.
-        if (ocId && !resultado.sin_deuda && !esRemito) {
+        // Costo y kardex (lib/compras/costo-y-kardex.ts): repetible, no mueve plata ni stock.
+        //  · el kardex de la recepción queda valorizado con lo facturado y el artículo con su último costo;
+        //  · el kardex "en camino" de la orden se ajusta a lo que falta recibir (ya no se "confirma":
+        //    eso duplicaba la compra de la recepción, E-31).
+        const avisos: string[] = [];
+        if (!resultado.sin_deuda && !esRemito) {
             try {
-                await actualizarKardex(supabase, comprobante, ocId);
+                if (ocId) await sincronizarKardexEnCamino(supabase, ocId);
+                const costo = await aplicarCostoDeFactura(supabase, comprobante, ocId);
+                // E-46: los renglones tienen que sumar lo mismo que el neto del comprobante
+                const dif = Math.round((costo.neto_renglones - costo.neto_comprobante) * 100) / 100;
+                if (!resultado.ya_validado && !esCredito && costo.neto_renglones > 0 && costo.neto_comprobante > 0
+                    && Math.abs(dif) > Math.max(1, costo.neto_comprobante * 0.005)) {
+                    avisos.push(`Los renglones suman ${moneda(costo.neto_renglones)} neto y el comprobante dice ${moneda(costo.neto_comprobante)} neto: hay ${moneda(Math.abs(dif))} de diferencia. Revisá si falta un renglón, sobra uno o hay un precio mal cargado.`);
+                }
             } catch (e: any) {
-                console.error('[Validar Comprobante] kardex:', e?.message || e);
+                console.error('[Validar Comprobante] costo y kardex:', e?.message || e);
+                avisos.push('El comprobante quedó validado, pero no se pudo actualizar el costo de los artículos ni el kardex. Avisá a sistemas.');
             }
         }
 
-        const avisos: string[] = [];
         if (resultado.ya_validado) avisos.push('Este comprobante ya estaba validado: no se generó ninguna deuda ni vencimiento nuevo.');
         if (!resultado.ya_validado && resultado.vencimiento_id && resultado.vencimiento_nuevo === false
             && resultado.vencimiento_monto != null && Math.abs(Number(resultado.vencimiento_monto) - total) > 0.01) {
