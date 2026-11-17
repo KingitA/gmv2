@@ -23,6 +23,7 @@ interface Previa {
   motivo: string | null
   cuenta: string | null
   cuentas: string[]
+  elegir_cuenta?: boolean
   para: string[]
   para_origen: "ordenes_compra" | "vendedor" | "oficina" | "general" | null
   otros_mails: string[]
@@ -62,8 +63,9 @@ export function DialogoEnviarOrden({ ordenId, onCerrar, onEnviada }: { ordenId: 
         setAsunto(p.asunto)
         setCuerpo(p.cuerpo)
         setConExcel(false)
-        // si el mail no salió del campo "mail para órdenes de compra", se propone guardarlo ahí
-        setGuardarMail(p.para_origen !== "ordenes_compra")
+        // Solo se propone guardar cuando el proveedor no tiene NINGÚN mail (lo va a escribir el usuario).
+        // Si se propuso el del vendedor o el de la oficina, no se da por bueno: se tilda a mano.
+        setGuardarMail(p.para_origen === null)
       })
       .catch(() => vivo && setError("No se pudo preparar el mail. Revisá la conexión."))
     return () => { vivo = false }
@@ -118,7 +120,13 @@ export function DialogoEnviarOrden({ ordenId, onCerrar, onEnviada }: { ordenId: 
                 <AlertTriangle className="h-4 w-4 shrink-0" /> {previa.motivo}
               </div>
             )}
-            {!previa.cuenta && (
+            {previa.elegir_cuenta && !de && (
+              <div className="flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>Hay más de una cuenta de Gmail conectada. Elegí en “Sale desde” cuál es la de compras: queda recordada para las próximas órdenes.</span>
+              </div>
+            )}
+            {previa.cuentas.length === 0 && (
               <div className="flex gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
                 <AlertTriangle className="h-4 w-4 shrink-0" />
                 <span>No hay ninguna cuenta de Gmail conectada al sistema. Conectala desde el asistente (botón “Conectar Gmail”) y volvé a abrir esta ventana.</span>
@@ -148,7 +156,7 @@ export function DialogoEnviarOrden({ ordenId, onCerrar, onEnviada }: { ordenId: 
               <Label>Sale desde</Label>
               {previa.cuentas.length > 1 ? (
                 <Select value={de} onValueChange={setDe}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Elegir la cuenta de compras…" /></SelectTrigger>
                   <SelectContent>{previa.cuentas.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
                 </Select>
               ) : <div className="text-sm font-medium">{previa.cuenta || "—"}</div>}
@@ -204,7 +212,7 @@ export function DialogoEnviarOrden({ ordenId, onCerrar, onEnviada }: { ordenId: 
 
         <DialogFooter>
           <Button variant="outline" onClick={onCerrar} disabled={enviando}>Cancelar</Button>
-          <Button onClick={enviar} disabled={!previa || !previa.puede_enviar || !previa.cuenta || enviando || !para.trim()}>
+          <Button onClick={enviar} disabled={!previa || !previa.puede_enviar || !de || enviando || !para.trim()}>
             {enviando ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Enviando…</> : <><Send className="mr-2 h-4 w-4" /> {reenvio ? "Reenviar al proveedor" : "Enviar al proveedor"}</>}
           </Button>
         </DialogFooter>

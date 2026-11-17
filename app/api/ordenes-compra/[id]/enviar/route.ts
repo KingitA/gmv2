@@ -1,7 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { cuentasParaEnviar, enviarMailGmail } from '@/lib/ai/gmail';
+import { cuentasParaEnviar, enviarMailGmail, recordarCuentaCompras } from '@/lib/ai/gmail';
 import { cargarOrdenCompleta, type OrdenCompleta } from '@/lib/compras/orden-completa';
 import { datosEmpresa, excelDeOrden, lineasCondicion, nombreArchivoOrden, pdfDeOrden } from '@/lib/compras/orden-archivos';
 import { armarMime, asuntoOrden, cuerpoOrden, rawParaGmail, type AdjuntoMail } from '@/lib/compras/mail-orden';
@@ -15,7 +15,7 @@ async function contexto(supabase: any, userId: string, id: string) {
     if (!oc) return null;
     const [empresa, cuentas, usuario] = await Promise.all([
         datosEmpresa(supabase),
-        cuentasParaEnviar(userId).catch(() => ({ predeterminada: null, todas: [] as string[] })),
+        cuentasParaEnviar().catch(() => ({ predeterminada: null, todas: [] as string[], configurada: null as string | null })),
         supabase.from('usuarios').select('nombre').eq('id', userId).maybeSingle(),
     ]);
     return { oc, empresa, cuentas, firma: (usuario.data as any)?.nombre ?? null };
@@ -60,6 +60,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
             motivo: oc.puede.enviar ? null : (oc.puede.motivo || 'La orden ya no se puede enviar.'),
             cuenta: cuentas.predeterminada,
             cuentas: cuentas.todas,
+            // hay varias cuentas conectadas y todavía no se eligió la de compras: la pantalla hace elegir
+            elegir_cuenta: !cuentas.predeterminada && cuentas.todas.length > 1,
             para: sugeridos.para,
             // de dónde salió el destinatario propuesto: 'ordenes_compra' = el campo de la ficha
             para_origen: sugeridos.origen,
@@ -125,6 +127,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         // Cuenta de envío: tiene que ser una de las conectadas
         const de = typeof body.de === 'string' && cuentas.todas.includes(body.de) ? body.de : cuentas.predeterminada;
+        if (!de && cuentas.todas.length > 1) {
+            return NextResponse.json({
+                error: 'Hay más de una cuenta de Gmail conectada y todavía no se eligió la de compras. Elegí desde cuál se manda: queda recordada para las próximas órdenes.',
+                codigo: 'elegir_cuenta',
+            }, { status: 400 });
+        }
         if (!de) {
             return NextResponse.json({
                 error: 'No hay ninguna cuenta de Gmail conectada al sistema para enviar. Conectala desde el asistente (botón "Conectar Gmail") y volvé a intentar.',
@@ -173,6 +181,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         // ── Constancia en la orden ──
         const avisos: string[] = [];
+        // La cuenta con la que se mandó queda como la cuenta de compras (si todavía no había una)
+        if (!cuentas.configurada || cuentas.configurada !== de) {
+            const ok = await recordarCuentaCompras(de).catch(() => false);
+            if (!ok && cuentas.todas.length > 1) avisos.push('No se pudo recordar la cuenta de envío: la próxima vez habrá que elegirla de nuevo.');
+        }
         const { data: marca, error: errMarca } = await supabase.rpc('oc_marcar_enviada', {
             p_orden_id: id,
             p_usuario_id: auth.user.id,

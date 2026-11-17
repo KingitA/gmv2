@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth';
 import { faltaLaColumna } from '@/lib/utils/migracion-pendiente';
 import { MIGRACION_OC } from '@/lib/compras/orden-compra';
 import { totalesOC } from '@/lib/compras/oc-totales';
+import { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all';
 
 const COLS_NUEVAS = 'id, numero_orden, proveedor_id, fecha_orden, fecha_estimada_recepcion, estado, observaciones, condicion_pago, usuario_creador, total_neto, total_estimado, cantidad_renglones, editada_at, enviada_at, enviada_a, envios, cancelada_at, motivo_cancelacion';
 const COLS_VIEJAS = 'id, numero_orden, proveedor_id, fecha_orden, fecha_estimada_recepcion, estado, observaciones, condicion_pago, usuario_creador';
@@ -39,16 +40,28 @@ export async function GET() {
         const userIds = [...new Set(lista.map((o) => o.usuario_creador).filter((u) => typeof u === 'string' && /^[0-9a-f-]{36}$/i.test(u)))];
         const sinTotal = lista.filter((o) => o.total_estimado == null).map((o) => o.id);
 
-        const [provs, usuarios, detalle, comprobantes] = await Promise.all([
-            provIds.length ? supabase.from('proveedores').select(COLS_PROVEEDOR).in('id', provIds) : Promise.resolve({ data: [] as any[] }),
-            userIds.length ? supabase.from('usuarios').select('id, nombre').in('id', userIds) : Promise.resolve({ data: [] as any[] }),
-            sinTotal.length
-                ? supabase.from('ordenes_compra_detalle')
-                    .select('orden_compra_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4, articulo:articulos(unidades_por_bulto, iva_compras)')
-                    .in('orden_compra_id', sinTotal).limit(5000)
-                : Promise.resolve({ data: [] as any[] }),
-            lista.length ? supabase.from('comprobantes_compra').select('orden_compra_id, estado').in('orden_compra_id', lista.map((o) => o.id)).limit(5000) : Promise.resolve({ data: [] as any[] }),
+        // Sin .in() con cientos de ids en la URL ni límites que PostgREST corta en 1000:
+        //  · proveedores y usuarios: por tandas de 200 ids (son pocos);
+        //  · comprobantes: todos los que tienen orden, paginados (no se filtra por lista de ids);
+        //  · detalle: SOLO de las órdenes viejas sin total guardado (las nuevas lo traen en la
+        //    cabecera), por tandas de 100 órdenes y cada tanda paginada.
+        const detalleDe = async (ids: string[]) => {
+            const out: any[] = [];
+            for (let i = 0; i < ids.length; i += 100) {
+                const tanda = ids.slice(i, i + 100);
+                out.push(...await fetchAllRows(() => supabase.from('ordenes_compra_detalle')
+                    .select('id, orden_compra_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4, articulo:articulos(unidades_por_bulto, iva_compras)')
+                    .in('orden_compra_id', tanda)));
+            }
+            return out;
+        };
+        const [provData, usuariosData, detalleData, comprobantesData] = await Promise.all([
+            fetchByIds<any>((ids) => supabase.from('proveedores').select(COLS_PROVEEDOR).in('id', ids), provIds),
+            fetchByIds<any>((ids) => supabase.from('usuarios').select('id, nombre').in('id', ids), userIds),
+            detalleDe(sinTotal),
+            lista.length ? fetchAllRows<any>(() => supabase.from('comprobantes_compra').select('id, orden_compra_id, estado').not('orden_compra_id', 'is', null)) : Promise.resolve([] as any[]),
         ]);
+        const provs = { data: provData }, usuarios = { data: usuariosData }, detalle = { data: detalleData }, comprobantes = { data: comprobantesData };
 
         const provPorId = new Map<string, any>((provs.data || []).map((p: any) => [p.id, p]));
         const nombrePorUsuario = new Map<string, string>((usuarios.data || []).map((u: any) => [u.id, u.nombre]));
