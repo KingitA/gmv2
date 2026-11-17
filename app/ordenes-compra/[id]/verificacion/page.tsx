@@ -1,54 +1,48 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, FileText, CreditCard, Scale } from "lucide-react"
+import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, FileText, CreditCard, Scale, Lock, Image as ImageIcon, X, Pencil } from "lucide-react"
 import Link from "next/link"
-import { formatCurrency } from "@/lib/utils"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { ComprobantesSection } from "./comprobantes-section"
-import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
-import { aUnidadesBase, bultosParaCubrir, cant, conversionLinea, desdeUnidadesBase, unidadesPorBultoDe } from "@/lib/deposito/unidades"
 import { toast } from "sonner"
+import { ComprobantesSection } from "./comprobantes-section"
+import { ResolverDiferencia } from "./resolver-diferencia"
+import { CorregirRecibido } from "./corregir-recibido"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { useConfirmar } from "@/components/ui/confirmar"
+import { bultosParaCubrir, cant, desdeUnidadesBase } from "@/lib/deposito/unidades"
+import { moneda } from "@/lib/formato"
+import type { VerificacionOC, DocumentoRecepcion } from "@/lib/compras/cargar-verificacion"
+import type { Bandera, FilaVerificacion } from "@/lib/compras/verificacion"
 
-interface CompData {
-    id: string
-    tipo: string // FA, ADQ, NCA, etc
-    numero: string
-    total: number
-    items: Record<string, { cantidad: number; precio: number }> // keyed by articulo_id
+// Verificación de una orden de compra: pedido / recibido / facturado.
+// Los datos y TODAS las cuentas vienen del servidor en una sola llamada
+// (GET /api/ordenes-compra/[id]/verificacion → lib/compras/verificacion.ts). Acá no se
+// calcula nada: se muestra, y se le pide al servidor que resuelva, valide o finalice.
+
+type Datos = VerificacionOC & { transportes: Array<{ id: string; nombre: string }> }
+
+const ESTADOS_OC: Record<string, string> = {
+    pendiente: "Pendiente", enviada: "Enviada", confirmada: "Confirmada", en_camino: "En camino",
+    recibida_parcial: "Recibida en parte", recibida_completa: "Recibida", finalizada: "Finalizada", cancelada: "Cancelada",
 }
 
-interface VerRow {
-    articulo_id: string
-    sku: string
-    descripcion: string
-    // E-30: TODAS las cantidades de la fila van en UNIDADES base (lo que entra al stock)
-    // y todos los precios son NETOS POR UNIDAD, así OC, recibido y facturado se comparan
-    // en lo mismo aunque la OC esté en bultos y la factura en unidades (o al revés).
-    cant_oc: number              // unidades pedidas (bultos × unidades por bulto si la línea es por bulto)
-    unidades_por_bulto: number
-    es_bulto: boolean            // la línea de la OC está pedida por bulto
-    sin_upb: boolean             // pedida o contada por bulto y el artículo no tiene unidades por bulto
-    precio_oc: number            // NETO por unidad (lista − D1..D4)
-    cant_recibida: number        // unidades recibidas, suma de todas las tandas
-    // Per-comprobante data filled dynamically
-    comp_data: Record<string, { cantidad: number; precio: number }> // keyed by comprobante id; unidades y precio NETO por unidad
-    cant_total_facturada: number
-    pendiente_oc: number         // unidades que el proveedor no envió vs OC (ni recibido ni facturado)
-    no_pedido: boolean           // recibido/facturado sin estar en la OC
-    resuelto: string | null      // diferencia ya imputada (empresa/transporte/proveedor/nc)
-    status: "ok" | "diferencia_cantidad" | "diferencia_precio" | "faltante" | "ambas" | "no_pedido" | "sin_documentar"
+const BANDERA: Record<Bandera, { texto: string; clase: string }> = {
+    precio: { texto: "Δ Precio", clase: "bg-orange-500" },
+    cantidad: { texto: "Δ Cantidad", clase: "bg-orange-500" },
+    pendiente: { texto: "Falta recibir", clase: "bg-amber-500" },
+    no_pedido: { texto: "No pedido", clase: "bg-purple-500" },
+    sin_documentar: { texto: "Sin documentar", clase: "bg-amber-600" },
+}
+const DESTINO: Record<string, string> = {
+    empresa: "lo asume la empresa", proveedor: "reclamo al proveedor", transporte: "cargo al transporte",
+    descuento_fuera_factura: "descuento fuera de factura", resuelto: "resuelto",
+    espera_factura: "recibido, se espera la factura", bonificado: "recibido sin cargo (bonificado)",
 }
 
 export default function VerificacionOCPage() {
@@ -56,572 +50,248 @@ export default function VerificacionOCPage() {
     const params = useParams()
     const router = useRouter()
     const ordenId = params.id as string
+    const { confirmar, dialogo } = useConfirmar()
 
-    const [orden, setOrden] = useState<any>(null)
-    const [rows, setRows] = useState<VerRow[]>([])
-    const [comprobantes, setComprobantes] = useState<CompData[]>([])
-    const [sinMatch, setSinMatch] = useState(0)
-    // Qué falta para poder finalizar la orden (lo decide el servidor: GET /api/ordenes-compra/[id]/finalizar)
-    const [controlFin, setControlFin] = useState<{ puede: boolean; faltas: string[]; falta_factura: boolean } | null>(null)
-    const [otrosConceptos, setOtrosConceptos] = useState<{ comprobante: string; descripcion: string; importe: number }[]>([])
-    const [loading, setLoading] = useState(true)
-    const [recepcionId, setRecepcionId] = useState<string | null>(null)
-    const [recepcionIds, setRecepcionIds] = useState<string[]>([])
-    const [transportes, setTransportes] = useState<any[]>([])
+    const [datos, setDatos] = useState<Datos | null>(null)
+    const [cargando, setCargando] = useState(true)
+    const [error, setError] = useState<string | null>(null)
+    const [resolviendo, setResolviendo] = useState<FilaVerificacion | null>(null)
+    const [corrigiendo, setCorrigiendo] = useState<FilaVerificacion | null>(null)
+    const [docVisible, setDocVisible] = useState<DocumentoRecepcion | null>(null) // foto / PDF al lado de la tabla
+    const [trabajando, setTrabajando] = useState(false)
 
-    // Resolution dialog state
-    const [resolviendoRow, setResolviendoRow] = useState<VerRow | null>(null)
-    const [resolucionTipo, setResolucionTipo] = useState<'mercaderia' | 'precio'>('mercaderia')
-    const [resolucionAccion, setResolucionAccion] = useState<'A' | 'B' | 'C' | 'D'>('A')
-    const [resolucionTransporte, setResolucionTransporte] = useState<string>('')
-    const [resolucionDesc, setResolucionDesc] = useState<string>('')
-    const [resolviendoItems, setResolviendoItems] = useState<Set<string>>(new Set())
-    const [resoluciones, setResoluciones] = useState<Record<string, string>>({}) // articulo_id → destino
-
-    useEffect(() => { if (ordenId) loadAll() }, [ordenId])
-    useEffect(() => {
-        supabase.from('transportes').select('id, nombre').eq('activo', true).order('nombre')
-            .then(({ data }) => setTransportes(data || []))
-    }, [])
-
-    async function loadAll() {
-        setLoading(true)
-
-        const { data: oc } = await supabase
-            .from("ordenes_compra")
-            .select("*, proveedor:proveedores(nombre, sigla)")
-            .eq("id", ordenId).single()
-        setOrden(oc)
-
-        const { data: ocItems } = await supabase
-            .from("ordenes_compra_detalle")
-            .select("*, articulo:articulos(sku, descripcion, unidades_por_bulto)")
-            .eq("orden_compra_id", ordenId)
-
-        const { data: comps } = await supabase
-            .from("comprobantes_compra")
-            .select("id, tipo_comprobante, numero_comprobante, total_factura_declarado")
-            .eq("orden_compra_id", ordenId)
-
-        // Load article-level detail from comprobantes_compra_detalle
-        const compIds = (comps || []).map((c: any) => c.id)
-        let compDetalle: any[] = []
-        if (compIds.length > 0) {
-            const { data: det } = await supabase
-                .from("comprobantes_compra_detalle")
-                .select("comprobante_id, articulo_id, cantidad_facturada, precio_unitario, descuento1, tipo_cantidad, match_estado, recepcion_item_id, descripcion_proveedor")
-                .in("comprobante_id", compIds)
-            compDetalle = det || []
-            setSinMatch(compDetalle.filter((d: any) => d.match_estado === "sugerido" || d.match_estado === "sin_match").length)
-            // Renglones marcados "no es mercadería" (flete, cargos): se muestran discriminados
-            setOtrosConceptos(compDetalle.filter((d: any) => d.match_estado === "no_mercaderia").map((d: any) => {
-                const comp = (comps || []).find((c: any) => c.id === d.comprobante_id)
-                return {
-                    comprobante: comp ? `${comp.tipo_comprobante} ${comp.numero_comprobante}` : "",
-                    descripcion: d.descripcion_proveedor || "(sin descripción)",
-                    importe: Math.round((Number(d.cantidad_facturada) || 0) * (Number(d.precio_unitario) || 0) * (1 - (Number(d.descuento1) || 0) / 100) * 100) / 100,
-                }
-            }))
-        }
-
-        const { data: recepciones } = await supabase
-            .from("recepciones").select("id").eq("orden_compra_id", ordenId)
-            .order("created_at", { ascending: false })
-
-        let recItems: any[] = []
-        if (recepciones && recepciones.length > 0) {
-            setRecepcionId(recepciones[0].id)
-            setRecepcionIds(recepciones.map(r => r.id))
-            const { data } = await supabase
-                .from("recepciones_items").select("*, cantidad_diferencia_destino")
-                .in("recepcion_id", recepciones.map(r => r.id))
-            recItems = data || []
-        }
-
-        // ── Unidades por bulto de todo artículo que aparezca (OC, recibido o facturado) ──
-        const ocArtIds = new Set((ocItems || []).map((i: any) => i.articulo_id))
-        const tipoOC = new Map<string, string | null>((ocItems || []).map((i: any) => [i.articulo_id, i.tipo_cantidad]))
-        const upbPorArt: Record<string, number> = {}
-        for (const i of ocItems || []) upbPorArt[i.articulo_id] = unidadesPorBultoDe(i.articulo?.unidades_por_bulto)
-        const extraIds = new Set<string>()
-        for (const ri of recItems) if (ri.articulo_id && !ocArtIds.has(ri.articulo_id)) extraIds.add(ri.articulo_id)
-        for (const det of compDetalle) if (det.articulo_id && !ocArtIds.has(det.articulo_id)) extraIds.add(det.articulo_id)
-        let extraArts: any[] = []
-        if (extraIds.size > 0) {
-            const { data } = await supabase
-                .from("articulos")
-                .select("id, sku, descripcion, unidades_por_bulto")
-                .in("id", [...extraIds])
-            extraArts = data || []
-            for (const a of extraArts) upbPorArt[a.id] = unidadesPorBultoDe(a.unidades_por_bulto)
-        }
-        const recItemPorId = new Map<string, any>(recItems.map((ri: any) => [ri.id, ri]))
-        const sinUpb: Record<string, boolean> = {}
-
-        /** Unidades base de lo contado en una línea de recepción (misma regla que finalizarRecepcion). */
-        const recibidoBase = (ri: any): number => {
-            if (ri.cantidad_fisica_base != null) return Number(ri.cantidad_fisica_base) // lo que realmente sumó al stock
-            const c = conversionLinea({
-                enOC: !ri.fuera_de_oc && ocArtIds.has(ri.articulo_id),
-                tipoCantidadOC: tipoOC.get(ri.articulo_id),
-                unidadElegida: ri.unidad_conteo,
-                unidadesPorBulto: upbPorArt[ri.articulo_id],
-            })
-            if (c.sinUnidadesPorBulto && Number(ri.cantidad_fisica || 0) > 0) sinUpb[ri.articulo_id] = true
-            return aUnidadesBase(ri.cantidad_fisica, c.factorConteo)
-        }
-        /** Unidades base por cada 1 de cantidad_facturada: el factor con que el OCR documentó la línea, o las unidades por bulto. */
-        const factorFactura = (det: any): number => {
-            if (det.tipo_cantidad !== "bulto") return 1
-            const f = Number(recItemPorId.get(det.recepcion_item_id)?.factor_conversion)
-            return f > 1 ? f : (upbPorArt[det.articulo_id] || 1)
-        }
-
-        // Build comprobantes data with article-level info from detalle table.
-        // Cantidad en UNIDADES y precio NETO POR UNIDAD (precio − descuento de línea,
-        // dividido por el factor si la factura viene por bulto) para compararlo
-        // contra la OC en la misma unidad.
-        const compDataList: CompData[] = (comps || []).map((c: any) => {
-            const items: Record<string, { cantidad: number; precio: number }> = {}
-            const detalleRows = compDetalle.filter((d: any) => d.comprobante_id === c.id)
-
-            for (const det of detalleRows) {
-                if (det.articulo_id) {
-                    const factor = factorFactura(det)
-                    const precioNeto = (Number(det.precio_unitario) || 0) * (1 - (Number(det.descuento1) || 0) / 100) / factor
-                    const unidades = aUnidadesBase(det.cantidad_facturada, factor)
-                    if (items[det.articulo_id]) {
-                        items[det.articulo_id].cantidad += unidades
-                    } else {
-                        items[det.articulo_id] = {
-                            cantidad: unidades,
-                            precio: Math.round(precioNeto * 100) / 100,
-                        }
-                    }
-                }
-            }
-
-            return {
-                id: c.id,
-                tipo: c.tipo_comprobante,
-                numero: c.numero_comprobante,
-                total: c.total_factura_declarado,
-                items
-            }
-        })
-        setComprobantes(compDataList)
-
-        // Recibido por artículo: SUMA de todas las tandas. Las filas fuera_de_oc
-        // de artículos que SÍ están en la OC son duplicados de documentación
-        // vieja — no suman recibido.
-        const recibidoPorArt: Record<string, number> = {}
-        const faltanteMarcado: Record<string, boolean> = {}
-        // Diferencias ya resueltas desde el dialog (persisten en recepciones_items)
-        const precioResuelto: Record<string, boolean> = {}
-        const cantResuelta: Record<string, string> = {}
-        for (const ri of recItems) {
-            if (ri.precio_verificado) precioResuelto[ri.articulo_id] = true
-            if (ri.cantidad_diferencia_destino) cantResuelta[ri.articulo_id] = ri.cantidad_diferencia_destino
-            if (ri.fuera_de_oc && ocArtIds.has(ri.articulo_id)) continue
-            recibidoPorArt[ri.articulo_id] = (recibidoPorArt[ri.articulo_id] || 0) + recibidoBase(ri)
-            if (ri.estado_linea === "faltante") faltanteMarcado[ri.articulo_id] = true
-        }
-
-        const TOLERANCIA_PRECIO = 0.005 // 0.5%: cubre redondeos de OCR/conversión de descuentos
-
-        const buildRow = (params: {
-            artId: string, sku: string, descripcion: string, upb: number, esBulto: boolean,
-            cantOC: number, precioOCNeto: number, noPedido: boolean,
-        }): VerRow => {
-            const { artId, sku, descripcion, upb, esBulto, cantOC, precioOCNeto, noPedido } = params
-            const cantRecibida = recibidoPorArt[artId] || 0
-
-            const compDataForArt: Record<string, { cantidad: number; precio: number }> = {}
-            let cantTotalFacturada = 0
-            let precioFANeto: number | null = null
-            for (const cd of compDataList) {
-                const artData = cd.items[artId]
-                if (artData) {
-                    compDataForArt[cd.id] = artData
-                    if (cd.tipo.startsWith("ND")) {
-                        // Nota de débito (E-35): es un cargo, no mercadería que entra ni que vuelve.
-                        // No cambia la cantidad facturada (antes restaba, como si fuera una NC).
-                    } else if (cd.tipo.startsWith("NC") || cd.tipo === "Reversa") {
-                        cantTotalFacturada -= artData.cantidad
-                    } else {
-                        cantTotalFacturada += artData.cantidad
-                        if (precioFANeto === null && artData.precio > 0) precioFANeto = artData.precio
-                    }
-                }
-            }
-
-            const hasOCRData = Object.keys(compDataForArt).length > 0
-
-            // Diferencia de cantidad: lo FACTURADO vs lo RECIBIDO (misma unidad: unidades base)
-            const diffCant = hasOCRData ? cantTotalFacturada - cantRecibida : 0
-            // Diferencia de precio: neto factura vs neto OC (ambos por unidad)
-            const difPrecio = precioFANeto !== null && precioOCNeto > 0
-                ? Math.abs(precioFANeto - precioOCNeto) / precioOCNeto > TOLERANCIA_PRECIO
-                : false
-            // Lo que el proveedor no envió vs la OC (ni recibido ni facturado): faltante de fábrica
-            const pendienteOC = Math.max(0, cantOC - Math.max(cantRecibida, cantTotalFacturada))
-
-            let status: VerRow["status"] = "ok"
-            if (noPedido) status = "no_pedido"
-            else if (cantRecibida === 0 && cantOC > 0) status = "faltante"
-            // Recibido pero NINGUN comprobante lo documenta (el OCR perdio la
-            // linea o quedo sin matchear): jamas debe figurar OK.
-            else if (!hasOCRData && cantRecibida > 0 && compIds.length > 0) status = "sin_documentar"
-            else if (Math.abs(diffCant) > 0.01 && difPrecio) status = "ambas"
-            else if (Math.abs(diffCant) > 0.01) status = "diferencia_cantidad"
-            else if (difPrecio) status = "diferencia_precio"
-
-            // Diferencias ya resueltas (imputadas a empresa/transporte/proveedor
-            // o NC esperada) pasan a OK con su etiqueta — habilitan finalizar.
-            let resuelto: string | null = null
-            if (status === "diferencia_precio" && precioResuelto[artId]) {
-                status = "ok"; resuelto = "precio"
-            } else if ((status === "faltante" || status === "diferencia_cantidad") && cantResuelta[artId]) {
-                status = "ok"; resuelto = cantResuelta[artId]
-            } else if (status === "ambas" && precioResuelto[artId] && cantResuelta[artId]) {
-                status = "ok"; resuelto = cantResuelta[artId]
-            }
-
-            return {
-                articulo_id: artId, sku, descripcion,
-                cant_oc: cantOC, unidades_por_bulto: upb, es_bulto: esBulto,
-                sin_upb: (esBulto && upb <= 1) || !!sinUpb[artId],
-                precio_oc: precioOCNeto,
-                cant_recibida: cantRecibida,
-                comp_data: compDataForArt,
-                cant_total_facturada: cantTotalFacturada,
-                pendiente_oc: pendienteOC,
-                no_pedido: noPedido,
-                resuelto,
-                status,
-            }
-        }
-
-        // Filas de la OC (cantidades en unidades base, precios netos por unidad)
-        const verRows: VerRow[] = (ocItems || []).map((item: any) => {
-            const upb = upbPorArt[item.articulo_id] || 1
-            // tipo_cantidad vacío = bulto (valor por defecto de la base), igual que al recibir
-            const esBulto = item.tipo_cantidad !== "unidad"
-            const descuentos = [item.descuento1, item.descuento2, item.descuento3, item.descuento4]
-                .map((d: any) => Number(d) || 0)
-            const precioNetoUnit = descuentos.reduce((p, d) => p * (1 - d / 100), Number(item.precio_unitario) || 0)
-            return buildRow({
-                artId: item.articulo_id,
-                sku: item.articulo?.sku || "",
-                descripcion: item.articulo?.descripcion || "",
-                upb, esBulto,
-                cantOC: aUnidadesBase(item.cantidad_pedida, esBulto ? upb : 1),
-                precioOCNeto: Math.round(precioNetoUnit * 100) / 100,
-                noPedido: false,
-            })
-        })
-
-        // Artículos NO pedidos: recibidos (fuera_de_oc) o facturados sin estar en la OC
-        // (los artículos extra ya se cargaron arriba, junto con sus unidades por bulto)
-        for (const art of extraArts) {
-            // Lo recibido fuera de OC sí cuenta como recibido acá
-            recibidoPorArt[art.id] = recItems
-                .filter(ri => ri.articulo_id === art.id)
-                .reduce((s, ri) => s + recibidoBase(ri), 0)
-            verRows.push(buildRow({
-                artId: art.id,
-                sku: art.sku || "",
-                descripcion: art.descripcion || "",
-                upb: upbPorArt[art.id] || 1,
-                esBulto: false,
-                cantOC: 0,
-                precioOCNeto: 0,
-                noPedido: true,
-            }))
-        }
-
-        setRows(verRows)
-        setLoading(false)
-        fetch(`/api/ordenes-compra/${ordenId}/finalizar`)
-            .then(r => (r.ok ? r.json() : null))
-            .then(c => setControlFin(c && Array.isArray(c.faltas) ? c : null))
-            .catch(() => setControlFin(null))
-    }
-
-    async function ajustarPrecio(articuloId: string, precio: number) {
-        await supabase.from("articulos").update({ precio_compra: precio }).eq("id", articuloId)
-        alert("Precio actualizado")
-    }
-
-    // "No era ese artículo, era este" — re-vincula líneas y aprende equivalencia
-    const [vincularDestino, setVincularDestino] = useState("")
-    const [vincularEan, setVincularEan] = useState("")
-    const [vincularDesc, setVincularDesc] = useState("")
-    const [vincularBulto, setVincularBulto] = useState("")
-    const [vincularAprender, setVincularAprender] = useState(true)
-    const [vinculando, setVinculando] = useState(false)
-
-    async function confirmarVinculacion() {
-        if (!resolviendoRow || !vincularDestino) return
-        setVinculando(true)
+    const cargar = useCallback(async () => {
         try {
-            const res = await fetch(`/api/ordenes-compra/${ordenId}/vincular-articulo`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    articulo_origen_id: resolviendoRow.articulo_id,
-                    articulo_destino_id: vincularDestino,
-                    aprender: vincularAprender,
-                    nuevo_ean: vincularEan || null,
-                    nueva_descripcion: vincularDesc || null,
-                    unidades_por_bulto: vincularBulto ? parseInt(vincularBulto) : null,
-                }),
-            })
-            const data = await res.json()
-            if (!res.ok) { alert(data.error || 'Error al vincular'); return }
-            alert(`Vinculado: ${data.lineas_comprobante} línea(s) de comprobante y ${data.items_recepcion} ítem(s) de recepción re-vinculados${data.equivalencia_aprendida ? ' · equivalencia aprendida para futuros comprobantes' : ''}${data.atributos_actualizados?.length ? ` · artículo actualizado (${data.atributos_actualizados.join(', ')})` : ''}`)
-            setResolviendoRow(null)
-            setVincularDestino(""); setVincularEan(""); setVincularDesc(""); setVincularBulto("")
-            loadAll()
-        } finally {
-            setVinculando(false)
-        }
-    }
-
-    function abrirResolucion(row: VerRow) {
-        setResolviendoRow(row)
-        setResolucionTipo('mercaderia')
-        setResolucionAccion('A')
-        setResolucionTransporte(transportes[0]?.id || '')
-        setResolucionDesc('')
-    }
-
-    async function confirmarResolucion() {
-        if (!resolviendoRow || recepcionIds.length === 0) return
-
-        // Buscar el ítem en TODAS las tandas (preferir la fila real de la OC)
-        const { data: candidatos } = await supabase
-            .from('recepciones_items')
-            .select('id, recepcion_id, cantidad_oc, cantidad_fisica, fuera_de_oc')
-            .in('recepcion_id', recepcionIds)
-            .eq('articulo_id', resolviendoRow.articulo_id)
-
-        const recItem = (candidatos || []).find(c => !c.fuera_de_oc && Number(c.cantidad_fisica || 0) > 0)
-            || (candidatos || []).find(c => !c.fuera_de_oc)
-            || (candidatos || [])[0]
-
-        if (!recItem) {
-            alert('No se encontró el ítem en la recepción')
-            setResolviendoRow(null)
-            return
-        }
-
-        const cantFaltante = resolviendoRow.cant_oc - resolviendoRow.cant_recibida
-
-        const decision = {
-            item_id: recItem.id,
-            tipo: resolucionTipo,
-            accion: resolucionAccion,
-            transporte_id: resolucionAccion === 'B' ? resolucionTransporte : undefined,
-            valor_real: cantFaltante,
-            descripcion: resolucionDesc || undefined,
-        }
-
-        const res = await fetch(`/api/recepciones/${recItem.recepcion_id}/cerrar`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ decisions: [decision] }),
-        })
-
-        const data = await res.json().catch(() => ({}))
-        const fallo = !res.ok ? (data.error || `error ${res.status}`) : (data.results || []).find((r: any) => r.error)?.error
-        if (fallo) {
-            toast.error(`No se resolvió la diferencia: ${fallo}`, { duration: 12000 })
-            return
-        }
-
-        const destino = resolucionAccion === 'A' ? 'empresa' : resolucionAccion === 'B' ? 'transporte' : resolucionAccion === 'D' ? 'nc-esperada' : 'proveedor'
-        setResoluciones(prev => ({ ...prev, [resolviendoRow.articulo_id]: destino }))
-        setResolviendoRow(null)
-    }
-
-    // Finalizar = validar los comprobantes pendientes (reemplaza la provisión
-    // de CC por los comprobantes reales + vencimientos + kardex confirmado)
-    // y cerrar la OC.
-    async function finalizarOC() {
-        const sinResolver = rows.filter(r => r.status !== "ok").length
-        const aviso = sinResolver > 0
-            ? `\n\n⚠ Hay ${sinResolver} artículo(s) con diferencias SIN resolver.`
-            : ""
-        if (!confirm(`¿Finalizar esta OC?\n\nSe validan los comprobantes pendientes: la provisión de la cuenta corriente se reemplaza por los comprobantes reales y se generan los vencimientos de pago.${aviso}`)) return
-
-        // Los remitos no se validan (solo controlan cantidades): no entran en la lista
-        const { data: pendientes } = await supabase
-            .from("comprobantes_compra")
-            .select("id, tipo_comprobante, numero_comprobante")
-            .eq("orden_compra_id", ordenId)
-            .neq("tipo_comprobante", "Remito")
-            .not("estado", "in", "(validado,cerrado,esperada)")
-
-        const avisos: string[] = []
-        for (const comp of pendientes || []) {
-            const res = await fetch(`/api/comprobantes-compra/${comp.id}/validar`, { method: "POST" })
+            const res = await fetch(`/api/ordenes-compra/${ordenId}/verificacion`, { cache: "no-store" })
             const data = await res.json().catch(() => ({}))
-            if (!res.ok) {
-                // Se frena acá: la OC NO queda finalizada con un comprobante sin validar (E-32)
-                toast.error(`La OC no se finalizó. No se pudo validar ${comp.tipo_comprobante} ${comp.numero_comprobante}: ${data.error || `error ${res.status}`}`, { duration: 15000 })
-                loadAll()
-                return
-            }
-            for (const a of (data.avisos || []) as string[]) avisos.push(`${comp.tipo_comprobante} ${comp.numero_comprobante}: ${a}`)
+            if (!res.ok) { setError(data.error || `No se pudo cargar la verificación (error ${res.status})`); return }
+            setError(null)
+            setDatos(data)
+            // Si la foto que se estaba mirando ya no existe, se cierra el panel
+            setDocVisible((d) => (d ? (data.documentos || []).find((x: DocumentoRecepcion) => x.id === d.id) || null : null))
+        } catch {
+            setError("No se pudo cargar la verificación: sin conexión con el servidor.")
+        } finally {
+            setCargando(false)
         }
+    }, [ordenId])
 
-        // El cierre lo hace el servidor, que controla que haya una factura validada que cubra lo
-        // recibido: con solo remitos la orden queda abierta (decisión de Juan, 17/11).
-        const resFin = await fetch(`/api/ordenes-compra/${ordenId}/finalizar`, { method: "POST" })
-        const fin = await resFin.json().catch(() => ({}))
-        if (!resFin.ok) {
-            toast.error(fin.error || `La orden no se finalizó (error ${resFin.status})`, { duration: 20000 })
+    useEffect(() => { if (ordenId) cargar() }, [ordenId, cargar])
+
+    const v = datos?.verificacion
+    const filas = v?.filas || []
+    const columnas = v?.columnas || []
+    const control = datos?.control
+    const soloLectura = !!datos?.solo_lectura
+    const pendientes = control?.pendientes || []
+
+    // Finalizar = validar los comprobantes con precios que falten y cerrar la orden. El cierre lo
+    // decide el servidor (factura validada que cubra lo recibido; faltantes aceptados expresamente).
+    async function finalizarOC() {
+        if (!datos || !control) return
+        const sinResolver = filas.filter((f) => f.banderas.some((b) => b !== "pendiente")).length
+        const porValidar = datos.comprobantes.filter((c) => c.tipo_comprobante !== "Remito" && !["validado", "cerrado", "esperada"].includes(c.estado))
+        const lineas: string[] = []
+        if (porValidar.length > 0) lineas.push(`Se validan ${porValidar.length} comprobante(s): ${porValidar.map((c) => `${c.tipo_comprobante} ${c.numero_comprobante}`).join(", ")}. Cada uno registra su deuda en la cuenta corriente del proveedor y su vencimiento.`)
+        if (sinResolver > 0) lineas.push(`⚠ Hay ${sinResolver} artículo(s) con diferencias de precio o cantidad SIN resolver.`)
+        if (pendientes.length > 0) lineas.push(`⚠ Falta recibir mercadería de ${pendientes.length} artículo(s): ${pendientes.slice(0, 6).map((p) => `${p.sku} (${cant(p.unidades)} u)`).join(", ")}${pendientes.length > 6 ? "…" : ""}. Al finalizar, la orden se cierra SIN el resto: el depósito ya no la va a poder recibir.`)
+        lineas.push("Una orden finalizada queda en solo lectura.")
+        const ok = await confirmar({
+            titulo: pendientes.length > 0 ? `¿Cerrar ${datos.orden.numero_orden} sin el resto de la mercadería?` : `¿Finalizar ${datos.orden.numero_orden}?`,
+            detalle: lineas.join("\n\n"),
+            confirmar: pendientes.length > 0 ? "Cerrar sin el resto" : "Finalizar",
+            peligro: pendientes.length > 0 || sinResolver > 0,
+        })
+        if (!ok) return
+
+        setTrabajando(true)
+        try {
+            const avisos: string[] = []
+            for (const comp of porValidar) {
+                const res = await fetch(`/api/comprobantes-compra/${comp.id}/validar`, { method: "POST" })
+                const data = await res.json().catch(() => ({}))
+                if (!res.ok) {
+                    // Se frena acá: la orden NO queda finalizada con un comprobante sin validar
+                    toast.error(`La orden no se finalizó. No se pudo validar ${comp.tipo_comprobante} ${comp.numero_comprobante}: ${data.error || `error ${res.status}`}`, { duration: 15000 })
+                    return
+                }
+                for (const a of (data.avisos || []) as string[]) avisos.push(`${comp.tipo_comprobante} ${comp.numero_comprobante}: ${a}`)
+            }
+            const res = await fetch(`/api/ordenes-compra/${ordenId}/finalizar`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ aceptar_faltantes: pendientes.length > 0 }),
+            })
+            const fin = await res.json().catch(() => ({}))
             if (avisos.length > 0) toast.warning(avisos.join(" · "), { duration: 15000 })
-            loadAll()
-            return
+            if (!res.ok) { toast.error(fin.error || `La orden no se finalizó (error ${res.status})`, { duration: 20000 }); return }
+            toast.success(fin.cerrada_sin_el_resto ? "Orden cerrada sin el resto de la mercadería" : "Orden finalizada")
+        } finally {
+            setTrabajando(false)
+            cargar()
         }
-        if (avisos.length > 0) toast.warning(avisos.join(" · "), { duration: 15000 })
-        else toast.success("Orden finalizada")
-        router.push("/ordenes-compra")
     }
 
-    // Los faltantes de fábrica no se reciben después: se repiden.
-    // Crea una OC nueva con lo que el proveedor no envió, a los precios
-    // y descuentos de la OC original.
+    // Los faltantes que no van a llegar se pueden volver a pedir: crea una orden nueva con lo
+    // que el proveedor no envió, a los precios y descuentos de la orden original.
     async function generarOCFaltantes() {
-        const faltantes = rows.filter(r => r.pendiente_oc > 0)
+        if (!datos) return
+        const faltantes = filas.filter((f) => f.dif.pendiente_oc > 0)
         if (faltantes.length === 0) return
-
-        // pendiente_oc está en unidades: una línea por bulto se repide en bultos ENTEROS (hacia arriba)
-        const aPedir = (r: VerRow) => r.es_bulto ? bultosParaCubrir(r.pendiente_oc, r.unidades_por_bulto) : r.pendiente_oc
-        const resumen = faltantes.map(r => `· ${r.sku} — ${cant(aPedir(r))}${r.es_bulto ? ` BUL (${cant(aPedir(r) * r.unidades_por_bulto)} u)` : " u"} — ${r.descripcion}`).join("\n")
-        if (!confirm(`¿Generar una nueva OC con estos faltantes?\n\n${resumen}`)) return
+        // pendiente en unidades: una línea por bulto se repide en bultos ENTEROS (hacia arriba)
+        const aPedir = (f: FilaVerificacion) => (f.pedido_por_bulto ? bultosParaCubrir(f.dif.pendiente_oc, f.unidades_por_bulto) : f.dif.pendiente_oc)
+        const resumen = faltantes.map((f) => `· ${f.sku} — ${cant(aPedir(f))}${f.pedido_por_bulto ? ` bultos (${cant(aPedir(f) * f.unidades_por_bulto)} u)` : " u"} — ${f.descripcion}`).join("\n")
+        if (!(await confirmar({ titulo: "¿Generar una orden de compra nueva con estos faltantes?", detalle: resumen, confirmar: "Generar orden" }))) return
 
         const { data: ocDetalle } = await supabase
             .from("ordenes_compra_detalle")
-            .select("articulo_id, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4")
+            .select("articulo_id, precio_unitario, descuento1, descuento2, descuento3, descuento4")
             .eq("orden_compra_id", ordenId)
-
-        const items = faltantes.map(r => {
-            const det = (ocDetalle || []).find((d: any) => d.articulo_id === r.articulo_id)
+        const items = faltantes.map((f) => {
+            const det = (ocDetalle || []).find((d: any) => d.articulo_id === f.articulo_id)
             return {
-                articulo_id: r.articulo_id,
-                cantidad_pedida: aPedir(r),
-                tipo_cantidad: r.es_bulto ? "bulto" : "unidad",
+                articulo_id: f.articulo_id,
+                cantidad_pedida: aPedir(f),
+                tipo_cantidad: f.pedido_por_bulto ? "bulto" : "unidad",
                 precio_unitario: det?.precio_unitario || 0,
-                descuento1: det?.descuento1 || 0,
-                descuento2: det?.descuento2 || 0,
-                descuento3: det?.descuento3 || 0,
-                descuento4: det?.descuento4 || 0,
+                descuento1: det?.descuento1 || 0, descuento2: det?.descuento2 || 0, descuento3: det?.descuento3 || 0, descuento4: det?.descuento4 || 0,
             }
         })
-
         const res = await fetch("/api/ordenes-compra/crear", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                proveedor_id: orden?.proveedor_id,
-                observaciones: `Reposición de faltantes de ${orden?.numero_orden}`,
-                items,
-            }),
+            body: JSON.stringify({ proveedor_id: datos.orden.proveedor_id, observaciones: `Reposición de faltantes de ${datos.orden.numero_orden}`, items }),
         })
         const data = await res.json().catch(() => ({}))
-        if (!res.ok) {
-            toast.error(`No se generó la OC de faltantes: ${data.error || `error ${res.status}`}`, { duration: 12000 })
-            return
-        }
-        toast.success(`OC de reposición creada: ${data.orden?.numero_orden || "OK"}`)
+        if (!res.ok) { toast.error(`No se generó la orden de faltantes: ${data.error || `error ${res.status}`}`, { duration: 12000 }); return }
+        toast.success(`Orden de reposición creada: ${data.orden?.numero_orden || "OK"}`)
         router.push("/ordenes-compra")
     }
 
-    async function generarOrdenPago() {
-        // Pre-fill the OP with OC data and navigate
-        const params = new URLSearchParams({
-            proveedor_id: orden?.proveedor_id || '',
-            orden_compra_id: ordenId,
-            monto: String(totalFacturado),
-        })
-        router.push(`/ordenes-pago/nueva?${params}`)
+    function generarOrdenPago() {
+        if (!datos || !v) return
+        const q = new URLSearchParams({ proveedor_id: datos.orden.proveedor_id || "", orden_compra_id: ordenId, monto: String(v.resumen.total_facturado) })
+        router.push(`/ordenes-pago/nueva?${q}`)
     }
 
-    const tieneComps = comprobantes.length > 0
-    const tieneOCR = comprobantes.some(c => Object.keys(c.items).length > 0)
-    const totalOC = rows.reduce((s, r) => s + r.precio_oc * r.cant_oc, 0)
-    // NC y reversas restan; la nota de débito suma (E-35)
-    const totalFacturado = comprobantes.reduce((s, c) => s + (c.tipo.startsWith("NC") || c.tipo === "Reversa" ? -1 : 1) * (Number(c.total) || 0), 0)
-    const itemsOK = rows.filter(r => r.status === "ok").length
-    const itemsDiff = rows.filter(r => r.status !== "ok").length
-    const allOK = itemsDiff === 0 && rows.length > 0 && tieneComps
+    if (cargando && !datos) {
+        return <div className="min-h-screen bg-background p-6"><CargaProgreso mensajes={MENSAJES.ordenesCompra} className="mx-auto max-w-sm mt-24" /></div>
+    }
+    if (error && !datos) {
+        return (
+            <div className="min-h-screen bg-background p-6">
+                <div className="max-w-xl mx-auto mt-24 p-4 border border-red-300 bg-red-50 rounded-lg text-sm text-red-800">
+                    <p className="font-semibold">No se pudo abrir la verificación</p>
+                    <p className="mt-1">{error}</p>
+                    <div className="mt-3 flex gap-2">
+                        <Button size="sm" onClick={() => { setCargando(true); cargar() }}>Reintentar</Button>
+                        <Link href="/ordenes-compra"><Button size="sm" variant="outline">Volver a órdenes de compra</Button></Link>
+                    </div>
+                </div>
+            </div>
+        )
+    }
+    if (!datos || !v || !control) return null
 
-    // How many unique comp types (for dynamic columns)
-    const showMultipleComps = comprobantes.length > 1
+    const tieneComps = datos.comprobantes.some((c) => c.estado !== "esperada")
+    const todoOK = v.resumen.con_diferencias === 0 && filas.length > 0 && tieneComps
+    const varias = columnas.length > 1
+    const documentos = datos.documentos
+    const fotos = documentos.filter((d) => !!d.url)
 
     return (
         <div className="min-h-screen bg-background p-6">
-            <div className="flex items-center gap-4 mb-6">
-                <Link href="/ordenes-compra">
-                    <Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button>
-                </Link>
-                <div className="flex-1">
-                    <h1 className="text-2xl font-bold">Verificación — {orden?.numero_orden}</h1>
-                    <p className="text-muted-foreground">
-                        {orden?.proveedor?.sigla || orden?.proveedor?.nombre} — Triple verificación
-                    </p>
+            {dialogo}
+            <div className="flex items-center gap-4 mb-6 flex-wrap">
+                <Link href="/ordenes-compra"><Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button></Link>
+                <div className="flex-1 min-w-60">
+                    <h1 className="text-2xl font-bold flex items-center gap-2 flex-wrap">
+                        Verificación — {datos.orden.numero_orden}
+                        <Badge variant="outline">{ESTADOS_OC[datos.orden.estado] || datos.orden.estado}</Badge>
+                    </h1>
+                    <p className="text-muted-foreground">{datos.orden.proveedor_nombre || "Sin proveedor"} · pedido, recibido y facturado, artículo por artículo</p>
                 </div>
-                <div className="flex gap-2">
-                    {rows.some(r => r.pendiente_oc > 0) && (
-                        <Button onClick={generarOCFaltantes} variant="outline" className="gap-2 border-amber-400 text-amber-700 hover:bg-amber-50">
-                            <FileText className="h-4 w-4" /> Generar OC con faltantes
-                        </Button>
-                    )}
-                    {tieneComps && orden?.estado !== "finalizada" && (
-                        <Button onClick={finalizarOC}
-                            disabled={!!controlFin?.falta_factura}
-                            title={controlFin?.falta_factura ? "Falta la factura para controlar precios: con solo el remito la orden queda abierta" : undefined}
-                            className={`gap-2 ${allOK ? "bg-green-600 hover:bg-green-700" : "bg-orange-500 hover:bg-orange-600"}`}>
-                            <CheckCircle2 className="h-4 w-4" /> Finalizar OC
-                        </Button>
-                    )}
-                    {tieneComps && (
-                        <Button onClick={generarOrdenPago} variant="outline" className="gap-2">
-                            <CreditCard className="h-4 w-4" /> Generar Orden de Pago
-                        </Button>
-                    )}
-                </div>
+                {!soloLectura && (
+                    <div className="flex gap-2 flex-wrap">
+                        {pendientes.length > 0 && (
+                            <Button onClick={generarOCFaltantes} variant="outline" className="gap-2 border-amber-400 text-amber-700 hover:bg-amber-50">
+                                <FileText className="h-4 w-4" /> Generar OC con faltantes
+                            </Button>
+                        )}
+                        {tieneComps && (
+                            <Button onClick={finalizarOC} disabled={trabajando || !control.puede}
+                                title={!control.puede ? control.faltas.join(" ") : undefined}
+                                className={`gap-2 ${todoOK ? "bg-green-600 hover:bg-green-700" : "bg-orange-500 hover:bg-orange-600"}`}>
+                                <CheckCircle2 className="h-4 w-4" /> {pendientes.length > 0 ? "Cerrar sin el resto" : "Finalizar OC"}
+                            </Button>
+                        )}
+                    </div>
+                )}
+                {tieneComps && (
+                    <Button onClick={generarOrdenPago} variant="outline" className="gap-2"><CreditCard className="h-4 w-4" /> Generar Orden de Pago</Button>
+                )}
             </div>
 
-            {controlFin && !controlFin.puede && orden?.estado !== "finalizada" && (
-                <div className="mb-4 p-3 border border-sky-300 bg-sky-50 rounded-lg">
-                    <p className="text-sm font-semibold text-sky-900">
-                        {controlFin.falta_factura ? "Falta la factura para controlar precios" : "Todavía no se puede finalizar la orden"}
-                    </p>
-                    <ul className="text-sm text-sky-900 mt-1 list-disc pl-5">
-                        {controlFin.faltas.map((f, i) => <li key={i}>{f}</li>)}
+            {soloLectura && (
+                <div className="mb-4 p-3 border rounded-lg bg-muted/40 text-sm flex items-center gap-2">
+                    <Lock className="h-4 w-4" /> Esta orden está {datos.orden.estado === "cancelada" ? "cancelada" : "finalizada"}: se puede consultar, pero no modificar.
+                </div>
+            )}
+
+            {(datos.conteos_tardios || []).length > 0 && (
+                <div className="mb-4 p-4 border-2 border-amber-400 bg-amber-50 rounded-lg">
+                    <p className="font-bold text-amber-900">Conteos del depósito que llegaron tarde y NO entraron al stock</p>
+                    <p className="text-sm text-amber-900 mt-1">Otro equipo contó esto cuando la entrega ya estaba cerrada (estaba sin señal). Revisá con el depósito si esa mercadería llegó de verdad; si llegó, corregí lo recibido con el botón "Corregir" del artículo.</p>
+                    <ul className="text-sm text-amber-900 mt-2 list-disc pl-5">
+                        {(datos.conteos_tardios || []).map((a: any) => (
+                            <li key={a.id}>{a.sku ? <strong>{a.sku}</strong> : null} {a.descripcion || "Artículo"}: contó {a.cantidad ?? "?"}{a.unidad ? ` (${a.unidad === "bulto" ? "bultos" : "unidades"})` : ""}{a.entrega ? ` — entrega ${a.entrega}` : ""}</li>
+                        ))}
                     </ul>
                 </div>
             )}
 
-            {sinMatch > 0 && (
+            {!soloLectura && datos.descuadres.length > 0 && (
+                <div className="mb-4 p-4 border-2 border-red-400 bg-red-50 rounded-lg">
+                    <p className="font-bold text-red-900">Los renglones no suman lo que dice el comprobante</p>
+                    <ul className="text-sm text-red-900 mt-1 space-y-1">
+                        {datos.descuadres.map((d) => (
+                            <li key={d.comprobante_id}><strong>{d.comprobante}:</strong> {d.faltas.join(" ")}</li>
+                        ))}
+                    </ul>
+                    <p className="text-xs text-red-800 mt-2">Hasta corregirlo, ese comprobante no se puede validar: editá los datos (lápiz), agregá el renglón que falta (+) o marcá como "No es mercadería" el concepto que corresponda.</p>
+                </div>
+            )}
+
+            {!soloLectura && !control.puede && (
+                <div className="mb-4 p-3 border border-sky-300 bg-sky-50 rounded-lg">
+                    <p className="text-sm font-semibold text-sky-900">{control.falta_factura ? "Falta la factura para controlar precios" : "Todavía no se puede finalizar la orden"}</p>
+                    <ul className="text-sm text-sky-900 mt-1 list-disc pl-5">{control.faltas.map((f, i) => <li key={i}>{f}</li>)}</ul>
+                </div>
+            )}
+
+            {!soloLectura && pendientes.length > 0 && (
+                <div className="mb-4 p-3 border border-amber-300 bg-amber-50 rounded-lg text-sm text-amber-900">
+                    <strong>Falta recibir mercadería de {pendientes.length} artículo(s).</strong> La orden sigue abierta ("recibida en parte"): el depósito puede
+                    recibir el resto en otra entrega sobre esta misma orden. Si no va a llegar, se cierra sin el resto (botón de arriba) o se vuelve a pedir con
+                    "Generar OC con faltantes".
+                </div>
+            )}
+
+            {v.resumen.sin_vincular > 0 && (
                 <div className="mb-4 p-3 border border-amber-300 bg-amber-50 rounded-lg">
                     <p className="text-sm text-amber-800">
-                        <strong>{sinMatch} ítem{sinMatch !== 1 ? "s" : ""} de comprobantes sin vincular al catálogo</strong> —
+                        <strong>{v.resumen.sin_vincular} renglón{v.resumen.sin_vincular !== 1 ? "es" : ""} de comprobantes sin vincular al catálogo</strong> —
                         confirmalos en "Revisar matches" (más abajo); hasta entonces la verificación no los incluye.
                     </p>
                 </div>
             )}
 
-            {otrosConceptos.length > 0 && (
+            {v.otros_conceptos.length > 0 && (
                 <div className="mb-4 p-3 border rounded-lg bg-muted/30">
                     <p className="text-sm font-medium">Otros conceptos facturados (no son mercadería, no entran al stock)</p>
                     <ul className="text-sm text-muted-foreground mt-1">
-                        {otrosConceptos.map((o, i) => (
-                            <li key={i}>{o.comprobante} — {o.descripcion}{o.importe > 0 ? <> — <span className="font-mono">{formatCurrency(o.importe)}</span> + impuestos</> : null}</li>
+                        {v.otros_conceptos.map((o, i) => (
+                            <li key={i}>{o.comprobante} — {o.descripcion}{o.importe > 0 ? <> — <span className="font-mono">{moneda(o.importe)}</span> + impuestos</> : null}</li>
                         ))}
                     </ul>
                     <p className="text-xs text-muted-foreground mt-1">Ya están incluidos en el total de cada comprobante, que es lo que se registra como deuda.</p>
@@ -630,296 +300,174 @@ export default function VerificacionOCPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <Card className="border-l-4 border-l-blue-500">
-                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total OC</CardTitle></CardHeader>
-                    <CardContent><div className="text-xl font-bold">{formatCurrency(totalOC)}</div></CardContent>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total de la orden <span className="font-normal">(neto)</span></CardTitle></CardHeader>
+                    <CardContent><div className="text-xl font-bold">{moneda(v.resumen.total_oc)}</div></CardContent>
                 </Card>
                 <Card className="border-l-4 border-l-purple-500">
-                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Facturado</CardTitle></CardHeader>
-                    <CardContent><div className="text-xl font-bold">{tieneComps ? formatCurrency(totalFacturado) : <span className="text-muted-foreground">Sin comprobantes</span>}</div></CardContent>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total facturado <span className="font-normal">(con impuestos)</span></CardTitle></CardHeader>
+                    <CardContent>
+                        <div className="text-xl font-bold">{tieneComps ? moneda(v.resumen.total_facturado) : <span className="text-muted-foreground">Sin comprobantes</span>}</div>
+                        {v.resumen.nc_esperadas > 0 && <div className="text-xs text-muted-foreground mt-1">Notas de crédito esperadas del proveedor: {moneda(v.resumen.nc_esperadas)}</div>}
+                        {v.resumen.nd_esperadas > 0 && <div className="text-xs text-muted-foreground mt-1">Mercadería de más que falta facturar: {moneda(v.resumen.nd_esperadas)}</div>}
+                    </CardContent>
                 </Card>
                 <Card className="border-l-4 border-l-green-500">
                     <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Artículos OK</CardTitle></CardHeader>
-                    <CardContent><div className="text-xl font-bold text-green-600">{itemsOK} / {rows.length}</div></CardContent>
+                    <CardContent><div className="text-xl font-bold text-green-600">{v.resumen.ok} / {v.resumen.articulos}</div></CardContent>
                 </Card>
-                <Card className={`border-l-4 ${itemsDiff > 0 ? "border-l-orange-500" : "border-l-green-500"}`}>
-                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Con Diferencias</CardTitle></CardHeader>
-                    <CardContent><div className={`text-xl font-bold ${itemsDiff > 0 ? "text-orange-600" : "text-green-600"}`}>{itemsDiff}</div></CardContent>
+                <Card className={`border-l-4 ${v.resumen.con_diferencias > 0 ? "border-l-orange-500" : "border-l-green-500"}`}>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Con diferencias</CardTitle></CardHeader>
+                    <CardContent><div className={`text-xl font-bold ${v.resumen.con_diferencias > 0 ? "text-orange-600" : "text-green-600"}`}>{v.resumen.con_diferencias}</div></CardContent>
                 </Card>
             </div>
 
-            {/* ── COMPROBANTES: subir (múltiple, sin bloquear), editar, validar, eliminar + revisar matches ── */}
+            {/* Comprobantes: subir, editar, validar, eliminar, documentos no leídos y revisar matches */}
             <div className="mb-6">
-                <ComprobantesSection ordenId={ordenId} onChanged={loadAll} />
+                <ComprobantesSection ordenId={ordenId} onChanged={cargar} soloLectura={soloLectura}
+                    comprobantes={datos.comprobantes.filter((c) => c.estado !== "esperada")}
+                    documentos={documentos} onVerDocumento={setDocVisible} />
             </div>
 
-            {/* ── DIALOG RESOLUCIÓN FALTANTES ── */}
-            <Dialog open={!!resolviendoRow} onOpenChange={open => !open && setResolviendoRow(null)}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <Scale className="h-5 w-5 text-orange-500" />
-                            Resolver diferencia
-                        </DialogTitle>
-                    </DialogHeader>
-                    {resolviendoRow && resolviendoRow.no_pedido && (
-                        <div className="space-y-4 py-2">
-                            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg text-sm">
-                                <p className="font-semibold truncate">{resolviendoRow.descripcion}</p>
-                                <p className="text-muted-foreground font-mono text-xs mt-1">{resolviendoRow.sku}</p>
-                                <p className="text-xs text-purple-800 mt-1.5">
-                                    Este artículo llegó/se facturó pero NO estaba en la OC. Si en realidad es OTRO artículo
-                                    (duplicado en la base, o el proveedor cambió código/EAN/descripción), vinculalo acá:
-                                    las líneas se corrigen, la equivalencia se aprende para el futuro, y podés actualizar
-                                    los datos del artículo correcto.
-                                </p>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Era este artículo de la OC:</Label>
-                                <Select value={vincularDestino} onValueChange={setVincularDestino}>
-                                    <SelectTrigger><SelectValue placeholder="Elegir el artículo correcto…" /></SelectTrigger>
-                                    <SelectContent>
-                                        {rows.filter(r => !r.no_pedido && r.articulo_id !== resolviendoRow.articulo_id).map(r => (
-                                            <SelectItem key={r.articulo_id} value={r.articulo_id}>
-                                                {r.sku} — {r.descripcion} (OC: {cant(r.cant_oc)} u)
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                    <Label className="text-xs">Actualizar EAN13 (opcional)</Label>
-                                    <Input value={vincularEan} onChange={e => setVincularEan(e.target.value)} placeholder="nuevo código de barras" />
-                                </div>
-                                <div>
-                                    <Label className="text-xs">Unidades por bulto (opcional)</Label>
-                                    <Input inputMode="numeric" value={vincularBulto} onChange={e => setVincularBulto(e.target.value.replace(/[^0-9]/g, ""))} placeholder="ej. 12" />
-                                </div>
-                                <div className="col-span-2">
-                                    <Label className="text-xs">Actualizar descripción del artículo (opcional)</Label>
-                                    <Input value={vincularDesc} onChange={e => setVincularDesc(e.target.value)} placeholder="dejar vacío para no tocarla" />
-                                </div>
-                            </div>
-                            <label className="flex items-center gap-2 text-sm cursor-pointer">
-                                <input type="checkbox" className="h-4 w-4" checked={vincularAprender} onChange={e => setVincularAprender(e.target.checked)} />
-                                Aprender la equivalencia (los próximos comprobantes del proveedor matchean solos)
-                            </label>
-                        </div>
-                    )}
-                    {resolviendoRow && !resolviendoRow.no_pedido && (
-                        <div className="space-y-4 py-2">
-                            <div className="p-3 bg-muted rounded-lg text-sm">
-                                <p className="font-semibold truncate">{resolviendoRow.descripcion}</p>
-                                <p className="text-muted-foreground font-mono text-xs mt-1">{resolviendoRow.sku}</p>
-                                <div className="flex gap-4 mt-2 text-xs">
-                                    <span>OC: <strong>{cant(resolviendoRow.cant_oc)} u</strong></span>
-                                    <span>Recibido: <strong>{cant(resolviendoRow.cant_recibida)} u</strong></span>
-                                    <span className="text-orange-600">Faltante: <strong>{cant(resolviendoRow.cant_oc - resolviendoRow.cant_recibida)} u</strong></span>
-                                </div>
-                            </div>
+            {resolviendo && (
+                <ResolverDiferencia fila={resolviendo} filasOC={filas.filter((f) => !f.no_pedido)} transportes={datos.transportes} ordenId={ordenId}
+                    recepcion={datos.recepciones.find((r) => r.id === resolviendo.recepcion_id) || null}
+                    onCerrar={() => setResolviendo(null)} onHecho={() => { setResolviendo(null); cargar() }} />
+            )}
+            {corrigiendo && (
+                <CorregirRecibido fila={corrigiendo} onCerrar={() => setCorrigiendo(null)} onHecho={() => { setCorrigiendo(null); cargar() }} />
+            )}
 
-                            <div className="space-y-2">
-                                <Label>Tipo de diferencia</Label>
-                                <Select value={resolucionTipo} onValueChange={(v: any) => { setResolucionTipo(v); setResolucionAccion('A') }}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="mercaderia">Diferencia de mercadería (cantidad)</SelectItem>
-                                        <SelectItem value="precio">Diferencia de precio</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+            {fotos.length > 0 && (
+                <div className="mb-3 flex items-center gap-2 flex-wrap text-sm">
+                    <span className="text-muted-foreground">Ver el comprobante al lado de la tabla:</span>
+                    {fotos.map((d) => (
+                        <Button key={d.id} size="sm" variant={docVisible?.id === d.id ? "default" : "outline"} className="h-7 gap-1"
+                            onClick={() => setDocVisible(docVisible?.id === d.id ? null : d)}>
+                            <ImageIcon className="h-3.5 w-3.5" /> {d.nombre_archivo || d.tipo_documento || "documento"}
+                        </Button>
+                    ))}
+                </div>
+            )}
 
-                            <div className="space-y-2">
-                                <Label>¿A quién se imputa?</Label>
-                                <div className="grid gap-2">
-                                    {(resolucionTipo === 'precio' ? [
-                                        { value: 'A', label: '↩ Empresa absorbe', desc: 'Se acepta el precio facturado y se actualiza el costo del artículo', color: 'border-gray-300' },
-                                        { value: 'C', label: '🏭 Proveedor — reclamar NC', desc: 'Queda una NC esperada por la diferencia de precio para reclamar al proveedor', color: 'border-red-300' },
-                                        { value: 'D', label: '📉 Descuento fuera de factura', desc: 'El proveedor factura sin el descuento y manda la NC a fin de mes/trimestre. Queda como NC esperada.', color: 'border-purple-300' },
-                                    ] : [
-                                        { value: 'A', label: '↩ Empresa absorbe', desc: 'Se desestima la diferencia, sin movimiento en cuentas', color: 'border-gray-300' },
-                                        { value: 'B', label: '🚚 Transporte', desc: 'Se registra en la cuenta corriente del transporte', color: 'border-blue-300' },
-                                        { value: 'C', label: '🏭 Proveedor', desc: 'Devolución con ajuste de stock + NC esperada para reclamar', color: 'border-red-300' },
-                                    ]).map(opt => (
-                                        <button key={opt.value}
-                                            onClick={() => setResolucionAccion(opt.value as any)}
-                                            className={`text-left p-3 rounded-lg border-2 transition-colors ${resolucionAccion === opt.value ? opt.color + ' bg-muted' : 'border-muted hover:border-muted-foreground/30'}`}>
-                                            <div className="font-semibold text-sm">{opt.label}</div>
-                                            <div className="text-xs text-muted-foreground mt-0.5">{opt.desc}</div>
-                                        </button>
+            <div className={docVisible ? "grid grid-cols-1 xl:grid-cols-2 gap-4 items-start" : ""}>
+                <Card>
+                    <CardContent className="p-0 overflow-x-auto">
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="bg-muted/30">
+                                    <TableHead className="w-[30px]"></TableHead>
+                                    <TableHead>SKU</TableHead>
+                                    <TableHead>Descripción</TableHead>
+                                    <TableHead className="text-right">Pedido<br /><span className="text-[10px] text-muted-foreground font-normal">en unidades</span></TableHead>
+                                    <TableHead className="text-right">Recibido<br /><span className="text-[10px] text-muted-foreground font-normal">en unidades</span></TableHead>
+                                    {columnas.map((c) => (
+                                        <TableHead key={`h-cant-${c.id}`} className="text-right text-xs">
+                                            Cant. {c.tipo}<br /><span className="text-[10px] text-muted-foreground">{c.numero}</span>
+                                            {c.es_remito && <><br /><span className="text-[10px] text-sky-700">controla cantidades</span></>}
+                                        </TableHead>
                                     ))}
-                                </div>
-                            </div>
-
-                            {resolucionAccion === 'B' && (
-                                <div className="space-y-2">
-                                    <Label>Transporte responsable</Label>
-                                    <Select value={resolucionTransporte} onValueChange={setResolucionTransporte}>
-                                        <SelectTrigger><SelectValue placeholder="Seleccionar transporte..." /></SelectTrigger>
-                                        <SelectContent>
-                                            {transportes.map(t => (
-                                                <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    {transportes.length === 0 && (
-                                        <Alert><AlertDescription className="text-xs">No hay transportes activos cargados en el sistema.</AlertDescription></Alert>
-                                    )}
-                                </div>
-                            )}
-
-                            <div className="space-y-2">
-                                <Label>Observaciones (opcional)</Label>
-                                <Textarea value={resolucionDesc} onChange={e => setResolucionDesc(e.target.value)}
-                                    placeholder="Detalle adicional..." rows={2} />
-                            </div>
-                        </div>
-                    )}
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setResolviendoRow(null)}>Cancelar</Button>
-                        {resolviendoRow?.no_pedido ? (
-                            <Button onClick={confirmarVinculacion} disabled={!vincularDestino || vinculando}>
-                                {vinculando ? 'Vinculando…' : 'Vincular artículo'}
-                            </Button>
-                        ) : (
-                            <Button onClick={confirmarResolucion}
-                                disabled={resolucionAccion === 'B' && !resolucionTransporte}>
-                                Confirmar resolución
-                            </Button>
-                        )}
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            <Card>
-                <CardContent className="p-0 overflow-x-auto">
-                    <Table>
-                        <TableHeader>
-                            <TableRow className="bg-muted/30">
-                                <TableHead className="w-[30px]"></TableHead>
-                                <TableHead>SKU</TableHead>
-                                <TableHead>Descripción</TableHead>
-                                <TableHead className="text-right">Cant. OC<br /><span className="text-[10px] text-muted-foreground font-normal">en unidades</span></TableHead>
-                                <TableHead className="text-right">Cant. Recibida<br /><span className="text-[10px] text-muted-foreground font-normal">en unidades</span></TableHead>
-                                {/* Dynamic columns per comprobante */}
-                                {comprobantes.map(c => (
-                                    <TableHead key={`h-cant-${c.id}`} className="text-right text-xs">
-                                        Cant. {c.tipo}<br /><span className="text-[10px] text-muted-foreground">{c.numero}</span>
-                                        {c.tipo === "Remito" && <><br /><span className="text-[10px] text-sky-700">controla cantidades</span></>}
-                                    </TableHead>
-                                ))}
-                                {showMultipleComps && (
-                                    <TableHead className="text-right font-bold">Total Fact.</TableHead>
-                                )}
-                                <TableHead className="text-right">Precio OC<br /><span className="text-[10px] text-muted-foreground font-normal">neto por unidad</span></TableHead>
-                                {comprobantes.map(c => (
-                                    <TableHead key={`h-pre-${c.id}`} className="text-right text-xs">
-                                        Precio {c.tipo}<br /><span className="text-[10px] text-muted-foreground">{c.numero}</span>
-                                    </TableHead>
-                                ))}
-                                <TableHead className="text-center">Estado</TableHead>
-                                <TableHead className="text-right">Acciones</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {loading ? (
-                                <TableRow><TableCell colSpan={20} className="text-center h-20"><CargaProgreso compacto mensajes={MENSAJES.ordenesCompra} className="mx-auto max-w-sm" /></TableCell></TableRow>
-                            ) : rows.length === 0 ? (
-                                <TableRow><TableCell colSpan={20} className="text-center h-20 text-muted-foreground">Sin artículos</TableCell></TableRow>
-                            ) : rows.map(row => {
-                                const hasDiff = row.status !== "ok"
-
-                                return (
-                                    <TableRow key={row.articulo_id} className={row.no_pedido ? "bg-purple-50/50" : hasDiff ? "bg-orange-50/50" : ""}>
-                                        <TableCell>
-                                            {row.status === "ok" ? <CheckCircle2 className="h-4 w-4 text-green-500" />
-                                                : row.status === "sin_documentar" ? <FileText className="h-4 w-4 text-amber-600" />
-                                                : row.status === "faltante" ? <XCircle className="h-4 w-4 text-red-500" />
-                                                    : row.no_pedido ? <AlertTriangle className="h-4 w-4 text-purple-500" />
-                                                        : <AlertTriangle className="h-4 w-4 text-orange-500" />}
-                                        </TableCell>
-                                        <TableCell className="font-mono text-xs">{row.sku}</TableCell>
-                                        <TableCell className="text-sm max-w-[180px] truncate">{row.descripcion}</TableCell>
-                                        <TableCell className="text-right font-mono">
-                                            {cant(row.cant_oc)}
-                                            {row.es_bulto && row.cant_oc > 0 ? <div className="text-[10px] text-muted-foreground">{cant(desdeUnidadesBase(row.cant_oc, row.unidades_por_bulto))} BUL × {cant(row.unidades_por_bulto)}</div> : null}
-                                            {row.sin_upb ? <div className="text-[10px] text-red-600 font-sans" title="Se pidió o se contó por bulto y el artículo no tiene unidades por bulto: se tomó 1 unidad por bulto. Cargá el dato en la ficha del artículo.">⚠ sin unidades por bulto</div> : null}
-                                        </TableCell>
-                                        <TableCell className={`text-right font-mono ${hasDiff ? "text-orange-600 font-bold" : ""}`}>
-                                            {cant(row.cant_recibida)}
-                                            {row.es_bulto && row.cant_recibida > 0 && row.unidades_por_bulto > 1 ? <div className="text-[10px] text-muted-foreground font-normal">{cant(desdeUnidadesBase(row.cant_recibida, row.unidades_por_bulto))} BUL</div> : null}
-                                        </TableCell>
-                                        {/* Cant per comprobante */}
-                                        {comprobantes.map(c => {
-                                            const d = row.comp_data[c.id]
-                                            return (
-                                                <TableCell key={`c-${c.id}`} className="text-right font-mono text-sm">
-                                                    {d ? cant(d.cantidad) : <span className="text-muted-foreground">—</span>}
-                                                </TableCell>
-                                            )
-                                        })}
-                                        {showMultipleComps && (
-                                            <TableCell className="text-right font-mono font-bold">
-                                                {row.cant_total_facturada > 0 ? cant(row.cant_total_facturada) : <span className="text-muted-foreground">—</span>}
+                                    {varias && <TableHead className="text-right font-bold">Facturado</TableHead>}
+                                    <TableHead className="text-right">Precio OC<br /><span className="text-[10px] text-muted-foreground font-normal">neto por unidad</span></TableHead>
+                                    {columnas.filter((c) => !c.es_remito).map((c) => (
+                                        <TableHead key={`h-pre-${c.id}`} className="text-right text-xs">
+                                            Precio {c.tipo}<br /><span className="text-[10px] text-muted-foreground">{c.numero}</span>
+                                        </TableHead>
+                                    ))}
+                                    <TableHead className="text-center">Estado</TableHead>
+                                    <TableHead className="text-right">Acciones</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {filas.length === 0 ? (
+                                    <TableRow><TableCell colSpan={20} className="text-center h-20 text-muted-foreground">Sin artículos</TableCell></TableRow>
+                                ) : filas.map((f) => {
+                                    const ok = f.banderas.length === 0
+                                    const soloPendiente = !ok && f.banderas.every((b) => b === "pendiente")
+                                    const { dif } = f
+                                    const resueltos = [f.resuelto.precio && `precio: ${DESTINO[f.resuelto.precio] || f.resuelto.precio}`, f.resuelto.cantidad && `cantidad: ${DESTINO[f.resuelto.cantidad] || f.resuelto.cantidad}`].filter(Boolean)
+                                    return (
+                                        <TableRow key={f.articulo_id} className={f.no_pedido ? "bg-purple-50/50" : ok ? "" : soloPendiente ? "bg-amber-50/60" : "bg-orange-50/50"}>
+                                            <TableCell>
+                                                {ok ? <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                                    : dif.recibido_unidades === 0 && !f.no_pedido ? <XCircle className="h-4 w-4 text-red-500" />
+                                                        : <AlertTriangle className={`h-4 w-4 ${f.no_pedido ? "text-purple-500" : soloPendiente ? "text-amber-500" : "text-orange-500"}`} />}
                                             </TableCell>
-                                        )}
-                                        <TableCell className="text-right font-mono">{formatCurrency(row.precio_oc)}</TableCell>
-                                        {/* Precio per comprobante */}
-                                        {comprobantes.map(c => {
-                                            const d = row.comp_data[c.id]
-                                            return (
-                                                <TableCell key={`p-${c.id}`} className="text-right font-mono text-sm">
-                                                    {d && d.precio > 0 ? formatCurrency(d.precio) : <span className="text-muted-foreground">—</span>}
+                                            <TableCell className="font-mono text-xs">{f.sku}</TableCell>
+                                            <TableCell className="text-sm max-w-[200px] truncate" title={f.descripcion}>{f.descripcion}</TableCell>
+                                            <TableCell className="text-right font-mono">
+                                                {dif.oc ? cant(dif.oc.unidades) : <span className="text-muted-foreground">—</span>}
+                                                {dif.oc && f.pedido_por_bulto && dif.oc.unidades > 0 ? <div className="text-[10px] text-muted-foreground">{cant(desdeUnidadesBase(dif.oc.unidades, f.unidades_por_bulto))} bultos × {cant(f.unidades_por_bulto)}</div> : null}
+                                                {f.sin_unidades_por_bulto ? <div className="text-[10px] text-red-600 font-sans" title="Se pidió por bulto y el artículo no tiene unidades por bulto: se toma 1 unidad por bulto. Cargá el dato en la ficha del artículo.">⚠ sin unidades por bulto</div> : null}
+                                            </TableCell>
+                                            <TableCell className={`text-right font-mono ${dif.pendiente_oc > 0 || f.banderas.includes("cantidad") ? "text-orange-600 font-bold" : ""}`}>
+                                                {cant(dif.recibido_unidades)}
+                                                {f.pedido_por_bulto && dif.recibido_unidades > 0 && f.unidades_por_bulto > 1 ? <div className="text-[10px] text-muted-foreground font-normal">{cant(desdeUnidadesBase(dif.recibido_unidades, f.unidades_por_bulto))} bultos</div> : null}
+                                                {dif.pendiente_oc > 0 ? <div className="text-[10px] text-amber-700 font-sans font-normal">faltan {cant(dif.pendiente_oc)}</div> : null}
+                                            </TableCell>
+                                            {columnas.map((c) => {
+                                                const d = f.por_comprobante[c.id]
+                                                return <TableCell key={`c-${c.id}`} className="text-right font-mono text-sm">{d ? cant(d.unidades) : <span className="text-muted-foreground">—</span>}</TableCell>
+                                            })}
+                                            {varias && (
+                                                <TableCell className="text-right font-mono font-bold">
+                                                    {dif.factura ? cant(dif.factura.unidades) : <span className="text-muted-foreground">—</span>}
+                                                    {dif.factura && dif.factura.bonificadas > 0 ? <div className="text-[10px] text-green-700 font-sans font-normal">{cant(dif.factura.bonificadas)} sin cargo</div> : null}
                                                 </TableCell>
-                                            )
-                                        })}
-                                        <TableCell className="text-center">
-                                            <div className="flex flex-col items-center gap-1">
-                                                <Badge className={`text-xs ${row.status === "ok" ? "bg-green-500"
-                                                    : row.status === "no_pedido" ? "bg-purple-500"
-                                                    : row.status === "sin_documentar" ? "bg-amber-500" : "bg-orange-500"}`}>
-                                                    {row.status === "ok" ? "OK"
-                                                        : row.status === "sin_documentar" ? "SIN DOCUMENTAR"
-                                                        : row.status === "faltante" ? "Faltante"
-                                                            : row.status === "no_pedido" ? "NO PEDIDO"
-                                                                : row.status === "diferencia_precio" ? "Δ Precio"
-                                                                    : row.status === "ambas" ? "Δ Cant. + Precio"
-                                                                        : "Δ Cant."}
-                                                </Badge>
-                                                {row.resuelto && (
-                                                    <Badge variant="outline" className="text-[10px] text-green-700 border-green-300">
-                                                        Resuelto{row.resuelto === "precio" ? " (precio)" : ` → ${row.resuelto}`}
-                                                    </Badge>
+                                            )}
+                                            <TableCell className="text-right font-mono">{dif.oc ? moneda(dif.oc.neto_unidad) : <span className="text-muted-foreground">—</span>}</TableCell>
+                                            {columnas.filter((c) => !c.es_remito).map((c) => {
+                                                const d = f.por_comprobante[c.id]
+                                                return <TableCell key={`p-${c.id}`} className={`text-right font-mono text-sm ${f.banderas.includes("precio") ? "text-orange-600 font-bold" : ""}`}>{d && d.neto_unidad > 0 ? moneda(d.neto_unidad) : d ? <span className="text-green-700 text-xs font-sans">sin cargo</span> : <span className="text-muted-foreground">—</span>}</TableCell>
+                                            })}
+                                            <TableCell className="text-center">
+                                                <div className="flex flex-col items-center gap-1">
+                                                    {ok ? <Badge className="text-xs bg-green-500">OK</Badge>
+                                                        : f.banderas.map((b) => <Badge key={b} className={`text-xs ${BANDERA[b].clase}`}>{BANDERA[b].texto}{b === "pendiente" ? ` ${cant(dif.pendiente_oc)} u` : ""}</Badge>)}
+                                                    {resueltos.length > 0 && <Badge variant="outline" className="text-[10px] text-green-700 border-green-300">Resuelto — {resueltos.join(" · ")}</Badge>}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                {!soloLectura && (
+                                                    <div className="flex gap-1 justify-end">
+                                                        {f.recepcion_item_id && (
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Corregir lo que contó el depósito" onClick={() => setCorrigiendo(f)}>
+                                                                <Pencil className="h-3.5 w-3.5" />
+                                                            </Button>
+                                                        )}
+                                                        {!ok && (
+                                                            <Button variant="outline" size="sm" className="text-xs h-7 text-orange-600 gap-1" onClick={() => setResolviendo(f)}>
+                                                                <Scale className="h-3 w-3" /> {soloPendiente ? "Ver" : "Resolver"}
+                                                            </Button>
+                                                        )}
+                                                    </div>
                                                 )}
-                                                {row.pendiente_oc > 0 && row.status !== "faltante" && (
-                                                    <Badge variant="outline" className="text-[10px] text-amber-700 border-amber-400"
-                                                        title="El proveedor no envió ni facturó esta cantidad de la OC (faltante de fábrica: no se debe, pero quedó sin cubrir)">
-                                                        Incompleto: −{cant(row.pendiente_oc)} u vs OC
-                                                    </Badge>
-                                                )}
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            {hasDiff && resoluciones[row.articulo_id] ? (
-                                                <Badge variant="outline" className="text-xs text-green-700 border-green-300">
-                                                    {resoluciones[row.articulo_id] === 'empresa' ? '↩ Empresa' :
-                                                     resoluciones[row.articulo_id] === 'transporte' ? '🚚 Transporte' :
-                                                     '🏭 Proveedor'}
-                                                </Badge>
-                                            ) : hasDiff ? (
-                                                <Button variant="outline" size="sm" className="text-xs h-7 text-orange-600 gap-1"
-                                                    onClick={() => abrirResolucion(row)}>
-                                                    <Scale className="h-3 w-3" /> Resolver
-                                                </Button>
-                                            ) : null}
-                                        </TableCell>
-                                    </TableRow>
-                                )
-                            })}
-                        </TableBody>
-                    </Table>
-                </CardContent>
-            </Card>
+                                            </TableCell>
+                                        </TableRow>
+                                    )
+                                })}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+
+                {docVisible && (
+                    <Card className="xl:sticky xl:top-4">
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                                <ImageIcon className="h-4 w-4" /> <span className="truncate">{docVisible.nombre_archivo || "Documento"}</span>
+                                <a href={docVisible.url || "#"} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-blue-600 underline shrink-0">abrir aparte</a>
+                                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => setDocVisible(null)}><X className="h-4 w-4" /></Button>
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {(docVisible.tipo_mime || "").includes("pdf") || /\.pdf($|\?)/i.test(docVisible.nombre_archivo || "")
+                                ? <iframe src={docVisible.url || ""} title="Comprobante" className="w-full h-[75vh] border rounded" />
+                                // eslint-disable-next-line @next/next/no-img-element
+                                : <div className="max-h-[75vh] overflow-auto border rounded"><img src={docVisible.url || ""} alt="Comprobante" className="w-full" /></div>}
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
         </div>
     )
 }

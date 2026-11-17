@@ -129,7 +129,8 @@ export async function POST(
                 comprobante: null,
                 ocr_processing_results: [],
                 no_leido: true,
-                aviso: `${noLeido} La foto quedó adjunta pero NO generó comprobante: sacala de nuevo (derecha, con luz, el papel entero) o avisá a la oficina para que lo cargue a mano.`,
+                aviso: "No se pudo leer la foto. Quedó adjunta pero NO generó comprobante: sacala de nuevo (derecha, con luz, el papel entero) o avisá a la oficina para que lo cargue a mano.",
+                motivo: noLeido,
             });
         }
 

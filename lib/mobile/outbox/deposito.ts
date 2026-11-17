@@ -161,9 +161,48 @@ const pickingSoltar: HandlerDef<{ pedido_id: string }> = {
 // Todo se direcciona por la OC: la recepción se crea sola en el servidor la
 // primera vez (el handheld puede haber empezado a contar sin señal).
 
-async function recepcionAbierta(ctx: CtxOutbox, ordenId: string) {
+/**
+ * La entrega abierta de la orden, para un conteo o un control de bultos. Si la última ya se
+ * finalizó, el cambio se RECHAZA (nunca abre otra entrega: eso solo lo hace "Iniciar recepción")
+ * y queda un aviso para la oficina, que lo ve en la verificación de la orden: es mercadería que
+ * alguien contó y que no entró al stock.
+ */
+async function recepcionAbierta(ctx: CtxOutbox, m: { tipo: string; idempotency_key: string; device_id?: string | null; capturado_at?: string | null; payload: any }) {
+  const ordenId: string = m.payload.orden_compra_id
   const rec = await negocio(() => obtenerOCrearRecepcion(ctx.supabase, ordenId, ctx.sesion.user.id))
-  if (rec.estado === "finalizada") throw new RechazoNegocio("La recepción de esta orden ya se finalizó: este cambio no se aplicó.", "recepcion_finalizada")
+  if (rec.estado === "finalizada") {
+    try {
+      let articulo: any = null
+      if (m.payload.articulo_id) {
+        const { data } = await ctx.admin.from("articulos").select("sku, descripcion").eq("id", m.payload.articulo_id).maybeSingle()
+        articulo = data
+      }
+      const { data: previa } = await ctx.admin.from("mobile_alertas_integridad").select("id").eq("idempotency_key", m.idempotency_key).limit(1)
+      if (!previa || previa.length === 0) {
+        await ctx.admin.from("mobile_alertas_integridad").insert({
+          tipo: "recepcion_tardia",
+          operacion: m.tipo,
+          idempotency_key: m.idempotency_key,
+          usuario_id: ctx.sesion.user.id,
+          device_id: m.device_id ?? null,
+          capturado_at: m.capturado_at ?? null,
+          detalle: {
+            orden_compra_id: ordenId,
+            recepcion_id: rec.id,
+            entrega: rec.numero_tanda ?? 1,
+            articulo_id: m.payload.articulo_id ?? null,
+            sku: articulo?.sku ?? null,
+            descripcion: articulo?.descripcion ?? null,
+            cantidad: m.payload.cantidad_fisica ?? null,
+            unidad: m.payload.unidad ?? null,
+          },
+        })
+      }
+    } catch (e) {
+      console.error("[recepción] no se pudo dejar el aviso del conteo tardío:", e)
+    }
+    throw new RechazoNegocio("La recepción de esta orden ya se finalizó: este cambio no se aplicó. Si llegó más mercadería de esta orden, volvé a la lista de órdenes y entrá de nuevo para iniciar la entrega siguiente (si no aparece, cerrá y abrí la app).", "recepcion_finalizada")
+  }
   return rec
 }
 
@@ -172,7 +211,9 @@ const recepcionIniciar: HandlerDef<{ orden_compra_id: string }> = {
   roles: ROLES,
   validar: (p) => (esId(p?.orden_compra_id) ? null : "Orden inválida"),
   async aplicar(ctx, m) {
-    const rec = await negocio(() => obtenerOCrearRecepcion(ctx.supabase, m.payload.orden_compra_id, ctx.sesion.user.id))
+    // Iniciar es lo ÚNICO que abre la entrega siguiente de una orden recibida en parte, y solo si se
+    // tocó después de que se cerró la anterior (un "iniciar" viejo que llega tarde no abre nada).
+    const rec = await negocio(() => obtenerOCrearRecepcion(ctx.supabase, m.payload.orden_compra_id, ctx.sesion.user.id, { abrirSiguiente: true, capturadoAt: m.capturado_at }))
     return { recepcion_id: rec.id, replica: [await parcheRecepcion(ctx, m.payload.orden_compra_id)] }
   },
 }
@@ -182,7 +223,7 @@ const recepcionConformidad: HandlerDef<{ orden_compra_id: string; conformidad: C
   roles: ROLES,
   validar: (p) => (esId(p?.orden_compra_id) && p?.conformidad?.estado ? null : "Datos de conformidad inválidos"),
   async aplicar(ctx, m) {
-    const rec = await recepcionAbierta(ctx, m.payload.orden_compra_id)
+    const rec = await recepcionAbierta(ctx, m)
     // El primer control registrado es el que vale (dos equipos sobre la misma OC)
     if (!rec.conformidad_transporte) {
       await negocio(() => guardarConformidad(ctx.supabase, rec.id, m.payload.conformidad, m.capturado_at))
@@ -207,7 +248,7 @@ const recepcionItem: HandlerDef<{ orden_compra_id: string; articulo_id: string; 
         ? "Unidad de conteo inválida (bulto o unidad)"
         : null,
   async aplicar(ctx, m) {
-    const rec = await recepcionAbierta(ctx, m.payload.orden_compra_id)
+    const rec = await recepcionAbierta(ctx, m)
     await negocio(() => aplicarItemRecepcion(ctx.supabase, rec.id, m.payload.articulo_id, Number(m.payload.cantidad_fisica), m.payload.unidad ?? null))
     return { recepcion_id: rec.id, replica: [await parcheRecepcion(ctx, m.payload.orden_compra_id)] }
   },
@@ -218,6 +259,8 @@ const recepcionCerrar: HandlerDef<{ orden_compra_id: string }> = {
   roles: ROLES,
   validar: (p) => (esId(p?.orden_compra_id) ? null : "Orden inválida"),
   async aplicar(ctx, m) {
+    // Un "cerrar" que llega tarde (la entrega ya la cerró otro equipo) no abre una entrega vacía:
+    // sin abrirSiguiente devuelve la finalizada y finalizarRecepcion responde ya_finalizada.
     const rec = await negocio(() => obtenerOCrearRecepcion(ctx.supabase, m.payload.orden_compra_id, ctx.sesion.user.id))
     const r = await negocio(() => finalizarRecepcion(ctx.supabase, rec.id, { exigirResuelta: true }))
     return { ...r, replica: [await parcheRecepcion(ctx, m.payload.orden_compra_id)] }

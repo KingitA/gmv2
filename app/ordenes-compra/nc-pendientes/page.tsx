@@ -15,12 +15,17 @@ import { todayArgentina, formatCurrency, formatDateAR } from "@/lib/utils"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { InputMonto } from "@/components/ui/input-monto"
 import { DateInputAR } from "@/components/ui/date-input-ar"
+import { useConfirmar } from "@/components/ui/confirmar"
+import { toast } from "sonner"
+
+const ES_ND = ["ND", "NDA", "NDB", "NDC"]
 
 const ORIGEN_LABELS: Record<string, string> = {
     descuento_fuera_factura: "Descuento fuera de factura",
     faltante: "Faltante",
     devolucion: "Devolución",
     diferencia_precio: "Diferencia de precio",
+    sobrante: "Mercadería de más",
 }
 
 // NC que los proveedores nos deben: descuentos fuera de factura (fin de
@@ -30,6 +35,9 @@ export default function NCPendientesPage() {
     const supabase = createClient()
 
     const [esperadas, setEsperadas] = useState<any[]>([])
+    // Notas de DÉBITO esperadas: mercadería que llegó de más y el proveedor va a facturar (17/11)
+    const [debitos, setDebitos] = useState<any[]>([])
+    const { confirmar, dialogo } = useConfirmar()
     const [sinImputar, setSinImputar] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
 
@@ -46,7 +54,7 @@ export default function NCPendientesPage() {
         const { data: esp } = await supabase
             .from("comprobantes_compra")
             .select(`
-                id, numero_comprobante, fecha_comprobante, total_factura_declarado,
+                id, tipo_comprobante, numero_comprobante, fecha_comprobante, total_factura_declarado,
                 origen_nc, comprobante_asociado_id, created_at,
                 proveedor:proveedores(id, nombre),
                 orden_compra:ordenes_compra(id, numero_orden),
@@ -67,12 +75,29 @@ export default function NCPendientesPage() {
             .lt("saldo_pendiente", -0.01)
             .order("fecha_comprobante", { ascending: true })
 
-        setEsperadas(esp || [])
+        setEsperadas((esp || []).filter((e: any) => !ES_ND.includes(e.tipo_comprobante)))
+        setDebitos((esp || []).filter((e: any) => ES_ND.includes(e.tipo_comprobante)))
         setSinImputar(sinImp || [])
         setLoading(false)
     }, [supabase])
 
     useEffect(() => { cargar() }, [cargar])
+
+    // La factura (o nota de débito) por la mercadería de más ya se cargó en la orden: se quita de la lista.
+    // No genera ningún movimiento: lo esperado nunca fue deuda.
+    const quitarDebito = async (nd: any) => {
+        const ok = await confirmar({
+            titulo: "¿Ya llegó y se cargó la factura de esta mercadería?",
+            detalle: `${nd.proveedor?.nombre || "Proveedor"} — ${formatCurrency(Number(nd.total_factura_declarado || 0))}${nd.orden_compra?.numero_orden ? ` — ${nd.orden_compra.numero_orden}` : ""}\n\nSe quita de la lista de notas esperadas. No mueve la cuenta corriente: la deuda la registra la factura o nota de débito real cuando se valida.`,
+            confirmar: "Sí, quitar de la lista",
+        })
+        if (!ok) return
+        const res = await fetch(`/api/comprobantes-compra/${nd.id}`, { method: "DELETE" })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) { toast.error(data.error || "No se pudo quitar"); return }
+        toast.success("Quitada de la lista")
+        cargar()
+    }
 
     const abrirRegistro = (nc: any) => {
         setRegistrando(nc)
@@ -141,21 +166,22 @@ export default function NCPendientesPage() {
 
     return (
         <div className="container mx-auto p-6 space-y-6">
+            {dialogo}
             <div className="flex items-center gap-4">
                 <Link href="/ordenes-compra">
                     <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
                 </Link>
                 <div className="flex-1">
                     <h1 className="text-3xl font-bold flex items-center gap-2">
-                        <FileMinus className="h-7 w-7" /> NC de Proveedores
+                        <FileMinus className="h-7 w-7" /> Notas esperadas de proveedores
                     </h1>
                     <p className="text-muted-foreground">
-                        Notas de crédito esperadas (descuentos fuera de factura, faltantes, devoluciones) y créditos sin imputar
+                        Notas de crédito esperadas (descuentos fuera de factura, faltantes, devoluciones), mercadería de más que falta facturar y créditos sin imputar
                     </p>
                 </div>
                 <Card className="border-l-4 border-l-amber-500">
                     <CardContent className="py-3 px-4">
-                        <p className="text-xs text-muted-foreground">Total esperado</p>
+                        <p className="text-xs text-muted-foreground">Créditos esperados</p>
                         <p className="text-xl font-bold">{formatCurrency(totalEsperado)}</p>
                     </CardContent>
                 </Card>
@@ -213,6 +239,44 @@ export default function NCPendientesPage() {
                     )}
                 </CardContent>
             </Card>
+
+            {debitos.length > 0 && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Mercadería de más que falta facturar ({debitos.length})</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                            Llegó más mercadería de la facturada y se decidió recibirla y esperar la factura. No es deuda todavía. Cuando el proveedor
+                            mande la factura o la nota de débito, cargala en la orden como un comprobante más y quitala de esta lista.
+                        </p>
+                    </CardHeader>
+                    <CardContent>
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Proveedor</TableHead>
+                                    <TableHead>OC</TableHead>
+                                    <TableHead>Factura de la entrega</TableHead>
+                                    <TableHead className="text-right">Importe esperado</TableHead>
+                                    <TableHead className="text-right">Días esperando</TableHead>
+                                    <TableHead></TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {debitos.map((nd) => (
+                                    <TableRow key={nd.id}>
+                                        <TableCell className="font-medium">{nd.proveedor?.nombre || "—"}</TableCell>
+                                        <TableCell>{nd.orden_compra?.numero_orden || "—"}</TableCell>
+                                        <TableCell className="text-xs">{nd.asociado ? `${nd.asociado.tipo_comprobante} ${nd.asociado.numero_comprobante}` : "—"}</TableCell>
+                                        <TableCell className="text-right font-semibold">{formatCurrency(Number(nd.total_factura_declarado || 0))}</TableCell>
+                                        <TableCell className="text-right">{diasEsperando(nd.created_at)}</TableCell>
+                                        <TableCell><Button size="sm" variant="outline" onClick={() => quitarDebito(nd)}>Ya se cargó la factura</Button></TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+            )}
 
             <Card>
                 <CardHeader>

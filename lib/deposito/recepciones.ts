@@ -16,11 +16,18 @@ import { nowArgentina } from "@/lib/utils"
 import { estadoLineaRecepcion } from "./bonificados"
 import { ErrorDeposito } from "./picking"
 import { faltaLaColumna, faltaLaFuncion } from "@/lib/utils/migracion-pendiente"
-import { aUnidadesBase, conversionLinea, esUnidadConteo, type ConversionLinea, type UnidadConteo } from "./unidades"
+import { aUnidadesBase, conversionLinea, esUnidadConteo, pendienteDeLinea, unidadesPorBultoDe, type ConversionLinea, type UnidadConteo, abreEntregaSiguiente } from "./unidades"
 
 const SELECT_FULL = `*, recepciones_items(*), recepciones_documentos(*)`
 /** Un finalizador que lleva más que esto sin terminar se considera caído y se retoma */
 const CANDADO_FINALIZAR_MS = 2 * 60_000
+/**
+ * Estados de la ORDEN en los que el depósito la puede recibir. "enviada", "confirmada" y
+ * "en_camino" los escribe la pantalla de órdenes de compra (envío al proveedor): una orden
+ * enviada tiene que seguir viéndose en depósito.
+ */
+export const ESTADOS_A_RECIBIR = ["pendiente", "enviada", "confirmada", "en_camino", "recibida_parcial"]
+
 /** Estados en los que una recepción todavía se puede contar y finalizar */
 const ABIERTA = ["en_proceso", "borrador"]
 
@@ -83,6 +90,56 @@ export async function conversionesDeRecepcion(
     )
   }
   return { porItem, articulos }
+}
+
+/**
+ * Qué falta recibir de una orden (E-39/E-92): por cada línea, lo pedido menos lo recibido en las
+ * entregas YA FINALIZADAS. Clave = articulo_id. Solo líneas con algo pendiente.
+ *
+ * Antes, finalizar la recepción cerraba la orden aunque faltara mercadería ("los faltantes se
+ * repiden"). Ahora la orden queda "recibida en parte" y el resto se puede recibir en otra entrega
+ * sobre la misma orden, hasta que llegue todo o la oficina la cierre sin el resto.
+ */
+export async function pendientesDeOrden(supabase: any, orden_compra_id: string): Promise<Map<string, { enUnidadOC: number; base: number; precio_unitario: number }>> {
+  const { data: detalle, error: detErr } = await supabase
+    .from("ordenes_compra_detalle")
+    .select("articulo_id, cantidad_pedida, tipo_cantidad, precio_unitario, articulos(unidades_por_bulto)")
+    .eq("orden_compra_id", orden_compra_id)
+  if (detErr) throw detErr
+  const { data: recs, error: recErr } = await supabase.from("recepciones").select("id").eq("orden_compra_id", orden_compra_id).eq("estado", "finalizada")
+  if (recErr) throw recErr
+  const recIds = (recs || []).map((r: any) => r.id)
+  const recibido = new Map<string, number>()
+  if (recIds.length > 0) {
+    const { data: items, error: itErr } = await supabase.from("recepciones_items").select("*").in("recepcion_id", recIds)
+    if (itErr) throw itErr
+    // Una línea "fuera de la orden" (el depósito contó algo que esa entrega no esperaba) NO descuenta
+    // lo pendiente de la orden: la oficina la resuelve en la verificación como mercadería no pedida.
+    const filas: any[] = (items || []).filter((i: any) => Number(i.cantidad_fisica) > 0 && !i.fuera_de_oc)
+    const { porItem } = await conversionesDeRecepcion(supabase, orden_compra_id, filas)
+    for (const i of filas) {
+      const base = i.cantidad_fisica_base != null ? Number(i.cantidad_fisica_base) : aUnidadesBase(i.cantidad_fisica, porItem.get(i.id)?.factorConteo ?? 1)
+      recibido.set(i.articulo_id, (recibido.get(i.articulo_id) || 0) + base)
+    }
+  }
+  const pendientes = new Map<string, { enUnidadOC: number; base: number; precio_unitario: number }>()
+  // Lo recibido se descuenta UNA vez por artículo, aunque esté en más de un renglón de la orden:
+  // se va consumiendo renglón por renglón, y lo pendiente de cada uno se suma.
+  const queda = new Map<string, number>(recibido)
+  for (const d of detalle || []) {
+    const art = Array.isArray(d.articulos) ? d.articulos[0] : d.articulos
+    const factor = d.tipo_cantidad === "unidad" ? 1 : unidadesPorBultoDe(art?.unidades_por_bulto)
+    const yaRecibido = queda.get(d.articulo_id) || 0
+    const p = pendienteDeLinea(d.cantidad_pedida, factor, yaRecibido)
+    queda.set(d.articulo_id, Math.max(0, yaRecibido - aUnidadesBase(d.cantidad_pedida, factor)))
+    if (p.base > 0) {
+      const previo = pendientes.get(d.articulo_id)
+      pendientes.set(d.articulo_id, previo
+        ? { ...previo, enUnidadOC: Math.round((previo.enUnidadOC + p.enUnidadOC) * 100) / 100, base: previo.base + p.base }
+        : { ...p, precio_unitario: Number(d.precio_unitario || 0) })
+    }
+  }
+  return pendientes
 }
 
 async function ultimaTanda(supabase: any, orden_compra_id: string) {
@@ -154,7 +211,7 @@ export async function cargarOrdenesPendientes(supabase: any, ordenId?: string): 
           articulos(id, sku, descripcion, ean13, unidades_por_bulto)
         )
       `)
-    .in("estado", ["pendiente", "recibida_parcial"])
+    .in("estado", ESTADOS_A_RECIBIR)
     .order("fecha_orden", { ascending: true })
   if (ordenId) q = q.eq("id", ordenId)
   const { data: ordenes, error } = await q
@@ -174,28 +231,64 @@ export async function cargarOrdenesPendientes(supabase: any, ordenId?: string): 
         .order("numero_tanda", { ascending: false })
         .limit(1)
         .maybeSingle()
+      // E-39: la última entrega ya se finalizó y la orden sigue abierta ⇒ falta mercadería.
+      // Se muestra como una orden sin empezar con SOLO lo que falta (en la unidad de la línea):
+      // así la app instalada (que arma la pantalla con estas líneas) recibe la segunda entrega
+      // sin cambios, y al entrar el servidor abre la tanda siguiente.
+      if (recepcion?.estado === "finalizada") {
+        const pendientes = await pendientesDeOrden(supabase, orden.id)
+        return {
+          ...orden,
+          ordenes_compra_detalle: (orden.ordenes_compra_detalle || [])
+            .filter((d: any) => pendientes.has(d.articulo_id))
+            .map((d: any) => ({ ...d, cantidad_pedida: pendientes.get(d.articulo_id)!.enUnidadOC })),
+          recepcion: null,
+          entrega_numero: Number(recepcion.numero_tanda || 1) + 1,
+        }
+      }
       return { ...orden, recepcion: recepcion || null }
     }),
   )
 }
 
-/** Crear o retomar la recepción de una OC (POST /api/deposito/recepciones). */
-export async function obtenerOCrearRecepcion(supabase: any, orden_compra_id: string, usuarioId?: string | null) {
+/**
+ * Crear o retomar la recepción de una OC (POST /api/deposito/recepciones).
+ * `abrirSiguiente`: la última entrega ya se finalizó y falta mercadería ⇒ abrir la siguiente.
+ * Solo lo piden "Iniciar recepción" (app: `recepcion.iniciar`; web: entrar a la orden). Sin eso se
+ * devuelve la entrega finalizada tal cual, y quien llama decide (rechazar el conteo tardío, etc.).
+ */
+export async function obtenerOCrearRecepcion(supabase: any, orden_compra_id: string, usuarioId?: string | null, opts?: { abrirSiguiente?: boolean; capturadoAt?: string | null }) {
   if (!orden_compra_id) throw new ErrorDeposito("orden_compra_id requerido", 400)
 
-  // Tanda en curso → retomarla. Si ya está finalizada, NO se abre otra:
-  // los faltantes no se reciben después, se repiden con una OC nueva.
+  // Entrega en curso → retomarla.
   const ultima = await ultimaTanda(supabase, orden_compra_id)
-  if (ultima) return ultima
+  if (ultima && ultima.estado !== "finalizada") return ultima
 
   // Detalle de la OC (cantidades pedidas y precios) + proveedor
-  const { data: ocData } = await supabase.from("ordenes_compra").select("id, proveedor_id").eq("id", orden_compra_id).maybeSingle()
-  if (!ocData) throw new ErrorDeposito("Orden de compra no encontrada", 404)
+  const { data: ocData } = await supabase.from("ordenes_compra").select("id, proveedor_id, estado").eq("id", orden_compra_id).maybeSingle()
+  if (!ocData) {
+    if (ultima) return ultima
+    throw new ErrorDeposito("Orden de compra no encontrada", 404)
+  }
 
-  const { data: detalles } = await supabase
-    .from("ordenes_compra_detalle")
-    .select("articulo_id, cantidad_pedida, precio_unitario")
-    .eq("orden_compra_id", orden_compra_id)
+  let detalles: Array<{ articulo_id: string; cantidad_pedida: number; precio_unitario: number }>
+  if (ultima) {
+    // E-39: la entrega anterior ya se finalizó. Se abre OTRA sobre la misma orden solo si la
+    // orden sigue abierta y falta mercadería; la entrega nueva lleva únicamente lo que falta.
+    // Si la oficina ya la cerró (finalizada / cancelada) o no falta nada, no se abre nada.
+    if (!abreEntregaSiguiente(opts, ultima.fecha_fin)) return ultima
+    if (!ESTADOS_A_RECIBIR.includes(ocData.estado)) return ultima
+    const pendientes = await pendientesDeOrden(supabase, orden_compra_id)
+    if (pendientes.size === 0) return ultima
+    detalles = [...pendientes].map(([articulo_id, p]) => ({ articulo_id, cantidad_pedida: p.enUnidadOC, precio_unitario: p.precio_unitario }))
+  } else {
+    const { data } = await supabase
+      .from("ordenes_compra_detalle")
+      .select("articulo_id, cantidad_pedida, precio_unitario")
+      .eq("orden_compra_id", orden_compra_id)
+    detalles = data || []
+  }
+  const numeroTanda = ultima ? Number(ultima.numero_tanda || 1) + 1 : 1
 
   const { data: nueva, error } = await supabase
     .from("recepciones")
@@ -204,18 +297,19 @@ export async function obtenerOCrearRecepcion(supabase: any, orden_compra_id: str
       proveedor_id: ocData?.proveedor_id || null,
       estado: "en_proceso",
       usuario_id: usuarioId ?? null,
-      numero_tanda: 1,
+      numero_tanda: numeroTanda,
     })
     .select()
     .single()
   if (error) throw error
 
   // Dos equipos abrieron la misma OC a la vez: se queda la primera que se creó.
+  // (solo entre las entregas ABIERTAS: las ya finalizadas son entregas anteriores, no duplicados)
   const { data: todas } = await supabase
     .from("recepciones")
     .select("id, created_at")
     .eq("orden_compra_id", orden_compra_id)
-    .not("estado", "eq", "cancelada")
+    .not("estado", "in", "(cancelada,finalizada)")
     .order("created_at", { ascending: true })
     .order("id", { ascending: true })
   if (todas && todas.length > 1 && todas[0].id !== nueva.id) {
@@ -522,10 +616,25 @@ export async function finalizarRecepcion(supabase: any, recepcion_id: string, op
 
   await supabase.from("recepciones").update({ estado: "finalizada", fecha_fin: nowArgentina() }).eq("id", recepcion_id)
 
-  // El proveedor NO envía los pendientes después: la recepción cierra la OC; lo
-  // que no vino queda visible en verificación como "incompleto vs OC".
+  // E-92: un faltante no cierra la orden. Si después de esta entrega todavía falta mercadería,
+  // la orden queda "recibida en parte": el depósito puede recibir el resto en otra entrega, y la
+  // oficina decide en la verificación si la cierra sin el resto. Completa solo si llegó todo.
+  // (Solo se toca una orden que está en recepción: nunca una que la oficina ya finalizó o canceló.)
+  let faltaRecibir = 0
   if (rec.orden_compra_id) {
-    await supabase.from("ordenes_compra").update({ estado: "recibida_completa" }).eq("id", rec.orden_compra_id)
+    faltaRecibir = (await pendientesDeOrden(supabase, rec.orden_compra_id)).size
+    await supabase.from("ordenes_compra")
+      .update({ estado: faltaRecibir > 0 ? "recibida_parcial" : "recibida_completa" })
+      .eq("id", rec.orden_compra_id)
+      .in("estado", [...ESTADOS_A_RECIBIR, "recibida_completa"])
+    // Lo que estaba "en camino" de esta orden (kardex pendiente) baja a lo que todavía falta recibir:
+    // lo que entró ya tiene su movimiento de compra de esta recepción (E-31). No frena la recepción.
+    try {
+      const { sincronizarKardexEnCamino } = await import("@/lib/compras/costo-y-kardex")
+      await sincronizarKardexEnCamino(createAdminClient(), rec.orden_compra_id)
+    } catch (e: any) {
+      console.error("[deposito] kardex en camino:", e?.message || e)
+    }
   }
-  return { ok: true, ...(sinUnidadesPorBulto.length ? { sin_unidades_por_bulto: sinUnidadesPorBulto } : {}) }
+  return { ok: true, ...(sinUnidadesPorBulto.length ? { sin_unidades_por_bulto: sinUnidadesPorBulto } : {}), ...(faltaRecibir > 0 ? { falta_recibir: faltaRecibir } : {}) }
 }

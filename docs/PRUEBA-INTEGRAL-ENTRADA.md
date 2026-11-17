@@ -45,6 +45,13 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 10. **¿Un remito debe poder validarse (sin deuda)?** — Primero: «No entiendo tu pregunta. A que llamar "validar"?». Aclarado, el 17/11: «No tiene sentido validar un remito, lo que buscamos con esta validación es que las cantidades y precios estén bien, un remito solo va a traer cantidades, y sin precio no deberíamos poder validar una orden de compra. Lo que sí podemos es validar cantidades, pero no nos debería permitir cerrar la OC.» → **Hecho en `entrada-t0a2-remito`**: el remito no tiene botón Validar y la ruta y la función lo rechazan (migración `20261117a_remito_no_se_valida.sql`, el merge no depende de ella); figura como "Remito: controla cantidades". "Finalizar OC" lo decide el servidor (`POST /api/ordenes-compra/[id]/finalizar`, regla en `lib/compras/finalizar-oc.ts`): hace falta al menos una factura o adquisición validada, ningún comprobante con precios / NC / ND sin validar, y que todo artículo recibido figure en una factura validada; con solo remitos la orden queda abierta y avisa "Falta la factura para controlar precios".
 11. **Hasta instalar la APK nueva el operario tiene que contar en la unidad de la OC: ¿se publica antes de volver a recibir?** — «si, se publica apk nuevo antes de la proxima prueba» → **Código hecho en la rama, APK sin generar** (el encargo de la Tanda 0-A era no generarla). La publica el orquestador antes de la próxima prueba, con la migración `20261116a` aplicada (PENDIENTES-APPS R1).
 
+### Decisiones de Juan sobre diferencias (17/11, textuales)
+
+12. **Cargo al transporte: ¿con IVA o neto?** — «Respecto a lo del transporte sí, debe cobrarse todo, neto + impuestos» → **Hecho en `entrada-t1b-diferencias`**: el cargo al transporte va por el total con IVA.
+13. **Tolerancia de precio y suma de renglones** — «Bien, siempre y cuando no afecte al total de la factura... por ejemplo, dos ítems de $10 cada uno deberían sumar $20. Si el subtotal es $21 hay un error, no hay problema con redondear centavos, el tema es que a través de este redondeo podemos llegar a tener diferencia entre la suma de los ítems y el total del comprobante.» → **Hecho en la rama**: (a) tolerancia de precio de 0,5 % por unidad con tope de $1.000 netos por línea (`TOLERANCIA_PRECIO` / `TOPE_DIFERENCIA_PESOS` en `lib/compras/diferencias.ts`); (b) regla dura E-46: los renglones (todos, también los "no es mercadería") tienen que sumar el neto del comprobante, y neto + IVA + percepciones + impuestos internos + otros impuestos el total (la retención de Ganancias no cuenta: no viene en la factura); solo se toleran centavos (diferencia menor a $1: `TOLERANCIA_SUMA_PESOS` en `lib/compras/control-suma.ts`). Si no cierra, la verificación lo muestra arriba en rojo con los dos números y el comprobante NO se puede validar (lo controla la ruta y la función SQL, migración `20261117d`); (c) ningún redondeo cambia la deuda: es siempre el total de la factura.
+14. **Mercadería de más (sobrante)** — «En caso de que llegue mercadería de más debe aparecer un cartel para ver si se recibe y esperamos factura, o solo se recibe, ajusta stock pero no se paga de más. Esto para cuando envían mercadería bonificada.» → **Hecho en `entrada-t1b-diferencias`**: al resolver un sobrante la ventana pregunta, sin opción por defecto: (a) *Se recibe y esperamos la factura* → queda una nota de débito esperada (`comprobantes_compra` tipo ND, estado `esperada`, origen `sobrante`) por las unidades de más al precio neto de la orden + IVA, asociada a la factura; se ve en "Notas esperadas" y se quita cuando se carga la factura real; (b) *Se recibe sin cargo (bonificado)* → el stock queda como entró, sin deuda ni nota, y el `ultimo_costo` baja prorrateado (neto facturado × unidades pagadas ÷ unidades recibidas), sin tocar la lista; (c) *Se devuelve* → sale del stock. En los tres casos la deuda sigue siendo el total de la factura.
+15. **Cómo se aplican los descuentos del proveedor** — «Lo aclara en la ficha del proveedor, hay dos opciones: En cascada / sobre precio lista.» → **Hecho en `entrada-t1b-diferencias`**: el neto de compra sale de una sola función, `netoCompra(lista, descuentos, tipo)` en `lib/compras/diferencias.ts`, que usa `proveedores.tipo_descuento` (`cascada`: uno sobre el otro; `sobre_lista`: se suman y se aplican sobre la lista; sin dato: cascada). La usan la verificación, las diferencias de precio, la regla de suma (también la función SQL de `20261117d`), el costo al validar y el kardex de la corrección de conteo. T1-A arma la misma función con la misma firma: se unifican al integrar. Fuera de esta rama (son de T1-A): el total de la orden al crearla y el PDF de la orden, que siguen en cascada.
+
 ## Problemas
 
 ### A. Orden de compra
@@ -144,8 +151,8 @@ Probado OK en pantalla: E-02 (sugerencia en bultos), E-30/E-40 (2 bultos × 24 �
 
 | id | Problema visto en pantalla | Tanda |
 |---|---|---|
-| E-90 | **Resolver un faltante contra el proveedor resta stock que nunca entró**: recibidos 150 (stock 228), al resolver "Proveedor" por las 50 u facturadas de más el stock bajó a 178. | T1-B (urgente) |
-| E-91 | **NC esperada mal calculada**: usa precio de lista sin el descuento y sin IVA. Diferencia de precio real (1.450,00 − 1.415,05) × 48 = $1.677,60 neto; generó $2.097,12 = (1.812,50 − 1.768,81) × 48. Faltante 50 u × $556,83 = $27.841,50 neto; generó $34.802,00 = 50 × 696,04. | T1-B (urgente) |
+| E-90 | **Resolver un faltante contra el proveedor resta stock que nunca entró**: recibidos 150 (stock 228), al resolver "Proveedor" por las 50 u facturadas de más el stock bajó a 178. **Hecho 17/11 (rama `entrada-t1b-diferencias`, 1ª entrega): resolver un faltante no toca el stock; solo baja si se pide expresamente devolver mercadería que entró.** | ~~T1-B (urgente)~~ |
+| E-91 | **NC esperada mal calculada**: usa precio de lista sin el descuento y sin IVA. Diferencia de precio real (1.450,00 − 1.415,05) × 48 = $1.677,60 neto; generó $2.097,12 = (1.812,50 − 1.768,81) × 48. Faltante 50 u × $556,83 = $27.841,50 neto; generó $34.802,00 = 50 × 696,04. **Hecho 17/11 (1ª entrega): la cuenta la hace el servidor con `lib/compras/diferencias.ts` (netos a centavos + IVA discriminado): $1.677,60 + IVA = $2.029,90 y $27.841,50 + IVA = $33.688,22. Una línea y tipo se resuelve una sola vez (`recepciones_diferencias`, migración `20261117b`, el merge no depende de ella).** | ~~T1-B (urgente)~~ |
 | E-92 | Un faltante figura como OK: recibido 3 de 4 bultos → verificación "OK" + cartel chico "Incompleto", "Artículos OK 2/2", OC `recibida_completa`, línea verde en la app. | T1-B / T1-C |
 | E-93 | App: Finalizar no pide confirmación ni muestra resumen aunque falte mercadería. Tocar un renglón no deja cargar cantidad (hay que ir a Buscar artículo). | T1-C |
 | E-94 | "Resolver diferencia" abre siempre en "mercadería" aunque la diferencia sea de precio, no muestra los precios ni el importe de la diferencia ni el impacto. | T1-B |
@@ -217,3 +224,66 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 - **Juan (3)**: el renglón de flete u otro concepto **no se borra**: se marca "No es mercadería" (`match_estado = 'no_mercaderia'`), queda discriminado en la verificación ("Otros conceptos facturados") y la deuda es siempre el **total** del comprobante ($100 + 21 % + 3 % de flete = $124).
 - **Juan (5)**: la APK de Depósito se publica antes de la próxima prueba (PENDIENTES-APPS R1).
 - Visto y no tocado: `lib/ai/email-invoice-processor.ts` mapea a tipos `ADQ` / `REV`, que el CHECK de `comprobantes_compra.tipo_comprobante` no acepta (`Adquisicion` / `Reversa`): esas facturas por mail no crean comprobante. Para T1.
+
+## Tanda 1-B — recepción, diferencias y verificación (17/11, rama `entrada-t1b-diferencias`)
+
+**Hecho** (nada probado en pantalla ni contra una base; `typecheck:movil` OK y pruebas de `mobile/` en verde):
+
+| id | Qué quedó |
+|---|---|
+| E-90, E-91 | Resolver una diferencia no toca stock; importes con netos a centavos + IVA (`lib/compras/diferencias.ts`). La diferencia de precio va sobre las unidades RECIBIDAS y el faltante sobre las que no llegaron (no se reclama dos veces). Una resolución por orden + artículo + tipo. |
+| E-92, E-39 | Lo pedido que no llegó ni se facturó es "Falta recibir" (ámbar, cuenta como diferencia). La orden queda `recibida_parcial`; el depósito recibe el resto en otra entrega (`numero_tanda` + 1, solo lo pendiente) y la oficina la cierra sin el resto desde Finalizar (`aceptar_faltantes`). |
+| E-94, E-44, E-43 | Ventana "Resolver diferencia" nueva (precio, cantidad o las dos; pedido / recibido / facturado; importe con IVA; vista previa). Sobrantes y no pedidos: aceptar o devolver. Foto o PDF al lado de la tabla. Corregir lo que contó el depósito con registro de quién (`20261117c`). |
+| E-42 | Lo bonificado (sin cargo) no es diferencia de precio ni baja el costo. |
+| E-34 | "La empresa asume" un precio: copia lista + descuentos de la factura; con precios distintos o descuento al pie deja solo `ultimo_costo` y avisa. |
+| E-23, E-98, E-21 | Validar valoriza el kardex de la recepción y deja `ultimo_costo` (con el descuento al pie repartido); cada cambio de último costo queda en `precios_compra_historial`. El **precio de lista** del artículo NO cambia al validar: cambia solo cuando alguien elige "la empresa asume" en una diferencia de precio, y ese cambio lo anota la misma función SQL en la misma transacción. |
+| E-31 | Una sola fuente: compra confirmada = kardex de la recepción; el kardex pendiente de la orden es "en camino" y baja a lo que falta recibir (`lib/compras/costo-y-kardex.ts`). Validar ya no lo confirma. |
+| E-46 | Regla dura de suma de renglones (decisión 13). |
+| E-95 | Sin `confirm()`/`alert()` nativos en la verificación (`components/ui/confirmar.tsx`). Documento "no leído" a la vista, con reintentar la lectura y cargar el comprobante a mano. |
+| E-96 | Verificación en una llamada al servidor con consultas en paralelo; deja los tiempos por etapa en el registro si tarda más de 3 s (`[verificación OC …] lenta: {…}`). **No se midió contra producción**: hay que mirar ese registro después del deploy. |
+| E-97 | Aviso de renglones sin vincular, encabezados de NC esperada, total facturado, total de la orden, subtítulo y orden finalizada en solo lectura. |
+
+**Migraciones de esta tanda** (escritas, sin aplicar; cualquier orden; no tocan datos):
+
+| Archivo | Para qué | Sin aplicarla |
+|---|---|---|
+| `20261117b_recepcion_resolver_diferencia.sql` | Tabla `recepciones_diferencias` + función que resuelve todo o nada | Solo se puede elegir "la empresa lo asume"; proveedor, transporte y devoluciones contestan que falta la migración |
+| `20261117c_recepcion_corregir_conteo.sql` | Corregir lo recibido desde la oficina, con registro | El botón avisa que falta y no cambia nada |
+| `20261117d_validar_renglones_suman.sql` | La función de validar también controla la suma | El servidor ya lo controla antes de llamarla: es la segunda barrera |
+
+**Hecho después (17/11):** el control "neto + impuestos = total" suma también `impuestos_internos` y `otros_impuestos` (se cargan a mano y los pide la lectura automática); E-45: el cargo al transporte muestra y deja asentado el control de bultos de esa entrega; E-47: se retiraron `/api/deposito/recepciones/documento`, `/api/recepciones` (GET/POST) y `/api/recepciones/[id]` (GET), que nadie llamaba, y la pantalla huérfana `/ordenes-compra/[id]/comprobantes` ahora redirige a la verificación (escribía comprobantes directo desde el navegador, sin ningún control).
+
+**No se retiró, y por qué:** `processOCRData` (en `/api/recepciones/[id]/ocr`) solo corre para recepciones SIN orden de compra, que ya no se pueden crear (las creaba `/api/recepciones`): queda para las que existan. `runArticleLevelOCR` (`lib/ai/email-invoice-processor.ts`) sigue en uso por las facturas que entran por mail; hace lo mismo que `matchAndCreateDetalle` con otra lógica y habría que unificarlo cuando se toque el circuito de mails (ya cumple la convención de cantidades).
+
+**Sobrante (decisión 14 de Juan):** hecho; la pantalla de notas de crédito pasó a llamarse "Notas esperadas de proveedores" y lista aparte la mercadería de más que falta facturar. Una nota de débito esperada no se puede registrar como nota de crédito (la ruta lo rechaza). La conciliación con la factura real es manual: se carga la factura en la orden y se quita la esperada de la lista.
+
+### Arreglos de la revisión de la rama completa (17/11)
+
+1. **Regla de suma**: entran impuestos internos y otros impuestos; sale la retención de Ganancias. Primero se controla la cabecera (neto + impuestos = total) y, si no cierra, se dice eso y no se culpa a los renglones.
+2. **Redondeo**: el importe de cada renglón se calcula de las dos formas (cantidad × lista × descuentos redondeado una vez, o cantidad × neto por unidad ya redondeado); pasa si cualquiera cierra. Igual en la función SQL (`20261117d`).
+3. **Factura B / C sin IVA leído**: neto = total (menos percepciones e impuestos) e IVA = 0; ya no se inventa total ÷ 1,21. El mensaje dice "en total" en lugar de "neto".
+4. **Recepción en parte con dos equipos**: un conteo o control de bultos que llega cuando la entrega ya se finalizó se rechaza (`recepcion_finalizada`) y deja un aviso (`mobile_alertas_integridad`, tipo `recepcion_tardia`) que la oficina ve en la verificación de la orden. La entrega siguiente la abre solo "Iniciar recepción" (`recepcion.iniciar` capturado después del cierre, o entrar a la orden en la web). Un `recepcion.cerrar` tardío no abre nada.
+5. **Costo al validar**: incluye el descuento al pie; una segunda factura de la misma orden no revaloriza el kardex que valorizó la primera (cada factura valoriza las entregas a las que quedó ligada); volver a validar una factura ya validada no corre el costo de nuevo.
+6. **Historial de costos**: "la empresa asume" y "bonificado" lo anotan dentro de la función SQL; el cambio de último costo al validar lo anota la aplicación y, si falla, avisa en pantalla. Columnas nuevas en `precios_compra_historial` (`ultimo_costo`, `origen`, `comprobante_compra_id`, `orden_compra_id`, `usuario_id`) dentro de `20261117b`.
+7. **Devolver unidades**: solo en diferencia de cantidad con destino proveedor o empresa (ruta y función).
+8. `ORDER BY fecha_comprobante DESC NULLS LAST` al elegir la factura asociada.
+9. Lo contado "fuera de la orden" no descuenta lo pendiente de la orden.
+10. El kardex de una corrección de conteo se valoriza al neto (el de la compra que corrige, o último costo, o lista menos descuentos).
+11. `sincronizarKardexEnCamino` trata sola como cerrada una orden finalizada o cancelada. **Hoy ninguna pantalla cancela órdenes**: quien agregue "cancelar orden" (T1-A) tiene que llamarla después de cambiar el estado.
+
+12. **E-cheq** (pedido de T1-A): si el acuerdo del proveedor dice `echeq`, el vencimiento que arma la validación queda con forma de pago `cheque` en vez de vacío. Al integrar, el mapeo pasa a `lib/compras/acuerdo-pago.ts`.
+
+**Limpieza única** (no es migración, la corre el dueño): `scripts/entrada-limpieza-kardex-en-camino.sql` — borra, con copia de respaldo, las compras duplicadas que dejaba la validación vieja y el "en camino" de órdenes cerradas o ya recibidas.
+
+**Límite conocido (app Depósito v0.5.2 instalada):** la app manda "iniciar" una sola vez por orden mientras está abierta. Si el mismo equipo cierra una entrega y, sin cerrar la app, quiere contar la siguiente de la misma orden, los conteos se rechazan con un mensaje que le dice que cierre y abra la app. Anotado en `docs/PENDIENTES-APPS.md`.
+
+**Queda:** la devolución con su kardex dentro de la misma transacción (hoy el stock y el registro van en la transacción y el kardex se anota después; si falla, avisa).
+
+**Coordinación con T1-A (orden de compra), pendiente hasta que su migración `20261117n` esté en main:**
+- Hecho acá: el depósito también ve órdenes `enviada`, `confirmada` y `en_camino` (`ESTADOS_A_RECIBIR`).
+- Falta: llamar a `oc_vencimiento_estimado_reemplazar` al validar y al finalizar; usar `ordenes_compra.total_*` para el total de la orden; reemplazar `armarPlan` por `lib/compras/acuerdo-pago.ts`; decidir si `oc_kardex_pendiente_sincronizar` y `sincronizarKardexEnCamino` conviven (la de T1-A rehace lo pendiente al guardar la orden; la de acá lo baja con cada entrega).
+- Para T1-A / E-99: la verificación ya abre una orden finalizada en solo lectura; falta el acceso desde el listado.
+
+**Dudas de negocio abiertas para Juan:**
+1. ~~Factura con un impuesto sin campo para cargarlo.~~ Resuelto: las columnas `impuestos_internos` y `otros_impuestos` ya existían; ahora entran en el control y se pueden cargar.
+2. ~~Sobrante aceptado sin anotar que el proveedor lo va a facturar.~~ Resuelto con la decisión 14.

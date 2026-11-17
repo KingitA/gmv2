@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     const supabase = await createClient()
     const { orden_compra_id } = await request.json()
     // Las fotos se firman al servir (bucket privado): ver firmarDocumentosRecepcion
-    return NextResponse.json(await conFotosFirmadas(await obtenerOCrearRecepcion(supabase, orden_compra_id, auth.user?.id)))
+    return NextResponse.json(await conFotosFirmadas(await obtenerOCrearRecepcion(supabase, orden_compra_id, auth.user?.id, { abrirSiguiente: true })))
   } catch (error: any) {
     if (error instanceof ErrorDeposito) return NextResponse.json({ error: error.message, ...error.extra }, { status: error.status })
     console.error("[deposito] Error POST recepcion:", error)

@@ -30,6 +30,7 @@ export async function PATCH(
             'tipo_comprobante', 'numero_comprobante', 'fecha_comprobante', 'fecha_vencimiento',
             'total_factura_declarado', 'total_neto', 'total_iva',
             'percepcion_iva_monto', 'percepcion_iibb_monto', 'retencion_ganancias_monto',
+            'impuestos_internos', 'otros_impuestos',
             'descuento_fuera_factura', 'ajusta_stock',
         ];
         const cambios: Record<string, any> = {};
