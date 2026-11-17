@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth';
 import { cargarVerificacionOC } from '@/lib/compras/cargar-verificacion';
 import { cant } from '@/lib/deposito/unidades';
 import { sincronizarKardexEnCamino } from '@/lib/compras/costo-y-kardex';
+import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 
 // Finalizar (cerrar) una orden de compra. El control se hace ACÁ, en el servidor:
 //   · sin una factura validada que cubra lo recibido la orden queda abierta; con solo remitos
@@ -81,13 +82,29 @@ export async function POST(
         if (!cambiada || cambiada.length === 0) {
             return NextResponse.json({ error: 'La orden cambió mientras se finalizaba. Actualizá la pantalla y volvé a intentar.', codigo: 'orden_cambio' }, { status: 409 });
         }
-        // La orden está cerrada: ya no hay mercadería "en camino" (kardex pendiente de la orden)
-        try {
-            await sincronizarKardexEnCamino(supabase, id, { cerrada: true });
-        } catch (e: any) {
-            console.error('[OC finalizar] kardex en camino:', e?.message || e);
+        // La orden está cerrada: lo que era ESTIMADO ya no corresponde (la deuda real está en las
+        // facturas validadas). Con la migración 20261117u se quita todo junto, en una transacción:
+        // provisión en la cuenta corriente, vencimientos estimados y mercadería "en camino". No toca
+        // ningún vencimiento que no sea un estimado de ESTA orden.
+        const avisos: string[] = [];
+        const cierre = await supabase.rpc('oc_cerrar_estimados', { p_orden_id: id });
+        if (cierre.error && faltaLaFuncion(cierre.error, 'oc_cerrar_estimados')) {
+            // Sin la migración u: los vencimientos estimados (función de 20261117n) y el kardex en camino
+            const est = await supabase.rpc('oc_vencimiento_estimado_reemplazar', { p_orden_id: id });
+            if (est.error && !faltaLaFuncion(est.error, 'oc_vencimiento_estimado_reemplazar')) {
+                console.error('[OC finalizar] vencimiento estimado:', est.error.message);
+                avisos.push('La orden quedó finalizada, pero no se pudieron quitar sus vencimientos estimados: revisalos en Finanzas y avisá a sistemas.');
+            }
+            try {
+                await sincronizarKardexEnCamino(supabase, id, { cerrada: true });
+            } catch (e: any) {
+                console.error('[OC finalizar] kardex en camino:', e?.message || e);
+            }
+        } else if (cierre.error) {
+            console.error('[OC finalizar] cierre de estimados:', cierre.error.message);
+            avisos.push('La orden quedó finalizada, pero no se pudo quitar lo que tenía estimado (deuda provisoria y vencimientos estimados): revisalo en Finanzas y avisá a sistemas.');
         }
-        return NextResponse.json({ success: true, cerrada_sin_el_resto: control.pendientes.length > 0 });
+        return NextResponse.json({ success: true, cerrada_sin_el_resto: control.pendientes.length > 0, avisos });
     } catch (error: any) {
         console.error('[OC finalizar] Error:', error);
         return NextResponse.json({ error: `No se pudo finalizar la orden: ${error.message || error}` }, { status: 500 });

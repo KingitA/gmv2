@@ -18,31 +18,11 @@ const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 const r4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0)
 
-/**
- * Cómo aplica sus descuentos el proveedor. Lo dice su ficha (`proveedores.tipo_descuento`):
- *   · "cascada":     uno sobre el otro  → lista × (1 − d1) × (1 − d2) × …
- *   · "sobre_lista": todos sobre la lista → lista × (1 − (d1 + d2 + …))
- * Decisión de Juan (17/11): «Lo aclara en la ficha del proveedor, hay dos opciones: En cascada /
- * sobre precio lista.» Misma regla que el motor de precios de venta (lib/pricing/calculator.ts).
- */
-export type TipoDescuento = "cascada" | "sobre_lista"
-
-export function tipoDescuentoDe(v: unknown): TipoDescuento {
-  return v === "sobre_lista" ? "sobre_lista" : "cascada"
-}
-
-/**
- * Precio de lista menos los descuentos (D1..D4, en %), según cómo los aplica el proveedor.
- * ÚNICA cuenta del neto de compra: la usan la verificación, las diferencias, la regla de suma
- * y el costo. (T1-A arma la misma función con esta firma; se unifican al integrar.)
- */
-export function netoCompra(lista: unknown, descuentos: unknown[] = [], tipo: TipoDescuento | null | undefined = "cascada"): number {
-  if (tipo === "sobre_lista") {
-    const suma = descuentos.reduce<number>((s, d) => s + num(d), 0)
-    return num(lista) * Math.max(0, 1 - suma / 100)
-  }
-  return descuentos.reduce<number>((p, d) => p * (1 - num(d) / 100), num(lista))
-}
+// El neto de compra sale de UNA sola función: netoCompra (lib/compras/neto-compra.ts), que aplica
+// los descuentos como dice la ficha del proveedor (en cascada o sobre precio de lista). Se
+// re-exporta desde acá para quien ya la importaba de este archivo.
+import { netoCompra, tipoDescuentoDe, type TipoDescuento } from "./neto-compra"
+export { netoCompra, tipoDescuentoDe, type TipoDescuento }
 
 /** Igual que netoCompra (nombre anterior). */
 export function precioNeto(lista: unknown, descuentos: unknown[] = [], tipo?: TipoDescuento | null): number {

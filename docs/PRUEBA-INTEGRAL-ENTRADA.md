@@ -312,6 +312,35 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 1. ~~Factura con un impuesto sin campo para cargarlo.~~ Resuelto: las columnas `impuestos_internos` y `otros_impuestos` ya existían; ahora entran en el control y se pueden cargar.
 2. ~~Sobrante aceptado sin anotar que el proveedor lo va a facturar.~~ Resuelto con la decisión 14.
 
+## Tanda 1 — cableado entre la orden de compra y la validación (17/11, rama `entrada-t1-cableado`, sobre `entrada-t1-integra`)
+
+| Punto | Qué quedó |
+|---|---|
+| Vencimiento estimado | Al validar una factura, el vencimiento ESTIMADO de la orden baja por el total del comprobante en su canal (factura = blanco, adquisición = negro) y desaparece al llegar a cero: `oc_vencimiento_estimado_reemplazar(orden, canal, total)`. Con la migración `20261117u` lo hace la misma función que valida, en la misma transacción; sin ella, el servidor lo hace apenas termina de validar. Al finalizar la orden se quita lo que quede. Nunca toca un vencimiento que no sea un estimado de esa orden. |
+| Total de la orden | La verificación muestra `ordenes_compra.total_neto` (lo guarda `oc_guardar`); en una orden anterior, la misma cuenta de `lib/compras/oc-totales.ts`. |
+| Plazo y forma de pago | `armarPlan` usa `lib/compras/acuerdo-pago.ts`: el acuerdo copiado en la orden (o el de la ficha, con el plazo viejo como respaldo), e-cheq = cheque, desde factura o recepción, y un vencimiento por cuota ("30/60/90"). Las cuotas necesitan la migración `20261117u`; sin ella sale un solo vencimiento (primera cuota, por el total). Sin plazo acordado ni fecha en el comprobante sigue avisando "sin vencimiento". |
+| Descuentos | Una sola función: `netoCompra` de `lib/compras/neto-compra.ts`. `lib/compras/diferencias.ts` la re-exporta. En SQL, la regla de suma usa `oc_neto_unitario`. |
+| Provisión | Cada comprobante baja la provisión de su canal (una orden mixta tiene dos). Al finalizar, `oc_cerrar_estimados` quita la provisión que quede, los vencimientos estimados y el "en camino", en una transacción. |
+| Kardex "en camino" | Antes de la primera recepción lo escribe `oc_kardex_pendiente_sincronizar` (al crear, editar o cancelar la orden). Desde la primera recepción lo ajusta `sincronizarKardexEnCamino` (cada entrega, cada validación, al finalizar). No se pisan: una orden con recepción no se puede editar ni cancelar. |
+| Estados | `ESTADOS_A_RECIBIR` = pendiente, enviada, recibida_parcial. "confirmada" y "en_camino" no existen. |
+
+### Orden de las migraciones de la Tanda 1
+
+Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `20261116c`, `20261116p`, `20261116q`, `20261117a_remito_no_se_valida`, `20261117a_op_ganancias_bases_neto`.
+
+| Orden | Archivo | Depende de |
+|---|---|---|
+| 1 | `20261117b_recepcion_resolver_diferencia.sql` | `20261116a` |
+| 2 | `20261117c_recepcion_corregir_conteo.sql` | `20261116a` |
+| 3 | `20261117d_validar_renglones_suman.sql` | `20261116c` y `20261117a_remito_no_se_valida` (reemplaza esa función) |
+| 4 | `20261117m_proveedores_datos_compra.sql` | nada |
+| 5 | `20261117n_oc_guardar.sql` | conviene después de la m (lee columnas del proveedor que agrega la m) |
+| 6 | `20261117p_ordenes_pago_t1d.sql` | `20261116p` y `20261116q` (corta si faltan) |
+| 7 | `20261117r_retencion_transporte_minimo.sql` | independiente |
+| 8 | `20261117u_cableado_oc_validar.sql` | **la d y la n** (corta con mensaje si falta alguna). Va última. |
+
+Aparte, una sola vez y a mano: `scripts/entrada-limpieza-kardex-en-camino.sql`.
+
 ## Tanda 1-A — orden de compra y envío al proveedor (17/11, rama `entrada-t1a-orden-compra`)
 
 **Migraciones (escritas, SIN aplicar; idempotentes; probadas en una base Postgres local de prueba). Orden: m y después n (son independientes, pero ese es el orden natural).**

@@ -10,6 +10,13 @@
  *     "confirmado" y quedaban DOS compras del mismo artículo (la de la recepción y esta, con
  *     fecha futura). Ahora el pendiente refleja solo lo que falta recibir: baja con cada
  *     entrega y desaparece cuando llegó todo o la orden se cierra.
+ *     QUIÉN LO ESCRIBE (dos funciones que no se pisan):
+ *       - Antes de la primera recepción: `oc_kardex_pendiente_sincronizar` (SQL, 20261117n), al
+ *         crear, editar o cancelar la orden. Pone lo pedido completo; al cancelar lo borra.
+ *       - Desde la primera recepción: `sincronizarKardexEnCamino` (acá), con cada entrega, cada
+ *         validación y al finalizar. Lo baja a lo que falta recibir.
+ *       Una orden con recepción ya no se puede editar ni cancelar (lo impiden oc_guardar y
+ *       oc_cancelar), así que nunca corren las dos sobre la misma orden.
  *   · articulos.ultimo_costo = neto por unidad de la última factura validada, con el descuento
  *     al pie de la factura ya repartido. Cada cambio queda en precios_compra_historial.
  *     articulos.precio_compra (la lista) NO se toca acá: cambia SOLO cuando alguien elige "la
