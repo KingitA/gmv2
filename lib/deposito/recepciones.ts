@@ -21,6 +21,13 @@ import { aUnidadesBase, conversionLinea, esUnidadConteo, pendienteDeLinea, unida
 const SELECT_FULL = `*, recepciones_items(*), recepciones_documentos(*)`
 /** Un finalizador que lleva más que esto sin terminar se considera caído y se retoma */
 const CANDADO_FINALIZAR_MS = 2 * 60_000
+/**
+ * Estados de la ORDEN en los que el depósito la puede recibir. "enviada", "confirmada" y
+ * "en_camino" los escribe la pantalla de órdenes de compra (envío al proveedor): una orden
+ * enviada tiene que seguir viéndose en depósito.
+ */
+export const ESTADOS_A_RECIBIR = ["pendiente", "enviada", "confirmada", "en_camino", "recibida_parcial"]
+
 /** Estados en los que una recepción todavía se puede contar y finalizar */
 const ABIERTA = ["en_proceso", "borrador"]
 
@@ -114,11 +121,21 @@ export async function pendientesDeOrden(supabase: any, orden_compra_id: string):
     }
   }
   const pendientes = new Map<string, { enUnidadOC: number; base: number; precio_unitario: number }>()
+  // Lo recibido se descuenta UNA vez por artículo, aunque esté en más de un renglón de la orden:
+  // se va consumiendo renglón por renglón, y lo pendiente de cada uno se suma.
+  const queda = new Map<string, number>(recibido)
   for (const d of detalle || []) {
     const art = Array.isArray(d.articulos) ? d.articulos[0] : d.articulos
     const factor = d.tipo_cantidad === "unidad" ? 1 : unidadesPorBultoDe(art?.unidades_por_bulto)
-    const p = pendienteDeLinea(d.cantidad_pedida, factor, recibido.get(d.articulo_id) || 0)
-    if (p.base > 0) pendientes.set(d.articulo_id, { ...p, precio_unitario: Number(d.precio_unitario || 0) })
+    const yaRecibido = queda.get(d.articulo_id) || 0
+    const p = pendienteDeLinea(d.cantidad_pedida, factor, yaRecibido)
+    queda.set(d.articulo_id, Math.max(0, yaRecibido - aUnidadesBase(d.cantidad_pedida, factor)))
+    if (p.base > 0) {
+      const previo = pendientes.get(d.articulo_id)
+      pendientes.set(d.articulo_id, previo
+        ? { ...previo, enUnidadOC: Math.round((previo.enUnidadOC + p.enUnidadOC) * 100) / 100, base: previo.base + p.base }
+        : { ...p, precio_unitario: Number(d.precio_unitario || 0) })
+    }
   }
   return pendientes
 }
@@ -192,7 +209,7 @@ export async function cargarOrdenesPendientes(supabase: any, ordenId?: string): 
           articulos(id, sku, descripcion, ean13, unidades_por_bulto)
         )
       `)
-    .in("estado", ["pendiente", "recibida_parcial"])
+    .in("estado", ESTADOS_A_RECIBIR)
     .order("fecha_orden", { ascending: true })
   if (ordenId) q = q.eq("id", ordenId)
   const { data: ordenes, error } = await q
@@ -252,7 +269,7 @@ export async function obtenerOCrearRecepcion(supabase: any, orden_compra_id: str
     // E-39: la entrega anterior ya se finalizó. Se abre OTRA sobre la misma orden solo si la
     // orden sigue abierta y falta mercadería; la entrega nueva lleva únicamente lo que falta.
     // Si la oficina ya la cerró (finalizada / cancelada) o no falta nada, no se abre nada.
-    if (!["pendiente", "recibida_parcial"].includes(ocData.estado)) return ultima
+    if (!ESTADOS_A_RECIBIR.includes(ocData.estado)) return ultima
     const pendientes = await pendientesDeOrden(supabase, orden_compra_id)
     if (pendientes.size === 0) return ultima
     detalles = [...pendientes].map(([articulo_id, p]) => ({ articulo_id, cantidad_pedida: p.enUnidadOC, precio_unitario: p.precio_unitario }))
@@ -601,7 +618,7 @@ export async function finalizarRecepcion(supabase: any, recepcion_id: string, op
     await supabase.from("ordenes_compra")
       .update({ estado: faltaRecibir > 0 ? "recibida_parcial" : "recibida_completa" })
       .eq("id", rec.orden_compra_id)
-      .in("estado", ["pendiente", "recibida_parcial", "recibida_completa"])
+      .in("estado", [...ESTADOS_A_RECIBIR, "recibida_completa"])
     // Lo que estaba "en camino" de esta orden (kardex pendiente) baja a lo que todavía falta recibir:
     // lo que entró ya tiene su movimiento de compra de esta recepción (E-31). No frena la recepción.
     try {

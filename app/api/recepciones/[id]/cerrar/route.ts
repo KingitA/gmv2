@@ -3,13 +3,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { conversionesDeRecepcion } from '@/lib/deposito/recepciones';
 import { aUnidadesBase, unidadesPorBultoDe } from '@/lib/deposito/unidades';
-import { calcularDiferencia, reclamablePorDevolucion, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
+import { calcularDiferencia, combinarLineasOC, reclamablePorDevolucion, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
 import { TIPOS_CON_PRECIOS } from '@/lib/compras/finalizar-oc';
 import { registrarCostoEnHistorial } from '@/lib/compras/costo-y-kardex';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
 import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 import { nowArgentina } from '@/lib/utils';
-import { hoyISO, moneda } from '@/lib/formato';
+import { moneda } from '@/lib/formato';
 
 // POST /api/recepciones/[id]/cerrar — resolver diferencias de una recepción.
 // Body: {
@@ -33,7 +33,8 @@ import { hoyISO, moneda } from '@/lib/formato';
 //   Idempotente: una línea y tipo se resuelve una sola vez (no hay dos NC esperadas).
 //
 // Con la migración 20261117b todo lo hace recepcion_resolver_diferencia en una transacción.
-// Sin ella: los mismos pasos, de a uno, con las marcas de la línea como compuerta.
+// Sin ella solo se permite "la empresa lo asume" (no mueve plata ni stock); para el proveedor,
+// el transporte o una devolución se contesta que falta aplicar la migración.
 //
 // Las imputaciones al proveedor NO acreditan la cuenta corriente: crean una NC 'esperada'
 // (comprobantes_compra estado=esperada) que se confirma con ncp_registrar cuando llega el
@@ -41,14 +42,13 @@ import { hoyISO, moneda } from '@/lib/formato';
 
 type Destino = 'empresa' | 'proveedor' | 'transporte' | 'descuento_fuera_factura';
 const DESTINOS: Destino[] = ['empresa', 'proveedor', 'transporte', 'descuento_fuera_factura'];
-const NO_ES_FACTURA = '(NC,NCA,NCB,NCC,Reversa,Remito)';
 
 class Rechazo extends Error {
     constructor(message: string, public codigo: string) { super(message); }
 }
 
 /** Lo pedido, lo recibido y lo facturado de la línea, con la cuenta hecha. */
-async function contexto(supabase: any, item: any, ocId: string | null): Promise<DiferenciaLinea> {
+async function contexto(supabase: any, item: any, ocId: string | null): Promise<{ dif: DiferenciaLinea; hermanas: any[]; descuentoAlPie: boolean }> {
     const articuloId = item.articulo_id;
     const { data: art } = await supabase.from('articulos').select('unidades_por_bulto').eq('id', articuloId).maybeSingle();
     const upb = unidadesPorBultoDe(art?.unidades_por_bulto);
@@ -56,24 +56,25 @@ async function contexto(supabase: any, item: any, ocId: string | null): Promise<
     let oc: LineaOC | null = null;
     const lineasFactura: LineaFactura[] = [];
     let recibido = 0;
+    /** Otras líneas de recepción del MISMO artículo en la orden (otras entregas) */
+    let hermanas: any[] = [];
+    /** Algún comprobante de la orden trae un descuento al pie: el precio del renglón no es el neto real */
+    let descuentoAlPie = false;
 
     if (ocId) {
         const { data: ocd, error: ocErr } = await supabase
             .from('ordenes_compra_detalle')
             .select('cantidad_pedida, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4')
             .eq('orden_compra_id', ocId)
-            .eq('articulo_id', articuloId)
-            .limit(1);
+            .eq('articulo_id', articuloId);
         if (ocErr) throw ocErr;
-        const d = ocd?.[0];
-        if (d) {
-            oc = {
-                cantidad_pedida: Number(d.cantidad_pedida || 0),
-                factor: d.tipo_cantidad === 'unidad' ? 1 : upb,
-                precio_unitario: Number(d.precio_unitario || 0),
-                descuentos: [d.descuento1, d.descuento2, d.descuento3, d.descuento4].map((x: any) => Number(x) || 0),
-            };
-        }
+        // El artículo puede estar en más de un renglón de la orden: se suman
+        oc = combinarLineasOC((ocd || []).map((d: any) => ({
+            cantidad_pedida: Number(d.cantidad_pedida || 0),
+            factor: d.tipo_cantidad === 'unidad' ? 1 : upb,
+            precio_unitario: Number(d.precio_unitario || 0),
+            descuentos: [d.descuento1, d.descuento2, d.descuento3, d.descuento4].map((x: any) => Number(x) || 0),
+        })));
 
         // Lo recibido del artículo en todas las tandas de la orden (en unidades)
         const { data: recs, error: recErr } = await supabase.from('recepciones').select('id').eq('orden_compra_id', ocId).neq('estado', 'cancelada');
@@ -84,6 +85,7 @@ async function contexto(supabase: any, item: any, ocId: string | null): Promise<
             : { data: [], error: null };
         if (filasErr) throw filasErr;
         const items: any[] = filas || [];
+        hermanas = items.filter((ri) => ri.id !== item.id);
         const { porItem } = await conversionesDeRecepcion(supabase, ocId, items);
         for (const ri of items) {
             // filas fuera_de_oc de un artículo que SÍ está en la orden: duplicados de documentación, no suman
@@ -97,12 +99,13 @@ async function contexto(supabase: any, item: any, ocId: string | null): Promise<
         // Lo facturado: renglones del artículo en los comprobantes CON precios de la orden
         const { data: comps, error: compErr } = await supabase
             .from('comprobantes_compra')
-            .select('id, tipo_comprobante')
+            .select('id, tipo_comprobante, descuento_fuera_factura')
             .eq('orden_compra_id', ocId)
             .neq('estado', 'esperada')
             .in('tipo_comprobante', TIPOS_CON_PRECIOS);
         if (compErr) throw compErr;
         const compIds = (comps || []).map((c: any) => c.id);
+        descuentoAlPie = (comps || []).some((c: any) => Number(c.descuento_fuera_factura) > 0);
         if (compIds.length > 0) {
             const { data: det, error: detErr } = await supabase
                 .from('comprobantes_compra_detalle')
@@ -126,11 +129,11 @@ async function contexto(supabase: any, item: any, ocId: string | null): Promise<
         recibido = item.cantidad_fisica_base != null ? Number(item.cantidad_fisica_base) : aUnidadesBase(item.cantidad_fisica, porItem.get(item.id)?.factorConteo ?? 1);
     }
 
-    return calcularDiferencia({ oc, factura: lineasFactura, recibido_unidades: recibido });
+    return { dif: calcularDiferencia({ oc, factura: lineasFactura, recibido_unidades: recibido }), hermanas, descuentoAlPie };
 }
 
 /** Qué se va a hacer, con los importes ya calculados. Lanza Rechazo si no corresponde. */
-function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destino, d: any, sku: string) {
+function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destino, d: any, sku: string, descuentoAlPie: boolean) {
     const devolver = Math.max(0, Number(d.devolver_unidades) || 0);
     if (devolver > dif.recibido_unidades + 0.0001) {
         throw new Rechazo(`No se pueden devolver ${devolver} unidades: de este artículo entraron ${dif.recibido_unidades}.`, 'devolucion_mayor_a_lo_recibido');
@@ -141,10 +144,16 @@ function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destin
         const p = dif.precio;
         if (!p || !dif.factura) throw new Rechazo('Este artículo no tiene diferencia de precio entre la orden y la factura.', 'sin_diferencia');
         if (destino === 'empresa') {
-            // Se toma el precio facturado como costo: lista y descuentos del renglón de la factura
+            // Se toma el precio facturado como costo: lista y descuentos del renglón de la factura.
+            // Si el artículo viene en renglones con precios distintos, o la factura trae un descuento al
+            // pie, no hay UNA lista con sus descuentos que copiar: se deja solo el último costo (neto
+            // promedio) y el precio de lista del artículo no se toca.
             const [d1 = 0, d2 = 0, d3 = 0, d4 = 0] = dif.factura.descuentos;
+            const soloUltimoCosto = dif.factura.precios_distintos || descuentoAlPie;
             return { ...base, unidades: p.unidades, neto: p.neto, iva: p.iva, total: p.total, origen_nc: null,
-                costo: { precio_compra: dif.factura.lista_unidad, descuento1: d1, descuento2: d2, descuento3: d3, descuento4: d4 } };
+                costo: soloUltimoCosto
+                    ? { precio_compra: 0, descuento1: 0, descuento2: 0, descuento3: 0, descuento4: 0, ultimo_costo: dif.factura.neto_unidad }
+                    : { precio_compra: dif.factura.lista_unidad, descuento1: d1, descuento2: d2, descuento3: d3, descuento4: d4, ultimo_costo: dif.factura.neto_unidad } };
         }
         if (p.a_favor !== 'nuestro') {
             throw new Rechazo('La factura vino MÁS BARATA que la orden: no hay nada para reclamarle al proveedor. Elegí "Empresa" para tomar el precio facturado como costo.', 'precio_a_favor_del_proveedor');
@@ -188,90 +197,43 @@ function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destin
         descripcion: base.descripcion || `Faltante ${sku}: ${c.unidades} u facturadas y no recibidas` };
 }
 
-/** Los mismos pasos que recepcion_resolver_diferencia, de a uno (migración 20261117b sin aplicar). */
-async function resolverSinFuncion(supabase: any, item: any, rec: any, tipo: 'precio' | 'cantidad', destino: Destino, p: any, usuarioId: string) {
-    if ((tipo === 'precio' && item.precio_verificado) || (tipo === 'cantidad' && item.cantidad_diferencia_destino)) {
-        return { ya_resuelta: true, destino: tipo === 'cantidad' ? item.cantidad_diferencia_destino : null };
+/**
+ * Sin la función recepcion_resolver_diferencia (migración 20261117b sin aplicar) NO se puede
+ * garantizar "todo o nada": una nota de crédito esperada creada y un fallo después dejarían la
+ * nota suelta y el reintento crearía otra. Por eso, sin la migración solo se permite lo que no
+ * mueve plata ni stock —"la empresa lo asume"— y para el proveedor, el transporte o una
+ * devolución se contesta que falta aplicarla.
+ */
+async function resolverSinFuncion(supabase: any, item: any, hermanas: any[], tipo: 'precio' | 'cantidad', destino: Destino, p: any, usuarioId: string) {
+    if (destino !== 'empresa' || p.devolver_unidades > 0) {
+        throw new Rechazo('Todavía no se puede reclamar al proveedor, cargar al transporte ni devolver mercadería desde acá: falta aplicar una actualización del sistema (migración 20261117b). No se cambió nada. Mientras tanto solo se puede elegir que la empresa lo asuma.', 'falta_migracion');
     }
-    // Compuerta: la marca de la línea se pone primero y solo si no estaba (dos clicks a la vez = uno)
+    // Ya resuelta en esta línea o en otra entrega del mismo artículo de la orden
+    const yaEsta = (l: any) => (tipo === 'precio' ? !!l.precio_verificado : !!l.cantidad_diferencia_destino);
+    if (yaEsta(item) || hermanas.some(yaEsta)) return { ya_resuelta: true, destino: null };
+
+    // Compuerta: la marca de la línea se pone solo si no estaba (dos clicks a la vez = uno)
     const marca = tipo === 'precio'
         ? supabase.from('recepciones_items').update({ precio_verificado: true }).eq('id', item.id).or('precio_verificado.is.null,precio_verificado.eq.false')
-        : supabase.from('recepciones_items').update({ cantidad_diferencia_destino: destino === 'descuento_fuera_factura' ? 'proveedor' : destino }).eq('id', item.id).is('cantidad_diferencia_destino', null);
+        : supabase.from('recepciones_items').update({ cantidad_diferencia_destino: 'empresa' }).eq('id', item.id).is('cantidad_diferencia_destino', null);
     const { data: ganada, error: marcaErr } = await marca.select('id');
     if (marcaErr) throw marcaErr;
     if (!ganada || ganada.length === 0) return { ya_resuelta: true, destino: null };
 
-    const deshacerMarca = () => supabase.from('recepciones_items')
-        .update(tipo === 'precio' ? { precio_verificado: false } : { cantidad_diferencia_destino: null }).eq('id', item.id);
-
-    try {
-        let ncId: string | null = null;
-        let movId: string | null = null;
-        let stockAntes: number | null = null;
-
-        if (destino === 'proveedor' || destino === 'descuento_fuera_factura') {
-            if (!rec.proveedorId) throw new Rechazo('La recepción no tiene proveedor: no se puede dejar la nota de crédito esperada.', 'sin_proveedor');
-            if (!(p.total > 0)) throw new Rechazo('La diferencia no tiene importe: no hay nada para reclamarle al proveedor.', 'sin_importe');
-            let asociadoId: string | null = null;
-            if (rec.ocId) {
-                const { data: fa } = await supabase.from('comprobantes_compra').select('id')
-                    .eq('orden_compra_id', rec.ocId).not('tipo_comprobante', 'in', NO_ES_FACTURA).neq('estado', 'esperada')
-                    .order('fecha_comprobante', { ascending: false }).limit(1).maybeSingle();
-                asociadoId = fa?.id || null;
+    // Aceptar el precio facturado: es el único cambio además de la marca. Si falla, la marca se saca.
+    if (tipo === 'precio' && p.costo) {
+        const cambios = p.costo.precio_compra > 0
+            ? { precio_compra: p.costo.precio_compra, descuento1: p.costo.descuento1, descuento2: p.costo.descuento2, descuento3: p.costo.descuento3, descuento4: p.costo.descuento4, actualizado_por: usuarioId }
+            : p.costo.ultimo_costo > 0 ? { ultimo_costo: p.costo.ultimo_costo } : null;
+        if (cambios) {
+            const { error } = await supabase.from('articulos').update(cambios).eq('id', item.articulo_id);
+            if (error) {
+                await supabase.from('recepciones_items').update({ precio_verificado: false }).eq('id', item.id);
+                throw error;
             }
-            const { data: nc, error } = await supabase.from('comprobantes_compra').insert({
-                orden_compra_id: rec.ocId || null,
-                proveedor_id: rec.proveedorId,
-                tipo_comprobante: 'NC',
-                numero_comprobante: `ESPERADA-${Date.now()}`,
-                fecha_comprobante: hoyISO(),
-                total_factura_declarado: p.total,
-                total_neto: p.neto,
-                total_iva: p.iva,
-                estado: 'esperada',
-                origen_nc: p.origen_nc,
-                comprobante_asociado_id: asociadoId,
-                ajusta_stock: false,
-            }).select('id').single();
-            if (error) throw error;
-            ncId = nc.id;
         }
-
-        if (destino === 'transporte') {
-            const transporteId = p.transporte_id || rec.transporteId;
-            if (!transporteId) throw new Rechazo('Elegí el transporte al que se le carga la diferencia.', 'sin_transporte');
-            if (!(p.total > 0)) throw new Rechazo('La diferencia no tiene importe: no hay nada para cargarle al transporte.', 'sin_importe');
-            const { data: mov, error } = await supabase.from('cuenta_corriente_transportes').insert({
-                transporte_id: transporteId,
-                tipo_movimiento: 'faltante_mercaderia',
-                monto: p.total,
-                descripcion: p.descripcion || 'Faltante de mercadería',
-                referencia_id: item.recepcion_id,
-                referencia_tipo: 'recepcion',
-                creado_por: usuarioId,
-            }).select('id').single();
-            if (error) throw error;
-            movId = mov.id;
-        }
-
-        if (destino === 'empresa' && tipo === 'precio' && p.costo?.precio_compra > 0) {
-            const { error } = await supabase.from('articulos').update({ ...p.costo, actualizado_por: usuarioId }).eq('id', item.articulo_id);
-            if (error) throw error;
-        }
-
-        if (p.devolver_unidades > 0) {
-            const { data: art, error: leerErr } = await supabase.from('articulos').select('stock_actual').eq('id', item.articulo_id).single();
-            if (leerErr) throw leerErr;
-            stockAntes = Number(art.stock_actual || 0);
-            const { error } = await supabase.from('articulos').update({ stock_actual: stockAntes - p.devolver_unidades }).eq('id', item.articulo_id);
-            if (error) throw error;
-        }
-
-        return { ya_resuelta: false, destino, neto: p.neto, iva: p.iva, total: p.total, nc_esperada_id: ncId, movimiento_transporte_id: movId, unidades_devueltas: p.devolver_unidades, stock_antes: stockAntes };
-    } catch (e) {
-        await deshacerMarca();
-        throw e;
     }
+    return { ya_resuelta: false, destino, neto: p.neto, iva: p.iva, total: p.total, nc_esperada_id: null, movimiento_transporte_id: null, unidades_devueltas: 0, stock_antes: null };
 }
 
 export async function POST(
@@ -325,23 +287,24 @@ export async function POST(
                     .maybeSingle();
                 if (itemErr) throw itemErr;
                 if (!item) throw new Rechazo('La línea de la recepción ya no existe.', 'no_encontrado');
+                if (item.recepcion_id !== recepcion_id) throw new Rechazo('Esa línea no es de esta recepción.', 'linea_de_otra_recepcion');
                 const articuloInfo = Array.isArray(item.articulo) ? item.articulo[0] : item.articulo;
 
                 // La cuenta la hace el servidor: lo que mande el navegador como cantidad o precio no se usa
-                const dif = await contexto(supabase, item, rec.ocId);
-                const p = plan(dif, tipo, destino, decision, articuloInfo?.sku || '');
+                const { dif, hermanas, descuentoAlPie } = await contexto(supabase, item, rec.ocId);
+                const p = plan(dif, tipo, destino, decision, articuloInfo?.sku || '', descuentoAlPie);
 
                 let r: any;
                 const rpc = await supabase.rpc('recepcion_resolver_diferencia', {
                     p_item_id: item_id, p_tipo: tipo, p_destino: destino, p_usuario_id: auth.user.id, p_datos: p,
                 });
                 if (!rpc.error) r = rpc.data;
-                else if (faltaLaFuncion(rpc.error, 'recepcion_resolver_diferencia')) r = await resolverSinFuncion(supabase, item, rec, tipo, destino, p, auth.user.id);
+                else if (faltaLaFuncion(rpc.error, 'recepcion_resolver_diferencia')) r = await resolverSinFuncion(supabase, item, hermanas, tipo, destino, p, auth.user.id);
                 else if (rpc.error.code === 'P0001' || rpc.error.code === 'P0002') throw new Rechazo(rpc.error.message, String(rpc.error.details || 'rechazado'));
                 else throw rpc.error;
 
                 // Cambió el costo de lista del artículo (se aceptó el precio facturado): queda en el historial
-                const costo = (p as { costo?: { precio_compra: number; descuento1: number; descuento2: number; descuento3: number; descuento4: number } }).costo;
+                const costo = (p as { costo?: { precio_compra: number; descuento1: number; descuento2: number; descuento3: number; descuento4: number; ultimo_costo?: number } }).costo;
                 if (!r.ya_resuelta && destino === 'empresa' && tipo === 'precio' && costo && costo.precio_compra > 0) {
                     await registrarCostoEnHistorial(supabase, {
                         articulo_id: item.articulo_id, proveedor_id: rec.proveedorId, precio_compra: costo.precio_compra,
@@ -350,8 +313,10 @@ export async function POST(
                 }
 
                 // Kardex de la devolución: solo si de verdad se devolvió mercadería que había entrado
-                if (!r.ya_resuelta && Number(r.unidades_devueltas) > 0 && dif.factura) {
-                    const precio = dif.factura.neto_unidad;
+                let avisoKardex = '';
+                if (!r.ya_resuelta && Number(r.unidades_devueltas) > 0) {
+                    // Valorizada a lo facturado; si no estaba facturado, al precio de la orden
+                    const precio = dif.factura?.neto_unidad || dif.oc?.neto_unidad || 0;
                     const subtotal = Math.round(precio * Number(r.unidades_devueltas) * 100) / 100;
                     try {
                         await insertarKardex(supabase, {
@@ -377,6 +342,7 @@ export async function POST(
                         });
                     } catch (e: any) {
                         console.error('[cerrar] kardex de devolución:', e?.message || e);
+                        avisoKardex = ' ATENCIÓN: el stock bajó pero no se pudo anotar el movimiento en el kardex; avisá a sistemas.';
                     }
                 }
 
@@ -387,10 +353,12 @@ export async function POST(
                         : destino === 'transporte'
                             ? `Se cargaron ${moneda(p.total)} a la cuenta del transporte.`
                             : tipo === 'precio'
-                                ? 'Se tomó el precio facturado como costo del artículo.'
+                                ? (costo && !(costo.precio_compra > 0)
+                                    ? 'Se aceptó el precio facturado. Como el artículo viene con precios distintos o la factura tiene un descuento al pie, el precio de lista del artículo NO se tocó: quedó solo el último costo.'
+                                    : 'Se tomó el precio facturado como costo del artículo.')
                                 : 'La diferencia quedó asumida por la empresa.';
                 const devueltas = !r.ya_resuelta && Number(r.unidades_devueltas) > 0 ? ` Salieron ${Number(r.unidades_devueltas)} unidades del stock (mercadería devuelta).` : "";
-                results.push({ item_id, tipo, destino, accion: decision.accion, success: true, ...r, unidades: p.unidades, mensaje: mensaje + devueltas });
+                results.push({ item_id, tipo, destino, accion: decision.accion, success: true, ...r, unidades: p.unidades, mensaje: mensaje + devueltas + avisoKardex });
             } catch (e: any) {
                 if (e instanceof Rechazo) results.push({ item_id, tipo, destino, accion: decision.accion, error: e.message, codigo: e.codigo });
                 else {

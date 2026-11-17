@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth';
 import { nowArgentina } from '@/lib/utils';
 import { fechaISO, mediodiaAR, moneda, sumarDiasISO } from '@/lib/formato';
 import { aplicarCostoDeFactura, sincronizarKardexEnCamino } from '@/lib/compras/costo-y-kardex';
+import { controlSuma } from '@/lib/compras/control-suma';
 import { normalizarNumeroComprobante } from '@/lib/services/numero-comprobante';
 import { faltaLaColumna, faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 
@@ -429,6 +430,25 @@ export async function POST(
                 error: 'Un remito no se valida: solo sirve para controlar las cantidades contra lo recibido. Para controlar los precios y registrar la deuda hace falta la factura.',
                 codigo: 'remito_no_se_valida',
             }, { status: 422 });
+        }
+
+        // E-46 (regla de Juan, 17/11): los renglones tienen que sumar el neto del comprobante, y neto +
+        // impuestos el total. Si no cierra NO se valida: primero se corrigen los renglones o la cabecera.
+        // Se controla acá y también en la función SQL (migración 20261117d).
+        if (!yaEstaba) {
+            const { data: renglones, error: renErr } = await supabase
+                .from('comprobantes_compra_detalle')
+                .select('cantidad_facturada, precio_unitario, descuento1, descuento2, descuento3, descuento4')
+                .eq('comprobante_id', comprobante_id);
+            if (renErr) throw renErr;
+            const suma = controlSuma(comprobante, renglones || []);
+            if (!suma.ok) {
+                return NextResponse.json({
+                    error: `${suma.faltas.join(' ')} No se validó: corregí el comprobante y volvé a validar.`,
+                    codigo: 'renglones_no_suman',
+                    ...suma,
+                }, { status: 422 });
+            }
         }
 
         // El plan solo hace falta para generar el vencimiento de una deuda nueva

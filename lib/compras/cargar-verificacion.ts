@@ -11,6 +11,7 @@ import { aUnidadesBase, conversionLinea } from "@/lib/deposito/unidades"
 import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
 import { evaluarFinalizarOC, esComprobanteConPrecios, type ControlFinalizarOC } from "./finalizar-oc"
 import { armarVerificacion, type DatosVerificacion, type Verificacion } from "./verificacion"
+import { controlSuma } from "./control-suma"
 
 export interface DocumentoRecepcion {
   id: string
@@ -36,6 +37,8 @@ export interface VerificacionOC {
   recepciones: Array<{ id: string; estado: string; numero_tanda: number | null; fecha_fin: string | null; transporte_id: string | null }>
   documentos: DocumentoRecepcion[]
   control: ControlFinalizarOC & { /** Artículos de la orden que no llegaron completos (E-92) */ pendientes: Array<{ articulo_id: string; sku: string; unidades: number }> }
+  /** Comprobantes sin validar cuyos renglones no suman lo que dice el comprobante (E-46): no se pueden validar así */
+  descuadres: Array<{ comprobante_id: string; comprobante: string; faltas: string[] }>
   /** La orden ya está cerrada o cancelada: se puede mirar, no tocar */
   solo_lectura: boolean
   tiempos: Record<string, number>
@@ -61,7 +64,7 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
   const [rOrden, rItems, rComps, rRecs] = await Promise.all([
     medir("orden", supabase.from("ordenes_compra").select("id, numero_orden, estado, proveedor_id, observaciones, proveedor:proveedores(nombre)").eq("id", ordenId).maybeSingle()),
     medir("detalle_oc", supabase.from("ordenes_compra_detalle").select("articulo_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4").eq("orden_compra_id", ordenId)),
-    medir("comprobantes", supabase.from("comprobantes_compra").select("id, tipo_comprobante, numero_comprobante, fecha_comprobante, estado, total_factura_declarado, total_neto, total_iva, percepcion_iva_monto, percepcion_iibb_monto, retencion_ganancias_monto, origen_nc, foto_url, created_at").eq("orden_compra_id", ordenId).order("created_at", { ascending: true })),
+    medir("comprobantes", supabase.from("comprobantes_compra").select("id, tipo_comprobante, numero_comprobante, fecha_comprobante, estado, total_factura_declarado, total_neto, total_iva, percepcion_iva_monto, percepcion_iibb_monto, retencion_ganancias_monto, descuento_fuera_factura, origen_nc, foto_url, created_at").eq("orden_compra_id", ordenId).order("created_at", { ascending: true })),
     medir("recepciones", supabase.from("recepciones").select("id, estado, numero_tanda, fecha_fin, transporte_id, created_at").eq("orden_compra_id", ordenId).neq("estado", "cancelada").order("created_at", { ascending: true })),
   ])
   const ordenFila: any = ok(rOrden as any, "orden")
@@ -78,7 +81,7 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
     medir("renglones", compIds.length
       ? supabase.from("comprobantes_compra_detalle").select("id, comprobante_id, articulo_id, cantidad_facturada, precio_unitario, descuento1, descuento2, descuento3, descuento4, tipo_cantidad, recepcion_item_id, iva_porcentaje, match_estado, descripcion_proveedor").in("comprobante_id", compIds)
       : vacio),
-    medir("lineas_recibidas", recIds.length ? supabase.from("recepciones_items").select("*").in("recepcion_id", recIds) : vacio),
+    medir("lineas_recibidas", recIds.length ? supabase.from("recepciones_items").select("*").in("recepcion_id", recIds).order("id", { ascending: true }) : vacio),
     medir("documentos", recIds.length
       ? supabase.from("recepciones_documentos").select("id, recepcion_id, comprobante_id, tipo_documento, nombre_archivo, tipo_mime, procesado, datos_ocr, storage_path, url_imagen, created_at").in("recepcion_id", recIds).order("created_at", { ascending: true })
       : vacio),
@@ -152,6 +155,13 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
     .filter((f) => f.banderas.includes("pendiente"))
     .map((f) => ({ articulo_id: f.articulo_id, sku: f.sku, unidades: f.dif.pendiente_oc }))
 
+  // E-46: comprobantes todavía sin validar que no cierran
+  const descuadres = comprobantes
+    .filter((c) => !["validado", "cerrado", "esperada"].includes(c.estado))
+    .map((c) => ({ c, suma: controlSuma(c, detalle.filter((l) => l.comprobante_id === c.id)) }))
+    .filter((x) => !x.suma.ok)
+    .map((x) => ({ comprobante_id: x.c.id, comprobante: `${x.c.tipo_comprobante} ${x.c.numero_comprobante}`, faltas: x.suma.faltas }))
+
   tiempos.total = Date.now() - t0
   if (tiempos.total > 3000) console.warn(`[verificación OC ${ordenFila.numero_orden}] lenta: ${JSON.stringify(tiempos)}`)
 
@@ -163,6 +173,7 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
     recepciones: recepciones.map((r) => ({ id: r.id, estado: r.estado, numero_tanda: r.numero_tanda ?? null, fecha_fin: r.fecha_fin ?? null, transporte_id: r.transporte_id ?? null })),
     documentos,
     control: { ...control, pendientes },
+    descuadres,
     solo_lectura: ["finalizada", "cancelada"].includes(ordenFila.estado),
     tiempos,
   }

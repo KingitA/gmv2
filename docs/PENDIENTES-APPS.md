@@ -256,3 +256,14 @@ Viene de la prueba integral de entrada (`docs/PRUEBA-INTEGRAL-ENTRADA.md`, Tanda
 **Para publicar:** `cd mobile && npm run build:apks -- --apps deposito --notas "Recepcion: bultos y unidades claros; lo contado se ve en unidades; avisos al subir fotos"` (queda v0.5.2) e instalar encima en el NuStar. Aplicar antes la migración `20261116a`.
 
 **Mientras tanto (APK v0.5.x instalada):** la pantalla sigue diciendo "2 esperadas / u". El operario tiene que contar en lo mismo que pide la OC (bultos si la OC está en bultos): el servidor convierte. Si cuenta unidades sueltas en una línea por bulto, el stock queda multiplicado: por eso conviene publicar esta APK antes de volver a recibir mercadería.
+
+## App Depósito → recepción parcial (17/11/2026, entrada E-39/E-92) — sin cambios en la app
+
+Cambio solo de servidor (rama `entrada-t1b-diferencias`), compatible con la v0.5.2 instalada:
+
+- Finalizar una recepción con faltantes ya NO cierra la orden: queda "recibida en parte" y **vuelve a aparecer en la lista de órdenes a recibir** como una orden sin empezar, con solo lo que falta (`ordenes_compra_detalle.cantidad_pedida` = lo pendiente, en la unidad de la línea; `recepcion: null`; `entrega_numero` = 2, 3…). Al entrar, el servidor abre la entrega siguiente.
+- Sale de la lista cuando llegó todo, o cuando la oficina la cierra sin el resto.
+- La lista también trae órdenes en estado `enviada`, `confirmada` y `en_camino`.
+- `recepcion.cerrar` puede devolver `falta_recibir: N` (cantidad de artículos con pendiente).
+
+Para la próxima APK (T1-C): mostrar "2ª entrega" en la tarjeta (`entrega_numero`), avisar al finalizar que la orden queda abierta con N artículos pendientes, y E-93 (confirmación con resumen al finalizar; cargar cantidad tocando el renglón).

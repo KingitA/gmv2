@@ -42,6 +42,17 @@ export interface LineaOC {
   descuentos: number[]
 }
 
+/**
+ * El mismo artículo en más de un renglón de la orden: se trata como UNA línea (se suman las
+ * unidades; el precio y los descuentos son los del primer renglón).
+ */
+export function combinarLineasOC(lineas: LineaOC[]): LineaOC | null {
+  if (lineas.length === 0) return null
+  if (lineas.length === 1) return lineas[0]!
+  const unidades = lineas.reduce((s, l) => s + num(l.cantidad_pedida) * (num(l.factor) || 1), 0)
+  return { cantidad_pedida: r4(unidades), factor: 1, precio_unitario: lineas[0]!.precio_unitario, descuentos: lineas[0]!.descuentos }
+}
+
 export interface LineaFactura {
   /** Tal cual la factura */
   cantidad_facturada: number
@@ -72,6 +83,8 @@ export interface DiferenciaLinea {
     iva_porcentaje: number
     /** Unidades facturadas SIN cargo (bonificadas: precio 0 o 100 % de descuento). E-42 */
     bonificadas: number
+    /** El artículo viene en renglones con precios distintos: no hay UNA lista + descuentos que copiar al artículo */
+    precios_distintos: boolean
   } | null
   /** Facturado a otro precio que el acordado. null = no hay diferencia (o falta una de las dos puntas). */
   precio: ({ por_unidad: number; unidades: number; a_favor: "nuestro" | "proveedor" } & Importe) | null
@@ -90,6 +103,12 @@ export interface DiferenciaLinea {
 
 /** Redondeos chicos del OCR / de pasar descuentos a porcentaje no son una diferencia de precio. */
 export const TOLERANCIA_PRECIO = 0.005
+/**
+ * …salvo que en plata sea importante: si la diferencia de la línea (por unidad × unidades) pasa
+ * este importe NETO, se muestra y se puede resolver aunque sea menor al 0,5 %. Aceptado por Juan
+ * el 17/11. Ninguna tolerancia cambia la deuda: la deuda es siempre el total de la factura.
+ */
+export const TOPE_DIFERENCIA_PESOS = 1000
 const TOLERANCIA_CANTIDAD = 0.01
 
 export function importe(neto: number, ivaPorcentaje: number): Importe {
@@ -114,6 +133,7 @@ export function calcularDiferencia(p: {
     let unidades = 0
     let conCargo = 0
     let netoTotal = 0
+    const preciosVistos = new Set<number>()
     for (const l of lineas) {
       const f = num(l.factor) || 1
       const u = num(l.cantidad_facturada) * f
@@ -124,6 +144,7 @@ export function calcularDiferencia(p: {
       if (neto > 0) {
         conCargo += u
         netoTotal += u * (neto / f)
+        preciosVistos.add(r4(neto / f))
       }
     }
     // Lista, descuentos e IVA: los del primer renglón con cargo
@@ -135,6 +156,7 @@ export function calcularDiferencia(p: {
       descuentos: ref.descuentos.map(num),
       iva_porcentaje: num(ref.iva_porcentaje),
       bonificadas: r4(unidades - conCargo),
+      precios_distintos: preciosVistos.size > 1,
     }
   }
 
@@ -143,8 +165,12 @@ export function calcularDiferencia(p: {
   let precio: DiferenciaLinea["precio"] = null
   if (oc && factura && oc.neto_unidad > 0 && factura.neto_unidad > 0) {
     const dif = factura.neto_unidad - oc.neto_unidad
-    if (Math.abs(dif) / oc.neto_unidad > TOLERANCIA_PRECIO) {
-      const cobradas = r4(factura.unidades - factura.bonificadas)
+    // La diferencia de precio va sobre lo que efectivamente se paga a ese precio: las unidades
+    // RECIBIDAS (con tope en las cobradas). Lo facturado que no llegó es faltante y se reclama
+    // entero al precio facturado: si además se le sumara la diferencia de precio, esas unidades
+    // se reclamarían dos veces.
+    const cobradas = r4(Math.min(factura.unidades - factura.bonificadas, recibido))
+    if (cobradas > 0 && (Math.abs(dif) / oc.neto_unidad > TOLERANCIA_PRECIO || Math.abs(dif) * cobradas > TOPE_DIFERENCIA_PESOS)) {
       precio = {
         por_unidad: r4(Math.abs(dif)),
         unidades: cobradas,

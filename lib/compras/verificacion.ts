@@ -17,7 +17,7 @@
  * Archivo PURO. Tests: mobile/packages/core/test/entrada-verificacion.test.ts
  */
 
-import { calcularDiferencia, precioNeto, type DiferenciaLinea, type LineaFactura } from "./diferencias"
+import { calcularDiferencia, combinarLineasOC, precioNeto, type DiferenciaLinea, type LineaFactura } from "./diferencias"
 import { esComprobanteConPrecios, esRemito } from "./finalizar-oc"
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
@@ -115,7 +115,9 @@ export interface Verificacion {
 export function armarVerificacion(d: DatosVerificacion): Verificacion {
   const art = new Map(d.articulos.map((a) => [a.id, a]))
   const comp = new Map(d.comprobantes.map((c) => [c.id, c]))
-  const ocPorArt = new Map(d.ocItems.map((i) => [i.articulo_id, i]))
+  // El mismo artículo puede estar en más de un renglón de la orden: se juntan
+  const ocPorArt = new Map<string, DatosVerificacion["ocItems"]>()
+  for (const i of d.ocItems) ocPorArt.set(i.articulo_id, [...(ocPorArt.get(i.articulo_id) || []), i])
   const recItemPorId = new Map(d.recItems.map((r) => [r.id, r]))
   // Solo cuentan los renglones de comprobantes que siguen existiendo y no son "esperada"
   const detalle = d.detalle.filter((l) => comp.has(l.comprobante_id) && comp.get(l.comprobante_id)!.estado !== "esperada")
@@ -129,7 +131,7 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
     [x.descuento1, x.descuento2, x.descuento3, x.descuento4].map(num)
 
   // Artículos: los de la orden, y después lo recibido o facturado que no estaba pedido
-  const ids: string[] = d.ocItems.map((i) => i.articulo_id)
+  const ids: string[] = [...ocPorArt.keys()]
   const extra = new Set<string>()
   for (const r of d.recItems) if (r.articulo_id && !ocPorArt.has(r.articulo_id) && (num(r.unidades) > 0 || r.fuera_de_oc)) extra.add(r.articulo_id)
   for (const l of detalle) if (l.articulo_id && !ocPorArt.has(l.articulo_id)) extra.add(l.articulo_id)
@@ -139,9 +141,10 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
 
   const filas: FilaVerificacion[] = ids.map((articuloId) => {
     const a = art.get(articuloId)
-    const oc = ocPorArt.get(articuloId)
+    const renglonesOC = ocPorArt.get(articuloId) || []
+    const oc = renglonesOC[0]
     const upb = upbDe(a?.unidades_por_bulto)
-    const porBulto = !!oc && oc.tipo_cantidad !== "unidad"
+    const porBulto = !!oc && renglonesOC.every((x) => x.tipo_cantidad !== "unidad")
 
     // Recibido: suma de todas las tandas. Las filas fuera_de_oc de un artículo que SÍ está en
     // la orden son duplicados de documentación vieja: no suman.
@@ -169,7 +172,7 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
     }
 
     const dif = calcularDiferencia({
-      oc: oc ? { cantidad_pedida: num(oc.cantidad_pedida), factor: porBulto ? upb : 1, precio_unitario: num(oc.precio_unitario), descuentos: descuentos(oc) } : null,
+      oc: combinarLineasOC(renglonesOC.map((x) => ({ cantidad_pedida: num(x.cantidad_pedida), factor: x.tipo_cantidad !== "unidad" ? upb : 1, precio_unitario: num(x.precio_unitario), descuentos: descuentos(x) }))),
       factura: lineasFactura,
       recibido_unidades: recibido,
     })

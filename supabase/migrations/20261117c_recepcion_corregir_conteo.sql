@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS public.recepciones_correcciones (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   recepcion_item_id  uuid NOT NULL REFERENCES public.recepciones_items(id) ON DELETE CASCADE,
   recepcion_id       uuid NOT NULL REFERENCES public.recepciones(id) ON DELETE CASCADE,
-  articulo_id        uuid NOT NULL,
+  articulo_id        uuid,
   unidades_antes     numeric(18,4) NOT NULL,
   unidades_despues   numeric(18,4) NOT NULL,
   -- lo que se movió el stock (0 si la recepción todavía no había sumado stock)
@@ -33,12 +33,12 @@ CREATE INDEX IF NOT EXISTS idx_recepciones_correcciones_recepcion ON public.rece
 COMMENT ON TABLE public.recepciones_correcciones IS
   'Correcciones hechas desde la oficina a lo que contó el depósito en una recepción: quién, cuándo, de cuánto a cuánto, por qué y cuánto se ajustó el stock.';
 
+-- Tabla de compras: la lee y la escribe SOLO el servidor (cliente de servicio); ni las apps ni
+-- el navegador la tocan directo.
+ALTER TABLE public.recepciones_correcciones ALTER COLUMN articulo_id DROP NOT NULL;
 ALTER TABLE public.recepciones_correcciones ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS recepciones_correcciones_lectura ON public.recepciones_correcciones;
-CREATE POLICY recepciones_correcciones_lectura ON public.recepciones_correcciones
-  FOR SELECT TO authenticated USING (true);
-REVOKE ALL ON public.recepciones_correcciones FROM anon;
-GRANT SELECT ON public.recepciones_correcciones TO authenticated;
+REVOKE ALL ON public.recepciones_correcciones FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.recepciones_correcciones TO service_role;
 
 -- p_unidades_antes: lo que valía la línea en unidades según el servidor (se usa solo si la

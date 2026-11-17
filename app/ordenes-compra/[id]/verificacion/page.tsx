@@ -237,6 +237,18 @@ export default function VerificacionOCPage() {
                 </div>
             )}
 
+            {!soloLectura && datos.descuadres.length > 0 && (
+                <div className="mb-4 p-4 border-2 border-red-400 bg-red-50 rounded-lg">
+                    <p className="font-bold text-red-900">Los renglones no suman lo que dice el comprobante</p>
+                    <ul className="text-sm text-red-900 mt-1 space-y-1">
+                        {datos.descuadres.map((d) => (
+                            <li key={d.comprobante_id}><strong>{d.comprobante}:</strong> {d.faltas.join(" ")}</li>
+                        ))}
+                    </ul>
+                    <p className="text-xs text-red-800 mt-2">Hasta corregirlo, ese comprobante no se puede validar: editá los datos (lápiz), agregá el renglón que falta (+) o marcá como "No es mercadería" el concepto que corresponda.</p>
+                </div>
+            )}
+
             {!soloLectura && !control.puede && (
                 <div className="mb-4 p-3 border border-sky-300 bg-sky-50 rounded-lg">
                     <p className="text-sm font-semibold text-sky-900">{control.falta_factura ? "Falta la factura para controlar precios" : "Todavía no se puede finalizar la orden"}</p>
