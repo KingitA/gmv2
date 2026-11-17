@@ -17,8 +17,10 @@ export const ESTADOS_OC_ABIERTA = ["pendiente", "enviada", "confirmada", "en_cam
 export const ESTADOS_OC: Record<string, { nombre: string; tono: "amarillo" | "azul" | "violeta" | "naranja" | "verde" | "rojo" | "gris" }> = {
   pendiente: { nombre: "Sin enviar", tono: "amarillo" },
   enviada: { nombre: "Enviada", tono: "azul" },
-  confirmada: { nombre: "Confirmada", tono: "azul" },
-  en_camino: { nombre: "En camino", tono: "violeta" },
+  // Juan (17/11): "confirmada" y "en camino" no se usan (la orden llega cuando depósito empieza
+  // a escanear). La base los admite; si alguna orden los tuviera se muestra como Enviada.
+  confirmada: { nombre: "Enviada", tono: "azul" },
+  en_camino: { nombre: "Enviada", tono: "azul" },
   recibida_parcial: { nombre: "Recibida en parte", tono: "naranja" },
   recibida_completa: { nombre: "Recibida", tono: "naranja" },
   recibida: { nombre: "Recibida", tono: "naranja" },

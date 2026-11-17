@@ -50,7 +50,7 @@ interface FilaOrden {
 const FILTROS: { valor: string; nombre: string; incluye: (o: FilaOrden) => boolean }[] = [
   { valor: "abiertas", nombre: "Abiertas (sin recibir)", incluye: (o) => (ESTADOS_OC_ABIERTA as readonly string[]).includes(o.estado) },
   { valor: "sin_enviar", nombre: "Sin enviar al proveedor", incluye: (o) => o.estado === "pendiente" },
-  { valor: "enviadas", nombre: "Enviadas / en camino", incluye: (o) => ["enviada", "confirmada", "en_camino"].includes(o.estado) },
+  { valor: "enviadas", nombre: "Enviadas al proveedor", incluye: (o) => ["enviada", "confirmada", "en_camino"].includes(o.estado) },
   { valor: "recepcion", nombre: "Recibidas (a verificar)", incluye: (o) => ["recibida_parcial", "recibida_completa", "recibida"].includes(o.estado) },
   { valor: "finalizadas", nombre: "Finalizadas", incluye: (o) => o.estado === "finalizada" },
   { valor: "canceladas", nombre: "Canceladas", incluye: (o) => o.estado === "cancelada" },
