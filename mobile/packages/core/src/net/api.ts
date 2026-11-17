@@ -7,6 +7,8 @@ export interface OpcionesApi {
   base: string
   deviceId: string
   appVersion: string
+  /** versionCode del APK (header X-App-Version-Code: actualización con un botón) */
+  appVersionCode?: number
   /** fetch inyectable (tests) */
   fetch?: typeof fetch
 }
@@ -100,6 +102,7 @@ export class Api {
     const headers: Record<string, string> = {
       "X-Device-Id": this.opts.deviceId,
       "X-App-Version": this.opts.appVersion,
+      ...(this.opts.appVersionCode ? { "X-App-Version-Code": String(this.opts.appVersionCode) } : {}),
       ...o.headers,
     }
     if (o.body !== undefined && !o.form) headers["Content-Type"] = "application/json"

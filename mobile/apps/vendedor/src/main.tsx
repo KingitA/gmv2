@@ -6,7 +6,7 @@ import { rutas } from "./rutas"
 void montarApp({
   // Los datasets dependen del vendedor logueado (su cartera, sus pedidos): al ingresar
   // otro usuario en el mismo equipo se limpia la réplica del anterior (default del core).
-  config: { app: "vendedor", apiBase: __API_BASE__, version: __APP_VERSION__, datasets: DATASETS },
+  config: { app: "vendedor", apiBase: __API_BASE__, version: __APP_VERSION__, versionCode: __APP_VERSION_CODE__, datasets: DATASETS },
   nombreApp: "Vendedor",
   rutas,
 }).then((rt) => {

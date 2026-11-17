@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { authClient, aSesionMovil, habilitado, nombreDe, rolesDe, tocarDispositivo } from "@/lib/mobile/auth-server"
 import type { AppMovil } from "@/lib/mobile/contrato"
+import { codeDelHeader } from "@/lib/mobile/actualizacion"
 
 // POST /api/mobile/auth/refresh  { refresh_token, app }
 // 401 = sesión revocada/vencida ⇒ el dispositivo vuelve al login.
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
     userId: data.user.id,
     app,
     appVersion: request.headers.get("x-app-version"),
+    appVersionCode: codeDelHeader(request.headers.get("x-app-version-code")),
   })
   if (revocado) return NextResponse.json({ error: "Este dispositivo fue dado de baja." }, { status: 401 })
 

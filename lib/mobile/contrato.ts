@@ -25,6 +25,25 @@ export interface SesionMovil {
   roles: string[]
 }
 
+// ─── Actualización desde la app (GET /api/mobile/actualizacion?app=X) ────────
+// La app manda su versionCode en el header X-App-Version-Code. Ver MOBILE.md →
+// "Actualización desde la app".
+
+export interface RespuestaActualizacion {
+  /** true = hay una versión publicada más nueva que la del equipo */
+  hay: boolean
+  version_name: string | null
+  version_code: number | null
+  notas: string | null
+  /** true = no se puede posponer (la franja no se cierra) */
+  obligatoria: boolean
+  tamano_bytes: number | null
+  /** sha256 del APK en hex minúscula: la app lo verifica antes de instalar */
+  sha256: string | null
+  /** URL firmada del bucket privado "apks" (vence en ~15 min). Solo si hay */
+  url: string | null
+}
+
 // ─── Sync (lecturas) ─────────────────────────────────────────────────────────
 
 export interface FilaReplica {

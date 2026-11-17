@@ -53,6 +53,8 @@ export async function tocarDispositivo(args: {
   userId: string
   app: string
   appVersion: string | null
+  /** versionCode del APK (header X-App-Version-Code, apps ≥ actualización con un botón) */
+  appVersionCode?: number | null
 }): Promise<boolean> {
   if (!args.deviceId) return false
   try {
@@ -64,16 +66,18 @@ export async function tocarDispositivo(args: {
       .eq("app", args.app)
       .maybeSingle()
     if (data?.revocado) return true
-    await admin.from("mobile_dispositivos").upsert(
-      {
-        device_id: args.deviceId,
-        app: args.app,
-        usuario_id: args.userId,
-        app_version: args.appVersion,
-        ultimo_contacto_at: new Date().toISOString(),
-      },
-      { onConflict: "device_id,app" },
-    )
+    const fila = {
+      device_id: args.deviceId,
+      app: args.app,
+      usuario_id: args.userId,
+      app_version: args.appVersion,
+      ultimo_contacto_at: new Date().toISOString(),
+    }
+    const { error } = await admin
+      .from("mobile_dispositivos")
+      .upsert(args.appVersionCode ? { ...fila, app_version_code: args.appVersionCode } : fila, { onConflict: "device_id,app" })
+    // Sin la migración 20261117b (columna app_version_code): se registra igual, sin el código
+    if (error && args.appVersionCode) await admin.from("mobile_dispositivos").upsert(fila, { onConflict: "device_id,app" })
   } catch {
     /* tabla ausente: ignorar */
   }

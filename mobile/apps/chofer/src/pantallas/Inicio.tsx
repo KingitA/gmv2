@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router"
 import { useContadoresOutbox, useNoEnviados, useOverlay, useRuntime } from "@gm/core"
-import { fechaHoraCorta } from "@gm/core/ui"
+import { FranjaActualizacion, fechaHoraCorta } from "@gm/core/ui"
 import { DS, type ViajeResumen } from "../datasets"
 import { rechazosDe, useDescargaViaje, useMe, useRefrescarAlEntrar, useViaje, useYo } from "../datos/hooks"
 import { AvisosAnulacion, AvisosBcra, fechaViaje, formatDateAR, HojaConfirmar, Pantalla, Rechazos, useAvisoEntrante, useEnterCierraTeclado, useToast } from "../ui"
@@ -94,6 +94,8 @@ export function Inicio() {
       <AvisosBcra />
       <AvisosAnulacion />
       <div className="mx-auto w-full max-w-2xl space-y-6 p-4">
+        {/* Actualización con un botón: solo acá, nunca en medio de una parada o un cobro */}
+        <FranjaActualizacion />
         <section>
           <h2 className="mb-3 text-lg font-bold text-gray-700">Viaje Activo</h2>
           {cargando ? null : me?.viaje_activo ? (

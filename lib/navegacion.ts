@@ -96,6 +96,7 @@ export const SECCIONES: Seccion[] = [
     accesos: [
       { label: "Todos los ajustes", href: "/tablas" },
       { label: "Usuarios", href: "/admin/usuarios", roles: ["admin"] },
+      { label: "Equipos y apps", href: "/admin/equipos", roles: ["admin"] },
     ],
   },
 ]

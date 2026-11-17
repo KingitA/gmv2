@@ -5,6 +5,8 @@ import { uuidv4 } from "./emitter"
 import { Api } from "./net/api"
 import { crearAlmacenSeguro } from "./platform/almacen-seguro"
 import { alCambiarPrimerPlano } from "./platform/ciclo-vida"
+import { plataformaActualizacion } from "./platform/archivos"
+import { Actualizador } from "./actualizacion/actualizador"
 import { crearConectividad, type Conectividad } from "./platform/conectividad"
 import { Outbox } from "./sync/outbox"
 import { Reloj } from "./sync/reloj"
@@ -17,6 +19,8 @@ export interface ConfigApp {
   apiBase: string
   /** versionName del APK (lo inyecta el build) */
   version: string
+  /** versionCode del APK (lo inyecta el build): con él se ofrece la actualización */
+  versionCode?: number
   datasets: DefDataset[]
   /**
    * true (default): los datasets dependen del usuario ⇒ al ingresar otro usuario se
@@ -37,6 +41,8 @@ export interface Runtime {
   sync: Sincronizador
   reloj: Reloj
   red: Conectividad
+  /** Actualización de la app con un botón (franja del inicio) */
+  actualizacion: Actualizador
   /** Cierra sesión. Falla si hay operaciones sin enviar (nunca se pierden datos). */
   salir(): Promise<void>
   /**
@@ -69,7 +75,7 @@ export async function crearRuntime(config: ConfigApp): Promise<Runtime> {
   const reloj = new Reloj(db)
   await reloj.cargar()
 
-  const api = new Api({ base: config.apiBase.replace(/\/+$/, ""), deviceId, appVersion: config.version })
+  const api = new Api({ base: config.apiBase.replace(/\/+$/, ""), deviceId, appVersion: config.version, appVersionCode: config.versionCode })
   const auth = new Auth(api, crearAlmacenSeguro(`gm.${config.app}`), config.app)
   const replica = new Replica(db, api)
   const outbox = new Outbox(
@@ -139,8 +145,23 @@ export async function crearRuntime(config: ConfigApp): Promise<Runtime> {
   if (auth.estado === "autenticado") sync.iniciar()
   alCambiarPrimerPlano((activo) => sync.setPrimerPlano(activo))
 
+  // Actualización con un botón: al abrir, al volver a primer plano y cada 30 min (con señal y sesión)
+  const actualizacion = new Actualizador({
+    app: config.app,
+    get: (path) => api.get(path),
+    online: () => red.online,
+    autenticado: () => auth.estado === "autenticado",
+    plataforma: plataformaActualizacion(),
+  })
+  if (config.versionCode) {
+    actualizacion.iniciar()
+    auth.suscribir(() => void actualizacion.chequear())
+    red.suscribir(() => void actualizacion.chequear())
+    alCambiarPrimerPlano((activo) => void (activo && actualizacion.alVolver()))
+  }
+
   return {
-    config, db, deviceId, api, auth, replica, outbox, sync, reloj, red,
+    config, db, deviceId, api, auth, replica, outbox, sync, reloj, red, actualizacion,
     async salir() {
       if (outbox.contadores.pendientes > 0) {
         throw new Error(`Hay ${outbox.contadores.pendientes} operación(es) sin enviar. Conectate a internet y esperá a que se envíen antes de salir.`)
