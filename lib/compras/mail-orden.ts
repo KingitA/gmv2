@@ -16,6 +16,7 @@ export interface DatosPlantillaMail {
   /** Una línea por condición de pago */
   condiciones: string[]
   renglones: number
+  /** Total del pedido SIN impuestos (un solo total: el proveedor recibe un solo pedido) */
   total: number
   observaciones?: string | null
   /** Quién firma (nombre del usuario) */
@@ -38,7 +39,7 @@ export function cuerpoOrden(d: DatosPlantillaMail): string {
     : `Les enviamos adjunta la orden de compra ${d.numero_orden}.`)
   lineas.push("")
   lineas.push(`• Artículos: ${d.renglones}`)
-  lineas.push(`• Total estimado: ${moneda(d.total)} (el definitivo es el de la factura)`)
+  lineas.push(`• Total: ${moneda(d.total)} (precios sin IVA)`)
   if (d.fecha_entrega) lineas.push(`• Fecha de entrega pedida: ${fecha(d.fecha_entrega)}`)
   if (d.condiciones.length === 1) lineas.push(`• Condición de pago: ${d.condiciones[0]}`)
   else if (d.condiciones.length > 1) {

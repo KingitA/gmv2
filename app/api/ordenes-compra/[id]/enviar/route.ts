@@ -29,7 +29,7 @@ function plantilla(oc: OrdenCompleta, empresa: any, firma: string | null) {
         cuerpo: cuerpoOrden({
             numero_orden: oc.orden.numero_orden, proveedor: oc.proveedor.nombre, empresa: nombreEmpresa,
             fecha_entrega: oc.orden.fecha_estimada_recepcion, condiciones: lineasCondicion(oc),
-            renglones: oc.totales.renglones, total: oc.totales.total, observaciones: oc.orden.observaciones,
+            renglones: oc.totales.renglones, total: oc.totales.neto, observaciones: oc.orden.observaciones,
             firma, telefono: empresa?.telefono ?? null, reemplaza,
         }),
     };
@@ -53,7 +53,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
             orden: {
                 id: oc.orden.id, numero_orden: oc.orden.numero_orden, estado: oc.orden.estado,
                 envios: oc.orden.envios, enviada_at: oc.orden.enviada_at, enviada_a: oc.orden.enviada_a,
-                cambio_sin_enviar: oc.orden.cambio_sin_enviar, total: oc.totales.total, renglones: oc.totales.renglones,
+                cambio_sin_enviar: oc.orden.cambio_sin_enviar, total: oc.totales.neto, renglones: oc.totales.renglones,
             },
             proveedor: { id: oc.proveedor.id, nombre: oc.proveedor.nombre },
             puede_enviar: oc.puede.enviar,

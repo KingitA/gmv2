@@ -7,18 +7,21 @@ import { renderToBuffer, type DocumentProps } from "@react-pdf/renderer"
 import React, { type JSXElementConstructor, type ReactElement } from "react"
 import * as XLSX from "xlsx"
 import { OrdenCompraPDF, type OrdenCompraPDFData } from "@/lib/pdf/orden-compra-template"
-import { fecha, moneda, redondear } from "@/lib/formato"
+import { fecha, redondear } from "@/lib/formato"
 import type { OrdenCompleta } from "@/lib/compras/orden-completa"
 
 export const nombreArchivoOrden = (numero: string) => `OC_${numero}`.replace(/[^a-zA-Z0-9_-]/g, "_")
 
-/** Una línea de condición por acuerdo: si hay parte con y sin factura con acuerdos distintos, salen las dos. */
+/**
+ * Condición de pago que se le escribe AL PROVEEDOR: una sola línea.
+ * Decisión de Juan (17/11/2026): «la orden de compra debe figurar un solo pedido, 10 en negro
+ * 5 en blanco, la orden de compra = 15». Lo que recibe el proveedor (PDF, Excel, mail) no separa
+ * "con factura / sin factura" ni muestra IVA sobre una parte: artículos, cantidades, precios y
+ * un total. La separación queda adentro (provisión, vencimientos estimados, nuestra pantalla).
+ */
 export function lineasCondicion(oc: OrdenCompleta): string[] {
-  const textos = oc.condiciones.map((c) => c.texto)
-  if (oc.condiciones.length === 2 && textos[0] !== textos[1]) {
-    return oc.condiciones.map((c) => `${c.canal === "blanco" ? "Con factura" : "Sin factura"}: ${c.texto}`)
-  }
-  return textos.length > 0 ? [textos[0]] : []
+  const principal = oc.condiciones.find((c) => c.canal === "blanco") ?? oc.condiciones[0]
+  return principal ? [principal.texto] : []
 }
 
 export async function datosEmpresa(supabase: any): Promise<OrdenCompraPDFData["empresa"]> {
@@ -32,7 +35,7 @@ export function datosPdfOrden(oc: OrdenCompleta, empresa: OrdenCompraPDFData["em
       numero_orden: oc.orden.numero_orden,
       fecha_orden: oc.orden.fecha_orden || "",
       fecha_estimada_recepcion: oc.orden.fecha_estimada_recepcion,
-      condicion_pago: oc.orden.condicion_pago,
+      condicion_pago: lineasCondicion(oc)[0] ?? null,
       observaciones: oc.orden.observaciones,
     },
     empresa,
@@ -44,10 +47,8 @@ export function datosPdfOrden(oc: OrdenCompleta, empresa: OrdenCompraPDFData["em
       precio_unitario: r.precio_unitario, descuentos: r.descuentos,
       precio_neto: redondear(r.precio_neto), total_linea: r.total,
     })),
-    totales: {
-      subtotal_neto: oc.totales.neto, iva: oc.totales.iva, base_iva: oc.totales.neto_blanco,
-      percepciones: oc.totales.percepciones, total: oc.totales.total, unidades: oc.totales.unidades,
-    },
+    // un solo total: la suma de los renglones, sin impuestos (ver lineasCondicion)
+    totales: { total: oc.totales.neto, unidades: oc.totales.unidades },
     condiciones: lineasCondicion(oc),
   }
 }
@@ -74,12 +75,8 @@ export function excelDeOrden(oc: OrdenCompleta): Buffer {
     "Precio neto x unidad": redondear(r.precio_neto, 4),
     "Total renglón (sin IVA)": r.total,
   }))
-  const t = oc.totales
   filas.push({})
-  filas.push({ "Descripción": "SUBTOTAL NETO", "Total renglón (sin IVA)": t.neto })
-  filas.push({ "Descripción": Math.abs(t.neto_blanco - t.neto) > 0.005 ? `IVA 21% sobre ${moneda(t.neto_blanco)}` : "IVA 21%", "Total renglón (sin IVA)": t.iva })
-  if (t.percepciones > 0) filas.push({ "Descripción": "PERCEPCIONES (estimadas)", "Total renglón (sin IVA)": t.percepciones })
-  filas.push({ "Descripción": "TOTAL ESTIMADO", "Total renglón (sin IVA)": t.total })
+  filas.push({ "Descripción": "TOTAL (precios sin IVA)", "Unidades totales": oc.totales.unidades, "Total renglón (sin IVA)": oc.totales.neto })
   filas.push({})
   for (const c of lineasCondicion(oc)) filas.push({ "Descripción": `Condición de pago: ${c}` })
   if (oc.orden.fecha_estimada_recepcion) filas.push({ "Descripción": `Entrega pedida: ${fecha(oc.orden.fecha_estimada_recepcion)}` })

@@ -117,24 +117,18 @@ export interface OrdenCompraPDFData {
     email?: string | null
   }
   detalle: OrdenCompraPDFLinea[]
+  /** Un solo total: la suma de los renglones, sin impuestos (lo que recibe el proveedor es un solo pedido) */
   totales: {
-    subtotal_neto: number
-    iva: number
-    /** Neto sobre el que se calcula el IVA (puede ser menor al subtotal) */
-    base_iva?: number
-    /** Percepciones estimadas del proveedor */
-    percepciones?: number
     total: number
     unidades: number
   }
-  /** Condición de pago: una línea por cada acuerdo que aplica a la orden */
+  /** Condición de pago (una línea) */
   condiciones?: string[]
 }
 
 export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
   const { orden, empresa, proveedor, detalle, totales } = data
   const condiciones = (data.condiciones && data.condiciones.length > 0) ? data.condiciones : (orden.condicion_pago ? [orden.condicion_pago] : [])
-  const ivaParcial = totales.base_iva != null && Math.abs(totales.base_iva - totales.subtotal_neto) > 0.005
   const fmtDesc = (ds: number[]) => {
     const activos = ds.filter(d => d > 0)
     return activos.length > 0 ? activos.map(d => porcentaje(d)).join('+') : '—'
@@ -227,29 +221,15 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
                 <Text style={s.totLbl}>Total unidades</Text>
                 <Text style={s.totVal}>{entero(totales.unidades)}</Text>
               </View>
-              <View style={s.totRow}>
-                <Text style={s.totLbl}>Subtotal neto</Text>
-                <Text style={s.totVal}>{moneda(totales.subtotal_neto)}</Text>
-              </View>
-              <View style={s.totRow}>
-                <Text style={s.totLbl}>{ivaParcial ? 'IVA 21% s/ ' + moneda(totales.base_iva) : 'IVA 21%'}</Text>
-                <Text style={s.totVal}>{moneda(totales.iva)}</Text>
-              </View>
-              {(totales.percepciones ?? 0) > 0 && (
-                <View style={s.totRow}>
-                  <Text style={s.totLbl}>Percepciones (estimadas)</Text>
-                  <Text style={s.totVal}>{moneda(totales.percepciones)}</Text>
-                </View>
-              )}
               <View style={s.grand}>
-                <Text style={s.grandLbl}>TOTAL ESTIMADO</Text>
+                <Text style={s.grandLbl}>TOTAL (sin IVA)</Text>
                 <Text style={s.grandVal}>{moneda(totales.total)}</Text>
               </View>
             </View>
           </View>
           <View style={s.pie}>
             <Text style={s.pieLegal}>
-              Orden de compra — documento no válido como factura. Los precios son POR UNIDAD y sin IVA; la columna Unid. es el total de unidades pedidas. Total estimado: el definitivo es el de la factura. Sujeta a confirmación del proveedor.
+              Orden de compra — documento no válido como factura. Los precios son POR UNIDAD y sin IVA; la columna Unid. es el total de unidades pedidas. El total no incluye impuestos. Sujeta a confirmación del proveedor.
             </Text>
           </View>
         </View>

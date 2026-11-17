@@ -204,7 +204,7 @@ export function DialogoEnviarOrden({ ordenId, onCerrar, onEnviada }: { ordenId: 
                 </label>
               </div>
               <div className="mt-2 text-xs text-muted-foreground">
-                {previa.orden.renglones} artículos · total estimado {moneda(previa.orden.total)}
+                {previa.orden.renglones} artículos · total {moneda(previa.orden.total)} sin impuestos. El proveedor recibe un solo pedido: no se le separa lo que viene con y sin factura.
               </div>
             </div>
           </div>
