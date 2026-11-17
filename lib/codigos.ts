@@ -55,7 +55,7 @@ export function siguienteAlMayor(ocupados: Iterable<string | null | undefined>):
   let mayor = 0
   for (const c of ocupados) {
     const n = normalizarCodigo(c)
-    if (n && /^d{1,12}$/.test(n)) mayor = Math.max(mayor, Number(n))
+    if (n && /^\d{1,12}$/.test(n)) mayor = Math.max(mayor, Number(n))
   }
   return String(mayor + 1)
 }
