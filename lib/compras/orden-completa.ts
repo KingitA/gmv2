@@ -67,6 +67,9 @@ export interface OrdenCompleta {
     enviada_a: string | null
     enviada_cc: string | null
     envios: number
+    /** Último envío en MODO PRUEBA (fue a la dirección de prueba, no al proveedor) */
+    prueba_enviada_at: string | null
+    prueba_enviada_a: string | null
     cambio_sin_enviar: boolean
     cancelada_at: string | null
     motivo_cancelacion: string | null
@@ -200,6 +203,8 @@ export async function cargarOrdenCompleta(supabase: any, ordenId: string): Promi
       enviada_a: o.enviada_a ?? null,
       enviada_cc: o.enviada_cc ?? null,
       envios: o.envios ?? 0,
+      prueba_enviada_at: o.prueba_enviada_at ?? null,
+      prueba_enviada_a: o.prueba_enviada_a ?? null,
       cambio_sin_enviar: !!(o.enviada_at && o.editada_at && new Date(o.editada_at).getTime() > new Date(o.enviada_at).getTime()),
       cancelada_at: o.cancelada_at ?? null,
       motivo_cancelacion: o.motivo_cancelacion ?? null,

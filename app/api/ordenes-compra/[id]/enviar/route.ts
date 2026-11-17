@@ -60,6 +60,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
             orden: {
                 id: oc.orden.id, numero_orden: oc.orden.numero_orden, estado: oc.orden.estado,
                 envios: oc.orden.envios, enviada_at: oc.orden.enviada_at, enviada_a: oc.orden.enviada_a,
+                prueba_enviada_at: oc.orden.prueba_enviada_at, prueba_enviada_a: oc.orden.prueba_enviada_a,
                 cambio_sin_enviar: oc.orden.cambio_sin_enviar, total: oc.totales.neto, renglones: oc.totales.renglones,
             },
             proveedor: { id: oc.proveedor.id, nombre: oc.proveedor.nombre },
@@ -203,7 +204,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const { data: marca, error: errMarca } = await supabase.rpc('oc_marcar_enviada', {
             p_orden_id: id,
             p_usuario_id: auth.user.id,
-            p_datos: { para: despacho.para.join(', '), cc: despacho.cc.join(', '), mensaje_id: enviado.id, hilo_id: enviado.threadId },
+            // modo_prueba: un envío de prueba queda registrado pero NO pasa la orden a "enviada"
+            p_datos: { para: despacho.para.join(', '), cc: despacho.cc.join(', '), mensaje_id: enviado.id, hilo_id: enviado.threadId, modo_prueba: despacho.prueba },
         });
         if (errMarca) {
             // El mail YA salió: no se puede devolver error (lo mandarían de nuevo). Se avisa.
@@ -231,7 +233,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             modo_prueba: despacho.prueba,
             mensaje_id: enviado.id,
             estado: (marca as any)?.estado ?? oc.orden.estado,
-            envios: (marca as any)?.envios ?? oc.orden.envios + 1,
+            envios: (marca as any)?.envios ?? oc.orden.envios + (despacho.prueba ? 0 : 1),
             avisos,
         });
     } catch (error: any) {

@@ -137,6 +137,11 @@ export function DetalleOrden({ ordenId, onCerrar, onEditar, onEnviar, onCambio, 
                     ) : (
                       <div className="text-sm font-semibold text-amber-700">Todavía no se le mandó al proveedor</div>
                     )}
+                    {o.prueba_enviada_at && (
+                      <div className="mt-1 rounded bg-gray-100 px-2 py-1 text-xs text-gray-700">
+                        Enviada a prueba el {fechaHora(o.prueba_enviada_at)} a {o.prueba_enviada_a || "la dirección de prueba"}. Ese mail no le llegó al proveedor.
+                      </div>
+                    )}
                   </div>
                 </div>
 

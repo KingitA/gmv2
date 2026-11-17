@@ -41,6 +41,8 @@ interface FilaOrden {
   enviada_at: string | null
   enviada_a: string | null
   envios: number
+  prueba_enviada_at: string | null
+  prueba_enviada_a: string | null
   cambio_sin_enviar: boolean
   cancelada_at: string | null
   motivo_cancelacion: string | null
@@ -227,6 +229,11 @@ function OrdenesCompra() {
                               {o.cambio_sin_enviar
                                 ? <div className="text-xs font-semibold text-amber-700">cambió después: reenviar</div>
                                 : <div className="max-w-[220px] truncate text-xs text-muted-foreground" title={o.enviada_a || ""}>{o.enviada_a}</div>}
+                            </>
+                          ) : abierta && o.prueba_enviada_at ? (
+                            <>
+                              <span className="inline-block rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-700" title={`Se mandó en MODO PRUEBA a ${o.prueba_enviada_a || "la dirección de prueba"}. Al proveedor no le llegó.`}>Enviada a prueba · {fechaCorta(o.prueba_enviada_at)}</span>
+                              <div className="text-xs font-medium text-amber-700">al proveedor: sin enviar</div>
                             </>
                           ) : abierta ? <span className="text-sm font-medium text-amber-700">Sin enviar</span>
                           : <span className="text-muted-foreground">—</span>}
