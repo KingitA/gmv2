@@ -22,6 +22,7 @@ import { EstadoOC } from "@/components/ordenes-compra/estado-oc"
 import { DialogoOrden, type InicioOrden } from "@/components/ordenes-compra/dialogo-orden"
 import { DetalleOrden } from "@/components/ordenes-compra/detalle-orden"
 import { DialogoEnviarOrden } from "@/components/ordenes-compra/dialogo-enviar"
+import { AjustesEnvioOrdenes } from "@/components/ordenes-compra/ajustes-envio"
 
 interface FilaOrden {
   id: string
@@ -143,6 +144,7 @@ function OrdenesCompra() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-3xl font-bold">Órdenes de compra</h1>
         <div className="flex gap-2">
+          <AjustesEnvioOrdenes />
           <ImportOrderDialog proveedores={proveedores} onImportSuccess={alImportar} />
           <Button onClick={abrirNueva}><Plus className="mr-2 h-4 w-4" /> Nueva orden</Button>
         </div>

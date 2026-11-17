@@ -21,6 +21,7 @@
 --        oc_guardar(orden, usuario, datos)          crear o editar
 --        oc_cancelar(orden, usuario, motivo)        cancelar (no borra)
 --        oc_marcar_enviada(orden, usuario, datos)   deja constancia del mail enviado
+--        compras_envio_ajustes_guardar(usuario, datos)   cuenta de envío, MODO PRUEBA y dirección de prueba
 --        oc_totales(orden)                          neto / IVA / percepciones / blanco / negro
 --        oc_provision_sincronizar(orden)            deuda provisoria en la cuenta corriente
 --        oc_vencimientos_estimados_sincronizar(orden, usuario)
@@ -122,16 +123,6 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 COMMENT ON COLUMN public.cuenta_corriente_proveedores.canal IS
   'Solo en las provisiones de una orden de compra (tipo_movimiento = orden_compra): blanco = lo que viene con factura, negro = sin factura. NULL en el resto y en las provisiones anteriores al 17/11/2026.';
-
--- Cuenta de Gmail desde la que se mandan las órdenes de compra (la "de compras").
-DO $$
-BEGIN
-  IF to_regclass('public.configuracion_empresa') IS NOT NULL THEN
-    ALTER TABLE public.configuracion_empresa ADD COLUMN IF NOT EXISTS mail_compras text;
-    COMMENT ON COLUMN public.configuracion_empresa.mail_compras IS
-      'Cuenta de Gmail conectada al sistema desde la que salen las órdenes de compra. La elige el primero que envía una orden y queda recordada.';
-  END IF;
-END $$;
 
 -- ═══ 2. Numeración: secuencia posicionada en el último número usado ═══
 CREATE SEQUENCE IF NOT EXISTS public.ordenes_compra_numero_seq START 1;
@@ -837,6 +828,97 @@ BEGIN
                             'estado', CASE WHEN o.estado = 'pendiente' THEN 'enviada' ELSE o.estado END);
 END;
 $$;
+
+-- ═══ 9b. Envío de órdenes por mail: cuenta, MODO PRUEBA y dirección de prueba ═══
+-- Decisión de Juan (17/11/2026): «megasur.proveedores@gmail.com es la cuenta, ojo igual, si
+-- hacemos pruebas con mails reales de los proveedores nos puede llegar una compra con la que
+-- estamos haciendo pruebas. Todos los mails de prueba deben salir de
+-- megasur.proveedores@gmail.com a juancruzrossi072@gmail.com, cuando pasemos a producción se
+-- pasan a los mail que corresponde.»
+--
+-- UNA sola fila, en la base (no en el navegador ni en el código):
+--   · cuenta_envio  desde qué cuenta de Gmail conectada salen las órdenes
+--   · modo_prueba   ENCENDIDO por defecto: todo mail de orden de compra va SOLO a mail_prueba
+--   · mail_prueba   a dónde van los mails mientras dure la prueba (editable)
+-- Solo la lee y la cambia el servidor (RLS sin políticas). Cada cambio queda en el historial
+-- con quién y cuándo. Si el servidor no puede leer esta fila, NO envía nada (falla segura).
+CREATE TABLE IF NOT EXISTS public.compras_envio_ajustes (
+  id              boolean PRIMARY KEY DEFAULT true CHECK (id),
+  cuenta_envio    text NOT NULL DEFAULT 'megasur.proveedores@gmail.com',
+  modo_prueba     boolean NOT NULL DEFAULT true,
+  mail_prueba     text NOT NULL DEFAULT 'juancruzrossi072@gmail.com',
+  actualizado_por uuid,
+  actualizado_at  timestamptz
+);
+INSERT INTO public.compras_envio_ajustes (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.compras_envio_ajustes_historial (
+  id            bigserial PRIMARY KEY,
+  cambiado_at   timestamptz NOT NULL DEFAULT now(),
+  usuario_id    uuid,
+  antes         jsonb NOT NULL,
+  despues       jsonb NOT NULL
+);
+
+ALTER TABLE public.compras_envio_ajustes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.compras_envio_ajustes_historial ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.compras_envio_ajustes FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.compras_envio_ajustes_historial FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.compras_envio_ajustes TO service_role;
+GRANT SELECT, INSERT ON public.compras_envio_ajustes_historial TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.compras_envio_ajustes_historial_id_seq TO service_role;
+
+COMMENT ON TABLE public.compras_envio_ajustes IS
+  'Una fila: cuenta de Gmail de la que salen las órdenes de compra, modo prueba (encendido = todo va a mail_prueba, nada a los proveedores) y dirección de prueba. Se cambia solo con compras_envio_ajustes_guardar.';
+
+-- p_datos: { cuenta_envio?, modo_prueba?, mail_prueba? } — lo que no viene no cambia.
+CREATE OR REPLACE FUNCTION public.compras_envio_ajustes_guardar(p_usuario_id uuid, p_datos jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  v_antes   compras_envio_ajustes%ROWTYPE;
+  v_despues compras_envio_ajustes%ROWTYPE;
+  v_cuenta  text := lower(nullif(trim(coalesce(p_datos ->> 'cuenta_envio', '')), ''));
+  v_mail    text := lower(nullif(trim(coalesce(p_datos ->> 'mail_prueba', '')), ''));
+BEGIN
+  INSERT INTO compras_envio_ajustes (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
+  SELECT * INTO v_antes FROM compras_envio_ajustes WHERE id FOR UPDATE;
+
+  IF v_cuenta IS NOT NULL AND v_cuenta !~ '^[^@[:space:],;]+@[^@[:space:],;]+[.][^@[:space:],;]{2,}$' THEN
+    RAISE EXCEPTION 'La cuenta de envío no es un mail válido.' USING ERRCODE = 'P0001', DETAIL = 'cuenta_invalida';
+  END IF;
+  IF v_mail IS NOT NULL AND v_mail !~ '^[^@[:space:],;]+@[^@[:space:],;]+[.][^@[:space:],;]{2,}$' THEN
+    RAISE EXCEPTION 'La dirección de prueba no es un mail válido.' USING ERRCODE = 'P0001', DETAIL = 'mail_invalido';
+  END IF;
+
+  UPDATE compras_envio_ajustes SET
+    cuenta_envio    = coalesce(v_cuenta, cuenta_envio),
+    mail_prueba     = coalesce(v_mail, mail_prueba),
+    modo_prueba     = CASE WHEN p_datos ->> 'modo_prueba' IN ('true', 'false') THEN (p_datos ->> 'modo_prueba')::boolean ELSE modo_prueba END,
+    actualizado_por = p_usuario_id,
+    actualizado_at  = now()
+  WHERE id
+  RETURNING * INTO v_despues;
+
+  IF v_antes.cuenta_envio IS DISTINCT FROM v_despues.cuenta_envio
+     OR v_antes.modo_prueba IS DISTINCT FROM v_despues.modo_prueba
+     OR v_antes.mail_prueba IS DISTINCT FROM v_despues.mail_prueba THEN
+    INSERT INTO compras_envio_ajustes_historial (usuario_id, antes, despues) VALUES (
+      p_usuario_id,
+      jsonb_build_object('cuenta_envio', v_antes.cuenta_envio, 'modo_prueba', v_antes.modo_prueba, 'mail_prueba', v_antes.mail_prueba),
+      jsonb_build_object('cuenta_envio', v_despues.cuenta_envio, 'modo_prueba', v_despues.modo_prueba, 'mail_prueba', v_despues.mail_prueba)
+    );
+  END IF;
+
+  RETURN jsonb_build_object('cuenta_envio', v_despues.cuenta_envio, 'modo_prueba', v_despues.modo_prueba, 'mail_prueba', v_despues.mail_prueba,
+                            'actualizado_por', v_despues.actualizado_por, 'actualizado_at', v_despues.actualizado_at);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.compras_envio_ajustes_guardar(uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.compras_envio_ajustes_guardar(uuid, jsonb) TO service_role;
 
 -- ═══ 10. Permisos: solo el servidor ═══
 REVOKE ALL ON FUNCTION public.oc_totales(uuid) FROM PUBLIC, anon, authenticated;

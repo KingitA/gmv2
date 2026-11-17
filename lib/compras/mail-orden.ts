@@ -179,3 +179,36 @@ export function armarMime(m: MensajeMail, frontera = `gm_${Date.now().toString(3
 export function rawParaGmail(mime: string): string {
   return base64DeTexto(mime).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
+
+// ─── Modo prueba ────────────────────────────────────────────────────────────────────────────
+export interface AjustesEnvio {
+  cuenta_envio: string
+  modo_prueba: boolean
+  mail_prueba: string
+}
+
+export interface MailADespachar {
+  para: string[]
+  cc: string[]
+  asunto: string
+  texto: string
+  /** true = salió redirigido a la dirección de prueba */
+  prueba: boolean
+  /** A quién habría ido si no fuera una prueba (para mostrarlo y dejarlo escrito en el mail) */
+  seria: string[]
+}
+
+/**
+ * A QUIÉN sale de verdad un mail de orden de compra. Decisión de Juan (17/11/2026): mientras el
+ * modo prueba esté encendido, TODO va solo a la dirección de prueba — ni el mail del proveedor
+ * ni las copias, diga lo que diga el campo "Para" — con "[PRUEBA]" en el asunto y, arriba del
+ * texto, a quién habría ido. Con el modo prueba apagado no cambia nada.
+ * Única función que decide el destinatario: la usan la vista previa y el envío.
+ */
+export function mailADespachar(ajustes: AjustesEnvio, m: { para: string[]; cc: string[]; asunto: string; texto: string }): MailADespachar {
+  if (!ajustes.modo_prueba) return { para: m.para, cc: m.cc, asunto: m.asunto, texto: m.texto, prueba: false, seria: m.para }
+  const seria = [...m.para, ...m.cc]
+  const asunto = m.asunto.startsWith("[PRUEBA]") ? m.asunto : `[PRUEBA] ${m.asunto}`
+  const aviso = `*** PRUEBA DEL SISTEMA: este mail NO se le envió al proveedor. Habría ido a: ${seria.length ? seria.join(", ") : "(sin destinatario)"} ***`
+  return { para: [ajustes.mail_prueba], cc: [], asunto, texto: [aviso, "", m.texto].join("\n"), prueba: true, seria }
+}

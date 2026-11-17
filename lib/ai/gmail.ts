@@ -600,37 +600,17 @@ export async function getConnectedAccounts(userId?: string): Promise<string[]> {
 // ─── Envío de mails ────────────────────────────────────
 
 /**
- * ¿Desde qué cuenta salen las órdenes de compra? La cuenta "de compras" configurada
- * (`configuracion_empresa.mail_compras`), siempre que siga conectada. Si no hay ninguna
- * configurada y hay UNA sola cuenta conectada, esa. Si hay varias y ninguna configurada, no se
- * adivina: la pantalla hace elegir y la elección queda recordada (`recordarCuentaCompras`).
- * Nunca "la primera conectada de cualquier usuario".
+ * ¿Esta cuenta de Gmail está conectada al sistema? Devuelve la dirección tal como está guardada
+ * (para usarla al enviar) o null. La cuenta de la que salen las órdenes de compra NO se elige
+ * acá: es la del ajuste de envío (lib/compras/envio-ajustes.ts).
  */
-export async function cuentasParaEnviar(): Promise<{ predeterminada: string | null; todas: string[]; configurada: string | null }> {
+export async function cuentaGmailConectada(email: string): Promise<string | null> {
+    const buscada = String(email || '').trim().toLowerCase()
+    if (!buscada) return null
     const db = getSupabaseAdmin()
-    const { data, error } = await db
-        .from('google_tokens')
-        .select('email, updated_at')
-        .order('updated_at', { ascending: false })
-    if (error || !data) return { predeterminada: null, todas: [], configurada: null }
-    const todas = [...new Set<string>(data.map((t: any) => String(t.email)))].sort()
-
-    let configurada: string | null = null
-    // la columna la agrega la migración 20261117n: si todavía no está, se sigue sin cuenta configurada
-    const { data: cfg, error: errCfg } = await db.from('configuracion_empresa').select('mail_compras').limit(1).maybeSingle()
-    if (!errCfg && cfg && typeof (cfg as any).mail_compras === 'string') configurada = (cfg as any).mail_compras.trim().toLowerCase() || null
-
-    const elegida = configurada ? todas.find((c) => c.toLowerCase() === configurada) ?? null : null
-    return { predeterminada: elegida ?? (todas.length === 1 ? todas[0] : null), todas, configurada: elegida }
-}
-
-/** Deja una cuenta conectada como la cuenta de compras. Devuelve false si no se pudo (sin migración). */
-export async function recordarCuentaCompras(email: string): Promise<boolean> {
-    const db = getSupabaseAdmin()
-    const { data: fila } = await db.from('configuracion_empresa').select('id').limit(1).maybeSingle()
-    if (!fila) return false
-    const { error } = await db.from('configuracion_empresa').update({ mail_compras: email }).eq('id', (fila as any).id)
-    return !error
+    const { data, error } = await db.from('google_tokens').select('email')
+    if (error || !data) return null
+    return (data as any[]).map((t) => String(t.email)).find((e) => e.toLowerCase() === buscada) ?? null
 }
 
 /**

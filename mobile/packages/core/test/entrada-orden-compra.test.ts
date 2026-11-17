@@ -7,7 +7,7 @@ import {
   acuerdoDeProveedor, acuerdoDeProveedorConLegado, acuerdoDelCanal, formaPagoVencimiento, modalidadVencimiento, normalizarAcuerdo,
   normalizarCuotas, planDePagos, textoCanal, textoCondicionPago,
 } from "../../../../lib/compras/acuerdo-pago"
-import { armarMime, asuntoOrden, base64DeTexto, cuerpoOrden, encabezadoUtf8, rawParaGmail } from "../../../../lib/compras/mail-orden"
+import { armarMime, asuntoOrden, base64DeTexto, cuerpoOrden, encabezadoUtf8, mailADespachar, rawParaGmail } from "../../../../lib/compras/mail-orden"
 
 const deBase64 = (b: string) => new TextDecoder().decode(Uint8Array.from(atob(b.replace(/\s+/g, "")), (c) => c.charCodeAt(0)))
 
@@ -234,6 +234,32 @@ describe("mail de la orden al proveedor", () => {
     const dec = enc.split(/\r\n /).map((t) => deBase64(t.replace(/^=\?UTF-8\?B\?/, "").replace(/\?=$/, ""))).join("")
     expect(dec).toBe("ACTUALIZADA — Orden de compra OC-000012 — Señor Ñandú & Cía. Distribución")
     expect(encabezadoUtf8("Orden simple")).toBe("Orden simple")
+  })
+
+  it("MODO PRUEBA (Juan, 17/11): todo va solo a la dirección de prueba, nunca al proveedor", () => {
+    const ajustes = { cuenta_envio: "compras@empresa.test", modo_prueba: true, mail_prueba: "prueba@empresa.test" }
+    const m = { para: ["ventas@hornal.com", "pedidos@hornal.com"], cc: ["jefe@hornal.com"], asunto: "Orden de compra OC-000012 — GM", texto: "Hola" }
+    const d = mailADespachar(ajustes, m)
+    expect(d.para).toEqual(["prueba@empresa.test"])
+    expect(d.cc).toEqual([])
+    expect(d.prueba).toBe(true)
+    expect(d.asunto).toBe("[PRUEBA] Orden de compra OC-000012 — GM")
+    expect(d.seria).toEqual(["ventas@hornal.com", "pedidos@hornal.com", "jefe@hornal.com"])
+    expect(d.texto).toContain("NO se le envió al proveedor")
+    expect(d.texto).toContain("ventas@hornal.com, pedidos@hornal.com, jefe@hornal.com")
+    expect(d.texto.endsWith("Hola")).toBe(true)
+    // el mensaje armado no nombra al proveedor en ningún encabezado
+    const cab = armarMime({ de: ajustes.cuenta_envio, para: d.para, cc: d.cc, asunto: d.asunto, texto: d.texto }, "F").split("\r\n\r\n")[0]
+    expect(cab).toContain("To: prueba@empresa.test")
+    expect(cab).not.toContain("hornal.com")
+    expect(cab).not.toMatch(/^Cc:/m)
+    // no duplica el prefijo en un reenvío
+    expect(mailADespachar(ajustes, { ...m, asunto: d.asunto }).asunto).toBe(d.asunto)
+  })
+
+  it("con el modo prueba apagado el mail va a quien se escribió, sin tocar nada", () => {
+    const m = { para: ["ventas@hornal.com"], cc: ["jefe@hornal.com"], asunto: "Orden", texto: "Hola" }
+    expect(mailADespachar({ cuenta_envio: "c@e.test", modo_prueba: false, mail_prueba: "p@e.test" }, m)).toEqual({ ...m, prueba: false, seria: ["ventas@hornal.com"] })
   })
 
   it("rechaza sin destinatario, mails inválidos e intento de inyectar encabezados", () => {
