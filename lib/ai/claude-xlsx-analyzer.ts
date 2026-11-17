@@ -16,6 +16,7 @@ import type {
     XlsxPriceListAnalysis,
     XlsxInvoiceAnalysis,
 } from './types'
+import { hojasVisibles } from "@/lib/xlsx/hojas-visibles"
 
 // ─── Claude Client ─────────────────────────────────────
 
@@ -85,7 +86,7 @@ async function parseXlsxToStructuredData(buffer: Buffer, filename: string): Prom
     const workbook = xlsx.read(buffer, { type: 'buffer' })
     const sheets: ParsedSheetData[] = []
 
-    for (const sheetName of workbook.SheetNames) {
+    for (const sheetName of hojasVisibles(workbook)) { // las hojas ocultas no se importan
         const worksheet = workbook.Sheets[sheetName]
         const rows = xlsx.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[][]
 

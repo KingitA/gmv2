@@ -7,6 +7,7 @@ import { searchProductsByVector } from "./embeddings"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { sanitizarOr } from "@/lib/search/hybrid"
 import { parseMonto } from "@/lib/formato"
+import { hojasVisibles } from "@/lib/xlsx/hojas-visibles"
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "" })
 
@@ -147,7 +148,7 @@ export async function processOrder(buffer: Buffer, fileName: string, mimeType: s
             const workbook = xlsx.read(buffer, { type: "buffer" })
             let headerCustomer: string | null = null
 
-            for (const sheetName of workbook.SheetNames) {
+            for (const sheetName of hojasVisibles(workbook)) { // las hojas ocultas no se importan
                 if (headerCustomer) break
                 const worksheet = workbook.Sheets[sheetName]
                 const rows = xlsx.utils.sheet_to_json(worksheet, { header: 1, defval: "" }) as any[][]
