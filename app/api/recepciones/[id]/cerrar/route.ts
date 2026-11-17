@@ -6,6 +6,8 @@ import { aUnidadesBase, unidadesPorBultoDe } from '@/lib/deposito/unidades';
 import { calcularDiferencia, combinarLineasOC, cuentaSobrante, reclamablePorDevolucion, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
 import { TIPOS_CON_PRECIOS } from '@/lib/compras/finalizar-oc';
 import { registrarCostoEnHistorial } from '@/lib/compras/costo-y-kardex';
+import { tipoDescuentoProveedor } from '@/lib/compras/tipo-descuento-proveedor';
+import type { TipoDescuento } from '@/lib/compras/diferencias';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
 import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 import { nowArgentina } from '@/lib/utils';
@@ -49,7 +51,7 @@ class Rechazo extends Error {
 }
 
 /** Lo pedido, lo recibido y lo facturado de la línea, con la cuenta hecha. */
-async function contexto(supabase: any, item: any, ocId: string | null): Promise<{ dif: DiferenciaLinea; hermanas: any[]; descuentoAlPie: boolean }> {
+async function contexto(supabase: any, item: any, ocId: string | null, tipoDto: TipoDescuento): Promise<{ dif: DiferenciaLinea; hermanas: any[]; descuentoAlPie: boolean }> {
     const articuloId = item.articulo_id;
     const { data: art } = await supabase.from('articulos').select('unidades_por_bulto').eq('id', articuloId).maybeSingle();
     const upb = unidadesPorBultoDe(art?.unidades_por_bulto);
@@ -130,7 +132,7 @@ async function contexto(supabase: any, item: any, ocId: string | null): Promise<
         recibido = item.cantidad_fisica_base != null ? Number(item.cantidad_fisica_base) : aUnidadesBase(item.cantidad_fisica, porItem.get(item.id)?.factorConteo ?? 1);
     }
 
-    return { dif: calcularDiferencia({ oc, factura: lineasFactura, recibido_unidades: recibido }), hermanas, descuentoAlPie };
+    return { dif: calcularDiferencia({ oc, factura: lineasFactura, recibido_unidades: recibido, tipo_descuento: tipoDto }), hermanas, descuentoAlPie };
 }
 
 /** Qué se va a hacer, con los importes ya calculados. Lanza Rechazo si no corresponde. */
@@ -302,6 +304,8 @@ export async function POST(
 
         const results: any[] = [];
 
+        // Cómo aplica los descuentos el proveedor (su ficha): en cascada o sobre la lista
+        const tipoDto = await tipoDescuentoProveedor(supabase, rec.proveedorId);
         for (const decision of decisions) {
             const item_id = decision.item_id;
             const tipo: 'precio' | 'cantidad' = decision.tipo === 'precio' ? 'precio' : 'cantidad';
@@ -324,7 +328,7 @@ export async function POST(
                 const articuloInfo = Array.isArray(item.articulo) ? item.articulo[0] : item.articulo;
 
                 // La cuenta la hace el servidor: lo que mande el navegador como cantidad o precio no se usa
-                const { dif, hermanas, descuentoAlPie } = await contexto(supabase, item, rec.ocId);
+                const { dif, hermanas, descuentoAlPie } = await contexto(supabase, item, rec.ocId, tipoDto);
                 const p: any = plan(dif, tipo, destino, decision, articuloInfo?.sku || '', descuentoAlPie);
                 if (destino === 'transporte' && rec.bultos) {
                     p.descripcion = `${p.descripcion || 'Faltante de mercadería'}. ${rec.bultos}`;

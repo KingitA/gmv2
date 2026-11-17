@@ -104,3 +104,15 @@ describe("revisión de la rama (17/11)", () => {
     expect(r.faltas[0]).toMatch(/^Los datos del comprobante no cierran/)
   })
 })
+
+describe("la suma usa el tipo de descuento del proveedor", () => {
+  const r = { cantidad_facturada: 10, precio_unitario: 1000, descuento1: 10, descuento2: 5 }
+  it("proveedor con descuentos sobre la lista: 10 × 850 = 8.500", () => {
+    const c = fa({ total_neto: 8500, total_iva: 1785, total_factura_declarado: 10285, tipo_descuento: "sobre_lista" })
+    expect(controlSuma(c, [r]).ok).toBe(true)
+  })
+  it("la misma factura leída en cascada (8.550) no cierra", () => {
+    const c = fa({ total_neto: 8500, total_iva: 1785, total_factura_declarado: 10285 })
+    expect(controlSuma(c, [r]).ok).toBe(false)
+  })
+})

@@ -161,3 +161,38 @@ describe("otros casos", () => {
     expect(d.cantidad).toMatchObject({ tipo: "faltante", unidades: 10, neto: 1000 })
   })
 })
+
+describe("descuentos del proveedor: en cascada o sobre precio de lista (decisión de Juan, 17/11)", async () => {
+  const { netoCompra, netoDocumento, calcularDiferencia, tipoDescuentoDe } = await import("../../../../lib/compras/diferencias")
+  it("en cascada: uno sobre el otro — 1.000 con 10 % y 5 % = 855", () => {
+    expect(netoCompra(1000, [10, 5], "cascada")).toBeCloseTo(855, 6)
+    expect(netoCompra(1000, [10, 5])).toBeCloseTo(855, 6)
+  })
+  it("sobre lista: se suman — 1.000 con 10 % y 5 % = 850", () => {
+    expect(netoCompra(1000, [10, 5], "sobre_lista")).toBeCloseTo(850, 6)
+    expect(netoDocumento(1768.81, [10, 10], "sobre_lista")).toBe(1415.05)
+  })
+  it("sobre lista: descuentos que suman más de 100 % no dan un precio negativo", () => {
+    expect(netoCompra(1000, [60, 50], "sobre_lista")).toBe(0)
+  })
+  it("un solo descuento: da lo mismo en los dos", () => {
+    expect(netoCompra(1000, [20], "sobre_lista")).toBeCloseTo(netoCompra(1000, [20], "cascada"), 6)
+  })
+  it("la ficha sin dato o con otro valor: en cascada", () => {
+    expect(tipoDescuentoDe(null)).toBe("cascada")
+    expect(tipoDescuentoDe("sobre_lista")).toBe("sobre_lista")
+    expect(tipoDescuentoDe("otra cosa")).toBe("cascada")
+  })
+  it("la diferencia de precio usa el tipo del proveedor: orden y factura iguales no difieren", () => {
+    const base = {
+      oc: { cantidad_pedida: 100, factor: 1, precio_unitario: 1000, descuentos: [10, 5] },
+      factura: [{ cantidad_facturada: 100, factor: 1, precio_unitario: 1000, descuentos: [10, 5], iva_porcentaje: 21 }],
+      recibido_unidades: 100,
+    }
+    const s = calcularDiferencia({ ...base, tipo_descuento: "sobre_lista" })
+    expect(s.oc!.neto_unidad).toBe(850)
+    expect(s.factura!.neto_unidad).toBe(850)
+    expect(s.precio).toBeNull()
+    expect(calcularDiferencia(base).oc!.neto_unidad).toBe(855)
+  })
+})

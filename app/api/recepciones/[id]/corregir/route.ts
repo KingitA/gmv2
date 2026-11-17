@@ -7,6 +7,7 @@ import { insertarKardex } from '@/lib/kardex/insertar-kardex';
 import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 import { nowArgentina } from '@/lib/utils';
 import { netoDocumento } from '@/lib/compras/diferencias';
+import { tipoDescuentoProveedor } from '@/lib/compras/tipo-descuento-proveedor';
 
 // POST /api/recepciones/[id]/corregir  { item_id, unidades, motivo }
 // Corrige desde la oficina lo que contó el depósito en UNA línea (siempre en unidades).
@@ -93,7 +94,7 @@ export async function POST(
                 precio = Number(compra?.[0]?.precio_unitario_final || 0);
             } catch { /* sigue con el costo del artículo */ }
             if (!(precio > 0)) precio = Number(a?.ultimo_costo || 0);
-            if (!(precio > 0)) precio = netoDocumento(lista, [a?.descuento1, a?.descuento2, a?.descuento3, a?.descuento4].map((x: unknown) => Number(x) || 0));
+            if (!(precio > 0)) precio = netoDocumento(lista, [a?.descuento1, a?.descuento2, a?.descuento3, a?.descuento4].map((x: unknown) => Number(x) || 0), await tipoDescuentoProveedor(supabase, rec?.proveedor_id || a?.proveedor_id));
             const subtotal = Math.round(precio * Math.abs(ajuste) * 100) / 100;
             try {
                 await insertarKardex(supabase, {

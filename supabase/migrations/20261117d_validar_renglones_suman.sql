@@ -53,6 +53,7 @@ DECLARE
   v_adoptar      uuid;
   v_suma         numeric;
   v_suma2        numeric;
+  v_tipo_dto     text := 'cascada';
   v_neto_comp    numeric;
   v_impuestos    numeric;
   v_dto          numeric;
@@ -125,12 +126,22 @@ BEGIN
   --    descuentos redondeado una vez, o cantidad × neto por unidad ya redondeado); con muchas
   --    unidades difieren en centavos. Pasa si CUALQUIERA de las dos cierra.
   IF v.tipo_comprobante IN ('FA', 'FB', 'FC', 'Adquisicion') THEN
+    -- Los descuentos del renglón se aplican como dice la ficha del proveedor: en cascada (uno sobre
+    -- el otro) o sobre la lista (se suman). Sin dato: en cascada.
+    SELECT coalesce(pr.tipo_descuento, 'cascada') INTO v_tipo_dto
+      FROM proveedores pr
+     WHERE pr.id = coalesce(v.proveedor_id, (SELECT oc.proveedor_id FROM ordenes_compra oc WHERE oc.id = v.orden_compra_id));
+    v_tipo_dto := coalesce(v_tipo_dto, 'cascada');
     SELECT coalesce(sum(round(coalesce(d.cantidad_facturada, 0) * coalesce(d.precio_unitario, 0)
-             * (1 - coalesce(d.descuento1, 0) / 100.0) * (1 - coalesce(d.descuento2, 0) / 100.0)
-             * (1 - coalesce(d.descuento3, 0) / 100.0) * (1 - coalesce(d.descuento4, 0) / 100.0), 2)), 0),
+             * (CASE WHEN v_tipo_dto = 'sobre_lista'
+                    THEN greatest(0, 1 - (coalesce(d.descuento1, 0) + coalesce(d.descuento2, 0) + coalesce(d.descuento3, 0) + coalesce(d.descuento4, 0)) / 100.0)
+                    ELSE (1 - coalesce(d.descuento1, 0) / 100.0) * (1 - coalesce(d.descuento2, 0) / 100.0)
+                       * (1 - coalesce(d.descuento3, 0) / 100.0) * (1 - coalesce(d.descuento4, 0) / 100.0) END), 2)), 0),
            coalesce(sum(round(coalesce(d.cantidad_facturada, 0) * round(coalesce(d.precio_unitario, 0)
-             * (1 - coalesce(d.descuento1, 0) / 100.0) * (1 - coalesce(d.descuento2, 0) / 100.0)
-             * (1 - coalesce(d.descuento3, 0) / 100.0) * (1 - coalesce(d.descuento4, 0) / 100.0), 2), 2)), 0)
+             * (CASE WHEN v_tipo_dto = 'sobre_lista'
+                    THEN greatest(0, 1 - (coalesce(d.descuento1, 0) + coalesce(d.descuento2, 0) + coalesce(d.descuento3, 0) + coalesce(d.descuento4, 0)) / 100.0)
+                    ELSE (1 - coalesce(d.descuento1, 0) / 100.0) * (1 - coalesce(d.descuento2, 0) / 100.0)
+                       * (1 - coalesce(d.descuento3, 0) / 100.0) * (1 - coalesce(d.descuento4, 0) / 100.0) END), 2), 2)), 0)
       INTO v_suma, v_suma2
       FROM comprobantes_compra_detalle d
      WHERE d.comprobante_id = p_comprobante_id;

@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth';
 import { nowArgentina } from '@/lib/utils';
 import { fechaISO, mediodiaAR, moneda, sumarDiasISO } from '@/lib/formato';
 import { aplicarCostoDeFactura, sincronizarKardexEnCamino } from '@/lib/compras/costo-y-kardex';
+import { tipoDescuentoProveedor } from '@/lib/compras/tipo-descuento-proveedor';
 import { controlSuma } from '@/lib/compras/control-suma';
 import { normalizarNumeroComprobante } from '@/lib/services/numero-comprobante';
 import { faltaLaColumna, faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
@@ -83,10 +84,12 @@ async function armarPlan(supabase: any, comprobante: any, proveedorId: string | 
         ? { medio: p.pago_negro_medio, plazoCheque: p.pago_negro_plazo_cheque, entrega: p.pago_negro_entrega, dias: p.pago_negro_dias, desde: p.pago_negro_desde }
         : { medio: p.pago_blanco_medio, plazoCheque: p.pago_blanco_plazo_cheque, entrega: p.pago_blanco_entrega, dias: p.pago_blanco_dias, desde: p.pago_blanco_desde };
 
-    // Medio → forma_pago del vencimiento (cheques y mixto = 'cheque')
+    // Medio → forma_pago del vencimiento (cheques, e-cheq y mixto = 'cheque').
+    // 'echeq' lo agrega T1-A al acuerdo del proveedor: un e-cheq se paga como cheque, no puede
+    // quedar sin forma de pago. Al integrar, este mapeo pasa a lib/compras/acuerdo-pago.ts.
     plan.forma_pago = cfg.medio === 'transferencia' ? 'transferencia'
         : cfg.medio === 'efectivo' ? 'efectivo'
-        : (cfg.medio === 'cheques' || cfg.medio === 'cheques_y_efectivo') ? 'cheque'
+        : (cfg.medio === 'cheques' || cfg.medio === 'cheques_y_efectivo' || cfg.medio === 'echeq' || cfg.medio === 'e-cheq' || cfg.medio === 'echeqs') ? 'cheque'
         : null;
     // Entrega → modalidad
     plan.modalidad = cfg.entrega === 'deposito_bancario' ? 'deposito'
@@ -441,7 +444,8 @@ export async function POST(
                 .select('cantidad_facturada, precio_unitario, descuento1, descuento2, descuento3, descuento4')
                 .eq('comprobante_id', comprobante_id);
             if (renErr) throw renErr;
-            const suma = controlSuma(comprobante, renglones || []);
+            // los descuentos del renglón, como dice la ficha del proveedor (en cascada o sobre la lista)
+            const suma = controlSuma({ ...comprobante, tipo_descuento: await tipoDescuentoProveedor(supabase, proveedorId) }, renglones || []);
             if (!suma.ok) {
                 return NextResponse.json({
                     error: `${suma.faltas.join(' ')} No se validó: corregí el comprobante y volvé a validar.`,
