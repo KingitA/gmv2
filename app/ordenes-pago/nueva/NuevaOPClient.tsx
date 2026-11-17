@@ -449,6 +449,14 @@ function NuevaOrdenPagoContent() {
         if (!i.vencimiento_id || i.movimiento_cc_id || i.retiene_ganancias !== undefined) return false
         return preguntaRetencion(vencimientosProv.find((v: any) => v.id === i.vencimiento_id))
     })
+    // La base de un vencimiento con retención la calcula el servidor (op_ganancias_bases):
+    // la pantalla muestra SU cuenta, no una propia. Con la migración 20261117a devuelve
+    // base_divisor = 1,21 (neto sin IVA); sin ella, la base es el importe completo.
+    const baseDeVenc = (v: any, monto: number): { base: number; divisor: number | null } | null => {
+        const b = (calcGanancias?.bases_detalle ?? []).find((d: any) => d.tipo === "vencimiento_con_retencion"
+            && (d.vencimiento_id ? d.vencimiento_id === v.id : (d.etiqueta === v.concepto && Math.abs(Number(d.monto_imputado) - monto) < 0.01)))
+        return b ? { base: Number(b.base ?? 0), divisor: b.base_divisor != null ? Number(b.base_divisor) : null } : null
+    }
     function responderRetencion(vencId: string, retiene: boolean) {
         setImputaciones(prev => prev.map(i => i.vencimiento_id === vencId && !i.movimiento_cc_id ? { ...i, retiene_ganancias: retiene } : i))
     }
@@ -884,7 +892,13 @@ function NuevaOrdenPagoContent() {
                                                             onClick={() => responderRetencion(v.id, false)}>No</Button>
                                                         <span className="text-xs text-muted-foreground">
                                                             {falta ? "Hay que contestar para poder crear la orden."
-                                                                : imp!.retiene_ganancias ? "Sí: el importe pagado entra en el cálculo de la retención y sale en el certificado."
+                                                                : imp!.retiene_ganancias ? (() => {
+                                                                    const b = baseDeVenc(v, Number(imp!.monto_imputado))
+                                                                    if (!b) return "Sí: entra en el cálculo de la retención y sale en el certificado."
+                                                                    return b.divisor
+                                                                        ? `Sí. Base: ${formatCurrency(b.base)} = ${formatCurrency(Number(imp!.monto_imputado))} ÷ ${numeroAR(b.divisor)} (neto sin IVA). Entra en el cálculo de la retención y sale en el certificado.`
+                                                                        : `Sí. Base: ${formatCurrency(b.base)} (el importe pagado). Entra en el cálculo de la retención y sale en el certificado.`
+                                                                })()
                                                                 : "No: es algo no fiscal (adquisición de stock, cheque rechazado…). No se retiene."}
                                                         </span>
                                                     </div>
