@@ -14,8 +14,13 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
     ArrowLeft, Plus, Trash2, DollarSign, CreditCard,
-    Building2, Banknote, FileText
+    Building2, Banknote, FileText, Copy, Clock
 } from "lucide-react"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+    AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+    AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
@@ -133,6 +138,10 @@ function NuevaOrdenPagoContent() {
 
     const [cheques, setCheques] = useState<any[]>([])
     const [submitting, setSubmitting] = useState(false)
+    // E-67: pagar en un paso. Antes de sacar la plata se pide confirmación; al terminar
+    // se muestra el resultado con el detalle listo para copiar y mandarle al proveedor.
+    const [confirmarPago, setConfirmarPago] = useState(false)
+    const [resultado, setResultado] = useState<{ op: any; confirmada: boolean; aviso?: string; texto: string } | null>(null)
 
     // Origen de fondos y acuerdo de pago de la ficha
     const [cuentasFondos, setCuentasFondos] = useState<any[]>([])
@@ -493,6 +502,19 @@ function NuevaOrdenPagoContent() {
         retira_oficina: "lo retiran por oficina", envio_grimar: "se envía por Grimar",
     }
     const plazoCheque = Number(cfgPago.plazoCheque ?? 0)
+    // Resumen del acuerdo de un canal, en una línea ("Cheques a 30 días · se envía por Grimar · paga a 15 días de la factura")
+    const acuerdoTexto = (canal: "blanco" | "negro"): string | null => {
+        const medio = fp[`pago_${canal}_medio`], plazo = fp[`pago_${canal}_plazo_cheque`], entrega = fp[`pago_${canal}_entrega`]
+        const dias = fp[`pago_${canal}_dias`], desde = fp[`pago_${canal}_desde`]
+        if (!medio && !entrega && dias == null) return null
+        const usaCh = medio === "cheques" || medio === "cheques_y_efectivo"
+        return [
+            medio ? `${MEDIO_FICHA[medio] ?? medio}${usaCh ? (Number(plazo ?? 0) > 0 ? ` a ${plazo} días` : " al día") : ""}` : null,
+            entrega ? (ENTREGA_FICHA[entrega] ?? entrega) : null,
+            dias != null ? `paga a ${dias} días de la ${desde === "recepcion" ? "recepción" : "factura"}` : null,
+        ].filter(Boolean).join(" · ")
+    }
+    const usaChequeTercero = medios.some(m => m.medio === "cheque" && m.cheque_id)
     const fichaUsaCheques = cfgPago.medio === "cheques" || cfgPago.medio === "cheques_y_efectivo"
 
     // ── Cheques de cartera: ventana por fecha (editable) + filtro por color ──
@@ -616,29 +638,67 @@ function NuevaOrdenPagoContent() {
         setMontoEfectivo("")
     }
 
-    async function handleSubmit() {
-        if (!proveedorId) { toast.warning("Seleccioná un proveedor"); return }
-        if (medios.length === 0) { toast.warning("Agregá al menos un medio de pago"); return }
-        if (totalMedios <= 0) { toast.warning("El total de medios de pago debe ser mayor a 0"); return }
-        if (gananciasManual && !gananciasMotivo.trim()) { toast.warning("Indicá el motivo del ajuste manual de la retención"); return }
-        if (imputaciones.some(i => i.vencimiento_id && !i.movimiento_cc_id && !(Number(i.monto_imputado) > 0))) {
-            toast.warning("Hay un vencimiento tildado sin importe: escribí cuánto se paga o destildalo.")
-            return
+    const copiar = async (texto: string, que = "Copiado") => {
+        try { await navigator.clipboard.writeText(texto); toast.success(que) }
+        catch { toast.error("No se pudo copiar. Seleccioná el texto y copialo a mano.") }
+    }
+    const NOMBRE_MEDIO: Record<string, string> = { efectivo: "Efectivo", transferencia: "Transferencia", deposito: "Depósito", cheque: "Cheque", cheque_propio: "Cheque propio" }
+    // Detalle del pago en texto simple, para pegar en un mail o WhatsApp al proveedor
+    function textoDelPago(op: any, confirmada: boolean): string {
+        const l: string[] = []
+        l.push(`${confirmada ? "Pago" : "Orden de pago (pendiente)"} a ${proveedorSeleccionado?.nombre ?? "proveedor"}`)
+        l.push(`Orden de pago N° ${op?.numero_op ?? "—"} · ${fmtFecha(fecha)}`)
+        const deudas = imputaciones.filter(i => Number(i.monto_imputado) > 0)
+        const creds = imputaciones.filter(i => Number(i.monto_imputado) < 0)
+        if (deudas.length) { l.push(""); l.push("Se paga:"); for (const i of deudas) l.push(`- ${i.descripcion}: ${formatCurrency(Number(i.monto_imputado))}`) }
+        else { l.push(""); l.push("Pago a cuenta (sin imputar a comprobantes).") }
+        if (creds.length) { l.push("Se descuenta:"); for (const i of creds) l.push(`- ${i.descripcion}: ${formatCurrency(Math.abs(Number(i.monto_imputado)))}`) }
+        const ret = Number(op?.retencion_ganancias ?? retGanancias) || 0
+        if (ret > 0) {
+            const cert = op?.confirmacion?.numero_certificado
+            l.push(""); l.push(`Retención de Ganancias: ${formatCurrency(ret)}${cert ? ` (certificado N° ${cert})` : ""}`)
         }
-        if (calcLoading) { toast.warning("Esperá un segundo: se está calculando la retención."); return }
+        l.push(""); l.push("Forma de pago:")
+        for (const m of medios) {
+            const det = m.medio === "cheque" || m.medio === "cheque_propio"
+                ? [m.cheque_banco, m.cheque_numero ? `N° ${m.cheque_numero}` : null, m.cheque_fecha_vencimiento ? `vence ${fmtFechaCorta(m.cheque_fecha_vencimiento)}` : null].filter(Boolean).join(" ")
+                : (m.observaciones || m.banco_destino || "")
+            l.push(`- ${NOMBRE_MEDIO[m.medio] ?? m.medio}${det ? " " + det : ""}: ${formatCurrency(Number(m.monto))}`)
+        }
+        l.push(""); l.push(`Total ${confirmada ? "pagado" : "a pagar"}: ${formatCurrency(Number(op?.neto_a_pagar ?? totalMedios))}`)
+        return l.join("\n")
+    }
+
+    function validarFormulario(): boolean {
+        if (!proveedorId) { toast.warning("Seleccioná un proveedor"); return false }
+        if (medios.length === 0) { toast.warning("Agregá al menos un medio de pago"); return false }
+        if (totalMedios <= 0) { toast.warning("El total de medios de pago debe ser mayor a 0"); return false }
+        if (gananciasManual && !gananciasMotivo.trim()) { toast.warning("Indicá el motivo del ajuste manual de la retención"); return false }
+        if (calcLoading) { toast.warning("Esperá un segundo: se está calculando la retención."); return false }
         if (sinContestar.length > 0) {
             toast.warning(`Falta contestar si corresponde retener Ganancias en: ${sinContestar.map(i => i.descripcion).join(", ")}. Elegí Sí o No.`)
-            return
+            return false
+        }
+        if (imputaciones.some(i => i.vencimiento_id && !i.movimiento_cc_id && !(Number(i.monto_imputado) > 0))) {
+            toast.warning("Hay un vencimiento tildado sin importe: escribí cuánto se paga o destildalo.")
+            return false
         }
         if (!cuadra) {
             toast.warning(`No cuadra: imputado ${formatCurrency(totalImputado)} − retenciones ${formatCurrency(totalRetenciones)} = ${formatCurrency(netoObjetivo!)}, pero los medios suman ${formatCurrency(totalMedios)}`)
-            return
+            return false
         }
+        return true
+    }
+
+    // confirmar = true → "Pagar ahora" (crea y confirma juntas). false → queda pendiente.
+    async function handleSubmit(confirmar: boolean) {
+        if (!validarFormulario()) return
 
         if (submitting) return
         setSubmitting(true)
         try {
             const cuerpo = {
+                    confirmar,
                     proveedor_id: proveedorId,
                     fecha,
                     observaciones,
@@ -698,8 +758,13 @@ function NuevaOrdenPagoContent() {
                 return
             }
 
-            toast.success(`Orden de pago ${data.numero_op ?? ""} creada. Queda pendiente: la plata sale cuando se confirma.`)
-            router.push("/ordenes-pago")
+            const confirmada = data.confirmada === true
+            claveRef.current = ""
+            setResultado({ op: data, confirmada, aviso: data.aviso, texto: textoDelPago(data, confirmada) })
+            if (data.aviso) toast.warning(data.aviso, { duration: 15000 })
+            else toast.success(confirmada
+                ? `Pago hecho. Orden de pago ${data.numero_op ?? ""} confirmada.`
+                : `Orden de pago ${data.numero_op ?? ""} creada. Queda pendiente: la plata sale cuando se confirma.`)
         } catch (e: any) {
             toast.error(e.message || "No se pudo crear la orden de pago")
         } finally {
@@ -781,6 +846,56 @@ function NuevaOrdenPagoContent() {
                         </div>
                     </CardContent>
                 </Card>
+
+                {/* Datos para pagarle (E-67): acuerdo, cuenta y qué acepta, siempre a la vista */}
+                {proveedorId && fichaPago && (
+                    <Card>
+                        <CardHeader className="pb-2"><CardTitle className="text-lg">Cómo le pagamos a {proveedorSeleccionado?.nombre ?? "este proveedor"}</CardTitle></CardHeader>
+                        <CardContent className="space-y-3 text-sm">
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                <div>
+                                    <p className="text-xs font-bold tracking-wide text-slate-500">ACUERDO DE PAGO</p>
+                                    <p><span className="text-muted-foreground">Blanco:</span> {acuerdoTexto("blanco") ?? <span className="text-amber-700">sin cargar</span>}</p>
+                                    <p><span className="text-muted-foreground">Negro:</span> {acuerdoTexto("negro") ?? <span className="text-muted-foreground">igual que blanco</span>}</p>
+                                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                        {([["acepta_cheques_terceros", "cheques de terceros"], ["acepta_echeq", "e-cheq"]] as const).map(([k, nombre]) => (
+                                            <span key={k} className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${fp[k] === true ? "border-green-300 bg-green-50 text-green-800" : fp[k] === false ? "border-red-300 bg-red-50 text-red-700" : "border-slate-200 text-slate-500"}`}>
+                                                {fp[k] === true ? `Acepta ${nombre}` : fp[k] === false ? `NO acepta ${nombre}` : `${nombre}: no se sabe`}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-bold tracking-wide text-slate-500">CUENTA PARA TRANSFERIRLE</p>
+                                    {!(fp.banco_cbu || fp.banco_alias || fp.banco_numero_cuenta || fp.banco_nombre) ? (
+                                        <p className="text-amber-700">Sin datos bancarios cargados en la ficha.</p>
+                                    ) : (
+                                        <div className="space-y-0.5">
+                                            {(fp.banco_nombre || fp.banco_tipo_cuenta || fp.banco_numero_cuenta) && (
+                                                <p>{[fp.banco_nombre, fp.banco_tipo_cuenta, fp.banco_cuenta, fp.banco_numero_cuenta ? `N° ${fp.banco_numero_cuenta}` : null].filter(Boolean).join(" · ")}</p>
+                                            )}
+                                            {([["banco_cbu", "CBU"], ["banco_alias", "Alias"]] as const).map(([k, nombre]) => fp[k] ? (
+                                                <p key={k} className="flex items-center gap-2">
+                                                    <span className="text-muted-foreground">{nombre}:</span> <span className="font-mono">{fp[k]}</span>
+                                                    <button type="button" className="text-muted-foreground hover:text-foreground" title={`Copiar ${nombre}`}
+                                                        onClick={() => copiar(String(fp[k]), `${nombre} copiado`)}><Copy className="h-3.5 w-3.5" /></button>
+                                                </p>
+                                            ) : null)}
+                                            {fp.banco_titular && <p><span className="text-muted-foreground">Titular:</span> {fp.banco_titular}</p>}
+                                            {proveedorSeleccionado?.cuit && <p><span className="text-muted-foreground">CUIT:</span> {proveedorSeleccionado.cuit}</p>}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            {usaChequeTercero && fp.acepta_cheques_terceros === false && (
+                                <p className="rounded-md border border-red-300 bg-red-50 px-3 py-1.5 font-semibold text-red-700">
+                                    Ojo: este proveedor NO acepta cheques de terceros y el pago armado tiene uno.
+                                </p>
+                            )}
+                            <p className="text-xs text-muted-foreground">Estos datos se cargan en la ficha del proveedor (Ficha fiscal y de pago).</p>
+                        </CardContent>
+                    </Card>
+                )}
 
                 {/* Imputaciones - qué se paga */}
                 {proveedorId && (
@@ -1270,14 +1385,102 @@ function NuevaOrdenPagoContent() {
                             <Link href="/ordenes-pago">
                                 <Button variant="outline">Cancelar</Button>
                             </Link>
-                            <Button onClick={handleSubmit} disabled={submitting} className="gap-2">
+                            <Button variant="outline" onClick={() => handleSubmit(false)} disabled={submitting} className="gap-2"
+                                title="Crea la orden pero NO saca la plata: se confirma después desde Órdenes de pago">
+                                <Clock className="h-4 w-4" />
+                                Dejar pendiente
+                            </Button>
+                            <Button onClick={() => { if (validarFormulario()) setConfirmarPago(true) }} disabled={submitting} className="gap-2">
                                 <DollarSign className="h-4 w-4" />
-                                {submitting ? "Creando..." : "Crear Orden de Pago"}
+                                {submitting ? "Guardando…" : "Pagar ahora"}
                             </Button>
                         </div>
+                        <p className="mt-2 text-right text-xs text-muted-foreground">
+                            <b>Pagar ahora</b> crea la orden y registra el pago en el mismo paso. <b>Dejar pendiente</b> solo la arma.
+                        </p>
                     </CardContent>
                 </Card>
             </main>
+
+            {/* Pagar ahora: última confirmación antes de sacar la plata */}
+            <AlertDialog open={confirmarPago} onOpenChange={setConfirmarPago}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>¿Pagar ahora a {proveedorSeleccionado?.nombre ?? "este proveedor"}?</AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                            <div className="space-y-2 text-sm">
+                                <p>
+                                    Sale <b>{formatCurrency(totalMedios)}</b>
+                                    {totalRetenciones > 0 ? <> y se retienen <b>{formatCurrency(totalRetenciones)}</b> de Ganancias (se emite el certificado)</> : null}.
+                                </p>
+                                <ul className="list-disc space-y-0.5 pl-5">
+                                    {medios.map(m => (
+                                        <li key={m.id}>
+                                            {NOMBRE_MEDIO[m.medio] ?? m.medio}
+                                            {m.medio === "cheque" || m.medio === "cheque_propio" ? ` ${m.cheque_banco ?? ""} N° ${m.cheque_numero ?? "—"}` : m.observaciones ? ` ${m.observaciones}` : ""}
+                                            : <b>{formatCurrency(Number(m.monto))}</b>
+                                        </li>
+                                    ))}
+                                </ul>
+                                <p>Baja el saldo de la caja o del banco, los cheques pasan a entregados, y lo elegido queda pagado en la cuenta corriente y en el calendario.</p>
+                                <p className="text-muted-foreground">Si algo ya no se puede (un cheque que salió de cartera, un comprobante que pagó otra orden), no se hace nada y avisa.</p>
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Volver</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => handleSubmit(true)}>Pagar ahora</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Resultado: número de orden, PDF, certificado y el detalle para copiar */}
+            <Dialog open={!!resultado} onOpenChange={(o) => { if (!o) router.push("/ordenes-pago") }}>
+                <DialogContent className="max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>
+                            {resultado?.confirmada ? "Pago hecho" : "Orden creada (pendiente)"} · OP {resultado?.op?.numero_op}
+                        </DialogTitle>
+                    </DialogHeader>
+                    {resultado && (
+                        <div className="space-y-3 text-sm">
+                            {resultado.aviso ? (
+                                <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 font-medium text-amber-900">{resultado.aviso}</p>
+                            ) : resultado.confirmada ? (
+                                <p className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-green-800">
+                                    Salió la plata y quedó registrado en la cuenta corriente del proveedor.
+                                    {resultado.op?.confirmacion?.numero_certificado ? ` Certificado de retención N° ${resultado.op.confirmacion.numero_certificado}.` : ""}
+                                </p>
+                            ) : (
+                                <p className="rounded-md border px-3 py-2 text-muted-foreground">Todavía no salió la plata: se confirma desde Órdenes de pago.</p>
+                            )}
+                            <div>
+                                <div className="mb-1 flex items-center justify-between">
+                                    <span className="text-xs font-bold tracking-wide text-slate-500">DETALLE PARA MANDARLE AL PROVEEDOR</span>
+                                    <Button size="sm" variant="outline" className="h-7 gap-1.5" onClick={() => copiar(resultado.texto, "Detalle copiado")}>
+                                        <Copy className="h-3.5 w-3.5" /> Copiar
+                                    </Button>
+                                </div>
+                                <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-sans text-[13px] leading-relaxed">{resultado.texto}</pre>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <a href={`/api/ordenes-pago/${resultado.op.id}/pdf`} target="_blank" rel="noreferrer">
+                                    <Button size="sm" variant="outline" className="gap-1.5"><FileText className="h-4 w-4" /> PDF de la orden</Button>
+                                </a>
+                                {resultado.confirmada && Number(resultado.op?.retencion_ganancias || 0) > 0 && (
+                                    <a href={`/api/ordenes-pago/${resultado.op.id}/certificado`} target="_blank" rel="noreferrer">
+                                        <Button size="sm" variant="outline" className="gap-1.5 text-orange-700">Certificado de retención</Button>
+                                    </a>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => { window.location.href = "/ordenes-pago/nueva" }}>Hacer otro pago</Button>
+                        <Button onClick={() => router.push("/ordenes-pago")}>Ir a órdenes de pago</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

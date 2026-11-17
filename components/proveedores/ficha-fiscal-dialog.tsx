@@ -40,6 +40,11 @@ export function FichaFiscalDialog({
   const [blanco, setBlanco] = useState({ ...vacio })
   const [negro, setNegro] = useState({ ...vacio })
   const [negroIgual, setNegroIgual] = useState(true)
+  // Datos para pagarle (E-67): CBU, alias, titular y qué acepta. "" = no se sabe
+  const [datosPago, setDatosPago] = useState({ cbu: "", alias: "", titular: "", cheques: "", echeq: "" })
+  const [datosPagoDisponibles, setDatosPagoDisponibles] = useState(false)
+  const siNo = (v: any) => (v === true ? "si" : v === false ? "no" : "")
+  const aBool = (v: string) => (v === "si" ? true : v === "no" ? false : null)
   const [nuevaExclusion, setNuevaExclusion] = useState<{ desde: string; hasta: string; pct: number | null; nro: string } | null>(null)
   const [desactivar, setDesactivar] = useState<Set<string>>(new Set())
   const [propuesta, setPropuesta] = useState<any>(null)
@@ -61,6 +66,11 @@ export function FichaFiscalDialog({
         setCondicion(d.proveedor.condicion_ganancias || "inscripto")
         setExentoHasta(d.proveedor.ganancias_exento_hasta ? String(d.proveedor.ganancias_exento_hasta).slice(0, 10) : "")
         setExentoHastaCargado(!!d.proveedor.ganancias_exento_hasta)
+        setDatosPagoDisponibles(d.proveedor.datos_pago_disponibles === true)
+        setDatosPago({
+          cbu: d.proveedor.banco_cbu || "", alias: d.proveedor.banco_alias || "", titular: d.proveedor.banco_titular || "",
+          cheques: siNo(d.proveedor.acepta_cheques_terceros), echeq: siNo(d.proveedor.acepta_echeq),
+        })
         const pv = d.proveedor
         setBlanco({
           medio: pv.pago_blanco_medio || "",
@@ -138,6 +148,10 @@ export function FichaFiscalDialog({
         pago_negro_dias: negroIgual ? null : (negro.dias !== "" ? parseInt(negro.dias) : null),
         pago_negro_desde: negroIgual ? null : (negro.desde || "factura"),
         desactivar_exclusiones: [...desactivar],
+        ...(datosPagoDisponibles ? {
+          banco_cbu: datosPago.cbu, banco_alias: datosPago.alias, banco_titular: datosPago.titular,
+          acepta_cheques_terceros: aBool(datosPago.cheques), acepta_echeq: aBool(datosPago.echeq),
+        } : {}),
       }
       if (nuevaExclusion && nuevaExclusion.desde && (nuevaExclusion.pct ?? 0) > 0) {
         body.exclusiones_nuevas = [{
@@ -212,6 +226,32 @@ export function FichaFiscalDialog({
                 )}
               </div>
             </div>
+
+            {/* Datos para pagarle: se ven en la orden de pago */}
+            {datosPagoDisponibles && (
+              <div className="border-t pt-3">
+                <Label className="font-semibold">Datos para pagarle</Label>
+                <p className="mb-2 text-xs text-muted-foreground">Aparecen a la vista al armar la orden de pago.</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div><Label className="text-xs">CBU / CVU</Label><Input inputMode="numeric" maxLength={22} value={datosPago.cbu} onChange={e => setDatosPago(p => ({ ...p, cbu: e.target.value.replace(/[^0-9]/g, "") }))} /></div>
+                  <div><Label className="text-xs">Alias</Label><Input value={datosPago.alias} onChange={e => setDatosPago(p => ({ ...p, alias: e.target.value }))} /></div>
+                  <div><Label className="text-xs">Titular de la cuenta</Label><Input value={datosPago.titular} onChange={e => setDatosPago(p => ({ ...p, titular: e.target.value }))} /></div>
+                  {([["cheques", "¿Acepta cheques de terceros?"], ["echeq", "¿Acepta e-cheq?"]] as const).map(([k, etiqueta]) => (
+                    <div key={k}>
+                      <Label className="text-xs">{etiqueta}</Label>
+                      <Select value={datosPago[k] || "nose"} onValueChange={v => setDatosPago(p => ({ ...p, [k]: v === "nose" ? "" : v }))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="nose">No se sabe</SelectItem>
+                          <SelectItem value="si">Sí</SelectItem>
+                          <SelectItem value="no">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Acuerdo de pago por canal — el vencimiento de cada comprobante lo hereda */}
             <div className="rounded-xl border p-3 space-y-3">

@@ -113,14 +113,14 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 | E-57 | Ganancias: acumulado mensual con fechas cruzadas (fecha OP vs fecha de confirmación). | C |
 | E-58 | Comprobante sin OC: base de retención 0. | C |
 | E-59 | Valores de retención a confirmar con el contador (mínimo transporte, código de régimen, condición del proveedor). Sin pantalla de edición. | C |
-| E-60 | IIBB / IVA / SUSS fijos en 0: no hay motor. | C |
+| ~~E-60~~ | ~~IIBB / IVA / SUSS fijos en 0: no hay motor.~~ **Cerrado sin motor (Juan, 16/11: solo Ganancias).** T1-D: la ruta de órdenes de pago ya no acepta IIBB / IVA / SUSS (van siempre en 0); la pantalla no los muestra. | C |
 | E-61 | `op_eliminar` borra certificados y reutiliza números sin mirar si el período ya se presentó. ~~No hay botón "Anular".~~ (T0-B agregó el botón Anular con confirmación; lo del período presentado sigue pendiente.) | C |
 | E-62 | Cheque propio: no baja el banco, banco en texto libre, no se puede marcar e-cheq desde la OP, valores por defecto `S/D`. | C |
 | E-63 | "Marcar pagado sin OP": sin cuenta corriente, kardex ni retención (es lo que se usa hoy a diario). | C, B |
 | ~~E-64~~ | ~~Pantalla y acciones viejas vivas: `/finanzas/proveedores/pagos`, `imputar-pago`.~~ **Hecho (T0-B):** la pantalla redirige a `/ordenes-pago`, `imputar-pago` responde 410, `crearPagoProveedor` ya no mueve plata y la RPC vieja queda sin permiso de ejecución (`20261116q`). | C |
 | ~~E-65~~ | ~~Endpoints de OP y reportes de Playroom sin control de rol.~~ **Hecho (T0-B):** permisos `ordenes_pago` y `ordenes_pago_confirmar` (solo admin: Juan, 16/11, "administrativo no arma ni ejecuta pagos") y `reportes_playroom` (admin y administrativo, confirmado por Juan el 16/11) en `lib/auth.ts`. | C |
 | E-66 | OP pendiente no reserva el cheque de tercero. | C |
-| E-67 | Dos pasos (crear y confirmar), sin pago parcial por comprobante, sin CBU/alias del proveedor a la vista. | C |
+| ~~E-67~~ | ~~Dos pasos (crear y confirmar), sin pago parcial por comprobante, sin CBU/alias del proveedor a la vista.~~ **Hecho (T1-D):** "Pagar ahora" crea y confirma en una transacción (`op_crear_y_confirmar`, migración `20261117p_op_un_paso.sql`) o "Dejar pendiente"; tarjeta "Cómo le pagamos" con acuerdo blanco/negro, CBU, alias, titular y si acepta cheques de terceros / e-cheq (columnas nuevas en `proveedores`, editables en la ficha fiscal); al terminar, detalle del pago listo para copiar. El pago parcial por comprobante va con E-55. | C |
 | E-68 | Cuenta corriente del proveedor: sin saldo corrido, sin filtros, sin export, sin enlace a OP/certificado; retenciones sueltas. | C |
 | E-69 | Proyección de caja usa vencimientos brutos (sin retenciones ni saldo inicial). | C |
 | E-70 | Bancos: solo lectura de Mercado Pago. Sin emisión de transferencias ni e-cheq; Provincia y MP sin CBU. | C, B |
