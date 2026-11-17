@@ -343,6 +343,15 @@ export function CalendarioPagos({
     // "Pagado sin OP": aviso antes de marcar pagos a proveedores
     const [avisoSinOP, setAvisoSinOP] = useState<{ ids: string[]; vencCheque?: Vencimiento; cantidad: number } | null>(null)
 
+    // E-63: dirección de la orden de pago con estos vencimientos ya tildados. null si no se
+    // pueden pagar juntos (sin proveedor, de proveedores distintos, o estimados de una OC).
+    const urlPagar = (lista: Vencimiento[]): string | null => {
+        if (lista.length === 0) return null
+        const prov = lista[0].proveedor_id
+        if (!prov || lista.some((v) => v.proveedor_id !== prov || esEstimadoOC(v))) return null
+        return `/ordenes-pago/nueva?proveedor_id=${prov}&vencimiento_ids=${lista.map((v) => v.id).join(",")}`
+    }
+
     async function confirmarPagados(ids: string[], vencCheque?: Vencimiento) {
         setSaving(true)
         try {
@@ -1000,11 +1009,22 @@ export function CalendarioPagos({
                                 Limpiar
                             </Button>
                         </div>
+                        {/* E-63: pagar de verdad (orden de pago con todo preseleccionado). Solo admin y si lo
+                            elegido es de UN mismo proveedor y no es un estimado de orden de compra. */}
+                        {soyAdmin && urlPagar(seleccionados) && (
+                            <Button size="sm" className="mt-2 w-full gap-1 text-xs" disabled={saving}
+                                title="Abre la orden de pago con esto ya tildado: registra caja o banco, cuenta corriente y retención"
+                                onClick={() => { window.location.href = urlPagar(seleccionados)! }}>
+                                Pagar ({seleccionados.length})
+                            </Button>
+                        )}
                         {seleccionados.length > 0 && (
                             <Button
                                 size="sm"
-                                className="mt-2 w-full gap-1 bg-emerald-600 text-xs hover:bg-emerald-700"
+                                variant={soyAdmin && urlPagar(seleccionados) ? "outline" : "default"}
+                                className={soyAdmin && urlPagar(seleccionados) ? "mt-1 w-full gap-1 text-xs" : "mt-2 w-full gap-1 bg-emerald-600 text-xs hover:bg-emerald-700"}
                                 disabled={saving}
+                                title="Solo lo marca pagado en el calendario: no registra caja, cuenta corriente ni retención"
                                 onClick={() => marcarPagados(seleccionados.map((v) => v.id))}
                             >
                                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
@@ -1085,17 +1105,15 @@ export function CalendarioPagos({
                                     <li>no registra el pago en la cuenta corriente del proveedor,</li>
                                     <li>no calcula la retención de Ganancias.</li>
                                 </ul>
-                                <p>Queda marcado como <b>pagado sin OP</b>. Para hacerlo completo, usá <b>Generar OP</b>.</p>
+                                <p>Queda marcado como <b>pagado sin OP</b>. Para hacerlo completo (caja o banco, cuenta corriente y retención), usá <b>Pagar con orden de pago</b>.</p>
                             </div>
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        {avisoSinOP?.ids.length === 1 && (() => {
-                            const v = vencimientos.find((x) => x.id === avisoSinOP.ids[0])
-                            return v?.proveedor_id && soyAdmin ? (
-                                <Button variant="outline" onClick={() => { window.location.href = `/ordenes-pago/nueva?proveedor_id=${v.proveedor_id}&vencimiento_id=${v.id}&monto=${v.monto ?? 0}` }}>Generar OP</Button>
-                            ) : null
+                        {soyAdmin && avisoSinOP && (() => {
+                            const url = urlPagar(vencimientos.filter((x) => avisoSinOP.ids.includes(x.id)))
+                            return url ? <Button onClick={() => { window.location.href = url }}>Pagar con orden de pago</Button> : null
                         })()}
                         <AlertDialogAction onClick={() => { const a = avisoSinOP; setAvisoSinOP(null); if (a) confirmarPagados(a.ids, a.vencCheque) }}>Marcar pagado sin OP</AlertDialogAction>
                     </AlertDialogFooter>

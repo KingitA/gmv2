@@ -264,10 +264,19 @@ function NuevaOrdenPagoContent() {
     // Si viene un vencimiento por URL (Generar OP desde el calendario), preseleccionarlo (E-53).
     // Espera a que estén cargados la cuenta corriente y los vencimientos del proveedor.
     useEffect(() => {
-        const vencId = searchParams.get("vencimiento_id")
-        if (!vencId || preselVencHecha.current) return
+        const pedidos = [
+            ...(searchParams.get("vencimiento_ids") || "").split(","),
+            searchParams.get("vencimiento_id") || "",
+        ].map(x => x.trim()).filter((x, i, a) => x && a.indexOf(x) === i)
+        if (pedidos.length === 0 || preselVencHecha.current) return
         if (!proveedorId || provCargado !== proveedorId) return
         preselVencHecha.current = true
+        for (const vencId of pedidos) preseleccionarVencimiento(vencId)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [provCargado, proveedorId])
+
+    // Tilda un vencimiento que llegó por la URL (uno o varios: "Pagar" desde el calendario)
+    function preseleccionarVencimiento(vencId: string) {
 
         const venc = vencimientosProv.find((v: any) => v.id === vencId)
         if (!venc) {
@@ -310,8 +319,7 @@ function NuevaOrdenPagoContent() {
             monto_imputado: monto,
             descripcion: venc.concepto,
         }])
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [provCargado, proveedorId])
+    }
 
     // Si vienen mov_cc_ids por URL (desde CC proveedor), pre-seleccionarlos
     useEffect(() => {
