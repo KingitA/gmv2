@@ -82,6 +82,19 @@ export function desdeUnidadesBase(base: unknown, factor: unknown): number {
   return Math.round((b / (Number.isFinite(f) && f > 0 ? f : 1)) * 10000) / 10000
 }
 
+/**
+ * Lo que falta recibir de una línea de la orden (E-39/E-92): lo pedido menos lo ya recibido en
+ * entregas anteriores. `enUnidadOC` va en la unidad de la línea (bultos si se pidió por bulto),
+ * que es en lo que el depósito ve y cuenta la segunda entrega.
+ */
+export function pendienteDeLinea(cantidadPedida: unknown, factorOC: unknown, recibidoBase: unknown): { base: number; enUnidadOC: number } {
+  const f = Number(factorOC) > 0 ? Number(factorOC) : 1
+  const base = Math.round(Math.max(0, aUnidadesBase(cantidadPedida, f) - (Number(recibidoBase) || 0)) * 10000) / 10000
+  // menos de una centésima no es un faltante: es redondeo
+  if (base < 0.01) return { base: 0, enUnidadOC: 0 }
+  return { base, enUnidadOC: Math.round((base / f) * 100) / 100 }
+}
+
 /** Unidades base → bultos ENTEROS hacia arriba (no se puede pedir medio bulto). */
 export function bultosParaCubrir(unidades: unknown, unidadesPorBulto: unknown): number {
   const u = Number(unidades)

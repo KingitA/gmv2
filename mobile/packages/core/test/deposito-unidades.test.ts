@@ -1,7 +1,7 @@
 // E-30 — bultos y unidades en la recepción: el stock sube SIEMPRE en unidades base.
 // Regla pura compartida por el servidor (finalizarRecepcion), la oficina y la app.
 import { describe, expect, it } from "vitest"
-import { aUnidadesBase, bultosParaCubrir, cant, cantidadConUnidad, conversionLinea, desdeUnidadesBase, textoCantidad, unidadLineaOC, unidadesPorBultoDe } from "@gm/deposito"
+import { aUnidadesBase, bultosParaCubrir, cant, cantidadConUnidad, conversionLinea, desdeUnidadesBase, pendienteDeLinea, textoCantidad, unidadLineaOC, unidadesPorBultoDe } from "@gm/deposito"
 import { vistaRecepcion } from "../../../apps/deposito/src/datos/overlay"
 import type { OrdenRecepcion } from "../../../apps/deposito/src/datasets"
 
@@ -80,6 +80,26 @@ describe("conversión de una línea de recepción", () => {
     expect(cantidadConUnidad(1, "bulto")).toBe("1 bulto")
     expect(cantidadConUnidad(1200, "unidad")).toBe("1.200 u")
     expect(cant(1.5)).toBe("1,5")
+  })
+})
+
+describe("E-39 lo que falta recibir de una línea (segunda entrega)", () => {
+  it("pedido 4 bultos de 24, llegaron 72 u: falta 1 bulto (24 u)", () => {
+    expect(pendienteDeLinea(4, 24, 72)).toEqual({ base: 24, enUnidadOC: 1 })
+  })
+  it("llegó todo o de más: no falta nada", () => {
+    expect(pendienteDeLinea(4, 24, 96)).toEqual({ base: 0, enUnidadOC: 0 })
+    expect(pendienteDeLinea(4, 24, 120)).toEqual({ base: 0, enUnidadOC: 0 })
+  })
+  it("línea por unidad: 200 pedidas, 150 recibidas ⇒ faltan 50", () => {
+    expect(pendienteDeLinea(200, 1, 150)).toEqual({ base: 50, enUnidadOC: 50 })
+  })
+  it("medio bulto pendiente se muestra como 0,5 bulto; un redondeo no es faltante", () => {
+    expect(pendienteDeLinea(4, 24, 84)).toEqual({ base: 12, enUnidadOC: 0.5 })
+    expect(pendienteDeLinea(10, 1, 9.999)).toEqual({ base: 0, enUnidadOC: 0 })
+  })
+  it("nada recibido todavía: falta todo", () => {
+    expect(pendienteDeLinea(2, 24, 0)).toEqual({ base: 48, enUnidadOC: 2 })
   })
 })
 
