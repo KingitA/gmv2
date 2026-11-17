@@ -416,14 +416,13 @@ export default function VerificacionOCPage() {
             return
         }
 
-        const cantFaltante = resolviendoRow.cant_oc - resolviendoRow.cant_recibida
 
         const decision = {
             item_id: recItem.id,
             tipo: resolucionTipo,
             accion: resolucionAccion,
             transporte_id: resolucionAccion === 'B' ? resolucionTransporte : undefined,
-            valor_real: cantFaltante,
+            // Cantidades e importes los calcula el servidor (netos + IVA): acá no se manda ninguno (E-91)
             descripcion: resolucionDesc || undefined,
         }
 
@@ -440,6 +439,9 @@ export default function VerificacionOCPage() {
             return
         }
 
+        // El servidor contesta qué hizo, con los importes (o que ya estaba resuelta)
+        const hecho = (data.results || [])[0]
+        if (hecho?.mensaje) (hecho.ya_resuelta ? toast.warning : toast.success)(hecho.mensaje, { duration: 10000 })
         const destino = resolucionAccion === 'A' ? 'empresa' : resolucionAccion === 'B' ? 'transporte' : resolucionAccion === 'D' ? 'nc-esperada' : 'proveedor'
         setResoluciones(prev => ({ ...prev, [resolviendoRow.articulo_id]: destino }))
         setResolviendoRow(null)
@@ -733,13 +735,13 @@ export default function VerificacionOCPage() {
                                 <Label>¿A quién se imputa?</Label>
                                 <div className="grid gap-2">
                                     {(resolucionTipo === 'precio' ? [
-                                        { value: 'A', label: '↩ Empresa absorbe', desc: 'Se acepta el precio facturado y se actualiza el costo del artículo', color: 'border-gray-300' },
-                                        { value: 'C', label: '🏭 Proveedor — reclamar NC', desc: 'Queda una NC esperada por la diferencia de precio para reclamar al proveedor', color: 'border-red-300' },
+                                        { value: 'A', label: '↩ Empresa absorbe', desc: 'Se acepta el precio facturado: el costo del artículo pasa a ser el de la factura (lista y descuentos)', color: 'border-gray-300' },
+                                        { value: 'C', label: '🏭 Proveedor — reclamar NC', desc: 'Queda una nota de crédito esperada por la diferencia (neto + IVA) para reclamar al proveedor', color: 'border-red-300' },
                                         { value: 'D', label: '📉 Descuento fuera de factura', desc: 'El proveedor factura sin el descuento y manda la NC a fin de mes/trimestre. Queda como NC esperada.', color: 'border-purple-300' },
                                     ] : [
                                         { value: 'A', label: '↩ Empresa absorbe', desc: 'Se desestima la diferencia, sin movimiento en cuentas', color: 'border-gray-300' },
-                                        { value: 'B', label: '🚚 Transporte', desc: 'Se registra en la cuenta corriente del transporte', color: 'border-blue-300' },
-                                        { value: 'C', label: '🏭 Proveedor', desc: 'Devolución con ajuste de stock + NC esperada para reclamar', color: 'border-red-300' },
+                                        { value: 'B', label: '🚚 Transporte', desc: 'Se le carga el importe de lo facturado y no recibido (con IVA) en su cuenta corriente. No toca el stock.', color: 'border-blue-300' },
+                                        { value: 'C', label: '🏭 Proveedor', desc: 'Queda una nota de crédito esperada por lo facturado y no recibido (neto + IVA). No toca el stock: solo entró lo que se contó.', color: 'border-red-300' },
                                     ]).map(opt => (
                                         <button key={opt.value}
                                             onClick={() => setResolucionAccion(opt.value as any)}
