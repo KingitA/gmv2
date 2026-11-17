@@ -269,3 +269,13 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 - **Guardar mail en la ficha (9):** solo viene tildado cuando el proveedor no tiene ningún mail.
 - **Listado (10):** sin `.in()` con cientos de ids ni `.limit(5000)`: proveedores y usuarios por tandas, comprobantes paginados, detalle solo de las órdenes viejas sin total guardado. No hizo falta una vista.
 - **Eliminar físico (11):** no queda ninguno en la pantalla de órdenes; solo `/cancelar`.
+
+### Importador de proveedores: plantilla del sistema (17/11, pedido del orquestador)
+
+Juan va a renovar todos los datos de los proveedores con el Excel. Fichas de proveedores → "Importar datos de compra (Excel)" (solo admin):
+
+- **Descargar plantilla**: la arma el sistema, una fila por proveedor activo con lo que tiene cargado hoy y una hoja "Cómo completar" con lo que se puede escribir en cada columna. No hay una plantilla aparte que mantener (`COLUMNAS_PLANTILLA`, `filaPlantilla`, `ayudaPlantilla` en `lib/proveedores/importar-datos.ts`). Lo que se descarga se puede volver a subir tal cual y no cambia nada (hay un test de ida y vuelta).
+- **Columnas** (32): código, proveedor, CUIT, tipo, mail para la orden de compra, mail de administración, teléfono del vendedor, **cómo aplica los descuentos (cascada / sobre_lista)**, **mixto: % con factura**, **percepción IVA %**, **percepción IIBB %**, acuerdo BLANCO y NEGRO (medio, días o cuotas, desde, plazo del cheque, entrega), banco, CBU, alias, titular, acepta cheques de terceros, acepta e-cheq, retención de Ganancias, vencimiento del certificado de exento, transporte habitual, días de entrega, observaciones.
+- **Plantilla anterior** (`docs/entrada/proveedores-para-completar.xlsx`): se acepta. Las columnas que no trae se ignoran (esos datos no se modifican) y la vista previa las nombra.
+- **Vista previa**: resumen arriba (con cambios / sin cambios / con errores / códigos que no existen) y, proveedor por proveedor, cada campo que cambia "antes → después". Lo vacío no pisa nada; una fila con error no se importa.
+- Lo que el Excel no puede expresar y por eso sale vacío (no se toca): proveedor "no inscripto" en Ganancias, régimen de servicios, y un CUIT que hoy está guardado con error.

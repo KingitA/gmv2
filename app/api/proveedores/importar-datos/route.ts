@@ -2,6 +2,8 @@
  * /api/proveedores/importar-datos — importador del Excel "proveedores-para-completar".
  *
  * GET  → { admin: boolean }   (para que la pantalla sepa si muestra el botón)
+ * GET ?plantilla=1 → la plantilla para completar: una fila por proveedor con lo que tiene
+ *        cargado hoy y la hoja de ayuda (solo admin). El navegador arma el Excel.
  * POST → { accion: "previsualizar" | "guardar", filas: FilaCruda[], archivo?: string }
  *
  * El Excel se lee en el navegador; acá llega JSON con el texto de cada celda. TODO se valida
@@ -17,7 +19,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
 import { guardarHistorialImportacion } from "@/lib/import/guardar-historial"
 import {
-  COLUMNAS_PROVEEDOR, analizarImportacion, limpiarFilaCruda, textoValor, updateDeCambios,
+  COLUMNAS_PLANTILLA, COLUMNAS_PROVEEDOR, analizarImportacion, ayudaPlantilla, filaPlantilla, limpiarFilaCruda, textoValor, updateDeCambios,
   type FilaAnalizada, type ProveedorActual,
 } from "@/lib/proveedores/importar-datos"
 
@@ -38,11 +40,43 @@ async function exigirAdmin() {
   return { user: auth.user, error: null }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  if (new URL(request.url).searchParams.get("plantilla") === "1") return plantilla()
   const auth = await requireAuth()
   if (auth.error) return NextResponse.json({ admin: false })
   const roles = await getUserRoles(auth.user.id)
   return NextResponse.json({ admin: roles.includes("admin") })
+}
+
+/**
+ * La plantilla: mismas columnas y mismos textos que entiende el importador, con los datos de
+ * hoy. Se lee con `select *` para que sirva aunque todavía no esté la migración 20261117m
+ * (las columnas nuevas salen vacías y se avisa).
+ */
+async function plantilla() {
+  const auth = await exigirAdmin()
+  if (auth.error) return auth.error
+  try {
+    const sb = createAdminClient()
+    const proveedores: ProveedorActual[] = []
+    for (let desde = 0; ; desde += 1000) {
+      const { data, error } = await sb.from("proveedores").select("*").order("nombre").order("id").range(desde, desde + 999)
+      if (error) throw error
+      proveedores.push(...((data || []) as unknown as ProveedorActual[]))
+      if (!data || data.length < 1000) break
+    }
+    const activos = proveedores.filter((p) => p.activo !== false)
+    const sinMigracion = activos.length > 0 && !("mail_ordenes_compra" in activos[0])
+    return NextResponse.json({
+      columnas: COLUMNAS_PLANTILLA.map((c) => ({ encabezado: c.encabezado, ancho: c.ancho })),
+      filas: activos.map((p) => { const f = filaPlantilla(p); return COLUMNAS_PLANTILLA.map((c) => f[c.clave] ?? "") }),
+      ayuda: ayudaPlantilla(),
+      aviso: sinMigracion ? "Todavía falta aplicar la migración 20261117m_proveedores_datos_compra.sql: las columnas nuevas salen vacías y no se van a poder importar hasta aplicarla." : null,
+    })
+  } catch (e: any) {
+    console.error("[Importar proveedores] plantilla:", e)
+    return NextResponse.json({ error: e?.message || "No se pudo armar la plantilla." }, { status: 500 })
+  }
 }
 
 /** Todos los proveedores con las columnas que se comparan (de a 1000). */

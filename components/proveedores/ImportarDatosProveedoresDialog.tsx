@@ -18,9 +18,9 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Upload, ArrowRight, AlertCircle, AlertTriangle, CheckCircle2, Loader2, FileSpreadsheet } from "lucide-react"
+import { Upload, ArrowRight, AlertCircle, AlertTriangle, CheckCircle2, Download, Loader2, FileSpreadsheet } from "lucide-react"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
-import { fecha, parseFecha } from "@/lib/formato"
+import { fecha, hoyISO, parseFecha } from "@/lib/formato"
 import { leerFilasExcel, type FilaCruda } from "@/lib/proveedores/importar-datos"
 
 type Estado = "cambios" | "sin_cambios" | "error" | "no_existe"
@@ -88,6 +88,36 @@ export function ImportarDatosProveedoresDialog({ onImportado }: { onImportado?: 
   const [archivo, setArchivo] = useState("")
   const [crudas, setCrudas] = useState<FilaCruda[]>([])
   const [columnasDesconocidas, setColumnasDesconocidas] = useState<string[]>([])
+  const [columnasFaltantes, setColumnasFaltantes] = useState<string[]>([])
+  const [bajando, setBajando] = useState(false)
+
+  /** Plantilla para completar: la arma el sistema con lo que cada proveedor tiene cargado hoy. */
+  async function descargarPlantilla() {
+    if (bajando) return
+    setBajando(true)
+    try {
+      const r = await fetch("/api/proveedores/importar-datos?plantilla=1", { cache: "no-store" })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.error || "No se pudo armar la plantilla.")
+      // todo como TEXTO: un CBU de 22 dígitos o un código con ceros no pueden quedar como número
+      const celda = (v: unknown) => ({ t: "s", v: String(v ?? "") })
+      const hoja = XLSX.utils.aoa_to_sheet([d.columnas.map((c: any) => celda(c.encabezado)), ...d.filas.map((f: string[]) => f.map(celda))])
+      hoja["!cols"] = d.columnas.map((c: any) => ({ wch: c.ancho }))
+      hoja["!freeze"] = { xSplit: 2, ySplit: 1 }
+      const ayuda = XLSX.utils.aoa_to_sheet(d.ayuda)
+      ayuda["!cols"] = [{ wch: 44 }, { wch: 110 }]
+      const libro = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(libro, hoja, "Proveedores")
+      XLSX.utils.book_append_sheet(libro, ayuda, "Cómo completar")
+      XLSX.writeFile(libro, `proveedores-para-completar-${hoyISO()}.xlsx`)
+      toast.success(`Plantilla descargada con ${d.filas.length} proveedores.`)
+      if (d.aviso) toast.warning(d.aviso, { duration: 15000 })
+    } catch (e: any) {
+      toast.error(e?.message || "No se pudo descargar la plantilla.", { duration: 10000 })
+    } finally {
+      setBajando(false)
+    }
+  }
   const [filas, setFilas] = useState<FilaPrevia[]>([])
   const [resumen, setResumen] = useState<Resumen | null>(null)
   const [filtro, setFiltro] = useState<Filtro>("todas")
@@ -106,7 +136,7 @@ export function ImportarDatosProveedoresDialog({ onImportado }: { onImportado?: 
   if (!esAdmin) return null
 
   function reiniciar() {
-    setPaso("archivo"); setArchivo(""); setCrudas([]); setColumnasDesconocidas([]); setFilas([])
+    setPaso("archivo"); setArchivo(""); setCrudas([]); setColumnasDesconocidas([]); setColumnasFaltantes([]); setFilas([])
     setResumen(null); setFiltro("todas"); setResultado(null); setLeyendo(false); setImportando(false); setError(null)
     enviando.current = false
   }
@@ -126,6 +156,7 @@ export function ImportarDatosProveedoresDialog({ onImportado }: { onImportado?: 
       const data = await llamar({ accion: "previsualizar", filas: lectura.filas })
       setCrudas(lectura.filas)
       setColumnasDesconocidas(lectura.columnasDesconocidas)
+      setColumnasFaltantes(lectura.columnasFaltantes)
       setFilas(data.filas || [])
       setResumen(data.resumen || null)
       setFiltro("todas")
@@ -206,6 +237,19 @@ export function ImportarDatosProveedoresDialog({ onImportado }: { onImportado?: 
           )}
 
           {paso === "archivo" && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 p-3">
+              <p className="text-sm text-muted-foreground">
+                <b className="text-foreground">1.</b> Descargá la plantilla: trae una fila por proveedor con lo que el sistema tiene cargado hoy y una hoja que explica qué se puede escribir en cada columna.{" "}
+                <b className="text-foreground">2.</b> Completala y subila acá. También sirve la plantilla anterior.
+              </p>
+              <Button type="button" variant="outline" onClick={descargarPlantilla} disabled={bajando}>
+                {bajando ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                {bajando ? "Armando la plantilla…" : "Descargar plantilla"}
+              </Button>
+            </div>
+          )}
+
+          {paso === "archivo" && (
             <div
               className="flex flex-col items-center justify-center gap-4 py-10 border-2 border-dashed rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
               onClick={() => { if (!leyendo) inputRef.current?.click() }}
@@ -246,6 +290,15 @@ export function ImportarDatosProveedoresDialog({ onImportado }: { onImportado?: 
                 </div>
               </div>
 
+              {columnasFaltantes.length > 0 && (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    Este archivo no trae {columnasFaltantes.length === 1 ? "esta columna" : "estas columnas"} (es una plantilla anterior): {columnasFaltantes.join(", ")}.
+                    No pasa nada: esos datos no se modifican. Para cargarlos, descargá la plantilla nueva.
+                  </AlertDescription>
+                </Alert>
+              )}
               {columnasDesconocidas.length > 0 && (
                 <Alert>
                   <AlertTriangle className="h-4 w-4" />

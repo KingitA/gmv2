@@ -27,6 +27,7 @@ export const CLAVES_EXCEL = [
   "negro_medio", "negro_dias", "negro_desde", "negro_plazo_cheque", "negro_entrega",
   "acepta_cheques_terceros", "acepta_echeq", "ganancias", "exento_hasta",
   "transporte_habitual", "dias_entrega", "observaciones", "mixto_pct",
+  "tipo_descuento", "percepcion_iva", "percepcion_iibb",
 ] as const
 export type ClaveExcel = (typeof CLAVES_EXCEL)[number]
 
@@ -61,6 +62,9 @@ export const NOMBRE_COLUMNA: Record<ClaveExcel, string> = {
   dias_entrega: "Días que tarda en entregar",
   observaciones: "Observaciones",
   mixto_pct: "Mixto: % con factura",
+  tipo_descuento: "Descuentos: cómo se aplican",
+  percepcion_iva: "Percepción IVA %",
+  percepcion_iibb: "Percepción IIBB %",
 }
 
 /** Fila del Excel tal cual se leyó: texto por clave + número de fila de Excel (la 1 es el encabezado). */
@@ -90,6 +94,9 @@ export function claveDeEncabezado(encabezado: unknown): ClaveExcel | null {
   }
   // "Mixto: % con factura" (columna opcional, Juan 17/11: la proporción varía según el proveedor)
   if (n.startsWith("mixto")) return "mixto_pct"
+  // columnas de la plantilla nueva (17/11): van antes de "tipo…" para que "Tipo de descuento" no se lea como Tipo
+  if (tiene("descuento")) return "tipo_descuento"
+  if (tiene("percepcion")) return tiene("iibb", "ingresos", "brutos") ? "percepcion_iibb" : "percepcion_iva"
   if (n.startsWith("codigo") || n === "cod") return "codigo"
   if (n === "proveedor" || n === "nombre" || n === "razon_social") return "nombre"
   if (tiene("cuit")) return "cuit"
@@ -169,8 +176,8 @@ export function leerFilasExcel(matriz: unknown[][]): LecturaExcel {
     filas,
     error: filas.length === 0 ? "El Excel no tiene ninguna fila con datos." : null,
     columnasDesconocidas: desconocidas,
-    // "Mixto: % con factura" es opcional: se agregó después de armar el Excel que completa Juan
-    columnasFaltantes: CLAVES_EXCEL.filter((k) => k !== "mixto_pct" && !columnaDe.has(k)).map((k) => NOMBRE_COLUMNA[k]),
+    // Informativo, no es error: sirve la plantilla vieja. Lo que el archivo no trae, no se modifica.
+    columnasFaltantes: CLAVES_EXCEL.filter((k) => k !== "nombre" && !columnaDe.has(k)).map((k) => NOMBRE_COLUMNA[k]),
   }
 }
 
@@ -222,6 +229,9 @@ export interface ValoresProveedor {
   dias_entrega?: number
   observaciones_compra?: string
   mixto_pct_factura?: number
+  tipo_descuento?: "cascada" | "sobre_lista"
+  percepcion_iva?: number
+  percepcion_iibb?: number
 }
 export type CampoProveedor = keyof ValoresProveedor
 
@@ -257,6 +267,9 @@ export const ETIQUETA_CAMPO: Record<CampoProveedor, string> = {
   dias_entrega: "Días que tarda en entregar",
   observaciones_compra: "Observaciones",
   mixto_pct_factura: "Mixto: % con factura",
+  tipo_descuento: "Descuentos: cómo se aplican",
+  percepcion_iva: "Percepción IVA %",
+  percepcion_iibb: "Percepción IIBB %",
 }
 export const CAMPOS_IMPORTABLES = Object.keys(ETIQUETA_CAMPO) as CampoProveedor[]
 
@@ -474,6 +487,22 @@ export function validarFila(cruda: FilaCruda): FilaValidada {
     else valores.mixto_pct_factura = Math.round(pct * 100) / 100
   }
 
+  // Cómo aplica sus descuentos (Juan, 17/11: en cascada / sobre precio lista)
+  if (dato("tipo_descuento")) {
+    const t = clave(dato("tipo_descuento"))
+    if (t.includes("cascada")) valores.tipo_descuento = "cascada"
+    else if (t.includes("lista")) valores.tipo_descuento = "sobre_lista"
+    else error("tipo_descuento", `"${dato("tipo_descuento")}" no vale: poné cascada o sobre_lista`)
+  }
+
+  // Percepciones que nos cobra en la factura
+  for (const [k, campo] of [["percepcion_iva", "percepcion_iva"], ["percepcion_iibb", "percepcion_iibb"]] as const) {
+    if (!dato(k)) continue
+    const pct = parseMonto(dato(k).replace("%", "").trim())
+    if (pct === null || pct < 0 || pct > 100) error(k, `tiene que ser un porcentaje de 0 a 100 ("${dato(k)}")`)
+    else valores[campo] = Math.round(pct * 100) / 100
+  }
+
   return { codigo, nombreExcel: dato("nombre") || null, valores, errores, avisos }
 }
 
@@ -482,7 +511,7 @@ export function validarFila(cruda: FilaCruda): FilaValidada {
 export type ValorCampo = string | number | boolean | null
 export interface Cambio { campo: CampoProveedor; etiqueta: string; antes: ValorCampo; despues: ValorCampo }
 
-const NUMERICOS = new Set<CampoProveedor>(["pago_blanco_dias", "pago_negro_dias", "pago_blanco_plazo_cheque", "pago_negro_plazo_cheque", "dias_entrega", "mixto_pct_factura"])
+const NUMERICOS = new Set<CampoProveedor>(["pago_blanco_dias", "pago_negro_dias", "pago_blanco_plazo_cheque", "pago_negro_plazo_cheque", "dias_entrega", "mixto_pct_factura", "percepcion_iva", "percepcion_iibb"])
 const BOOLEANOS = new Set<CampoProveedor>(["acepta_cheques_terceros", "acepta_echeq"])
 
 /** Valor de la base llevado a algo comparable (texto vacío = null). */
@@ -676,4 +705,100 @@ export function updateDeCambios(cambios: Cambio[]): Record<string, ValorCampo> {
   const u: Record<string, ValorCampo> = {}
   for (const c of cambios) u[c.campo] = c.despues
   return u
+}
+
+// ─── Plantilla para completar ────────────────────────────────────────────────
+// La arma el sistema con lo que cada proveedor tiene cargado HOY, con las mismas columnas y
+// los mismos textos que este importador entiende: lo que se descarga se puede volver a subir
+// tal cual y no cambia nada (hay un test que lo comprueba). No hay una plantilla aparte que mantener.
+
+/** Columnas de la plantilla, en orden, con la ayuda entre paréntesis (el importador la ignora). */
+export const COLUMNAS_PLANTILLA: { clave: ClaveExcel; encabezado: string; ancho: number; ayuda: string }[] = [
+  { clave: "codigo", encabezado: "Código (no tocar)", ancho: 10, ayuda: "Con el código se vuelve a importar. No lo cambies." },
+  { clave: "nombre", encabezado: "Proveedor (no tocar)", ancho: 32, ayuda: "Solo para ubicarse: el nombre no se modifica desde acá." },
+  { clave: "cuit", encabezado: "CUIT (xx-xxxxxxxx-x)", ancho: 16, ayuda: "Con guiones: 30-12345678-9" },
+  { clave: "tipo", encabezado: "Tipo (mercaderia / transporte / servicios)", ancho: 14, ayuda: "mercaderia / transporte / servicios" },
+  { clave: "mail_oc", encabezado: "Mail para enviar la orden de compra", ancho: 30, ayuda: "A esta casilla se le manda la orden. Varios separados por coma." },
+  { clave: "mail_admin", encabezado: "Mail de administración / cobranzas", ancho: 30, ayuda: "Un solo mail." },
+  { clave: "telefono_vendedor", encabezado: "Teléfono del vendedor", ancho: 20, ayuda: "Texto libre." },
+  { clave: "tipo_descuento", encabezado: "Descuentos: cómo se aplican (cascada / sobre_lista)", ancho: 16, ayuda: "cascada = uno sobre otro · sobre_lista = se suman y se aplican sobre el precio de lista" },
+  { clave: "mixto_pct", encabezado: "Mixto: % con factura", ancho: 12, ayuda: "Artículos de compra mixta: qué porcentaje viene con factura (0 a 100). El resto viene sin. Vacío = 50." },
+  { clave: "percepcion_iva", encabezado: "Percepción IVA %", ancho: 11, ayuda: "Porcentaje que nos percibe en la factura (0 si no percibe)." },
+  { clave: "percepcion_iibb", encabezado: "Percepción IIBB %", ancho: 11, ayuda: "Porcentaje de Ingresos Brutos que nos percibe (0 si no percibe)." },
+  { clave: "blanco_medio", encabezado: "BLANCO: medio de pago", ancho: 18, ayuda: "transferencia / cheques / echeq / efectivo / cheques_y_efectivo" },
+  { clave: "blanco_dias", encabezado: "BLANCO: días de plazo", ancho: 12, ayuda: "Número de días (0 = contado). En cuotas: 30/60/90" },
+  { clave: "blanco_desde", encabezado: "BLANCO: desde (factura / recepcion)", ancho: 12, ayuda: "factura = corre desde la fecha de la factura · recepcion = desde que llega la mercadería" },
+  { clave: "blanco_plazo_cheque", encabezado: "BLANCO: plazo máx. del cheque (días)", ancho: 12, ayuda: "Hasta cuántos días de vencimiento acepta un cheque (30, 60…)." },
+  { clave: "blanco_entrega", encabezado: "BLANCO: cómo se entrega", ancho: 18, ayuda: "transferencia / deposito_bancario / retira_oficina / envio_grimar" },
+  { clave: "negro_medio", encabezado: "NEGRO: medio de pago", ancho: 18, ayuda: "Igual que BLANCO. Si se paga igual que lo que viene con factura, dejá vacías las columnas NEGRO." },
+  { clave: "negro_dias", encabezado: "NEGRO: días de plazo", ancho: 12, ayuda: "Igual que BLANCO." },
+  { clave: "negro_desde", encabezado: "NEGRO: desde (factura / recepcion)", ancho: 12, ayuda: "Igual que BLANCO." },
+  { clave: "negro_plazo_cheque", encabezado: "NEGRO: plazo máx. del cheque (días)", ancho: 12, ayuda: "Igual que BLANCO." },
+  { clave: "negro_entrega", encabezado: "NEGRO: cómo se entrega", ancho: 18, ayuda: "Igual que BLANCO." },
+  { clave: "banco", encabezado: "Banco del proveedor", ancho: 18, ayuda: "Texto libre." },
+  { clave: "cbu", encabezado: "CBU", ancho: 26, ayuda: "22 dígitos, sin espacios. La celda tiene que ser texto." },
+  { clave: "alias", encabezado: "Alias", ancho: 20, ayuda: "De 6 a 20 caracteres: letras, números, punto y guion." },
+  { clave: "titular", encabezado: "Titular de la cuenta", ancho: 26, ayuda: "Texto libre." },
+  { clave: "acepta_cheques_terceros", encabezado: "Acepta cheques de terceros (si / no)", ancho: 12, ayuda: "si / no" },
+  { clave: "acepta_echeq", encabezado: "Acepta e-cheq (si / no)", ancho: 12, ayuda: "si / no" },
+  { clave: "ganancias", encabezado: "Retención Ganancias (mercaderia 2% / transporte 0,25% / exento)", ancho: 16, ayuda: "mercaderia (2 %) / transporte (0,25 %) / exento (no se le retiene)" },
+  { clave: "exento_hasta", encabezado: "Exento: vence certificado (dd/mm/aaaa)", ancho: 14, ayuda: "Solo si es exento: hasta cuándo vale el certificado. dd/mm/aaaa" },
+  { clave: "transporte_habitual", encabezado: "Transporte habitual", ancho: 22, ayuda: "Texto libre." },
+  { clave: "dias_entrega", encabezado: "Días que tarda en entregar", ancho: 12, ayuda: "Número de días desde que se le manda la orden." },
+  { clave: "observaciones", encabezado: "Observaciones", ancho: 34, ayuda: "Texto libre." },
+]
+
+const TIPO_A_TEXTO: Record<string, string> = { mercaderia_general: "mercaderia", transporte: "transporte", servicios: "servicios" }
+
+/** Una fila de la plantilla con lo que el proveedor tiene cargado (texto, como lo entiende validarFila). */
+export function filaPlantilla(p: ProveedorActual): Record<ClaveExcel, string> {
+  const t = (v: unknown) => (v === null || v === undefined ? "" : String(v).trim())
+  const num = (v: unknown) => { const n = Number(v); return v === null || v === undefined || v === "" || !Number.isFinite(n) ? "" : String(n).replace(".", ",") }
+  const siNo = (v: unknown) => (v === true ? "si" : v === false ? "no" : "")
+  const dias = (canal: "blanco" | "negro") => t(p[`pago_${canal}_cuotas`]) || num(p[`pago_${canal}_dias`])
+  const condicion = t(p.condicion_ganancias)
+  const regimen = t(p.regimen_ganancias)
+  // "no inscripto" y el régimen de servicios no se pueden expresar en el Excel: quedan vacíos (no se tocan)
+  const ganancias = condicion === "exento" ? "exento" : condicion === "inscripto" ? (regimen === "transporte" ? "transporte" : regimen === "bienes" ? "mercaderia" : "") : ""
+  const cuit = t(p.cuit)
+  return {
+    codigo: t(p.codigo_proveedor),
+    nombre: t(p.nombre),
+    // un CUIT guardado con error no se vuelve a escribir: saldría como error al importar
+    cuit: cuit && !errorCuit(cuit) ? formatCuit(cuit) : "",
+    tipo: TIPO_A_TEXTO[t(p.tipo_proveedor)] ?? "",
+    mail_oc: t(p.mail_ordenes_compra),
+    mail_admin: t(p.mail_oficina),
+    telefono_vendedor: t(p.telefono_vendedor),
+    tipo_descuento: t(p.tipo_descuento) === "sobre_lista" ? "sobre_lista" : t(p.tipo_descuento) === "cascada" ? "cascada" : "",
+    mixto_pct: num(p.mixto_pct_factura),
+    percepcion_iva: num(p.percepcion_iva),
+    percepcion_iibb: num(p.percepcion_iibb),
+    blanco_medio: t(p.pago_blanco_medio), blanco_dias: dias("blanco"), blanco_desde: t(p.pago_blanco_desde),
+    blanco_plazo_cheque: num(p.pago_blanco_plazo_cheque), blanco_entrega: t(p.pago_blanco_entrega),
+    negro_medio: t(p.pago_negro_medio), negro_dias: dias("negro"), negro_desde: t(p.pago_negro_desde),
+    negro_plazo_cheque: num(p.pago_negro_plazo_cheque), negro_entrega: t(p.pago_negro_entrega),
+    banco: t(p.banco_nombre), cbu: t(p.cbu), alias: t(p.cbu_alias), titular: t(p.banco_titular),
+    acepta_cheques_terceros: siNo(p.acepta_cheques_terceros), acepta_echeq: siNo(p.acepta_echeq),
+    ganancias,
+    exento_hasta: condicion === "exento" && t(p.ganancias_exento_hasta) ? fecha(t(p.ganancias_exento_hasta).slice(0, 10)) : "",
+    transporte_habitual: t(p.transporte_habitual),
+    dias_entrega: num(p.dias_entrega),
+    observaciones: t(p.observaciones_compra),
+  }
+}
+
+/** Hoja "Cómo completar" de la plantilla. */
+export function ayudaPlantilla(): string[][] {
+  return [
+    ["Cómo completar"],
+    ["Una fila por proveedor, con lo que el sistema tiene cargado hoy. Corregí o completá lo que haga falta y volvé a subir el archivo en Fichas de proveedores → Importar datos de compra (Excel)."],
+    ["No cambies las dos primeras columnas: con el código se vuelve a importar."],
+    ["Lo que dejes vacío NO se modifica (una celda vacía nunca borra un dato)."],
+    ["Antes de guardar, el sistema muestra proveedor por proveedor qué cambia (antes → después) y qué filas tienen errores. Una fila con error no se importa; el resto sí."],
+    ["Si con un proveedor no se compra sin factura, o se le paga igual, dejá vacías las columnas NEGRO."],
+    [],
+    ["Columna", "Qué se puede escribir"],
+    ...COLUMNAS_PLANTILLA.map((c) => [c.encabezado.replace(/\s*\([^)]*\)\s*$/, ""), c.ayuda]),
+  ]
 }

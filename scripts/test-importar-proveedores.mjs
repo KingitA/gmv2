@@ -38,6 +38,7 @@ register("data:text/javascript," + encodeURIComponent(GANCHO), import.meta.url)
 const {
   leerFilasExcel, validarFila, calcularCambios, analizarImportacion, claveDeEncabezado,
   COLUMNAS_PROVEEDOR, updateDeCambios, nombresParecidos, textoValor,
+  COLUMNAS_PLANTILLA, filaPlantilla, ayudaPlantilla,
 } = await import(pathToFileURL(join(RAIZ, "lib/proveedores/importar-datos.ts")).href)
 
 let ok = 0, mal = 0
@@ -77,6 +78,47 @@ function proveedor(extra = {}) {
 }
 
 console.log("\nEncabezados")
+prueba("columnas nuevas: tipo de descuento y percepciones", () => {
+  igual(claveDeEncabezado("Descuentos: cómo se aplican (cascada / sobre_lista)"), "tipo_descuento")
+  igual(claveDeEncabezado("Tipo de descuento"), "tipo_descuento")
+  igual(claveDeEncabezado("Tipo (mercaderia / transporte / servicios)"), "tipo")
+  igual(claveDeEncabezado("Percepción IVA %"), "percepcion_iva")
+  igual(claveDeEncabezado("Percepción IIBB %"), "percepcion_iibb")
+  igual(validarFila({ codigo: "1", tipo_descuento: "Sobre precio lista" }).valores.tipo_descuento, "sobre_lista")
+  igual(validarFila({ codigo: "1", tipo_descuento: "en cascada" }).valores.tipo_descuento, "cascada")
+  igual(validarFila({ codigo: "1", tipo_descuento: "otro" }).errores.length, 1)
+  igual(validarFila({ codigo: "1", percepcion_iva: "3", percepcion_iibb: "1,5 %" }).valores, { percepcion_iva: 3, percepcion_iibb: 1.5 })
+  igual(validarFila({ codigo: "1", percepcion_iva: "300" }).errores.length, 1)
+})
+prueba("plantilla: lo que se descarga se vuelve a subir tal cual y no cambia nada", () => {
+  const p = proveedor({
+    cuit: "30-67949425-9", tipo_proveedor: "transporte", mail_ordenes_compra: "pedidos@x.com, ventas@x.com", mail_oficina: "adm@x.com",
+    telefono_vendedor: "291 4000000", tipo_descuento: "sobre_lista", mixto_pct_factura: 70, percepcion_iva: 3, percepcion_iibb: 1.5,
+    pago_blanco_medio: "echeq", pago_blanco_dias: 30, pago_blanco_cuotas: "30/60/90", pago_blanco_desde: "recepcion", pago_blanco_plazo_cheque: 60, pago_blanco_entrega: "retira_oficina",
+    pago_negro_medio: "efectivo", pago_negro_dias: 0, pago_negro_desde: "factura",
+    banco_nombre: "Credicoop", cbu: "0170099220000067797370", cbu_alias: "mi.alias-01", banco_titular: "X SA",
+    acepta_cheques_terceros: true, acepta_echeq: false, regimen_ganancias: "transporte", condicion_ganancias: "exento", ganancias_exento_hasta: "2027-03-31",
+    transporte_habitual: "Expreso Sur", dias_entrega: 7, observaciones_compra: "Entrega los martes",
+  })
+  const fila = filaPlantilla(p)
+  // pasa por una "hoja" igual que el Excel: encabezados de la plantilla + la fila
+  const lectura = leerFilasExcel([COLUMNAS_PLANTILLA.map((c) => c.encabezado), COLUMNAS_PLANTILLA.map((c) => fila[c.clave])])
+  igual(lectura.error, null)
+  igual(lectura.columnasDesconocidas, [], "desconocidas:")
+  igual(lectura.columnasFaltantes, [], "faltantes:")
+  const { filas, resumen } = analizarImportacion(lectura.filas, [p])
+  igual(filas[0].errores, [], "errores:")
+  igual(filas[0].cambios, [], "cambios:")
+  igual(resumen.sin_cambios, 1)
+  // proveedor vacío: plantilla vacía, tampoco cambia nada
+  const vacio = proveedor()
+  const filaVacia = filaPlantilla(vacio)
+  const r2 = analizarImportacion(leerFilasExcel([COLUMNAS_PLANTILLA.map((c) => c.encabezado), COLUMNAS_PLANTILLA.map((c) => filaVacia[c.clave])]).filas, [vacio])
+  igual(r2.filas[0].errores, []); igual(r2.filas[0].cambios, [])
+  // todos los encabezados de la plantilla se reconocen y la ayuda tiene una línea por columna
+  igual(COLUMNAS_PLANTILLA.map((c) => claveDeEncabezado(c.encabezado)), COLUMNAS_PLANTILLA.map((c) => c.clave))
+  igual(ayudaPlantilla().filter((l) => l.length === 2).length, COLUMNAS_PLANTILLA.length + 1)
+})
 prueba("columna opcional Mixto: % con factura (Juan 17/11)", () => {
   igual(claveDeEncabezado("Mixto: % con factura"), "mixto_pct")
   igual(validarFila({ codigo: "134", mixto_pct: "70" }).valores.mixto_pct_factura, 70)
@@ -271,7 +313,8 @@ if (!excel) {
     const lectura = leerFilasExcel(XLSX.utils.sheet_to_json(hoja, { header: 1, raw: false, defval: "" }))
     igual(lectura.error, null)
     igual(lectura.columnasDesconocidas, [], "columnas desconocidas:")
-    igual(lectura.columnasFaltantes, [], "columnas faltantes:")
+    // plantilla anterior: se acepta; lo que no trae se informa y no se modifica
+    igual(lectura.columnasFaltantes, ["Mixto: % con factura", "Descuentos: cómo se aplican", "Percepción IVA %", "Percepción IIBB %"], "columnas faltantes:")
     // Sin base: se compara contra proveedores "vacíos" con los mismos códigos, para ver qué traería cada fila
     const vacios = [...new Set(lectura.filas.map((f) => validarFila(f).codigo).filter(Boolean))]
       .map((codigo, i) => proveedor({ id: `id-${i}`, codigo_proveedor: codigo, nombre: lectura.filas.find((f) => validarFila(f).codigo === codigo)?.nombre ?? "" }))
