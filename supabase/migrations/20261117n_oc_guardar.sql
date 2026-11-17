@@ -104,6 +104,30 @@ COMMENT ON COLUMN public.ordenes_compra_detalle.precio_ficha IS
 COMMENT ON COLUMN public.ordenes_compra_detalle.precio_neto_ficha IS
   'Precio neto (con sus descuentos) que tenía el artículo al guardar la orden, para mostrar la diferencia con lo pactado.';
 
+-- Canal de la provisión en la cuenta corriente: una orden mixta tiene DOS provisiones
+-- (con factura / sin factura). Quien convierte la provisión en factura (el mail de una
+-- factura, la validación) tiene que tomar la del canal que corresponde, no "la primera".
+ALTER TABLE public.cuenta_corriente_proveedores
+  ADD COLUMN IF NOT EXISTS canal varchar(10);
+DO $$
+BEGIN
+  ALTER TABLE public.cuenta_corriente_proveedores ADD CONSTRAINT cc_proveedores_canal_check
+    CHECK (canal IS NULL OR canal IN ('blanco', 'negro'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+COMMENT ON COLUMN public.cuenta_corriente_proveedores.canal IS
+  'Solo en las provisiones de una orden de compra (tipo_movimiento = orden_compra): blanco = lo que viene con factura, negro = sin factura. NULL en el resto y en las provisiones anteriores al 17/11/2026.';
+
+-- Cuenta de Gmail desde la que se mandan las órdenes de compra (la "de compras").
+DO $$
+BEGIN
+  IF to_regclass('public.configuracion_empresa') IS NOT NULL THEN
+    ALTER TABLE public.configuracion_empresa ADD COLUMN IF NOT EXISTS mail_compras text;
+    COMMENT ON COLUMN public.configuracion_empresa.mail_compras IS
+      'Cuenta de Gmail conectada al sistema desde la que salen las órdenes de compra. La elige el primero que envía una orden y queda recordada.';
+  END IF;
+END $$;
+
 -- ═══ 2. Numeración: secuencia posicionada en el último número usado ═══
 CREATE SEQUENCE IF NOT EXISTS public.ordenes_compra_numero_seq START 1;
 
@@ -215,15 +239,15 @@ BEGIN
   SELECT * INTO t FROM oc_totales(p_orden_id);
 
   IF coalesce(t.total_blanco, 0) > 0 THEN
-    INSERT INTO cuenta_corriente_proveedores (proveedor_id, tipo_movimiento, monto, descripcion, referencia_id, referencia_tipo, fecha)
-    VALUES (o.proveedor_id, 'orden_compra', t.total_blanco,
+    INSERT INTO cuenta_corriente_proveedores (proveedor_id, tipo_movimiento, canal, monto, descripcion, referencia_id, referencia_tipo, fecha)
+    VALUES (o.proveedor_id, 'orden_compra', 'blanco', t.total_blanco,
             'Provisión OC: ' || o.numero_orden || ' — con factura (neto + IVA'
               || CASE WHEN t.percepciones > 0 THEN ' + percepciones' ELSE '' END || ', estimado)',
             p_orden_id, 'orden_compra', coalesce(o.fecha_orden, now()));
   END IF;
   IF coalesce(t.total_negro, 0) > 0 THEN
-    INSERT INTO cuenta_corriente_proveedores (proveedor_id, tipo_movimiento, monto, descripcion, referencia_id, referencia_tipo, fecha)
-    VALUES (o.proveedor_id, 'orden_compra', t.total_negro,
+    INSERT INTO cuenta_corriente_proveedores (proveedor_id, tipo_movimiento, canal, monto, descripcion, referencia_id, referencia_tipo, fecha)
+    VALUES (o.proveedor_id, 'orden_compra', 'negro', t.total_negro,
             'Provisión OC: ' || o.numero_orden || ' — sin factura (estimado)',
             p_orden_id, 'orden_compra', coalesce(o.fecha_orden, now()));
   END IF;
@@ -292,7 +316,9 @@ BEGIN
   END IF;
 
   SELECT * INTO t FROM oc_totales(p_orden_id);
-  v_base := coalesce(o.fecha_estimada_recepcion, public.hoy_ar());
+  -- Una orden vieja (fecha de entrega ya pasada) no genera vencimientos con fecha pasada:
+  -- el plazo corre desde hoy.
+  v_base := greatest(coalesce(o.fecha_estimada_recepcion, public.hoy_ar()), public.hoy_ar());
 
   FOREACH v_canal IN ARRAY ARRAY['blanco', 'negro'] LOOP
     v_total := CASE WHEN v_canal = 'blanco' THEN t.total_blanco ELSE t.total_negro END;
@@ -352,7 +378,8 @@ BEGIN
         true, false,
         'Vencimiento ESTIMADO, generado por la orden de compra ' || o.numero_orden
           || ': fecha estimada de entrega + ' || v_dias[v_i] || ' días. Se reemplaza por el real al validar la factura y se borra si la orden se cancela.'
-          || CASE WHEN v_sin_ac THEN ' El proveedor no tiene acuerdo de pago cargado: se tomó la fecha de entrega.' ELSE '' END,
+          || CASE WHEN v_sin_ac THEN ' El proveedor no tiene acuerdo de pago cargado: se tomó la fecha de entrega.' ELSE '' END
+          || CASE WHEN v_ac ->> 'de_legado' = 'true' THEN ' ACUERDO DE PAGO SIN CARGAR: el plazo salió del dato viejo de la ficha del proveedor (plazo en días). Cargar el acuerdo en la ficha fiscal.' ELSE '' END,
         p_usuario_id, p_usuario_id
       );
       v_creados := v_creados + 1;
@@ -613,9 +640,12 @@ BEGIN
       RAISE EXCEPTION 'La orden % ya tiene una recepción en depósito: no se puede modificar.', o.numero_orden
         USING ERRCODE = 'P0001', DETAIL = 'con_recepcion';
     END IF;
-    IF EXISTS (SELECT 1 FROM comprobantes_compra c WHERE c.orden_compra_id = p_orden_id AND c.estado IN ('validado', 'cerrado')) THEN
-      RAISE EXCEPTION 'La orden % ya tiene un comprobante validado: no se puede modificar.', o.numero_orden
-        USING ERRCODE = 'P0001', DETAIL = 'con_comprobante_validado';
+    -- Con un comprobante cargado (aunque no esté validado) la orden no se toca: la factura que
+    -- entra por mail ya convirtió la provisión en deuda y creó su vencimiento; rehacer la
+    -- provisión y los estimados duplicaría las dos cosas. Misma regla que oc_cancelar.
+    IF EXISTS (SELECT 1 FROM comprobantes_compra c WHERE c.orden_compra_id = p_orden_id AND c.estado <> 'esperada') THEN
+      RAISE EXCEPTION 'La orden % ya tiene comprobantes cargados: no se puede modificar. Si hay que cambiarla, eliminá primero los comprobantes desde la verificación.', o.numero_orden
+        USING ERRCODE = 'P0001', DETAIL = 'con_comprobantes';
     END IF;
 
     v_id := p_orden_id;

@@ -237,6 +237,7 @@ export function FichaFiscalDialog({
                             <SelectItem value="sin">Sin definir</SelectItem>
                             <SelectItem value="transferencia">Transferencia</SelectItem>
                             <SelectItem value="cheques">Cheques</SelectItem>
+                            <SelectItem value="echeq">E-cheq</SelectItem>
                             <SelectItem value="cheques_y_efectivo">Cheques + completar efectivo</SelectItem>
                             <SelectItem value="efectivo">Efectivo</SelectItem>
                           </SelectContent>
@@ -255,7 +256,7 @@ export function FichaFiscalDialog({
                           </SelectContent>
                         </Select>
                       </div>
-                      {(val.medio === "cheques" || val.medio === "cheques_y_efectivo") && (
+                      {(val.medio === "cheques" || val.medio === "cheques_y_efectivo" || val.medio === "echeq") && (
                         <div>
                           <Label className="text-xs">Plazo cheques (días)</Label>
                           <Input inputMode="numeric" placeholder="0 = al día" value={val.plazo_cheque}

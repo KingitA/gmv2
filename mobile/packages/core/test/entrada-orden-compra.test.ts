@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest"
 import { netoRenglon, precioNeto, totalesOC, unidadesRenglon } from "../../../../lib/compras/oc-totales"
 import {
-  acuerdoDeProveedor, acuerdoDelCanal, formaPagoVencimiento, modalidadVencimiento, normalizarAcuerdo,
+  acuerdoDeProveedor, acuerdoDeProveedorConLegado, acuerdoDelCanal, formaPagoVencimiento, modalidadVencimiento, normalizarAcuerdo,
   normalizarCuotas, planDePagos, textoCanal, textoCondicionPago,
 } from "../../../../lib/compras/acuerdo-pago"
 import { armarMime, asuntoOrden, base64DeTexto, cuerpoOrden, encabezadoUtf8, rawParaGmail } from "../../../../lib/compras/mail-orden"
@@ -72,6 +72,26 @@ describe("acuerdo de pago", () => {
     expect(a.blanco).toEqual({ medio: "cheques", dias: 30, cuotas: "30/60", desde: "factura", plazo_cheque: 30, entrega: "retira_oficina" })
     expect(a.negro).toBeNull()
     expect(acuerdoDeProveedor({ plazo_dias: 30, dias_vencimiento: 15 }).blanco.dias).toBeNull()
+  })
+
+  it("proveedor SIN plazo en el acuerdo: cae al dato viejo de la ficha, marcado (revisión 17/11)", () => {
+    // GAETA: sin pago_blanco_dias, legado 20 días desde recepción
+    const gaeta = acuerdoDeProveedorConLegado({ plazo_dias: 20, plazo_desde: "fecha_recepcion" })
+    expect(gaeta.blanco).toMatchObject({ dias: 20, desde: "recepcion", de_legado: true })
+    // LUQUE: contado
+    expect(acuerdoDeProveedorConLegado({ plazo_dias: 0, plazo_desde: "fecha_factura" }).blanco).toMatchObject({ dias: 0, desde: "factura", de_legado: true })
+    // la marca sobrevive a guardarse en la orden y volver a leerse
+    expect(normalizarAcuerdo(JSON.parse(JSON.stringify(gaeta)))!.blanco.de_legado).toBe(true)
+    expect(planDePagos(1000, "2026-12-01", gaeta.blanco)[0]).toMatchObject({ fecha: "2026-12-21", sin_plazo: false })
+  })
+
+  it("acuerdo y dato viejo contradictorios: manda el acuerdo, sin marca", () => {
+    // BUYANOR: legado 30 desde recepción, acuerdo 0 desde recepción
+    const b = acuerdoDeProveedorConLegado({ pago_blanco_dias: 0, pago_blanco_desde: "recepcion", plazo_dias: 30, plazo_desde: "fecha_recepcion" })
+    expect(b.blanco).toMatchObject({ dias: 0, desde: "recepcion" })
+    expect(b.blanco.de_legado).toBeUndefined()
+    // COTY: legado 30 desde recepción, acuerdo 30 desde factura
+    expect(acuerdoDeProveedorConLegado({ pago_blanco_dias: 30, pago_blanco_desde: "factura", plazo_dias: 30, plazo_desde: "fecha_recepcion" }).blanco.desde).toBe("factura")
   })
 
   it("negro sin acuerdo propio usa el de blanco", () => {

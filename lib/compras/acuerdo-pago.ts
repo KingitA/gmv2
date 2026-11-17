@@ -47,6 +47,11 @@ export interface AcuerdoCanal {
   /** Hasta cuántos días de vencimiento acepta un cheque. */
   plazo_cheque: number | null
   entrega: EntregaPago | null
+  /**
+   * El proveedor NO tiene acuerdo de pago cargado: el plazo salió del dato viejo de su ficha
+   * (plazo_dias / plazo_desde). Se muestra como "acuerdo de pago sin cargar" hasta que se cargue.
+   */
+  de_legado?: boolean
 }
 export interface AcuerdoPago {
   blanco: AcuerdoCanal
@@ -89,7 +94,13 @@ export function normalizarCanal(x: any): AcuerdoCanal {
     desde: c.desde === "recepcion" ? "recepcion" : "factura",
     plazo_cheque: enteroONull(c.plazo_cheque),
     entrega: ENTREGAS.has(c.entrega) ? c.entrega : null,
+    ...(c.de_legado === true ? { de_legado: true } : {}),
   }
+}
+
+/** ¿El canal tiene un plazo acordado? (sin plazo no se puede calcular cuándo se paga) */
+export function tienePlazo(c: AcuerdoCanal): boolean {
+  return c.dias !== null || !!c.cuotas
 }
 
 const canalSinDatos = (c: AcuerdoCanal | null | undefined) => !c || (!c.medio && c.dias === null && !c.entrega && !c.cuotas)
@@ -116,6 +127,21 @@ export function acuerdoDeProveedor(p: any): AcuerdoPago {
   return { blanco, negro: canalSinDatos(negro) ? null : negro }
 }
 
+/**
+ * Acuerdo de la ficha y, SOLO si el proveedor no tiene plazo cargado en el acuerdo (pago_blanco_dias
+ * ni cuotas), el plazo viejo de su ficha (plazo_dias + plazo_desde) como respaldo, marcado
+ * `de_legado`. Así un proveedor sin acuerdo no pasa a "30 días fijos" ni a "sin plazo": sigue
+ * con lo que tenía, y la orden y el vencimiento avisan que falta cargar el acuerdo.
+ * Si el acuerdo y el dato viejo se contradicen, manda el acuerdo (es el campo nuevo).
+ */
+export function acuerdoDeProveedorConLegado(p: any): AcuerdoPago {
+  const a = acuerdoDeProveedor(p)
+  if (tienePlazo(a.blanco)) return a
+  const dias = enteroONull(p?.plazo_dias)
+  if (dias === null) return a
+  return { ...a, blanco: { ...a.blanco, dias, desde: p?.plazo_desde === "fecha_recepcion" ? "recepcion" : "factura", de_legado: true } }
+}
+
 /** El acuerdo que vale para un canal: negro sin acuerdo propio = el de blanco. */
 export function acuerdoDelCanal(a: AcuerdoPago | null | undefined, canal: CanalPago): AcuerdoCanal {
   if (!a) return canalVacio()
@@ -123,8 +149,6 @@ export function acuerdoDelCanal(a: AcuerdoPago | null | undefined, canal: CanalP
   return a.blanco || canalVacio()
 }
 
-/** ¿El canal tiene un plazo acordado? (sin plazo no se puede calcular cuándo se paga) */
-export const tienePlazo = (c: AcuerdoCanal) => c.dias !== null || !!c.cuotas
 
 /** Días de cada pago: [30] o [30, 60, 90]. Sin plazo acordado: [] */
 export function diasDePago(c: AcuerdoCanal): number[] {
@@ -132,7 +156,13 @@ export function diasDePago(c: AcuerdoCanal): number[] {
   return c.dias !== null ? [c.dias] : []
 }
 
-/** Medio del acuerdo → `vencimientos.forma_pago` (el CHECK solo admite efectivo / transferencia / cheque). */
+/**
+ * ÚNICO mapeo de medio del acuerdo → `vencimientos.forma_pago`. El CHECK de vencimientos solo
+ * admite efectivo / transferencia / cheque, así que el e-cheq va como 'cheque': es un cheque
+ * (tiene fecha de pago diferida y por eso lleva `fecha_validez` con el plazo del cheque, que es
+ * lo que el calendario necesita). Como 'transferencia' perdería esa fecha. Que sea electrónico
+ * queda en el acuerdo (medio = echeq) y se decide al armar el pago.
+ */
 export function formaPagoVencimiento(medio: MedioPago | null | undefined): "efectivo" | "transferencia" | "cheque" | null {
   if (medio === "transferencia") return "transferencia"
   if (medio === "efectivo") return "efectivo"

@@ -2,7 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { hoyISO, parseFecha } from '@/lib/formato';
-import { acuerdoDeProveedor, normalizarAcuerdo, textoCondicionPago } from '@/lib/compras/acuerdo-pago';
+import { acuerdoDeProveedorConLegado, normalizarAcuerdo, textoCondicionPago } from '@/lib/compras/acuerdo-pago';
 import { regimenDe } from '@/lib/compras/oc-totales';
 import { diasEntregaDeProveedor, errorDeFuncion, fechaEntregaEstimada, mensajeMigracionOC } from '@/lib/compras/orden-compra';
 
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
         // Acuerdo de pago: pantalla → orden actual → ficha del proveedor
         const acuerdo = normalizarAcuerdo(body.acuerdo_pago)
             ?? normalizarAcuerdo(ordenActual?.acuerdo_pago)
-            ?? acuerdoDeProveedor(proveedor);
+            ?? acuerdoDeProveedorConLegado(proveedor);
 
         // Para el texto de la condición: ¿la orden tiene parte con factura, sin factura, o las dos?
         const ids = [...new Set(items.map((i) => i.articulo_id))];

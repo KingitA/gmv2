@@ -5,7 +5,7 @@
  */
 import { redondear } from "@/lib/formato"
 import { unidadesPorBultoDe } from "@/lib/deposito/unidades"
-import { acuerdoDeProveedor, acuerdoDelCanal, normalizarAcuerdo, textoCanal, textoCondicionPago, type AcuerdoPago, type CanalPago } from "@/lib/compras/acuerdo-pago"
+import { acuerdoDeProveedorConLegado, acuerdoDelCanal, normalizarAcuerdo, textoCanal, textoCondicionPago, type AcuerdoPago, type CanalPago } from "@/lib/compras/acuerdo-pago"
 import { netoRenglon, precioNeto, regimenDe, totalesOC, unidadesRenglon, type RegimenCompra, type TotalesOC } from "@/lib/compras/oc-totales"
 import { ESTADOS_OC_ABIERTA, mailsParaOrden } from "@/lib/compras/orden-compra"
 
@@ -162,7 +162,7 @@ export async function cargarOrdenCompleta(supabase: any, ordenId: string): Promi
   })), p)
 
   const guardado = normalizarAcuerdo(o.acuerdo_pago)
-  const acuerdo = guardado ?? acuerdoDeProveedor(p)
+  const acuerdo = guardado ?? acuerdoDeProveedorConLegado(p)
   const hay = { blanco: totales.total_blanco > 0 || totales.total_negro <= 0, negro: totales.total_negro > 0 }
   const condiciones: OrdenCompleta["condiciones"] = []
   if (hay.blanco) condiciones.push({ canal: "blanco", texto: textoCanal(acuerdoDelCanal(acuerdo, "blanco")), total: totales.total_blanco })
@@ -170,13 +170,12 @@ export async function cargarOrdenCompleta(supabase: any, ordenId: string): Promi
 
   const recepciones = (recs.data || []).filter((r: any) => r.estado === "en_proceso" || r.estado === "finalizada").length
   const comprobantes = (comps.data || []).filter((c: any) => c.estado !== "esperada").length
-  const validados = (comps.data || []).filter((c: any) => c.estado === "validado" || c.estado === "cerrado").length
   const abierta = (ESTADOS_OC_ABIERTA as readonly string[]).includes(o.estado)
   let motivo: string | null = null
   if (o.estado === "cancelada") motivo = "La orden está cancelada."
   else if (!abierta) motivo = "La orden ya se recibió en depósito."
   else if (recepciones > 0) motivo = "La orden ya tiene una recepción en depósito."
-  else if (comprobantes > 0) motivo = `La orden tiene ${comprobantes} comprobante(s) cargado(s).`
+  else if (comprobantes > 0) motivo = `La orden tiene ${comprobantes} comprobante(s) cargado(s): no se puede editar ni cancelar. Para cambiarla, eliminá primero los comprobantes desde la verificación.`
 
   return {
     orden: {
@@ -223,8 +222,9 @@ export async function cargarOrdenCompleta(supabase: any, ordenId: string): Promi
     recepciones,
     comprobantes,
     puede: {
-      // editar se puede con comprobantes cargados mientras ninguno esté validado (misma regla que oc_guardar)
-      editar: abierta && recepciones === 0 && validados === 0,
+      // con un comprobante cargado (aunque no esté validado) no se edita ni se cancela: la factura
+      // que entra por mail ya convirtió la provisión en deuda (misma regla que oc_guardar / oc_cancelar)
+      editar: abierta && recepciones === 0 && comprobantes === 0,
       enviar: abierta,
       cancelar: abierta && recepciones === 0 && comprobantes === 0,
       motivo,

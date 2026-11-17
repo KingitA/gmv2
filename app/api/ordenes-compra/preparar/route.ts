@@ -2,7 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { hoyISO, parseFecha, sumarDiasISO } from '@/lib/formato';
-import { acuerdoDeProveedor } from '@/lib/compras/acuerdo-pago';
+import { acuerdoDeProveedorConLegado } from '@/lib/compras/acuerdo-pago';
 import { datosParaPedir, diasEntregaDeProveedor, fechaEntregaEstimada, idsArticulosDeProveedor, mailsParaOrden } from '@/lib/compras/orden-compra';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
                 percepcion_iibb: Number(proveedor.percepcion_iibb) || 0,
                 mails: mailsParaOrden(proveedor),
             },
-            acuerdo_pago: acuerdoDeProveedor(proveedor),
+            acuerdo_pago: acuerdoDeProveedorConLegado(proveedor),
             entrega: { ...entrega, fecha: fechaEntregaEstimada(entrega) },
             periodo: { desde: fechaDesde, hasta: fechaHasta, dias: diasPeriodo, tipo_venta: tipoVenta, dias_objetivo: diasObjetivo },
             articulos,

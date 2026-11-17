@@ -70,6 +70,9 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
   const { roles } = useMisRoles()
   const tipos = tiposVisibles(CATEGORIAS_GASTO, roles)
   const editando = !!venc
+  // Estimado que generó una orden de compra: sigue siendo estimado aunque se le toque el monto
+  // (se reemplaza solo por el vencimiento real cuando se valida la factura).
+  const esEstimadoDeOrden = !!venc?.es_estimado && ((venc as any)?.referencia_tipo === "orden_compra" || /^ESTIMADO OC-/.test(venc?.concepto || ""))
 
   const [tipo, setTipo] = useState(tipoInicial)
   const [proveedor, setProveedor] = useState<{ id: string; nombre: string } | null>(null)
@@ -275,7 +278,7 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
             <Campos cols={2}>
               <Campo label="Monto">
                 <InputMonto value={monto} placeholder="0,00"
-                  onChange={n => { setMonto(n); if (editando && estimado && venc?.es_estimado) setEstimado(false) }} />
+                  onChange={n => { setMonto(n); if (editando && estimado && venc?.es_estimado && !esEstimadoDeOrden) setEstimado(false) }} />
                 <p className="mt-1 text-[12px] text-neutro-500">
                   {montoNum !== null ? `= ${formatCurrency(montoNum)}` : "Formato: 1.500,50"}
                 </p>
