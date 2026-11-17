@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all';
 import { diasEntre, finDiaAR, inicioDiaAR } from '@/lib/formato';
+import { idsArticulosDeProveedor } from '@/lib/compras/orden-compra';
 
 // Trae TODAS las filas de kardex para una lista grande de articulo_ids:
 // parte los ids en tandas (URLs cortas) y pagina cada tanda (sin corte en 1000).
@@ -33,13 +34,10 @@ export async function GET(request: NextRequest) {
 
     const supabase = createAdminClient();
 
-    // 1. Get articulos associated with this provider
-    const articulosProveedor = await fetchAllRows(() => supabase
-        .from('articulos_proveedores')
-        .select('articulo_id')
-        .eq('proveedor_id', proveedor_id), 'articulo_id');
-
-    const articuloIds = articulosProveedor.map((a: any) => a.articulo_id);
+    // 1. Artículos del proveedor: UNA sola fuente (E-14) — los de su ficha + los vinculados.
+    //    Antes acá se miraba solo articulos_proveedores (18 filas) y la tabla de la orden solo
+    //    articulos.proveedor_id: la sugerencia y la tabla hablaban de artículos distintos.
+    const articuloIds = await idsArticulosDeProveedor(supabase, proveedor_id);
 
     if (articuloIds.length === 0) {
         return NextResponse.json({ items: [] });

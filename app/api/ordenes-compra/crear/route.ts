@@ -1,246 +1,153 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { insertarKardex } from '@/lib/kardex/insertar-kardex';
-import { nowArgentina } from '@/lib/utils';
-import { hoyISO, mediodiaAR, sumarDiasISO } from '@/lib/formato';
-import { aUnidadesBase, unidadesPorBultoDe } from '@/lib/deposito/unidades';
+import { hoyISO, parseFecha } from '@/lib/formato';
+import { acuerdoDeProveedor, normalizarAcuerdo, textoCondicionPago } from '@/lib/compras/acuerdo-pago';
+import { regimenDe } from '@/lib/compras/oc-totales';
+import { diasEntregaDeProveedor, errorDeFuncion, fechaEntregaEstimada, mensajeMigracionOC } from '@/lib/compras/orden-compra';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function calcularFechaEstimadaRecepcion(supabase: any, proveedorId: string): Promise<string> {
-    // Try AVG of actual receipt times for this provider
-    const { data: avg } = await supabase.rpc('calcular_avg_dias_recepcion', { p_proveedor_id: proveedorId }).single();
-    const avgDias = avg?.avg_dias;
-
-    if (avgDias && avgDias > 0) {
-        return sumarDiasISO(hoyISO(), Math.round(Number(avgDias)));
-    }
-
-    // Fallback: proveedor.dias_vencimiento
-    const { data: proveedor } = await supabase
-        .from('proveedores')
-        .select('dias_vencimiento')
-        .eq('id', proveedorId)
-        .single();
-
-    const dias = proveedor?.dias_vencimiento || 7;
-    return sumarDiasISO(hoyISO(), Number(dias));
-}
-
+/**
+ * POST /api/ordenes-compra/crear — crea o edita una orden de compra (E-07, E-08).
+ *
+ * Body: { orden_id?, proveedor_id, observaciones, fecha_estimada_recepcion?, acuerdo_pago?, clave?,
+ *         items: [{ articulo_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1..4 }] }
+ *
+ * Todo lo que escribe (número, cabecera, detalle, provisión en la cuenta corriente, vencimientos
+ * estimados, stock en camino) lo hace la función SQL `oc_guardar` en UNA transacción. Esta ruta
+ * solo prepara el pedido:
+ *   · fecha estimada de entrega: la que eligió el usuario o, si no vino, el promedio real del
+ *     proveedor (nunca más los días de pago, E-10);
+ *   · acuerdo de pago: el que vino de la pantalla o, si no vino (OC de faltantes, Jarvis), el de
+ *     la ficha del proveedor (E-04);
+ *   · NO pisa el precio de compra ni los descuentos del artículo (E-11): el costo lo actualiza
+ *     la factura validada.
+ * Las unidades por bulto, el régimen de IVA y las percepciones los lee la función de la base:
+ * nada de eso se le cree al navegador (E-13).
+ */
 export async function POST(request: NextRequest) {
     const auth = await requireAuth();
     if (auth.error) return auth.error;
 
     try {
-        const body = await request.json();
-        const { proveedor_id, observaciones } = body;
-        // items: Array<{ articulo_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1-4 }>
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Pedido inválido' }, { status: 400 });
 
-        if (!proveedor_id || !Array.isArray(body.items) || body.items.length === 0) {
-            return NextResponse.json({ error: 'proveedor_id e items son requeridos' }, { status: 400 });
-        }
+        const ordenId: string | null = typeof body.orden_id === 'string' && UUID.test(body.orden_id) ? body.orden_id : null;
+        const proveedorId: string | null = typeof body.proveedor_id === 'string' && UUID.test(body.proveedor_id) ? body.proveedor_id : null;
+        const itemsCrudos: any[] = Array.isArray(body.items) ? body.items : [];
 
-        const supabase = createAdminClient();
+        if (!ordenId && !proveedorId) return NextResponse.json({ error: 'Elegí el proveedor de la orden.' }, { status: 400 });
+        if (itemsCrudos.length === 0) return NextResponse.json({ error: 'La orden no tiene artículos con cantidad.' }, { status: 400 });
 
-        // ── E-13: nada de lo que define cantidades se le cree al navegador ──
-        // Antes las unidades por bulto venían en el pedido (`item.articulo.unidades_por_bulto`) y,
-        // si no venían (OC de faltantes, importación desde archivo), se tomaba 1: la provisión de
-        // la cuenta corriente y el kardex pendiente quedaban calculados como si cada bulto fuera
-        // una unidad. Ahora se leen de la base. Y un renglón sin artículo no llega al insert.
-        const sinArticulo = body.items.filter((it: any) => !it || typeof it.articulo_id !== 'string' || !UUID.test(it.articulo_id)).length;
+        // Mensajes claros antes de ir a la base (la función vuelve a controlar todo)
+        const sinArticulo = itemsCrudos.filter((it) => !it || typeof it.articulo_id !== 'string' || !UUID.test(it.articulo_id)).length;
         if (sinArticulo > 0) {
             return NextResponse.json({
-                error: `Hay ${sinArticulo} renglón${sinArticulo > 1 ? 'es' : ''} sin artículo vinculado. Vinculalos a un artículo del catálogo o sacalos de la orden antes de crearla.`,
+                error: `Hay ${sinArticulo} renglón${sinArticulo > 1 ? 'es' : ''} sin artículo vinculado. Vinculalos a un artículo del catálogo o sacalos de la orden antes de guardarla.`,
                 codigo: 'items_sin_articulo',
             }, { status: 400 });
         }
-        const cantidadInvalida = body.items.filter((it: any) => !(Number(it.cantidad_pedida) > 0)).length;
+        const cantidadInvalida = itemsCrudos.filter((it) => !(Number(it.cantidad_pedida) > 0)).length;
         if (cantidadInvalida > 0) {
             return NextResponse.json({ error: `Hay ${cantidadInvalida} renglón${cantidadInvalida > 1 ? 'es' : ''} con cantidad en cero o inválida.`, codigo: 'cantidad_invalida' }, { status: 400 });
         }
 
-        const idsArticulos: string[] = [...new Set<string>(body.items.map((it: any) => it.articulo_id))];
-        const artPorId = new Map<string, any>();
-        for (let i = 0; i < idsArticulos.length; i += 200) {
-            const { data: arts, error: artErr } = await supabase
-                .from('articulos')
-                .select('id, sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, unidades_por_bulto')
-                .in('id', idsArticulos.slice(i, i + 200));
-            if (artErr) throw new Error(artErr.message);
-            for (const a of arts || []) artPorId.set(a.id, a);
-        }
-        const inexistentes = idsArticulos.filter((id) => !artPorId.has(id)).length;
-        if (inexistentes > 0) {
-            return NextResponse.json({ error: `Hay ${inexistentes} artículo${inexistentes > 1 ? 's' : ''} de la orden que ya no existe${inexistentes > 1 ? 'n' : ''} en el catálogo.`, codigo: 'articulo_inexistente' }, { status: 400 });
-        }
-
-        // Renglones normalizados: tipo válido y unidades por bulto DE LA BASE
-        const items = body.items.map((it: any) => {
-            const tipo_cantidad = it.tipo_cantidad === 'unidad' ? 'unidad' : 'bulto';
-            const unidadesPorBulto = unidadesPorBultoDe(artPorId.get(it.articulo_id)?.unidades_por_bulto);
-            const cantidad_pedida = Number(it.cantidad_pedida);
-            return {
-                ...it,
-                cantidad_pedida,
-                tipo_cantidad,
-                precio_unitario: Number(it.precio_unitario) || 0,
-                /** Unidades base que representa el renglón (bultos × unidades por bulto) */
-                cantidadBase: aUnidadesBase(cantidad_pedida, tipo_cantidad === 'bulto' ? unidadesPorBulto : 1),
-            };
-        });
-
-        // 1. Generate OC number
-        const { data: ultimaOrden } = await supabase
-            .from('ordenes_compra')
-            .select('numero_orden')
-            .order('numero_orden', { ascending: false })
-            .limit(1);
-
-        const numeroOrden = ultimaOrden && ultimaOrden[0]
-            ? `OC-${String(Number.parseInt(ultimaOrden[0].numero_orden.split('-')[1]) + 1).padStart(6, '0')}`
-            : 'OC-000001';
-
-        // 2. Calculate estimated reception date
-        let fechaEstimada: string;
-        try {
-            fechaEstimada = await calcularFechaEstimadaRecepcion(supabase, proveedor_id);
-        } catch {
-            // If RPC doesn't exist yet, fallback to 7 days
-            fechaEstimada = sumarDiasISO(hoyISO(), 7);
-        }
-
-        // 3. Create OC
-        const { data: orden, error: errorOrden } = await supabase
-            .from('ordenes_compra')
-            .insert({
-                numero_orden: numeroOrden,
-                proveedor_id,
-                fecha_orden: nowArgentina(),
-                fecha_estimada_recepcion: fechaEstimada,
-                estado: 'pendiente',
-                observaciones: observaciones || null,
-                usuario_creador: auth.user.id,
-            })
-            .select()
-            .single();
-
-        if (errorOrden || !orden) throw new Error(errorOrden?.message || 'Error creando orden');
-
-        // 4. Create detalle
-        const detalleParaInsertar = items.map((item: any) => ({
-            orden_compra_id: orden.id,
-            articulo_id: item.articulo_id,
-            cantidad_pedida: item.cantidad_pedida,
-            tipo_cantidad: item.tipo_cantidad,
-            precio_unitario: item.precio_unitario,
-            descuento1: item.descuento1 || 0,
-            descuento2: item.descuento2 || 0,
-            descuento3: item.descuento3 || 0,
-            descuento4: item.descuento4 || 0,
+        const supabase = createAdminClient();
+        const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : 0; };
+        const items = itemsCrudos.map((it) => ({
+            articulo_id: String(it.articulo_id).toLowerCase(),
+            cantidad_pedida: Number(it.cantidad_pedida),
+            tipo_cantidad: it.tipo_cantidad === 'unidad' ? 'unidad' : 'bulto',
+            precio_unitario: num(it.precio_unitario),
+            descuento1: num(it.descuento1), descuento2: num(it.descuento2), descuento3: num(it.descuento3), descuento4: num(it.descuento4),
         }));
 
-        const { error: errorDetalle } = await supabase.from('ordenes_compra_detalle').insert(detalleParaInsertar);
-        if (errorDetalle) throw new Error(errorDetalle.message);
+        // Proveedor: el de la orden si se edita, el elegido si se crea
+        let provId = proveedorId;
+        let ordenActual: any = null;
+        if (ordenId) {
+            const { data, error } = await supabase.from('ordenes_compra').select('*').eq('id', ordenId).maybeSingle();
+            if (error) throw error;
+            if (!data) return NextResponse.json({ error: 'La orden no existe (puede que la hayan eliminado).' }, { status: 404 });
+            ordenActual = data;
+            provId = data.proveedor_id;
+        }
+        const { data: proveedor, error: provErr } = await supabase.from('proveedores').select('*').eq('id', provId).maybeSingle();
+        if (provErr) throw provErr;
+        if (!proveedor) return NextResponse.json({ error: 'El proveedor no existe.' }, { status: 400 });
 
-        // 5. Calculate total and create provisional CC entry
-        const totalOrden = items.reduce((sum: number, item: any) => {
-            const cantidadBase = item.cantidadBase;
-            let precio = item.precio_unitario || 0;
-            precio *= (1 - (item.descuento1 || 0) / 100);
-            precio *= (1 - (item.descuento2 || 0) / 100);
-            precio *= (1 - (item.descuento3 || 0) / 100);
-            precio *= (1 - (item.descuento4 || 0) / 100);
-            return sum + precio * cantidadBase;
-        }, 0);
-
-        // La provisión anticipa la deuda REAL: neto + IVA + percepciones del
-        // proveedor (misma fórmula que el desglose de comprobantes). Al validar
-        // la factura, la provisión se reemplaza por los comprobantes reales.
-        const { data: provPercep } = await supabase
-            .from('proveedores')
-            .select('percepcion_iva, percepcion_iibb, retencion_ganancias')
-            .eq('id', proveedor_id)
-            .maybeSingle();
-        const factorImpuestos = 1 + 0.21
-            + (Number(provPercep?.percepcion_iva) || 0) / 100
-            + (Number(provPercep?.percepcion_iibb) || 0) / 100
-            + (Number(provPercep?.retencion_ganancias) || 0) / 100;
-        const totalProvision = Math.round(totalOrden * factorImpuestos * 100) / 100;
-
-        await supabase.from('cuenta_corriente_proveedores').insert({
-            proveedor_id,
-            tipo_movimiento: 'orden_compra',
-            monto: totalProvision,
-            descripcion: `Provisión OC: ${numeroOrden} (neto ${Math.round(totalOrden * 100) / 100} + imp. estimados)`,
-            referencia_id: orden.id,
-            referencia_tipo: 'orden_compra',
-            fecha: nowArgentina(),
-        });
-
-        // 6. Insert kardex pendiente for each item + update articulos prices
-        for (const item of items) {
-            // Quantity in units (unidades por bulto leídas de la base, no del navegador)
-            const cantidadBase = item.cantidadBase;
-
-            let precioFinal = item.precio_unitario || 0;
-            precioFinal *= (1 - (item.descuento1 || 0) / 100);
-            precioFinal *= (1 - (item.descuento2 || 0) / 100);
-            precioFinal *= (1 - (item.descuento3 || 0) / 100);
-            precioFinal *= (1 - (item.descuento4 || 0) / 100);
-
-            // Article info for denormalization (ya leída arriba, una sola consulta)
-            const artInfo = artPorId.get(item.articulo_id);
-
-            await insertarKardex(
-                supabase,
-                {
-                    tipo_movimiento: 'compra',
-                    estado: 'pendiente',
-                    fecha: mediodiaAR(fechaEstimada), // timestamptz: 00 UTC caía el día anterior en Argentina
-                    articulo_id: item.articulo_id,
-                    cantidad: cantidadBase,
-                    precio_lista: item.precio_unitario || 0,
-                    precio_unitario_final: precioFinal,
-                    subtotal_neto: Math.round(precioFinal * cantidadBase * 100) / 100,
-                    subtotal_total: Math.round(precioFinal * cantidadBase * 100) / 100,
-                    proveedor_id,
-                    orden_compra_id: orden.id,
-                    descuento_proveedor_pct: item.descuento1 || null,
-                    descuento_proveedor_financiero_pct: item.descuento2 || null,
-                    descuento_proveedor_comercial_pct: item.descuento3 || null,
-                    comprador_id: auth.user.id,
-                    operador_id: auth.user.id,
-                },
-                {
-                    sku: artInfo?.sku,
-                    descripcion: artInfo?.descripcion,
-                    categoria: artInfo?.categoria,
-                    marca_id: artInfo?.marca_id,
-                    proveedor_id: artInfo?.proveedor_id,
-                    iva_compras: artInfo?.iva_compras,
-                    iva_ventas: artInfo?.iva_ventas,
-                }
-            );
-
-            // Update article prices
-            await supabase
-                .from('articulos')
-                .update({
-                    precio_compra: item.precio_unitario,
-                    descuento1: item.descuento1 || 0,
-                    descuento2: item.descuento2 || 0,
-                    descuento3: item.descuento3 || 0,
-                    descuento4: item.descuento4 || 0,
-                    actualizado_por: auth.user.id,
-                })
-                .eq('id', item.articulo_id);
+        // Fecha estimada de entrega
+        let fechaEstimada = parseFecha(body.fecha_estimada_recepcion);
+        if (fechaEstimada && fechaEstimada < hoyISO() && !ordenId) {
+            return NextResponse.json({ error: 'La fecha estimada de entrega no puede ser anterior a hoy.', codigo: 'fecha_pasada' }, { status: 400 });
+        }
+        if (!fechaEstimada) {
+            fechaEstimada = ordenActual?.fecha_estimada_recepcion
+                ? String(ordenActual.fecha_estimada_recepcion).slice(0, 10)
+                : fechaEntregaEstimada(await diasEntregaDeProveedor(supabase, provId!, proveedor));
         }
 
-        return NextResponse.json({ success: true, orden, numeroOrden, fechaEstimada });
+        // Acuerdo de pago: pantalla → orden actual → ficha del proveedor
+        const acuerdo = normalizarAcuerdo(body.acuerdo_pago)
+            ?? normalizarAcuerdo(ordenActual?.acuerdo_pago)
+            ?? acuerdoDeProveedor(proveedor);
 
+        // Para el texto de la condición: ¿la orden tiene parte con factura, sin factura, o las dos?
+        const ids = [...new Set(items.map((i) => i.articulo_id))];
+        const regimenes = new Set<string>();
+        for (let i = 0; i < ids.length; i += 200) {
+            const { data: arts, error } = await supabase.from('articulos').select('id, iva_compras').in('id', ids.slice(i, i + 200));
+            if (error) throw error;
+            for (const a of arts || []) regimenes.add(regimenDe(a.iva_compras));
+        }
+        const hay = {
+            blanco: regimenes.has('factura') || regimenes.has('mixto') || regimenes.size === 0,
+            negro: regimenes.has('adquisicion_stock') || regimenes.has('mixto'),
+        };
+
+        const { data: res, error } = await supabase.rpc('oc_guardar', {
+            p_orden_id: ordenId,
+            p_usuario_id: auth.user.id,
+            p_datos: {
+                proveedor_id: provId,
+                observaciones: typeof body.observaciones === 'string' ? body.observaciones : '',
+                fecha_estimada_recepcion: fechaEstimada,
+                condicion_pago: textoCondicionPago(acuerdo, hay),
+                acuerdo_pago: acuerdo,
+                clave: typeof body.clave === 'string' && UUID.test(body.clave) ? body.clave : null,
+                items,
+            },
+        });
+
+        if (error) {
+            const migracion = mensajeMigracionOC(error);
+            if (migracion) return NextResponse.json({ error: migracion, codigo: 'migracion_pendiente' }, { status: 503 });
+            const e = errorDeFuncion(error);
+            if (e.status === 500) console.error('[OC Guardar] Error:', error);
+            return NextResponse.json({ error: e.mensaje, codigo: e.codigo }, { status: e.status });
+        }
+
+        const r: any = res || {};
+        const { data: orden } = await supabase.from('ordenes_compra').select('*').eq('id', r.orden_id).maybeSingle();
+
+        return NextResponse.json({
+            success: true,
+            repetida: !!r.repetida,
+            editada: !!ordenId,
+            // nombres que ya usaban la pantalla y la verificación ("OC de faltantes")
+            orden, numeroOrden: r.numero_orden, fechaEstimada: orden?.fecha_estimada_recepcion ?? fechaEstimada,
+            totales: {
+                neto: r.total_neto, iva: r.total_iva, percepciones: r.total_percepciones,
+                total_blanco: r.total_blanco, total_negro: r.total_negro, total: r.total_estimado,
+            },
+            vencimientos_estimados: r.vencimientos_estimados ?? 0,
+        });
     } catch (error: any) {
-        console.error('[OC Crear] Error:', error);
-        return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+        const migracion = mensajeMigracionOC(error);
+        if (migracion) return NextResponse.json({ error: migracion, codigo: 'migracion_pendiente' }, { status: 503 });
+        console.error('[OC Guardar] Error:', error);
+        return NextResponse.json({ error: error.message || 'Error interno' }, { status: 500 });
     }
 }

@@ -1,0 +1,112 @@
+import { createAdminClient } from '@/lib/supabase/admin';
+import { NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth';
+import { faltaLaColumna } from '@/lib/utils/migracion-pendiente';
+import { MIGRACION_OC } from '@/lib/compras/orden-compra';
+import { totalesOC } from '@/lib/compras/oc-totales';
+
+const COLS_NUEVAS = 'id, numero_orden, proveedor_id, fecha_orden, fecha_estimada_recepcion, estado, observaciones, condicion_pago, usuario_creador, total_neto, total_estimado, cantidad_renglones, editada_at, enviada_at, enviada_a, envios, cancelada_at, motivo_cancelacion';
+const COLS_VIEJAS = 'id, numero_orden, proveedor_id, fecha_orden, fecha_estimada_recepcion, estado, observaciones, condicion_pago, usuario_creador';
+const COLS_PROVEEDOR = 'id, nombre, sigla, percepcion_iva, percepcion_iibb';
+
+/**
+ * GET /api/ordenes-compra/listado — el listado de órdenes, liviano (E-12, E-96).
+ *
+ * Antes la pantalla pedía `select *` de la orden + TODO el detalle de TODAS las órdenes con
+ * sus artículos + los comprobantes: ~7 segundos en blanco. Acá van solo las columnas que se
+ * muestran; el total viene guardado en la cabecera (lo calcula `oc_guardar`). Para las órdenes
+ * viejas, que no lo tienen, se calcula con el detalle de ESAS órdenes nada más.
+ */
+export async function GET() {
+    const auth = await requireAuth();
+    if (auth.error) return auth.error;
+
+    try {
+        const supabase = createAdminClient();
+        let migracionPendiente = false;
+
+        let { data: ordenes, error } = await supabase.from('ordenes_compra').select(COLS_NUEVAS)
+            .order('fecha_orden', { ascending: false }).limit(500);
+        if (error && faltaLaColumna(error)) {
+            migracionPendiente = true;
+            ({ data: ordenes, error } = await supabase.from('ordenes_compra').select(COLS_VIEJAS)
+                .order('fecha_orden', { ascending: false }).limit(500) as any);
+        }
+        if (error) throw error;
+        const lista: any[] = ordenes || [];
+
+        const provIds = [...new Set(lista.map((o) => o.proveedor_id).filter(Boolean))];
+        const userIds = [...new Set(lista.map((o) => o.usuario_creador).filter((u) => typeof u === 'string' && /^[0-9a-f-]{36}$/i.test(u)))];
+        const sinTotal = lista.filter((o) => o.total_estimado == null).map((o) => o.id);
+
+        const [provs, usuarios, detalle, comprobantes] = await Promise.all([
+            provIds.length ? supabase.from('proveedores').select(COLS_PROVEEDOR).in('id', provIds) : Promise.resolve({ data: [] as any[] }),
+            userIds.length ? supabase.from('usuarios').select('id, nombre').in('id', userIds) : Promise.resolve({ data: [] as any[] }),
+            sinTotal.length
+                ? supabase.from('ordenes_compra_detalle')
+                    .select('orden_compra_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4, articulo:articulos(unidades_por_bulto, iva_compras)')
+                    .in('orden_compra_id', sinTotal).limit(5000)
+                : Promise.resolve({ data: [] as any[] }),
+            lista.length ? supabase.from('comprobantes_compra').select('orden_compra_id, estado').in('orden_compra_id', lista.map((o) => o.id)).limit(5000) : Promise.resolve({ data: [] as any[] }),
+        ]);
+
+        const provPorId = new Map<string, any>((provs.data || []).map((p: any) => [p.id, p]));
+        const nombrePorUsuario = new Map<string, string>((usuarios.data || []).map((u: any) => [u.id, u.nombre]));
+        const detPorOrden = new Map<string, any[]>();
+        for (const d of (detalle.data || []) as any[]) {
+            const arr = detPorOrden.get(d.orden_compra_id) || [];
+            arr.push({ ...d, unidades_por_bulto: d.articulo?.unidades_por_bulto, iva_compras: d.articulo?.iva_compras });
+            detPorOrden.set(d.orden_compra_id, arr);
+        }
+        const compPorOrden = new Map<string, { total: number; validados: number }>();
+        for (const c of (comprobantes.data || []) as any[]) {
+            if (c.estado === 'esperada') continue;
+            const x = compPorOrden.get(c.orden_compra_id) || { total: 0, validados: 0 };
+            x.total++;
+            if (c.estado === 'validado' || c.estado === 'cerrado') x.validados++;
+            compPorOrden.set(c.orden_compra_id, x);
+        }
+
+        const filas = lista.map((o) => {
+            const prov = provPorId.get(o.proveedor_id);
+            let total = o.total_estimado != null ? Number(o.total_estimado) : null;
+            let neto = o.total_neto != null ? Number(o.total_neto) : null;
+            let renglones = o.cantidad_renglones ?? null;
+            if (total == null) {
+                const t = totalesOC(detPorOrden.get(o.id) || [], prov);
+                total = t.total; neto = t.neto; renglones = t.renglones;
+            }
+            const comp = compPorOrden.get(o.id) || { total: 0, validados: 0 };
+            return {
+                id: o.id,
+                numero_orden: o.numero_orden,
+                proveedor_id: o.proveedor_id,
+                proveedor_nombre: prov?.nombre ?? '—',
+                fecha_orden: o.fecha_orden,
+                fecha_estimada_recepcion: o.fecha_estimada_recepcion,
+                estado: o.estado,
+                observaciones: o.observaciones,
+                condicion_pago: o.condicion_pago,
+                creada_por: nombrePorUsuario.get(o.usuario_creador) ?? null,
+                total, neto, renglones,
+                enviada_at: o.enviada_at ?? null,
+                enviada_a: o.enviada_a ?? null,
+                envios: o.envios ?? 0,
+                // se cambió después de mandársela al proveedor: tiene una versión vieja
+                cambio_sin_enviar: !!(o.enviada_at && o.editada_at && new Date(o.editada_at).getTime() > new Date(o.enviada_at).getTime()),
+                cancelada_at: o.cancelada_at ?? null,
+                motivo_cancelacion: o.motivo_cancelacion ?? null,
+                comprobantes: comp.total,
+                comprobantes_validados: comp.validados,
+            };
+        });
+
+        return NextResponse.json({
+            ordenes: filas,
+            migracion_pendiente: migracionPendiente ? `Falta aplicar la migración ${MIGRACION_OC}: no se pueden crear, editar, cancelar ni enviar órdenes hasta entonces.` : null,
+        });
+    } catch (error: any) {
+        console.error('[OC Listado] Error:', error);
+        return NextResponse.json({ error: error.message || 'Error interno' }, { status: 500 });
+    }
+}
