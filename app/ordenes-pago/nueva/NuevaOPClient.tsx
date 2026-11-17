@@ -470,6 +470,24 @@ function NuevaOrdenPagoContent() {
         setImputaciones(prev => prev.map(i => i.vencimiento_id === vencId && !i.movimiento_cc_id ? { ...i, retiene_ganancias: retiene } : i))
     }
 
+    // E-55: pago parcial de un comprobante — se puede bajar el importe (nunca pasarse del saldo)
+    function cambiarMontoCC(movId: string, monto: number) {
+        setImputaciones(prev => prev.map(i => i.movimiento_cc_id === movId ? { ...i, monto_imputado: monto } : i))
+    }
+    // ¿La base ya guarda el saldo del vencimiento? (migración 20261117q). Sin ella, un pago
+    // parcial deja el vencimiento marcado como pagado entero, y la pantalla lo avisa.
+    const guardaSaldoVenc = vencimientosProv.length === 0 || vencimientosProv.some((v: any) => "monto_pagado" in v)
+    const FORMA_VENC: Record<string, string> = { efectivo: "Efectivo", transferencia: "Transferencia", cheque: "Cheque" }
+    const MODALIDAD_VENC: Record<string, string> = { deposito: "depósito", entrega: "entrega", grimar: "por Grimar" }
+    // Lo que distingue a dos vencimientos del mismo día e importe (E-99)
+    const detalleVenc = (v: any): string => [
+        v.forma_pago ? `${FORMA_VENC[v.forma_pago] ?? v.forma_pago}${v.modalidad ? ` (${MODALIDAD_VENC[v.modalidad] ?? v.modalidad})` : ""}` : "sin forma de pago",
+        v.fecha_validez ? `cheque válido hasta ${fmtFecha(String(v.fecha_validez).slice(0, 10))}` : null,
+        v.canal === "negro" ? "canal negro" : null,
+        v.observaciones ? String(v.observaciones).slice(0, 80) : null,
+    ].filter(Boolean).join(" · ")
+    const vencDeComprobante = (movId: string) => vencimientosProv.find((v: any) => movDeVenc(v) === movId)
+
     function cambiarMontoVenc(vencId: string, monto: number) {
         setImputaciones(prev => prev.map(i => i.vencimiento_id === vencId && !i.movimiento_cc_id ? { ...i, monto_imputado: monto } : i))
     }
@@ -682,6 +700,15 @@ function NuevaOrdenPagoContent() {
         if (imputaciones.some(i => i.vencimiento_id && !i.movimiento_cc_id && !(Number(i.monto_imputado) > 0))) {
             toast.warning("Hay un vencimiento tildado sin importe: escribí cuánto se paga o destildalo.")
             return false
+        }
+        for (const i of imputaciones) {
+            if (!i.movimiento_cc_id) continue
+            const comp = comprobantesCC.find((c: any) => c.id === i.movimiento_cc_id)
+            if (!(Number(i.monto_imputado) > 0)) { toast.warning(`El comprobante ${i.descripcion} está tildado sin importe: escribí cuánto se paga o destildalo.`); return false }
+            if (comp && Number(i.monto_imputado) > Number(comp.saldo_pendiente) + 0.01) {
+                toast.warning(`Al comprobante ${i.descripcion} le quedan ${formatCurrency(Number(comp.saldo_pendiente))} por pagar: no se puede pagar de más.`)
+                return false
+            }
         }
         if (!cuadra) {
             toast.warning(`No cuadra: imputado ${formatCurrency(totalImputado)} − retenciones ${formatCurrency(totalRetenciones)} = ${formatCurrency(netoObjetivo!)}, pero los medios suman ${formatCurrency(totalMedios)}`)
@@ -942,8 +969,26 @@ function NuevaOrdenPagoContent() {
                                                         {tomado && (
                                                             <span className="text-xs font-semibold text-amber-700 ml-2">ya está en la OP pendiente {tomado}</span>
                                                         )}
+                                                        {(() => {
+                                                            const vd = vencDeComprobante(c.id)
+                                                            return vd ? <p className="mt-0.5 text-xs text-muted-foreground">Vencimiento del {fmtFecha(vd.fecha_vencimiento)} · {detalleVenc(vd)}</p> : null
+                                                        })()}
                                                     </div>
-                                                    <span className="text-sm font-medium">{formatCurrency(c.saldo_pendiente)}</span>
+                                                    {sel ? (() => {
+                                                        const imp = imputaciones.find(i => i.movimiento_cc_id === c.id)!
+                                                        const parcial = Number(imp.monto_imputado) < Number(c.saldo_pendiente) - 0.01
+                                                        const pasado = Number(imp.monto_imputado) > Number(c.saldo_pendiente) + 0.01
+                                                        return (
+                                                            <span className="flex flex-col items-end gap-0.5" onClick={e => e.stopPropagation()}>
+                                                                <InputMonto className={`h-8 w-36 text-sm text-right ${pasado ? "border-red-500" : ""}`} soloPositivos value={imp.monto_imputado}
+                                                                    onChange={n => cambiarMontoCC(c.id, n ?? 0)} />
+                                                                {pasado && <span className="text-[11px] font-semibold text-red-600">supera el saldo de {formatCurrency(c.saldo_pendiente)}</span>}
+                                                                {parcial && <span className="text-[11px] font-semibold text-amber-700">pago parcial: quedan {formatCurrency(Number(c.saldo_pendiente) - Number(imp.monto_imputado))}</span>}
+                                                            </span>
+                                                        )
+                                                    })() : (
+                                                        <span className="text-sm font-medium">{formatCurrency(c.saldo_pendiente)}</span>
+                                                    )}
                                                 </div>
                                             )
                                         })}
@@ -984,8 +1029,18 @@ function NuevaOrdenPagoContent() {
                                                             <span className="text-xs font-semibold text-amber-700 ml-2">sin importe: se escribe al tildarlo</span>
                                                         )}
                                                         {distinto && (
-                                                            <span className="text-xs font-semibold text-amber-700 ml-2">el vencimiento es de {formatCurrency(Number(v.monto))}</span>
+                                                            <span className="text-xs font-semibold text-amber-700 ml-2">
+                                                                {Number(imp!.monto_imputado) > Number(v.monto)
+                                                                    ? `el vencimiento es de ${formatCurrency(Number(v.monto))}: la diferencia queda a cuenta`
+                                                                    : guardaSaldoVenc
+                                                                        ? `pago parcial: quedan ${formatCurrency(Number(v.monto) - Number(imp!.monto_imputado))} pendientes en el calendario`
+                                                                        : `el vencimiento es de ${formatCurrency(Number(v.monto))} y va a quedar como pagado entero`}
+                                                            </span>
                                                         )}
+                                                        <p className="mt-0.5 text-xs text-muted-foreground">
+                                                            {detalleVenc(v)}
+                                                            {Number(v.monto_pagado) > 0 && v.monto_original != null ? ` · ya se pagaron ${formatCurrency(Number(v.monto_pagado))} de ${formatCurrency(Number(v.monto_original))}` : ""}
+                                                        </p>
                                                     </div>
                                                     {sel ? (
                                                         <span onClick={e => e.stopPropagation()}>

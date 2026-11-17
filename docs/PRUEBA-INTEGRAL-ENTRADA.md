@@ -37,6 +37,15 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 5. Plazo de pago: depende del proveedor, desde la emisión de la factura o desde la recepción. Fuente única = `proveedores.pago_blanco_*` / `pago_negro_*` (ya tienen `*_desde` = `factura` | `recepcion`). `plazo_dias`, `plazo_desde`, `dias_vencimiento` y `condicion_pago` quedan como legado a retirar (E-06).
 6. Datos de proveedores: Juan completa `docs/entrada/proveedores-para-completar.xlsx` (sin commitear) y se importa. Hay que escribir el importador y agregar las columnas que falten (mail de OC, alias, titular, acepta cheques de terceros / e-cheq, exento y vencimiento del certificado, días de entrega).
 
+### Decisiones de Juan sobre pagos (16 y 17/11, textuales)
+
+- **Quién arma y confirma órdenes de pago:** «La orden la va a armar solo admin. Administrativo no tiene el poder de ejecutar un pago.»
+- **Pagar un importe distinto al del vencimiento:** «Se puede pagar mas, no hay problema. En este caso puede pasar como ajuste o como entrega a cuenta del proveedor.»
+- **Eliminar una orden pagada:** solo admin («Si, queda solo para admin»).
+- **Reportes de Playroom:** «Admin y administrativo».
+- **Retención al pagar un vencimiento cargado a mano:** «el sistema debe preguntarnos si corresponde retenerle, ya que un vencimiento cargado a mano puede ser un comprobante NO fiscal (adquisición de stock, un cheque rechazado) y a estos no corresponde retenerle. En caso de poner que SÍ retenemos, genera la misma. Si el proveedor es EXENTO nos lo debe aclarar un cartel que no se nos escape.» Base = importe ÷ 1,21 (17/11).
+- **Qué espera del pago (17/11):** ver los vencimientos y, según el tipo: transferencia → de qué banco sale; cheque de tercero → que el sistema sugiera con cuál pagar según monto, fecha, color y condiciones del proveedor; cheque propio físico → cuánto y cuándo hay que hacerlo; e-cheq → como transferencia; efectivo → cuánto separar y para quién. Y la cuenta corriente del proveedor sencilla, con pagos, retenciones y comprobantes.
+
 ### Respuestas de Juan a las dudas de la Tanda 0-A (16/11, textuales)
 
 7. **¿Un comprobante de proveedor sin orden de compra debe generar la deuda en cuenta corriente al validarse?** — «Si, debe crearla.» → **Hecho en `entrada-t0a-compras-recepcion`**: validar genera el movimiento de cuenta corriente con o sin OC; sin proveedor no valida.
@@ -108,7 +117,7 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 | ~~E-52~~ | ~~Imputar por vencimiento no baja la factura en cuenta corriente: queda pagable otra vez; doble imputación posible.~~ **Hecho (T0-B):** el vencimiento con comprobante se imputa contra su movimiento de cuenta corriente (`op_movimiento_de`); el cargado a mano se sigue pagando contra el vencimiento. No se puede tildar la misma deuda por dos caminos. Al vencimiento sin comprobante se le puede pagar un importe distinto al anotado (Juan, 16/11: la diferencia es ajuste o entrega a cuenta). | C |
 | ~~E-53~~ | ~~"Generar OP" desde el calendario no preselecciona nada.~~ **Hecho (T0-B):** llegan proveedor, vencimiento y monto; queda tildado y a la vista (la Nueva OP ahora lista también los vencimientos sin comprobante). | C |
 | ~~E-54~~ | ~~No se valida sobreimputación; dos OP sobre la misma factura confirman las dos.~~ **Hecho (T0-B):** `op_validar_imputaciones` al crear (cuenta otras OP pendientes) y al confirmar (`op_confirmar` v6, migración `20261116q`): error claro en vez de absorber. | C |
-| E-55 | Pago parcial marca el vencimiento entero como pagado (no hay saldo en el vencimiento). | C |
+| ~~E-55~~ | ~~Pago parcial marca el vencimiento entero como pagado (no hay saldo en el vencimiento).~~ **Hecho (T1-D):** importe editable por comprobante y por vencimiento en la Nueva OP. Pago parcial ⇒ el vencimiento sigue pendiente y su importe pasa a ser lo que falta (`monto_original` / `monto_pagado`); al completarse vuelve al importe original y queda pagado; anular devuelve todo. Migración `20261117q_op_pago_parcial.sql` (`op_confirmar` v7, `op_anular` v4). El calendario no se tocó: lee `monto` como siempre. | C |
 | E-56 | Dos fuentes de saldo (`comprobantes_compra.saldo_pendiente` e `imputaciones_proveedores`) que divergen; las NC quedan pendientes para siempre. | C |
 | E-57 | Ganancias: acumulado mensual con fechas cruzadas (fecha OP vs fecha de confirmación). | C |
 | E-58 | Comprobante sin OC: base de retención 0. | C |
@@ -153,7 +162,7 @@ Probado OK en pantalla: E-02 (sugerencia en bultos), E-30/E-40 (2 bultos × 24 �
 | E-96 | Lentitud: listado de OC ~7 s en blanco, verificación 12–35 s ("Ya casi está…"). | T1-A / T1-B |
 | E-97 | Tras eliminar un comprobante queda el aviso "2 ítems sin vincular". Columnas de NC esperada con encabezado `ESPERADA-1794…`. "Total facturado" resta NC sin IVA. Total OC $179.288,70 al crear vs $179.288,40 en verificación. Subtítulo "HO — Triple verificación". | T1-B |
 | E-98 | Kardex de compra sin `precio_costo` y `ultimo_costo` en 0 después de validar; quedan kardex `compra` pendientes con fecha futura (fecha estimada) además del de la recepción. | T1-B |
-| E-99 | El vencimiento que nace al validar no tiene forma de pago si el proveedor no tiene acuerdo cargado. Una OC finalizada queda sin acceso a la verificación. En Nueva OP dos vencimientos del mismo día e importe se ven idénticos (no muestra forma de pago). | T1-A / T1-D |
+| E-99 | El vencimiento que nace al validar no tiene forma de pago si el proveedor no tiene acuerdo cargado. Una OC finalizada queda sin acceso a la verificación. En Nueva OP dos vencimientos del mismo día e importe se ven idénticos (no muestra forma de pago). **T1-D hecho:** la Nueva OP muestra en cada vencimiento la forma de pago, modalidad, validez del cheque, canal y observaciones. | T1-A / T1-D |
 | E-100 | Una leyenda como "sin valor fiscal" en la factura hace que el OCR la clasifique como Adquisición (negro) y no lea neto/IVA. Pedir confirmación del tipo cuando hay CUIT + CAE + letra. | T2-B |
 | E-101 | Gemini sin crédito el 17/11 (402): OCR caído sin que nadie se entere. Falta un vigía/alerta de saldo o de fallas de OCR. | T2-B |
 
