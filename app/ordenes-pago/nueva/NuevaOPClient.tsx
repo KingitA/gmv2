@@ -55,6 +55,9 @@ interface Imputacion {
     descripcion: string
     // Solo vencimientos sin comprobante: ¿corresponde retener Ganancias? Sin contestar = undefined
     retiene_ganancias?: boolean
+    // Solo vencimientos sin comprobante pagados por menos: "con este pago queda cancelado"
+    // (la diferencia queda como descuento / ajuste, no como deuda pendiente). Juan, 17/11.
+    cancela_vencimiento?: boolean
 }
 
 // ── Etiquetas reales por tipo de comprobante ────────────────────────────────
@@ -486,6 +489,11 @@ function NuevaOrdenPagoContent() {
         v.canal === "negro" ? "canal negro" : null,
         v.observaciones ? String(v.observaciones).slice(0, 80) : null,
     ].filter(Boolean).join(" · ")
+    // ¿La base ya acepta "con este pago queda cancelado"? (migración 20261117s)
+    const aceptaCancelar = vencimientosProv.some((v: any) => "monto_ajuste" in v)
+    function marcarCancela(vencId: string, cancela: boolean) {
+        setImputaciones(prev => prev.map(i => i.vencimiento_id === vencId && !i.movimiento_cc_id ? { ...i, cancela_vencimiento: cancela } : i))
+    }
     const vencDeComprobante = (movId: string) => vencimientosProv.find((v: any) => movDeVenc(v) === movId)
 
     function cambiarMontoVenc(vencId: string, monto: number) {
@@ -755,7 +763,8 @@ function NuevaOrdenPagoContent() {
                         vencimiento_id: i.vencimiento_id || null,
                         comprobante_compra_id: i.comprobante_compra_id || null,
                         monto_imputado: i.monto_imputado,
-                        retiene_ganancias: i.retiene_ganancias ?? null
+                        retiene_ganancias: i.retiene_ganancias ?? null,
+                        cancela_vencimiento: i.cancela_vencimiento === true
                     }))
             }
             // Misma clave SOLO si es exactamente el mismo pedido (doble click o reintento
@@ -1032,6 +1041,8 @@ function NuevaOrdenPagoContent() {
                                                             <span className="text-xs font-semibold text-amber-700 ml-2">
                                                                 {Number(imp!.monto_imputado) > Number(v.monto)
                                                                     ? `el vencimiento es de ${formatCurrency(Number(v.monto))}: la diferencia queda a cuenta`
+                                                                    : imp!.cancela_vencimiento
+                                                                        ? `queda cancelado: ${formatCurrency(Number(v.monto) - Number(imp!.monto_imputado))} van como descuento`
                                                                     : guardaSaldoVenc
                                                                         ? `pago parcial: quedan ${formatCurrency(Number(v.monto) - Number(imp!.monto_imputado))} pendientes en el calendario`
                                                                         : `el vencimiento es de ${formatCurrency(Number(v.monto))} y va a quedar como pagado entero`}
@@ -1051,6 +1062,18 @@ function NuevaOrdenPagoContent() {
                                                         <span className="text-sm font-medium">{sinMonto ? "—" : formatCurrency(Number(v.monto))}</span>
                                                     )}
                                                 </div>
+                                                {sel && aceptaCancelar && Number(v.monto) > 0 && Number(imp!.monto_imputado) > 0 && Number(imp!.monto_imputado) < Number(v.monto) - 0.01 && (
+                                                    <label className="flex cursor-pointer flex-wrap items-center gap-2 border-t px-2 py-2 pl-9 text-sm">
+                                                        <input type="checkbox" className="h-4 w-4" checked={imp!.cancela_vencimiento === true}
+                                                            onChange={e => marcarCancela(v.id, e.target.checked)} />
+                                                        <span className="font-semibold text-slate-700">Con este pago queda cancelado</span>
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {imp!.cancela_vencimiento
+                                                                ? `El vencimiento queda pagado y ${formatCurrency(Number(v.monto) - Number(imp!.monto_imputado))} quedan como descuento / ajuste.`
+                                                                : `Sin marcar, quedan ${formatCurrency(Number(v.monto) - Number(imp!.monto_imputado))} pendientes en el calendario.`}
+                                                        </span>
+                                                    </label>
+                                                )}
                                                 {pregunta && (
                                                     <div className="flex flex-wrap items-center gap-2 border-t px-2 py-2 pl-9">
                                                         <span className={`text-sm font-semibold ${falta ? "text-red-700" : "text-slate-700"}`}>¿Corresponde retener Ganancias?</span>

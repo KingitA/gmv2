@@ -588,16 +588,25 @@ const pagosProveedores: Herramienta = {
     let provId: string | null = null
     if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); provId = pr.id; nombre = pr.nombre }
     const admin = await veReservados(ctx)
-    const data = await fetchAllRows<any>(() => {
-      let q = ctx.db.from("vencimientos").select("id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)")
+    // Con pago parcial por orden de pago, "monto" es LO QUE FALTA; el total del vencimiento
+    // queda en monto_original y lo ya pagado en monto_pagado (migración 20261117q). Si esas
+    // columnas todavía no existen, se sigue leyendo como antes.
+    const colsVenc = "id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)"
+    const traerVenc = (cols: string) => fetchAllRows<any>(() => {
+      let q = ctx.db.from("vencimientos").select(cols)
         .eq("estado", "pendiente").lte("fecha_vencimiento", hasta)
       if (!admin) q = q.not("tipo", "in", filtroReservados)
       return provId ? q.eq("proveedor_id", provId) : q
     }, "id")
+    let data: any[]
+    try { data = await traerVenc(`${colsVenc}, monto_original, monto_pagado`) } catch (e) { if (!faltaEnLaBase(e)) throw e; data = await traerVenc(colsVenc) }
     data.sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)))
     const filas = data.map((v: any) => ({
       fecha: fechaSola(v.fecha_vencimiento), proveedor: v.proveedores?.nombre ?? "—", concepto: v.concepto ?? v.tipo ?? null,
       monto: red(n0(v.monto)), atrasado: String(v.fecha_vencimiento) < ctx.hoy ? "sí" : "", estimado: v.es_estimado ? "sí" : "",
+      // Solo si ya recibió un pago parcial: "monto" es lo que falta de este total
+      importe_original: v.monto_original != null ? red(n0(v.monto_original)) : null,
+      ya_pagado: v.monto_original != null ? red(n0(v.monto_pagado)) : null,
     }))
     const atrasado = red(filas.filter((f) => f.atrasado).reduce((s, f) => s + f.monto, 0))
     const semana = red(filas.filter((f) => !f.atrasado && (f.fecha ?? "") <= sumarDiasISO(ctx.hoy, 7)).reduce((s, f) => s + f.monto, 0))

@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { InputMonto } from "@/components/ui/input-monto"
-import { fecha as fmtFecha, redondear } from "@/lib/formato"
+import { fecha as fmtFecha, moneda, redondear } from "@/lib/formato"
 import { Campo, Campos } from "@/components/ficha/ficha"
 import { CATEGORIAS_GASTO } from "@/lib/finanzas/categorias-gasto"
 import { tiposVisibles } from "@/lib/finanzas/tipos-reservados"
@@ -249,6 +249,18 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
         </div>
 
         <form id="form-vencimiento" onSubmit={guardar} className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">
+          {/* Pago parcial por orden de pago: el importe de abajo es lo que FALTA; acá queda a la vista el total */}
+          {editando && (venc as any)?.monto_original != null && Number((venc as any).monto_pagado) > 0 && (venc as any).estado === "pendiente" && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <b>Pago parcial:</b> este vencimiento era de {moneda(Number((venc as any).monto_original))} y ya se pagaron {moneda(Number((venc as any).monto_pagado))} por orden de pago.
+              El importe de abajo es lo que falta pagar.
+            </p>
+          )}
+          {editando && Number((venc as any)?.monto_ajuste) > 0 && (
+            <p className="rounded-md border px-3 py-2 text-sm text-muted-foreground">
+              Se pagaron {moneda(Number((venc as any).monto_pagado))} y se dio por cancelado: {moneda(Number((venc as any).monto_ajuste))} quedaron como descuento / ajuste.
+            </p>
+          )}
           <Bloque icono={Receipt} titulo="Qué se paga">
             <Campos cols={2}>
               <Campo label="Tipo">
