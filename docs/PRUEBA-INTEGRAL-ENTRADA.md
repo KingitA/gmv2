@@ -138,6 +138,27 @@ Cómo se hizo: lectura completa del código de cada tramo + consulta de solo lec
 | E-82 | Modelos viejos: `claude-sonnet-4-6` (mails, Excel), `claude-haiku-4-5`, `claude-opus-4-8`; Gemini 2.5 en 4 lugares. | C |
 | E-83 | Jarvis: deuda a proveedores calculada distinto según la tool; no hay período "últimos 12 meses"; tabla de precios sin `claude-fable-5-2`. | C |
 
+### F. Prueba en pantalla del 17/11 (producción + NuStar, OC-000011 de prueba)
+
+Probado OK en pantalla: E-02 (sugerencia en bultos), E-30/E-40 (2 bultos × 24 → +48 al stock, una vez), E-32 (validar bloquea renglones sin vincular; una sola deuda y un solo vencimiento), E-09 (estado `finalizada`), E-37 (OCR caído → documento "no leído", sin comprobante vacío), remito sin botón Validar ("Remito: controla cantidades"), retención en vencimiento a mano (pregunta Sí/No, base ÷ 1,21).
+
+| id | Problema visto en pantalla | Tanda |
+|---|---|---|
+| E-90 | **Resolver un faltante contra el proveedor resta stock que nunca entró**: recibidos 150 (stock 228), al resolver "Proveedor" por las 50 u facturadas de más el stock bajó a 178. | T1-B (urgente) |
+| E-91 | **NC esperada mal calculada**: usa precio de lista sin el descuento y sin IVA. Diferencia de precio real (1.450,00 − 1.415,05) × 48 = $1.677,60 neto; generó $2.097,12 = (1.812,50 − 1.768,81) × 48. Faltante 50 u × $556,83 = $27.841,50 neto; generó $34.802,00 = 50 × 696,04. | T1-B (urgente) |
+| E-92 | Un faltante figura como OK: recibido 3 de 4 bultos → verificación "OK" + cartel chico "Incompleto", "Artículos OK 2/2", OC `recibida_completa`, línea verde en la app. | T1-B / T1-C |
+| E-93 | App: Finalizar no pide confirmación ni muestra resumen aunque falte mercadería. Tocar un renglón no deja cargar cantidad (hay que ir a Buscar artículo). | T1-C |
+| E-94 | "Resolver diferencia" abre siempre en "mercadería" aunque la diferencia sea de precio, no muestra los precios ni el importe de la diferencia ni el impacto. | T1-B |
+| E-95 | Quedan `confirm()` nativos en verificación (eliminar comprobante, validar, finalizar). El error del OCR se muestra crudo en inglés y desaparece al recargar (el documento "no leído" no queda a la vista). | T1-B |
+| E-96 | Lentitud: listado de OC ~7 s en blanco, verificación 12–35 s ("Ya casi está…"). | T1-A / T1-B |
+| E-97 | Tras eliminar un comprobante queda el aviso "2 ítems sin vincular". Columnas de NC esperada con encabezado `ESPERADA-1794…`. "Total facturado" resta NC sin IVA. Total OC $179.288,70 al crear vs $179.288,40 en verificación. Subtítulo "HO — Triple verificación". | T1-B |
+| E-98 | Kardex de compra sin `precio_costo` y `ultimo_costo` en 0 después de validar; quedan kardex `compra` pendientes con fecha futura (fecha estimada) además del de la recepción. | T1-B |
+| E-99 | El vencimiento que nace al validar no tiene forma de pago si el proveedor no tiene acuerdo cargado. Una OC finalizada queda sin acceso a la verificación. En Nueva OP dos vencimientos del mismo día e importe se ven idénticos (no muestra forma de pago). | T1-A / T1-D |
+| E-100 | Una leyenda como "sin valor fiscal" en la factura hace que el OCR la clasifique como Adquisición (negro) y no lea neto/IVA. Pedir confirmación del tipo cuando hay CUIT + CAE + letra. | T2-B |
+| E-101 | Gemini sin crédito el 17/11 (402): OCR caído sin que nadie se entere. Falta un vigía/alerta de saldo o de fallas de OCR. | T2-B |
+
+Datos de prueba que quedaron: OC-000011, FA 0003-00045678 (validada), 2 NC esperadas, **vencimiento HORNAL $218.969,34 al 17/12/2026 (de prueba, en el calendario real)**, stock 190039 = 178 (debería ser 228).
+
 ## Plan por tandas
 
 **Tanda 0 — frenar daños (solo código, sin decisiones de negocio).** Dos agentes en paralelo, archivos disjuntos.
