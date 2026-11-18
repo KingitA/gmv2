@@ -518,6 +518,9 @@ export async function POST(
             if (!rpc.error) {
                 resultado = rpc.data as Resultado;
             } else if (faltaLaFuncion(rpc.error, 'comprobante_compra_validar')) {
+                // Con orden de compra no hay camino por partes: la provisión, el estimado y las cuotas
+                // se resuelven solo dentro de la función (una sola vez, en una transacción).
+                if (ocId) throw new Rechazo('Todavía no se puede validar un comprobante de una orden de compra: falta aplicar las migraciones de la tanda (20261117u y 20261118c). No se cambió nada.', 'falta_migracion', 409);
                 atomico = false;
                 resultado = await validarSinFuncion(supabase, comprobante, proveedorId, ocId, plan, auth.user.id);
             } else if (rpc.error.code === 'P0001') {
