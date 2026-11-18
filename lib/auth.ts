@@ -115,6 +115,8 @@ export const PERMISOS = {
   reportes_playroom: ["admin", "administrativo"],
   /** /admin/equipos: equipos de las apps, versión instalada y última publicada — solo admin (17/11/2026) */
   equipos_moviles: ["admin"],
+  /** Documentos de una recepción (fotos de remito / factura): subir, leer y borrar — depósito y oficina (18/11/2026) */
+  documentos_recepcion: ["admin", "administrativo", "deposito"],
 } as const satisfies Record<string, readonly string[]>
 
 export type Permiso = keyof typeof PERMISOS

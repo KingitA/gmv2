@@ -28,6 +28,7 @@ import {
   type ConformidadTransporte,
 } from "@/lib/deposito/recepciones"
 import { esUnidadConteo, type UnidadConteo } from "@/lib/deposito/unidades"
+import { guardarHojasDocumento, recepcionDeDocumento, validarEnvioDocumento, type EnvioDocumento } from "@/lib/deposito/documentos-recepcion"
 import type { FilaReplica } from "../contrato"
 import { cargarArticulosDeposito, cargarPedidosDeposito, cargarRecepcionDeposito } from "../sync/deposito"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
@@ -267,6 +268,35 @@ const recepcionCerrar: HandlerDef<{ orden_compra_id: string }> = {
   },
 }
 
+/**
+ * Documento de la recepción (foto de remito / factura, una o varias hojas, o un PDF). E-38.
+ * SOLO GUARDA: sube las hojas al bucket y deja UNA fila en recepciones_documentos, "pendiente de
+ * leer". NO llama a la lectura automática: así un documento no traba la fila del outbox (leer
+ * tarda hasta un minuto) ni se lee dos veces por un reintento. La lectura es aparte, con señal:
+ * POST /api/recepciones/[id]/ocr/leer (la dispara la app, o la oficina desde la verificación).
+ *
+ * Idempotente por `documento_local_id`: reenviar el mismo envío no crea otro documento ni
+ * duplica hojas. Un documento con muchas hojas viene en varios envíos (`parte` 0..`partes`-1)
+ * del MISMO documento. Se acepta también con la entrega ya finalizada: la foto de la factura
+ * suele sacarse después de contar.
+ */
+const recepcionDocumento: HandlerDef<EnvioDocumento> = {
+  tipo: "recepcion.documento",
+  roles: ROLES,
+  validar: (p) => validarEnvioDocumento(p),
+  async aplicar(ctx, m) {
+    // Antes de subir nada: ¿está la migración? ¿ya llegó otra parte de este documento? Todas las
+    // partes van a la recepción de la primera, aunque después se haya abierto otra tanda.
+    const previa = await recepcionDeDocumento(ctx.admin, m.payload.documento_local_id, m.payload.orden_compra_id)
+    if (!previa.ok) throw new RechazoNegocio(previa.mensaje, previa.codigo)
+    const recepcionId = previa.recepcion_id
+      ?? (await negocio(() => obtenerOCrearRecepcion(ctx.supabase, m.payload.orden_compra_id, ctx.sesion.user.id))).id
+    const r = await guardarHojasDocumento(ctx.admin, recepcionId, m.payload)
+    if (!r.ok) throw new RechazoNegocio(r.mensaje, r.codigo)
+    return { ...r.resultado, replica: [await parcheRecepcion(ctx, m.payload.orden_compra_id)] }
+  },
+}
+
 // ─── Devoluciones ────────────────────────────────────────────────────────────
 
 const devolucionRecibir: HandlerDef<{ devolucion_id: string; items_confirmados: ItemDevolucionConfirmado[] }> = {
@@ -495,6 +525,7 @@ export const HANDLERS_DEPOSITO: HandlerDef[] = [
   recepcionConformidad,
   recepcionItem,
   recepcionCerrar,
+  recepcionDocumento,
   devolucionRecibir,
   devolucionRevisar,
   stockAjustar,

@@ -93,8 +93,12 @@ export function inferirTipoComprobante(parsed: ParseResult, tipoDocumento?: stri
     return 'Adquisicion';
 }
 
+/**
+ * Lee un documento con Gemini. `file` puede ser UN archivo o VARIOS: varios son las hojas del
+ * MISMO comprobante, en orden (una factura de 3 hojas = una lectura, un comprobante). E-38.
+ */
 export async function processWithGemini(
-    file: File,
+    file: File | File[],
     context: {
         proveedorNombre?: string,
         tipoDocumento?: string
@@ -104,9 +108,14 @@ export async function processWithGemini(
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) throw new Error("Missing GEMINI_API_KEY");
 
-        const bytes = await file.arrayBuffer();
-        const base64 = Buffer.from(bytes).toString('base64');
-        const mimeType = file.type || 'image/jpeg';
+        const archivos = (Array.isArray(file) ? file : [file]).filter(Boolean);
+        if (archivos.length === 0) throw new Error("No hay ningún archivo para leer");
+        const hojas = await Promise.all(archivos.map(async (a) => ({
+            inlineData: { mimeType: a.type || 'image/jpeg', data: Buffer.from(await a.arrayBuffer()).toString('base64') },
+        })));
+        const variasHojas = hojas.length > 1
+            ? `\nATENCIÓN: recibís ${hojas.length} imágenes. Son las HOJAS DEL MISMO comprobante, en orden (hoja 1, hoja 2, …). Devolvé UN SOLO comprobante: el encabezado y los totales salen de donde figuren (los totales suelen estar en la última hoja) y "items" tiene los renglones de TODAS las hojas, en orden, sin repetir los que aparezcan dos veces por un "transporte" o "viene de hoja anterior".\n`
+            : '';
 
         const prompt = `Sos un asistente experto en procesamiento de documentos comerciales argentinos.
 
@@ -114,6 +123,7 @@ CONTEXTO:
 - Proveedor: ${context.proveedorNombre || "Desconocido"}
 - Tipo de documento: ${context.tipoDocumento || "Comprobante"}
 
+${variasHojas}
 TAREA:
 Extraé TODA la información del documento: encabezado del comprobante Y los ítems de detalle.
 Listá TODOS los renglones del detalle, sin saltear ninguno aunque se parezcan entre sí: un objeto por renglón, todos en la ÚNICA lista "items" (no repitas la clave "items" ni pongas renglones en otra parte del JSON). La suma de los importes de los renglones tiene que dar el subtotal del documento.
@@ -158,7 +168,7 @@ FORMATO JSON:
         const cuerpo = JSON.stringify({
             contents: [{
                 parts: [
-                    { inlineData: { mimeType, data: base64 } },
+                    ...hojas,
                     { text: prompt }
                 ]
             }],

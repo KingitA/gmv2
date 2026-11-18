@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { useNavigate, useParams } from "react-router"
-import { ErrorHttp, esQrOUrl, lecturaError, lecturaOk, useLector, useNoEnviados, useOnline, useOverlay, useRuntime } from "@gm/core"
+import { ErrorHttp, esQrOUrl, lecturaError, lecturaOk, useLector, useNoEnviados, useOnline, useOverlay, useRuntime, uuidv4 } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
 import { fecha, moneda, parseMonto } from "@gm/formato"
 import { aUnidadesBase, cant, cantidadConUnidad, textoCantidad, type UnidadConteo } from "@gm/deposito"
-import { comprimirFoto } from "@gm/cheques/foto"
+import { blobABase64, comprimirFoto } from "@gm/cheques/foto"
 import { DS } from "../../datasets"
 import { borrarBorradorBultos, faltaParaRegistrarBultos, guardarBorradorBultos, leerBorradorBultos } from "../../datos/borradorBultos"
 import { buscarPorCodigo, eansDe, padEan13 } from "../../datos/busqueda"
-import { lecturaDeDocumento, LIMITE_SUBIDA_BYTES, megas, revisarArchivo, type DocumentoRecepcion } from "../../datos/documentos"
+import { documentosEnCola, enviosDeDocumento, lecturaDeDocumento, LIMITE_BASE64_ENVIO, repartirEnEnvios, revisarArchivo, type DocumentoRecepcion, type HojaLocal } from "../../datos/documentos"
 import { useArticulos, useCatalogos, useEncolar, useRecepcion, useRecepciones, useRefrescarAlEntrar } from "../../datos/hooks"
 import { lineaIncompleta, resumenCierre, textoFalta, unidadesFaltantes, type LineaRecepcion, type RecepcionVista } from "../../datos/overlay"
 import { BarraProgreso, C, Contadores, dejarAviso, DESCRIPCION, Marco, META, Rechazos, SinEnviar, TarjetaSwipe, TITULO_GRUPO, useAvisoEntrante, useTecladoAbierto, useToast, useVolver, Vacio } from "../../ui"
@@ -439,11 +439,8 @@ export function Recepcion() {
     fondo: C.red, icono: "✕", etiqueta: "Faltante",
     onConfirmar: () => void contar(l.articulo_id, l.articulo?.descripcion ?? "artículo", 0).then(() => mostrar("Marcado como faltante")),
   })
-  const irDocumentos = () => {
-    if (!online) { mostrar("Las fotos y el OCR necesitan señal. Acercate al WiFi.", "err"); return }
-    if (!r.recepcionId) { mostrar("La recepción todavía se está enviando al servidor. Probá en unos segundos.", "err"); return }
-    navigate(`/recibir/${r.orden.id}/documentos`)
-  }
+  // Sin señal también: las fotos quedan en la cola del equipo y suben solas (E-38)
+  const irDocumentos = () => navigate(`/recibir/${r.orden.id}/documentos`)
 
   return (
     <Marco titulo="Recibir Mercadería" dataset={DATASET}>
@@ -456,7 +453,7 @@ export function Recepcion() {
             <div style={{ color: C.green, fontWeight: 600, fontSize: 13, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🏭 {r.orden.proveedores?.nombre}</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-            <button onClick={irDocumentos} style={{ background: "#eff6ff", border: "1.5px solid #bfdbfe", borderRadius: 14, padding: "8px 14px", minHeight: 44, display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: "#1d4ed8", opacity: online ? 1 : 0.5 }}>
+            <button onClick={irDocumentos} style={{ background: "#eff6ff", border: "1.5px solid #bfdbfe", borderRadius: 14, padding: "8px 14px", minHeight: 44, display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: "#1d4ed8" }}>
               📷 Documentos{r.documentos > 0 ? ` (${r.documentos})` : ""}
             </button>
             {s.faltantes > 0 && (
@@ -682,19 +679,36 @@ export function RecepcionFaltantes() {
   )
 }
 
-// ─── /recibir/:id/documentos — fotos, PDF y lo que leyó el sistema (ONLINE-ONLY, MOBILE.md §9) ───
+// ─── /recibir/:id/documentos — fotos y PDF de la entrega (E-38) ──────────────
+// Un documento = una o varias hojas (la factura de 3 hojas es UN comprobante). Se arma acá,
+// se guarda en la cola del equipo (outbox "recepcion.documento": anda SIN señal) y sube solo.
+// La lectura automática es aparte y necesita señal: la dispara esta pantalla cuando el
+// documento ya está en el servidor, y muestra lo que el sistema leyó.
 
 type Documento = DocumentoRecepcion
+const NOMBRE_TIPO: Record<string, string> = { remito: "Remito", factura: "Factura", foto: "Foto de respaldo" }
 
 /** Lo que el sistema leyó de un documento (o por qué no pudo), en castellano. */
-function LecturaDoc({ doc, destacado }: { doc: Documento; destacado?: boolean }) {
+function LecturaDoc({ doc, destacado, leyendo, onLeer }: { doc: Documento; destacado?: boolean; leyendo?: boolean; onLeer?: () => void }) {
   const l = lecturaDeDocumento(doc)
-  if (l.estado === "adjunto") return destacado ? <div style={{ fontSize: 14, color: C.sub, fontWeight: 600 }}>📎 Quedó adjunto (no se lee: es una foto de respaldo).</div> : null
-  if (l.estado === "no_leido") {
+  const caja = (fondo: string, borde: string) => ({ background: fondo, border: `1.5px solid ${borde}`, borderRadius: 12, padding: "8px 10px", marginTop: destacado ? 0 : 6 })
+  if (l.estado === "adjunto") return <div style={{ fontSize: 13, color: C.sub, fontWeight: 600, marginTop: 6 }}>📎 Foto de respaldo: quedó adjunta (no se lee).</div>
+  if (l.estado === "incompleto") return <div style={{ ...caja(C.yellowL, C.yellowB), color: C.yellow, fontWeight: 700, fontSize: 13 }}>⏳ {l.motivo}</div>
+  if (l.estado === "pendiente") {
     return (
-      <div style={{ background: C.redL, border: `1.5px solid ${C.redB}`, borderRadius: 12, padding: "8px 10px", marginTop: destacado ? 0 : 6 }}>
-        <div style={{ color: C.red, fontWeight: 800, fontSize: 13 }}>NO SE PUDO LEER</div>
+      <div style={{ ...caja("#eff6ff", "#bfdbfe"), display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ flex: 1, color: "#1d4ed8", fontWeight: 700, fontSize: 13 }}>{leyendo ? "⏳ Leyendo… puede tardar hasta un minuto" : "Subido. Falta leerlo."}</div>
+        {!leyendo && onLeer && <button onClick={onLeer} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 10, padding: "8px 12px", fontWeight: 800, fontSize: 13, minHeight: 40 }}>Leer ahora</button>}
+      </div>
+    )
+  }
+  if (l.estado === "no_leido" || l.estado === "duplicado") {
+    return (
+      <div style={caja(C.redL, C.redB)}>
+        <div style={{ color: C.red, fontWeight: 800, fontSize: 13 }}>{l.estado === "duplicado" ? "YA ESTABA CARGADO" : "NO SE PUDO LEER"}</div>
         <div style={{ color: C.text, fontSize: 13, lineHeight: 1.35, marginTop: 2 }}>{l.motivo}</div>
+        {l.estado === "no_leido" && onLeer && !leyendo && <button onClick={onLeer} style={{ marginTop: 6, background: C.white, color: C.text, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "8px 12px", fontWeight: 700, fontSize: 13, minHeight: 40 }}>Probar leerlo de nuevo</button>}
+        {leyendo && <div style={{ color: "#1d4ed8", fontWeight: 700, fontSize: 13, marginTop: 4 }}>⏳ Leyendo…</div>}
       </div>
     )
   }
@@ -705,7 +719,7 @@ function LecturaDoc({ doc, destacado }: { doc: Documento; destacado?: boolean })
     </div>
   )
   return (
-    <div style={{ background: C.greenL, border: `1.5px solid ${C.greenB}`, borderRadius: 12, padding: "8px 10px", marginTop: destacado ? 0 : 6 }}>
+    <div style={caja(C.greenL, C.greenB)}>
       <div style={{ color: C.green, fontWeight: 800, fontSize: 12, marginBottom: 4 }}>✓ EL SISTEMA LEYÓ</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px" }}>
         {dato("Tipo", l.tipo ?? "sin identificar", !l.tipo)}
@@ -721,141 +735,247 @@ function LecturaDoc({ doc, destacado }: { doc: Documento; destacado?: boolean })
 export function RecepcionDocumentos() {
   const { id } = useParams()
   const { recepcion: r, cargando } = useRecepcion(id)
-  const { api, sync } = useRuntime()
+  const { api, sync, outbox } = useRuntime()
+  const encolar = useEncolar()
   const online = useOnline()
+  const ops = useNoEnviados()
   const { toast, mostrar } = useToast()
   const [docs, setDocs] = useState<Documento[] | null>(null)
-  const [tipo, setTipo] = useState<"remito" | "factura" | "foto">("remito")
-  const [subiendo, setSubiendo] = useState<string | null>(null)
-  // El último documento subido, para mostrarle al operario enseguida qué leyó el sistema
-  const [ultimo, setUltimo] = useState<Documento | null>(null)
+  const [tipo, setTipo] = useState<"remito" | "factura" | "foto">("factura")
+  // Documento que se está armando: sus hojas viven en memoria hasta tocar "Subir"
+  const [hojas, setHojas] = useState<HojaLocal[]>([])
+  const [ocupado, setOcupado] = useState<string | null>(null)
+  const [leyendo, setLeyendo] = useState<string | null>(null)
+  const intentados = useRef(new Set<string>())
   const camaraRef = useRef<HTMLInputElement>(null)
   const archivoRef = useRef<HTMLInputElement>(null)
-  const recepcionId = r?.recepcionId ?? null
   const ordenId = r?.orden.id
+  const enCola = useMemo(() => (ordenId ? documentosEnCola(ops, ordenId) : []), [ops, ordenId])
+  // cada vez que la cola de documentos cambia (subió uno), se vuelve a pedir la lista al servidor
+  const huellaCola = enCola.map((d) => `${d.documento_local_id}:${d.estado}:${d.claves.length}`).join("|")
+
+  const cargarDocs = useCallback(async () => {
+    if (!ordenId) return null
+    try {
+      const rec = await api.post<{ id?: string; recepciones_documentos?: Documento[] }>("/api/deposito/recepciones", { orden_compra_id: ordenId })
+      const lista = (rec.recepciones_documentos || []).filter(Boolean)
+      setDocs(lista)
+      return { recepcionId: rec.id ?? null, lista }
+    } catch {
+      return null
+    }
+  }, [api, ordenId])
 
   useEffect(() => {
-    if (!ordenId || !online) return
-    let vivo = true
-    api.post<{ recepciones_documentos?: Documento[] }>("/api/deposito/recepciones", { orden_compra_id: ordenId })
-      .then((rec) => vivo && setDocs((rec.recepciones_documentos || []).filter(Boolean)))
-      .catch(() => vivo && mostrar("No se pudieron cargar los documentos", "err"))
-    return () => { vivo = false }
-  }, [api, ordenId, online, mostrar])
+    if (!online) return
+    void cargarDocs()
+  }, [online, cargarDocs, huellaCola])
+
+  const recepcionId = r?.recepcionId ?? null
+
+  /** Pide la lectura de un documento ya subido. Idempotente en el servidor: tocar dos veces no duplica. */
+  const leer = useCallback(async (doc: Documento, avisar: boolean) => {
+    if (!recepcionId || leyendo) return
+    setLeyendo(doc.id)
+    try {
+      const data = await api.post<{ document?: Documento; aviso?: string; en_curso?: boolean }>(`/api/recepciones/${recepcionId}/ocr/leer`, { document_id: doc.id }, { timeoutMs: 310_000 })
+      if (data.document) setDocs((p) => (p || []).map((d) => (d.id === doc.id ? data.document! : d)))
+      const l = data.document ? lecturaDeDocumento(data.document) : null
+      if (data.en_curso) mostrar("Ya se está leyendo: esperá un momento")
+      else if (l?.estado === "leido") mostrar(`✓ Leído: ${l.renglones} renglón${l.renglones === 1 ? "" : "es"}`)
+      else if (l?.estado === "no_leido") mostrar("No se pudo leer: mirá el detalle", "err")
+      void sync.dataset(DATASET)
+    } catch (e) {
+      // 409: factura repetida o faltan hojas (el servidor manda el documento actualizado)
+      const cuerpo = e instanceof ErrorHttp ? (e.body as { document?: Documento } | null | undefined) : undefined
+      if (cuerpo?.document) setDocs((p) => (p || []).map((d) => (d.id === doc.id ? cuerpo.document! : d)))
+      else void cargarDocs()
+      if (avisar || e instanceof ErrorHttp) mostrar(e instanceof ErrorHttp ? e.message : "Sin señal: no se pudo leer. Probá de nuevo cerca del WiFi.", "err")
+    } finally {
+      setLeyendo(null)
+    }
+  }, [api, recepcionId, leyendo, mostrar, sync, cargarDocs])
+
+  // Con señal, lo que subió y falta leer se lee solo (una vez por documento en esta pantalla)
+  useEffect(() => {
+    if (!online || !recepcionId || leyendo || !docs) return
+    const pendiente = docs.find((d) => lecturaDeDocumento(d).estado === "pendiente" && d.lectura_estado === "pendiente" && !intentados.current.has(d.id))
+    if (!pendiente) return
+    intentados.current.add(pendiente.id)
+    void leer(pendiente, false)
+  }, [online, recepcionId, leyendo, docs, leer])
 
   if (!r) return <Marco titulo="Documentos">{toast}<OrdenNoDisponible cargando={cargando} /></Marco>
 
-  const subir = async (original: File) => {
-    if (!recepcionId || subiendo) return
+  const agregarHoja = async (original: File) => {
+    if (ocupado) return
     const revision = revisarArchivo(original)
     if (!revision.ok) { mostrar(revision.motivo, "err"); return }
-    setUltimo(null)
+    if (revision.esPdf && hojas.length > 0) { mostrar("Terminá de subir las fotos de este documento antes de elegir un PDF.", "err"); return }
+    if (!revision.esPdf && hojas.some((h) => h.mime === "application/pdf")) { mostrar("Este documento ya es un PDF: subilo y después sacá las fotos como otro documento.", "err"); return }
+    setOcupado(revision.esImagen ? "Achicando la foto…" : "Preparando el archivo…")
     try {
-      // Las fotos se achican ANTES de viajar: la cámara saca 3–6 MB y el servidor corta en 4,5 MB
-      let file = original
+      // Las fotos se achican ANTES de guardarse: la cámara saca 3–6 MB
+      let blob: Blob = original
+      let nombre = original.name || "documento"
+      let mime = original.type || (revision.esPdf ? "application/pdf" : "image/jpeg")
       if (revision.esImagen) {
-        setSubiendo("Achicando la foto…")
-        const c = await comprimirFoto(original, { maxLado: 2000, calidad: 0.78 })
-        file = new File([c.blob], c.nombre, { type: c.mime })
+        let c = await comprimirFoto(original, { maxLado: 2000, calidad: 0.78 })
+        // una hoja sola no puede pasar el tope de un envío: segundo intento más chico
+        if (c.blob.size * 1.37 > LIMITE_BASE64_ENVIO) c = await comprimirFoto(original, { maxLado: 1500, calidad: 0.6 })
+        blob = c.blob; nombre = c.nombre; mime = c.mime
       }
-      if (file.size > LIMITE_SUBIDA_BYTES) {
-        mostrar(`El archivo pesa ${megas(file.size)} y el máximo es ${megas(LIMITE_SUBIDA_BYTES)}. ${revision.esPdf ? "Sacale fotos a las hojas en vez de subir el PDF." : "Sacá la foto de nuevo."}`, "err")
+      const base64 = await blobABase64(blob)
+      if (base64.length > LIMITE_BASE64_ENVIO) {
+        mostrar(revision.esPdf ? "El PDF pesa demasiado para enviarse desde el equipo. Sacale fotos a las hojas." : "La foto pesa demasiado. Sacala de nuevo.", "err")
         return
       }
-      setSubiendo(tipo === "foto" ? "Subiendo…" : "Subiendo y leyendo…")
-      const fd = new FormData()
-      fd.append("file", file)
-      fd.append("tipo_documento", tipo)
-      const data = await api.postForm<{ document: Documento; ocr_processing_results?: unknown[]; no_leido?: boolean; aviso?: string }>(`/api/recepciones/${recepcionId}/ocr`, fd)
-      setDocs((p) => [...(p || []), data.document])
-      setUltimo(data.document)
-      const l = lecturaDeDocumento(data.document)
-      // Un comprobante que ya estaba cargado llega como error (409) y lo muestra el catch.
-      if (l.estado === "no_leido") mostrar("No se pudo leer: mirá el detalle arriba", "err")
-      else if (l.estado === "leido") mostrar(`✓ Leído: ${l.renglones} renglón${l.renglones === 1 ? "" : "es"}`)
-      else mostrar("📎 Adjuntado")
-      void sync.dataset(DATASET)
-    } catch (e) {
-      mostrar(e instanceof ErrorHttp ? e.message : "Sin señal: el archivo no se subió. Probá de nuevo cerca del WiFi.", "err")
+      setHojas((p) => [...p, { id: uuidv4(), nombre: revision.esPdf ? nombre : `hoja-${p.length + 1}.jpg`, mime, base64 }])
+    } catch {
+      mostrar("No se pudo preparar el archivo. Probá de nuevo.", "err")
     } finally {
-      setSubiendo(null)
+      setOcupado(null)
     }
+  }
+  const elegido = (e: ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void agregarHoja(f) }
+
+  /** Guarda el documento armado en la cola del equipo: con o sin señal, sube solo. */
+  const subirDocumento = async () => {
+    if (!ordenId || ocupado || hojas.length === 0) return
+    const reparto = repartirEnEnvios(hojas)
+    if (!reparto.ok) { mostrar(reparto.motivo, "err"); return }
+    setOcupado("Guardando el documento…")
+    try {
+      const envios = enviosDeDocumento({ orden_compra_id: ordenId, documento_local_id: uuidv4(), tipo_documento: tipo, grupos: reparto.grupos })
+      const que = `${NOMBRE_TIPO[tipo]} (${hojas.length} hoja${hojas.length === 1 ? "" : "s"})`
+      for (const e of envios) {
+        await encolar("recepcion.documento", e, `Recepción ${r.orden.numero_orden}: ${que}${envios.length > 1 ? ` — parte ${e.parte + 1} de ${envios.length}` : ""}`)
+      }
+      setHojas([])
+      mostrar(envios.length > 1
+        ? `Son muchas hojas: se envían en ${envios.length} partes, como UN solo documento`
+        : online ? "Guardado: se está subiendo" : "Guardado en el equipo: sube solo cuando haya señal")
+    } catch {
+      mostrar("No se pudo guardar el documento en el equipo. Probá de nuevo.", "err")
+    } finally {
+      setOcupado(null)
+    }
+  }
+
+  const quitarDeCola = async (claves: string[]) => {
+    let quitadas = 0
+    for (const k of claves) if (await outbox.retirar(k).catch(() => null)) quitadas++
+    mostrar(quitadas > 0 ? "Documento quitado de la cola" : "Ya se estaba enviando: no se pudo quitar", quitadas > 0 ? "ok" : "err")
   }
   const eliminar = async (docId: string) => {
     if (!recepcionId) return
     try {
       await api.delete(`/api/recepciones/${recepcionId}/ocr`, { document_id: docId })
       setDocs((p) => (p || []).filter((d) => d.id !== docId))
-      setUltimo((u) => (u?.id === docId ? null : u))
       mostrar("Documento eliminado")
       void sync.dataset(DATASET)
     } catch (e) {
       mostrar(e instanceof ErrorHttp ? e.message : "No se pudo eliminar: sin señal", "err")
     }
   }
-  const elegido = (e: ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void subir(f) }
 
-  const habilitado = online && !!recepcionId
-  const ocupado = !habilitado || !!subiendo
+  const esPdfBorrador = hojas.some((h) => h.mime === "application/pdf")
   const boton = { border: "none", borderRadius: 14, padding: "10px 14px", minHeight: 52, fontSize: 15, fontWeight: 800, opacity: ocupado ? 0.5 : 1 } as const
   return (
     <Marco titulo="Documentos">
       {toast}
       <div style={{ padding: "16px 14px" }}>
-        {!habilitado && (
-          <div style={{ background: C.yellowL, border: `1px solid ${C.yellowB}`, borderRadius: 14, padding: 14, color: C.yellow, fontWeight: 600, fontSize: 14, marginBottom: 14 }}>
-            {online ? "La recepción todavía se está enviando al servidor. Probá en unos segundos." : "Sin señal: las fotos y la lectura necesitan conexión. Seguí contando y sacá las fotos cuando vuelvas a tener WiFi."}
+        {!online && (
+          <div style={{ background: C.yellowL, border: `1px solid ${C.yellowB}`, borderRadius: 14, padding: 12, color: C.yellow, fontWeight: 600, fontSize: 14, marginBottom: 12 }}>
+            Sin señal: sacá las fotos igual. Quedan guardadas en el equipo y suben solas; el sistema las lee cuando vuelva la conexión.
           </div>
         )}
         <input ref={camaraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={elegido} />
         <input ref={archivoRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={elegido} />
-        <div style={{ marginBottom: 10 }}>
+
+        {/* ── Documento nuevo ── */}
+        <div style={{ background: C.white, border: `1.5px solid ${hojas.length > 0 ? C.greenB : C.border}`, borderRadius: 18, padding: 14, marginBottom: 14 }}>
           <div style={{ color: C.sub, fontSize: 13, fontWeight: 600, marginBottom: 4 }}>¿Qué vas a subir?</div>
-          <select value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)} style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 12, padding: "10px 12px", fontSize: 16, color: C.text, fontWeight: 700, width: "100%", minHeight: 50 }}>
-            <option value="remito">Remito (controla cantidades)</option>
+          <select value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)} disabled={!!ocupado} style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 12, padding: "10px 12px", fontSize: 16, color: C.text, fontWeight: 700, width: "100%", minHeight: 50, marginBottom: 10 }}>
             <option value="factura">Factura (cantidades y precios)</option>
+            <option value="remito">Remito (controla cantidades)</option>
             <option value="foto">Foto de respaldo (no se lee)</option>
           </select>
+
+          {hojas.length === 0 ? (
+            <>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => camaraRef.current?.click()} disabled={!!ocupado} style={{ ...boton, flex: 1.3, background: C.green, color: "#fff" }}>📷 Sacar foto</button>
+                <button onClick={() => archivoRef.current?.click()} disabled={!!ocupado} style={{ ...boton, flex: 1, background: C.white, color: C.text, border: `1.5px solid ${C.border}` }}>📄 PDF o archivo</button>
+              </div>
+              <div style={{ color: C.sub, fontSize: 13, marginTop: 8, lineHeight: 1.35 }}>Si tiene varias hojas, sacalas todas antes de subir: van como <b>un solo comprobante</b>.</div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 6 }}>{NOMBRE_TIPO[tipo]}: {hojas.length} hoja{hojas.length === 1 ? "" : "s"} lista{hojas.length === 1 ? "" : "s"}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                {hojas.map((h, i) => (
+                  <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 6, background: C.greenL, border: `1.5px solid ${C.greenB}`, borderRadius: 12, padding: "4px 4px 4px 10px" }}>
+                    <span style={{ fontWeight: 800, fontSize: 14, color: C.green }}>{h.mime === "application/pdf" ? "PDF" : `Hoja ${i + 1}`}</span>
+                    <button onClick={() => setHojas((p) => p.filter((x) => x.id !== h.id))} disabled={!!ocupado} aria-label={`Quitar la hoja ${i + 1}`} style={{ width: 40, height: 40, borderRadius: 10, border: "none", background: "transparent", fontSize: 16 }}>🗑️</button>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {!esPdfBorrador && <button onClick={() => camaraRef.current?.click()} disabled={!!ocupado} style={{ ...boton, flex: 1, background: C.white, color: C.text, border: `1.5px solid ${C.border}` }}>📷 Otra hoja</button>}
+                <button onClick={() => void subirDocumento()} disabled={!!ocupado} style={{ ...boton, flex: 1.4, background: C.green, color: "#fff" }}>⬆ Subir ({hojas.length} hoja{hojas.length === 1 ? "" : "s"})</button>
+              </div>
+              <div style={{ color: C.orange, fontSize: 13, fontWeight: 700, marginTop: 8 }}>Todavía no se guardó: tocá “Subir” antes de salir de esta pantalla.</div>
+            </>
+          )}
+          {ocupado && <div style={{ color: "#1d4ed8", fontWeight: 700, fontSize: 14, marginTop: 8 }}>⏳ {ocupado}</div>}
         </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <button onClick={() => camaraRef.current?.click()} disabled={ocupado} style={{ ...boton, flex: 1.3, background: C.green, color: "#fff" }}>📷 Sacar foto</button>
-          <button onClick={() => archivoRef.current?.click()} disabled={ocupado} style={{ ...boton, flex: 1, background: C.white, color: C.text, border: `1.5px solid ${C.border}` }}>📄 PDF o archivo</button>
-        </div>
-        {subiendo && (
-          <div style={{ background: "#eff6ff", border: "1.5px solid #bfdbfe", borderRadius: 14, padding: 14, color: "#1d4ed8", fontWeight: 700, fontSize: 15, marginBottom: 14 }}>
-            ⏳ {subiendo} <span style={{ fontWeight: 500 }}>No cierres esta pantalla: leer una factura puede tardar hasta un minuto.</span>
-          </div>
-        )}
-        {ultimo && !subiendo && (
+
+        {/* ── En la cola del equipo ── */}
+        {enCola.length > 0 && (
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 13, color: C.sub, fontWeight: 700, marginBottom: 4 }}>Recién subido: {ultimo.nombre_archivo || ultimo.tipo_documento}</div>
-            <LecturaDoc doc={ultimo} destacado />
+            <div style={TITULO_GRUPO}>En el equipo, sin subir ({enCola.length})</div>
+            {enCola.map((d) => (
+              <div key={d.documento_local_id} style={{ background: d.estado === "rechazado" ? C.redL : C.yellowL, border: `1.5px solid ${d.estado === "rechazado" ? C.redB : C.yellowB}`, borderRadius: 14, padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: C.text }}>{NOMBRE_TIPO[d.tipo_documento] ?? d.tipo_documento} · {d.hojas} hoja{d.hojas === 1 ? "" : "s"}</div>
+                  <div style={{ fontSize: 13, color: d.estado === "rechazado" ? C.red : C.yellow, fontWeight: 600, lineHeight: 1.3 }}>
+                    {d.estado === "rechazado" ? `No se pudo subir: ${d.error || "el servidor lo rechazó"}` : d.estado === "enviando" ? "Subiendo…" : online ? "En cola: sube en unos segundos" : "Esperando señal: sube solo"}
+                  </div>
+                </div>
+                {d.estado !== "enviando" && <button onClick={() => void quitarDeCola(d.claves)} aria-label="Quitar de la cola" style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 10, minWidth: 44, minHeight: 44, fontSize: 16 }}>🗑️</button>}
+              </div>
+            ))}
           </div>
         )}
-        {docs && docs.length === 0 && (
-          <div style={{ textAlign: "center", padding: "40px 0", color: C.light }}>
-            <div style={{ fontSize: 48 }}>📎</div>
-            <div style={{ fontSize: 15, marginTop: 10 }}>No hay documentos adjuntos</div>
-            <div style={{ fontSize: 13, marginTop: 6 }}>Sacale una foto a la factura o al remito, o subí el PDF</div>
+
+        {/* ── Ya subidos ── */}
+        {online && docs && docs.length === 0 && enCola.length === 0 && (
+          <div style={{ textAlign: "center", padding: "30px 0", color: C.light }}>
+            <div style={{ fontSize: 44 }}>📎</div>
+            <div style={{ fontSize: 15, marginTop: 8 }}>No hay documentos de esta entrega</div>
           </div>
         )}
+        {!online && <div style={{ color: C.light, fontSize: 13, textAlign: "center", padding: "6px 0 12px" }}>Los documentos ya subidos se ven cuando vuelva la señal.</div>}
+        {(docs || []).length > 0 && <div style={TITULO_GRUPO}>Subidos ({(docs || []).length})</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {(docs || []).map((doc) => {
             const esPdf = (doc.tipo_mime || "").includes("pdf") || (doc.nombre_archivo || "").toLowerCase().endsWith(".pdf") || (doc.url_imagen || "").includes(".pdf")
+            const cuantas = Array.isArray(doc.hojas) ? doc.hojas.length : 1
             return (
               <div key={doc.id} style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 18, padding: "12px 14px" }}>
                 <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                   <div style={{ fontSize: 30 }}>{esPdf ? "📄" : "🖼️"}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.nombre_archivo || doc.tipo_documento || "Documento"}</div>
-                    <span style={{ fontSize: 11, background: "#e0f2fe", color: "#0369a1", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>{doc.tipo_documento}</span>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: C.text }}>{NOMBRE_TIPO[doc.tipo_documento || ""] ?? doc.tipo_documento ?? "Documento"}</div>
+                    <div style={{ fontSize: 12, color: C.sub, fontWeight: 600 }}>{esPdf ? "PDF" : `${cuantas} hoja${cuantas === 1 ? "" : "s"}`}</div>
                   </div>
                   {doc.url_imagen && (
                     <a href={doc.url_imagen} target="_blank" rel="noopener noreferrer" aria-label="Ver documento" style={{ background: "#f0f9ff", border: "1.5px solid #bae6fd", borderRadius: 10, minWidth: 44, minHeight: 44, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>👁️</a>
                   )}
-                  <button onClick={() => void eliminar(doc.id)} disabled={ocupado} aria-label="Eliminar documento" style={{ background: C.redL, border: `1.5px solid ${C.redB}`, borderRadius: 10, minWidth: 44, minHeight: 44, fontSize: 16 }}>🗑️</button>
+                  <button onClick={() => void eliminar(doc.id)} disabled={!online || leyendo === doc.id} aria-label="Eliminar documento" style={{ background: C.redL, border: `1.5px solid ${C.redB}`, borderRadius: 10, minWidth: 44, minHeight: 44, fontSize: 16, opacity: online ? 1 : 0.5 }}>🗑️</button>
                 </div>
-                <LecturaDoc doc={doc} />
+                <LecturaDoc doc={doc} leyendo={leyendo === doc.id} onLeer={online && recepcionId ? () => void leer(doc, true) : undefined} />
               </div>
             )
           })}
