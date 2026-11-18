@@ -26,6 +26,7 @@ import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 import { fecha as fmtFecha, hoyISO, numero as numeroAR, parseMonto, porcentaje, redondear, sumarDiasISO } from "@/lib/formato"
 import { InputMonto } from "@/components/ui/input-monto"
+import { colorDeCheque, elegirCheques } from "@/lib/ordenes-pago/sugerir-cheques"
 import { DateInputAR } from "@/components/ui/date-input-ar"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
@@ -88,7 +89,6 @@ const COLOR_CHEQUE: Record<string, { label: string; dot: string }> = {
     NEGRO: { label: "Negro", dot: "#1f2937" },
     ECHEQ: { label: "Echeq", dot: "#8b5cf6" },
 }
-const colorDeCheque = (ch: any): string => ch.es_echeq ? "ECHEQ" : (ch.color === "NEGRO" ? "NEGRO" : "BLANCO")
 
 export default function NuevaOrdenPagoPage() {
     return (
@@ -727,16 +727,9 @@ function NuevaOrdenPagoContent() {
         if (objetivo <= 0) return
         const candidatos = cheques
             .filter((ch: any) => enVentana(ch) && !medios.some(m => m.cheque_id === ch.id) && !chequesReservados.has(ch.id))
-        const greedy = (pool: any[], objetivoBolsa: number) => {
-            let rem = objetivoBolsa + 0.009
-            const picks: any[] = []
-            for (const ch of pool.sort((a: any, b: any) => Number(b.monto) - Number(a.monto))) {
-                if (Number(ch.monto) <= rem) { picks.push(ch); rem -= Number(ch.monto) }
-            }
-            return picks
-        }
-        const picksNegro = greedy(candidatos.filter((ch: any) => colorDeCheque(ch) === "NEGRO"), faltaNegro)
-        const picksBlanco = greedy(candidatos.filter((ch: any) => colorDeCheque(ch) !== "NEGRO"), faltaBlanco)
+        // Misma regla que "Pagos de la semana" (lib/ordenes-pago/sugerir-cheques)
+        const picksNegro: any[] = elegirCheques<any>(candidatos.filter((ch: any) => colorDeCheque(ch) === "NEGRO"), faltaNegro)
+        const picksBlanco: any[] = elegirCheques<any>(candidatos.filter((ch: any) => colorDeCheque(ch) !== "NEGRO"), faltaBlanco)
         const picks = [...picksNegro, ...picksBlanco]
         if (picks.length === 0) { toast.warning("No hay cheques del color y la ventana necesarios que entren en el monto restante"); return }
         setMedios(prev => [...prev, ...picks.map(chequeAMedio)])

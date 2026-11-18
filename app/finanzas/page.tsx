@@ -215,6 +215,10 @@ export default function FinanzasPage() {
       {/* ── Encabezado ── */}
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-2 text-2xl font-bold tracking-tight text-azul-900">Finanzas</h1>
+        <Link href="/finanzas/pagos-semana" className="inline-flex items-center gap-1.5 rounded-full border border-neutro-300 bg-white px-3 py-1 text-[13px] font-semibold text-azul-800 hover:bg-neutro-50">
+          Pagos de la semana y proyección de caja
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
         {extra.cobros_por_verificar.cantidad > 0 && (
           <Link href="/caja" className="inline-flex items-center gap-1.5 rounded-full border border-ambar-200 bg-ambar-50 px-3 py-1 text-[13px] font-semibold text-ambar-800 hover:bg-ambar-100">
             {extra.cobros_por_verificar.cantidad} cobro{extra.cobros_por_verificar.cantidad === 1 ? "" : "s"} por verificar en Caja · {moneda(extra.cobros_por_verificar.monto, 0)}

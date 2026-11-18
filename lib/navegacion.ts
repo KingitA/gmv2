@@ -73,6 +73,7 @@ export const SECCIONES: Seccion[] = [
       { label: "Caja del día", href: "/caja", roles: ["admin"] },
       // Bandeja de lo que espera control: dentro de Caja, solo quien confirma (dueño 21/10)
       { label: "Pendientes de revisar", href: "/caja/pendientes", roles: ["admin"] },
+      { label: "Pagos de la semana", href: "/finanzas/pagos-semana", roles: ["admin"] },
       { label: "Cheques", href: "/finanzas/cheques", roles: ["admin"] },
       { label: "Conciliación", href: "/finanzas/conciliacion", roles: ["admin"] },
       { label: "Cierre de caja", href: "/finanzas/cierres", roles: ["admin"] },

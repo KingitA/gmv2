@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import {
     ArrowLeft, Plus, Calendar, AlertTriangle, CheckCircle2,
-    Clock, XCircle, Filter, DollarSign
+    Clock, XCircle, Filter, DollarSign, CalendarDays
 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
@@ -218,6 +218,7 @@ export default function VencimientosPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Button variant="outline" asChild><Link href="/ordenes-compra?nueva=1"><Plus className="h-4 w-4" /> Orden de compra</Link></Button>
+                    {roles.includes("admin") && <Button variant="outline" asChild><Link href="/finanzas/pagos-semana"><CalendarDays className="h-4 w-4" /> Pagos de la semana</Link></Button>}
                     {roles.includes("admin") && <Button variant="outline" asChild><Link href="/ordenes-pago/nueva"><DollarSign className="h-4 w-4" /> Orden de pago</Link></Button>}
                 </div>
             </div>
