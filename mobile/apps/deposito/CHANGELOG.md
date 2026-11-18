@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.5.3 (versionCode 17) — 2026-11-18
+
+- Actualización con un botón: la app avisa en el inicio cuando hay una versión nueva y se actualiza sola (ACTUALIZAR → INSTALAR)
+
 ## v0.5.2 (versionCode 16) — 2026-11-17
 
 - Recepcion: muestra bultos y su equivalente en unidades (2 bultos x 24 u = 48 u); el stock entra siempre en unidades

@@ -109,6 +109,8 @@ export const PERMISOS = {
   ordenes_pago_confirmar: ["admin"],
   /** Reportes de Playroom (ventas, comisiones, cuentas corrientes, fiscal, depósito) — los mismos roles que usan Jarvis */
   reportes_playroom: ["admin", "administrativo"],
+  /** /admin/equipos: equipos de las apps, versión instalada y última publicada — solo admin (17/11/2026) */
+  equipos_moviles: ["admin"],
 } as const satisfies Record<string, readonly string[]>
 
 export type Permiso = keyof typeof PERMISOS

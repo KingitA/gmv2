@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.13 (versionCode 22) — 2026-11-18
+
+- Actualización con un botón: la app avisa en el inicio cuando hay una versión nueva y se actualiza sola (ACTUALIZAR → INSTALAR)
+
 ## v0.4.12 (versionCode 21) — 2026-11-03
 
 - Segmentación solo este pedido también desde el panel del cliente; fracción como cantidad mínima al cargar artículos

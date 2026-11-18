@@ -47,6 +47,8 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | DP2 — CARGAR PEDIDO en la app Depósito: "Para mí" / "Para un cliente", sin precios ni lista + filtro de la cola de la app | App Depósito | **Hecho y en main 05/11**, APK v0.5.0 |
 | R1 — Recepción en bultos y unidades (entrada E-30/E-36/E-37): la app dice "2 bultos × 24 u = 48 u", deja contar por bulto o por unidades sueltas y muestra los avisos del servidor al subir fotos | App Depósito | **Código hecho 16/11 en la rama `entrada-t0a-compras-recepcion` (sin APK, sin instalar)**. El servidor ya convierte bien con la APK v0.5.x instalada. Ver "App Depósito → recepción en unidades" abajo |
 
+| AU — **Actualización con un botón** (las 3 apps): franja ACTUALIZAR en el inicio, baja el APK firmado del bucket privado, verifica sha256 y abre el instalador; `npm run publicar:apk`; ERP → Ajustes → Equipos y apps | App Vendedor (dueño de core) | **Código hecho 18/11 en la rama `apps-actualizacion`**, migración `20261117b_mobile_versiones.sql` **sin aplicar**; APKs compiladas sin instalar. Ver "Actualización con un botón" abajo |
+
 ## Versiones instaladas hoy
 
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |
@@ -54,6 +56,17 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | Vendedor | v0.4.3 (versionCode 12) | 23/10 | — |
 | Chofer | v0.3.2 (versionCode 8) | 23/10 | — |
 | Depósito | v0.3.0 (versionCode 8) | 20/10 | — |
+
+---
+
+## Actualización con un botón (las 3 apps) — 18/11/2026, rama `apps-actualizacion`
+
+Detalle en MOBILE.md §13 → "Actualización desde la app".
+
+- **Para que funcione hace falta, en este orden:** (1) aplicar `supabase/migrations/20261117b_mobile_versiones.sql`; (2) mergear a main y esperar el deploy; (3) instalar UNA vez por adb las APK de esta rama (son las primeras que saben preguntar); (4) de ahí en más, `npm run publicar:apk -- --app <app>` y los equipos se actualizan solos.
+- **Cada agente de app**: después de compilar con `build:apks`, decidir si se publica (`publicar:apk`, con `--obligatoria` si la app vieja ya no sirve contra el servidor). Compilar no publica.
+- **Primera vez en cada equipo**: Android pide el permiso "instalar apps desconocidas" para esa app; la franja explica "Tocá PERMITIR y volvé".
+- Depósito ahora depende de `@gm/capacitor-archivos` (antes no lo usaba).
 
 ---
 
