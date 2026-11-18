@@ -189,7 +189,7 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
         .eq("tipo_movimiento", "compra")
         .in("articulo_id", [...precio.keys()])
       if (movErr) throw movErr
-      const esAdquisicion = comprobante.tipo_comprobante === "Adquisicion"
+      const esAdquisicion = comprobante.tipo_comprobante === "Adquisicion" || comprobante.tipo_comprobante === "ADQ"
       for (const k of movs || []) {
         const p = precio.get(k.articulo_id)!
         // Lo que ya valorizó OTRA factura de la misma orden no se pisa (la segunda factura no

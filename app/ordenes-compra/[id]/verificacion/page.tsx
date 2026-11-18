@@ -97,7 +97,7 @@ export default function VerificacionOCPage() {
         if (pendientes.length > 0) lineas.push(`⚠ Falta recibir mercadería de ${pendientes.length} artículo(s): ${pendientes.slice(0, 6).map((p) => `${p.sku} (${cant(p.unidades)} u)`).join(", ")}${pendientes.length > 6 ? "…" : ""}. Al finalizar, la orden se cierra SIN el resto: el depósito ya no la va a poder recibir.`)
         // Si el comprobante de esa parte está cargado y se valida en este mismo paso, no falta nada
         const sinComprobante = (control.canales_sin_comprobante || []).filter((x) =>
-            !porValidar.some((c) => ["FA", "FB", "FC", "Adquisicion"].includes(c.tipo_comprobante) && (c.tipo_comprobante === "Adquisicion") === (x.canal === "negro")))
+            !porValidar.some((c) => ["FA", "FB", "FC", "Adquisicion", "ADQ"].includes(c.tipo_comprobante) && ["Adquisicion", "ADQ"].includes(c.tipo_comprobante) === (x.canal === "negro")))
         for (const x of sinComprobante) {
             lineas.push(`⚠ La parte ${x.nombre} de la orden (${moneda(x.total_orden)}) no tiene ningún comprobante validado. Si finalizás así, se CANCELAN ${moneda(x.provision)} de deuda provisoria y ${moneda(x.vencimiento_estimado)} de vencimiento estimado: esa plata deja de figurar como deuda. Si el comprobante va a llegar, cargalo y validalo antes de finalizar.`)
         }

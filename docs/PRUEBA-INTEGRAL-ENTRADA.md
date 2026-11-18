@@ -331,6 +331,13 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 2. **Finalizar una orden con parte con factura y parte sin factura:** cada parte necesita su comprobante validado (factura / adquisición). Si falta, `/finalizar` contesta 409 `falta_comprobante_del_canal` con los importes; la pantalla lo avisa antes y solo cierra con confirmación expresa (`aceptar_canal_sin_comprobante`), diciendo cuánta deuda provisoria y cuánto vencimiento estimado se cancelan. La pantalla muestra los avisos que devuelve `/finalizar`.
 3. **Una nota de débito con orden de compra** no baja la provisión ni el estimado de la orden.
 
+### Arreglos de la segunda revisión del cableado (18/11, rama `entrada-t1-cableado3`)
+
+1. **Pago antes de validar:** una factura de una orden que entró por mail deja la deuda en la cuenta corriente y se puede pagar con una orden de pago antes de validarla. Al validar, las cuotas nacen por el total y enseguida se acomodan al saldo real del movimiento (paso 8 de `20261117u`, con `op_vencimientos_sincronizar_movimiento` de la `p`): lo ya pagado no vuelve a aparecer como pendiente, y la pantalla avisa cuánto estaba pagado.
+2. **NC / ND por mail con orden:** ya no convierten la provisión de la orden. Solo una factura o una adquisición la convierte; la nota entra como movimiento propio.
+3. **Adquisición, un solo valor:** el procesador de mails guarda `Adquisicion` (antes `ADQ`). Al leer se aceptan los dos (`esAdquisicion` en `lib/compras/finalizar-oc.ts`, y la función SQL), porque hay comprobantes viejos con `ADQ`.
+4. **Sin la migración u**, validar un comprobante de una orden de compra contesta "falta aplicar la migración 20261117u" y no hace nada (el servidor pregunta `entrada_cableado_version()`). Se quitó el camino por partes.
+
 ### Orden de las migraciones de la Tanda 1
 
 Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `20261116c`, `20261116p`, `20261116q`, `20261117a_remito_no_se_valida`, `20261117a_op_ganancias_bases_neto`.
@@ -344,7 +351,7 @@ Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `2
 | 5 | `20261117n_oc_guardar.sql` | conviene después de la m (lee columnas del proveedor que agrega la m) |
 | 6 | `20261117p_ordenes_pago_t1d.sql` | `20261116p` y `20261116q` (corta si faltan) |
 | 7 | `20261117r_retencion_transporte_minimo.sql` | independiente |
-| 8 | `20261117u_cableado_oc_validar.sql` | **la d y la n** (corta con mensaje si falta alguna). Va última. |
+| 8 | `20261117u_cableado_oc_validar.sql` | **la d, la n y la p** (corta con mensaje si falta alguna). Va última. Sin ella el servidor no valida comprobantes de una orden de compra (avisa que falta). |
 
 Aparte, una sola vez y a mano: `scripts/entrada-limpieza-kardex-en-camino.sql`.
 

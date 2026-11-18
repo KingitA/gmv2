@@ -5,6 +5,7 @@ import { nowArgentina } from '@/lib/utils';
 import { fechaISO, mediodiaAR, moneda, sumarDiasISO } from '@/lib/formato';
 import { aplicarCostoDeFactura, sincronizarKardexEnCamino } from '@/lib/compras/costo-y-kardex';
 import { tipoDescuentoProveedor } from '@/lib/compras/tipo-descuento-proveedor';
+import { esAdquisicion } from '@/lib/compras/finalizar-oc';
 import { acuerdoDelCanal, acuerdoDeProveedorConLegado, formaPagoVencimiento, modalidadVencimiento, normalizarAcuerdo, planDePagos, tienePlazo, type AcuerdoPago } from '@/lib/compras/acuerdo-pago';
 import { controlSuma } from '@/lib/compras/control-suma';
 import { normalizarNumeroComprobante } from '@/lib/services/numero-comprobante';
@@ -70,6 +71,8 @@ interface Resultado {
     vencimientos_creados?: number;
     /** Vencimientos ESTIMADOS de la orden que se quitaron al nacer el real. Migración 20261117u */
     estimados_reemplazados?: number;
+    /** Lo que ya se había pagado de esta deuda antes de validarla (entró por mail). Migración 20261117u */
+    pagado_antes?: number;
     sin_vencimiento?: boolean;
     provision?: string;
 }
@@ -88,7 +91,7 @@ interface Resultado {
  */
 async function armarPlan(supabase: any, comprobante: any, proveedorId: string | null, ocId: string | null, numeroOrden: string | null, total: number): Promise<PlanVencimiento> {
     // Adquisición = canal negro
-    const canal: 'blanco' | 'negro' = comprobante.tipo_comprobante === 'Adquisicion' ? 'negro' : 'blanco';
+    const canal: 'blanco' | 'negro' = esAdquisicion(comprobante.tipo_comprobante) ? 'negro' : 'blanco';
     const plan: PlanVencimiento = {
         canal,
         fecha_vencimiento: comprobante.fecha_vencimiento ? String(comprobante.fecha_vencimiento).slice(0, 10) : null,
@@ -490,6 +493,17 @@ export async function POST(
                 plan.movimiento_adoptar = await buscarMovimientoPrevio(supabase, comprobante, proveedorId, ocId, total);
             }
 
+            // Un comprobante de una ORDEN de compra se valida solo con la migración 20261117u: es la que
+            // deja en una sola transacción la deuda, las cuotas, la provisión por canal y el vencimiento
+            // estimado de la orden. Sin ella no se hace nada (antes el servidor lo intentaba por partes).
+            if (!yaEstaba && !esRemito && ocId) {
+                const prueba = await supabase.rpc('entrada_cableado_version');
+                if (prueba.error && faltaLaFuncion(prueba.error, 'entrada_cableado_version')) {
+                    throw new Rechazo('Todavía no se puede validar un comprobante de una orden de compra: falta aplicar la migración 20261117u (y las anteriores de la tanda). No se cambió nada.', 'falta_migracion', 409);
+                }
+                if (prueba.error) throw prueba.error;
+            }
+
             const rpc = await supabase.rpc('comprobante_compra_validar', {
                 p_comprobante_id: comprobante_id,
                 p_usuario_id: auth.user.id,
@@ -517,26 +531,14 @@ export async function POST(
             }, { status: 500 });
         }
 
-        // Vencimiento ESTIMADO de la orden (lo crea la orden de compra): cuando nace el real, el
-        // estimado de ese canal baja por el importe de este comprobante y desaparece al llegar a cero.
-        // Con la migración 20261117u lo hace la misma función que valida, en la misma transacción
-        // (contesta estimados_reemplazados). Sin ella se hace acá, apenas validado.
-        const avisosEstimado: string[] = [];
-        if (!resultado.ya_validado && !resultado.sin_deuda && !esCredito && !esRemito && ocId
-            && !['ND', 'NDA', 'NDB', 'NDC'].includes(comprobante.tipo_comprobante)
-            && resultado.vencimiento_id && resultado.vencimiento_nuevo === true && resultado.estimados_reemplazados === undefined) {
-            const est = await supabase.rpc('oc_vencimiento_estimado_reemplazar', { p_orden_id: ocId, p_canal: plan.canal, p_monto: total });
-            if (est.error && !faltaLaFuncion(est.error, 'oc_vencimiento_estimado_reemplazar')) {
-                console.error('[Validar Comprobante] vencimiento estimado de la orden:', est.error.message);
-                avisosEstimado.push('El comprobante quedó validado con su vencimiento, pero no se pudo quitar el vencimiento ESTIMADO de la orden: va a figurar dos veces en Finanzas hasta que se finalice la orden. Avisá a sistemas.');
-            }
-        }
-
         // Costo y kardex (lib/compras/costo-y-kardex.ts): repetible, no mueve plata ni stock.
         //  · el kardex de la recepción queda valorizado con lo facturado y el artículo con su último costo;
         //  · el kardex "en camino" de la orden se ajusta a lo que falta recibir (ya no se "confirma":
         //    eso duplicaba la compra de la recepción, E-31).
-        const avisos: string[] = [...avisosEstimado];
+        const avisos: string[] = [];
+        if (!resultado.ya_validado && Number(resultado.pagado_antes || 0) > 0.01) {
+            avisos.push(`Este comprobante ya tenía ${moneda(Number(resultado.pagado_antes))} pagados antes de validarlo: los vencimientos quedaron por el saldo que falta pagar.`);
+        }
         if (!resultado.ya_validado && plan.acuerdo_de_legado && resultado.vencimiento_nuevo) {
             avisos.push('El proveedor no tiene acuerdo de pago cargado: el plazo del vencimiento salió del dato viejo de su ficha. Cargá el acuerdo en la ficha del proveedor.');
         }

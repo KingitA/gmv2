@@ -423,8 +423,12 @@ export async function processEmailAsInvoice(
             // adquisición → negro), nunca "la primera que aparezca". Las provisiones anteriores al
             // 17/11 no tienen canal: valen para cualquiera. Si solo queda la del otro canal, no se
             // toca y la deuda entra como movimiento nuevo.
-            const canalComprobante: 'blanco' | 'negro' = tipoComp === 'ADQ' ? 'negro' : 'blanco'
-            const existingCC = await provisionDelCanal(db, proveedorId, pendingOC.id, canalComprobante)
+            const canalComprobante: 'blanco' | 'negro' = tipoComp === 'Adquisicion' ? 'negro' : 'blanco'
+            // SOLO una factura o una adquisición convierte la provisión: es la deuda que la orden
+            // estimaba. Una nota de crédito o de débito NO: entra como movimiento propio y no toca ni
+            // la provisión ni el estimado (antes una NC de −50 se quedaba con la provisión de 1.000).
+            const convierteProvision = ['FA', 'FB', 'FC', 'Adquisicion'].includes(tipoComp)
+            const existingCC = convierteProvision ? await provisionDelCanal(db, proveedorId, pendingOC.id, canalComprobante) : null
 
             let ccResult: any = null
             if (existingCC) {
@@ -803,7 +807,7 @@ async function createCCMovement(
                 .single()
 
             // E-06: plazo del acuerdo de pago de la ficha (no más plazo_dias)
-            const plazo = await plazoDePago(db, proveedorId, null, tipoComp === 'ADQ' ? 'negro' : 'blanco')
+            const plazo = await plazoDePago(db, proveedorId, null, tipoComp === 'Adquisicion' ? 'negro' : 'blanco')
             const plazoDias = plazo.dias
             const fechaBase = invoiceData.fecha_comprobante || fechaHoy
 
@@ -888,7 +892,9 @@ function mapTipoComprobante(tipo: string | null): string {
     if (!tipo) return 'FA'
     const upper = tipo.toUpperCase().replace(/[^A-Z0-9]/g, '')
     // Map common names
-    if (upper.includes('PRESUPUESTO') || upper.includes('ADQUISICION') || upper === 'ADQ') return 'ADQ'
+    // Un solo valor para la adquisición: 'Adquisicion', el que usan la validación, la verificación y
+    // los pagos. (Hasta el 18/11 acá se guardaba 'ADQ'; los que ya están así se siguen leyendo.)
+    if (upper.includes('PRESUPUESTO') || upper.includes('ADQUISICION') || upper === 'ADQ') return 'Adquisicion'
     if (upper.includes('NOTA') && upper.includes('CRED')) {
         if (upper.includes('A') || upper.endsWith('A')) return 'NCA'
         if (upper.includes('B') || upper.endsWith('B')) return 'NCB'
@@ -898,7 +904,7 @@ function mapTipoComprobante(tipo: string | null): string {
         if (upper.includes('A') || upper.endsWith('A')) return 'NDA'
         return 'NDA'
     }
-    const valid = ['FA', 'FB', 'FC', 'NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC', 'ADQ', 'REV']
+    const valid = ['FA', 'FB', 'FC', 'NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC', 'REV']
     return valid.includes(upper) ? upper : 'FA'
 }
 
@@ -1015,7 +1021,7 @@ async function runArticleLevelOCR(
                             // con tipo 'bulto' y la verificación la multiplicaba otra vez.
                             cantidad_facturada: item.cantidad || 0,
                             precio_unitario: item.precio_unitario || 0,
-                            iva_porcentaje: tipoDocumento === 'ADQ' ? 0 : 21,
+                            iva_porcentaje: tipoDocumento === 'Adquisicion' || tipoDocumento === 'ADQ' ? 0 : 21,
                             tipo_cantidad: conversion.factor === 1 ? 'unidad' : 'bulto',
                             recepcion_item_id: matchedItem.id,
                             match_estado: 'auto',

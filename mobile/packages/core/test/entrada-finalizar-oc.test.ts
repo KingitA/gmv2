@@ -65,3 +65,20 @@ describe("¿se puede finalizar la orden de compra?", () => {
     expect(evaluarFinalizarOC({ comprobantes: [comp("FB", "validado")], recibidos: [], cubiertos: [] }).puede).toBe(true)
   })
 })
+
+describe("adquisición: 'Adquisicion' y el valor viejo del mail 'ADQ' se leen igual", async () => {
+  const { esAdquisicion, esComprobanteConPrecios: conPrecios, evaluarFinalizarOC: evaluar } = await import("../../../../lib/compras/finalizar-oc")
+  it("los dos son adquisición y traen precios", () => {
+    expect(esAdquisicion("Adquisicion")).toBe(true)
+    expect(esAdquisicion("ADQ")).toBe(true)
+    expect(esAdquisicion("FA")).toBe(false)
+    expect(conPrecios("ADQ")).toBe(true)
+  })
+  it("una adquisición vieja ('ADQ') validada cubre lo recibido", () => {
+    const r = evaluar({
+      comprobantes: [{ id: "c", tipo_comprobante: "ADQ", numero_comprobante: "1", estado: "validado" }],
+      recibidos: [{ articulo_id: "a" }], cubiertos: ["a"],
+    })
+    expect(r.puede).toBe(true)
+  })
+})
