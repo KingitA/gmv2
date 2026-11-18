@@ -4,7 +4,7 @@
  * El 17/11/2026 Gemini se quedó sin crédito (error 402) y la lectura de facturas estuvo caída
  * sin que nadie se enterara. Ahora, cada vez que un servicio de IA rechaza un pedido por saldo,
  * facturación o cuota:
- *   1. se anota en la tabla ia_fallas (migración 20261119a_jarvis_compras.sql), y
+ *   1. se anota en la tabla ia_fallas (migración 20261119c_jarvis_compras.sql), y
  *   2. se deja un aviso en la bandeja de Jarvis ("Lo que Jarvis notó"), que ven admin y
  *      administrativo. El vigía `lectura_ia` (lib/jarvis/vigias.ts) lo mantiene mientras siga
  *      fallando y lo cierra solo cuando pasan 24 horas sin fallas.

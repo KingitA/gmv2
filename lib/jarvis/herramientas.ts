@@ -27,6 +27,7 @@ import { estadoIndicadores } from "./exterior"
 import { cobertura } from "./clasificador"
 import { estadoPlanMes, mesSiguiente } from "@/lib/viajes/plan-mes"
 import { ausenciasEntre } from "@/lib/viajes/calendario-laboral"
+import { crearHerramientasCompras, deudaSegunCuentaCorriente } from "./herramientas-compras"
 
 export interface Contexto {
   db: SupabaseClient
@@ -534,7 +535,7 @@ const coberturaStock: Herramienta = {
 const proveedores: Herramienta = {
   nombre: "proveedores",
   descripcion:
-    "Resumen por proveedor: cuánto vendemos de lo suyo (30 días), último aumento de costo cargado (historial de precios desde el 18/09/2026), aumento promedio de los últimos 90 días, deuda con él, próximo vencimiento y órdenes de compra abiertas. Orden: venta, deuda, sin_aumento (los que hace más que no aumentan) o aumento.",
+    "Resumen por proveedor: cuánto vendemos de lo suyo (30 días), último aumento de costo cargado (historial de precios desde el 18/09/2026), aumento promedio de los últimos 90 días, lo que le debemos (la MISMA cifra que cuenta_corriente_proveedor: cuenta corriente + anotado a mano; sin estimados de órdenes de compra), próximo vencimiento y órdenes de compra abiertas. Para el detalle de la deuda de UN proveedor usá cuenta_corriente_proveedor. Orden: venta, deuda, sin_aumento (los que hace más que no aumentan) o aumento.",
   esquema: {
     type: "object",
     properties: { proveedor: { type: "string" }, orden: { type: "string", enum: ["venta", "deuda", "sin_aumento", "aumento"] }, ...P_LIMITE },
@@ -566,11 +567,14 @@ const proveedores: Herramienta = {
         { clave: "deuda", titulo: "Le debemos", formato: "pesos" }, { clave: "proximo_vencimiento", titulo: "Próx. vencimiento", formato: "fecha" },
       ],
       filas.slice(0, lim),
-      { nota: "Aumentos según el historial de precios del sistema (desde el 18/09/2026). Sin fecha = no se le cargó aumento desde entonces." },
+      { nota: "Aumentos según el historial de precios del sistema (desde el 18/09/2026). Sin fecha = no se le cargó aumento desde entonces. \"Le debemos\" sale de la cuenta corriente del proveedor más lo anotado a mano sin comprobante; no incluye lo comprometido por órdenes de compra." },
     )
     return {
       consultado: nombre ? `Ventas, historial de precios, vencimientos y órdenes de ${nombre}` : `Ventas, historial de precios, vencimientos y órdenes de ${rows.length} proveedores`,
-      datos: { filas: filas.slice(0, lim), cantidad: filas.length },
+      datos: {
+        filas: filas.slice(0, lim), cantidad: filas.length,
+        sobre_la_deuda: "deuda = cuenta corriente del proveedor + vencimientos anotados a mano sin comprobante (igual que cuenta_corriente_proveedor). deuda_estimada = comprometido por órdenes de compra sin facturar: NO es deuda.",
+      },
       bloques: [{ ...bloque, recalcular: { herramienta: "proveedores", parametros: { ...p } } }],
     }
   },
@@ -579,7 +583,7 @@ const proveedores: Herramienta = {
 // ─── 9. Pagos a proveedores ────────────────────────────────────────────────
 const pagosProveedores: Herramienta = {
   nombre: "pagos_proveedores",
-  descripcion: "Vencimientos pendientes de pago a proveedores: los atrasados y los que vencen en los próximos N días (por defecto 30).",
+  descripcion: "Vencimientos pendientes de pago a proveedores (el CALENDARIO de pagos): los atrasados y los que vencen en los próximos N días (por defecto 30). Sirve para \"¿qué vence?\" y \"¿qué hay que pagar?\". No suma los estimados de órdenes de compra. Informa además cuánto le debemos según la cuenta corriente (la deuda oficial): para \"¿cuánto le debemos a X?\" usá cuenta_corriente_proveedor.",
   esquema: { type: "object", properties: { dias: { type: "integer" }, proveedor: { type: "string" }, ...P_LIMITE } },
   async ejecutar(ctx, p) {
     const dias = Math.max(1, Math.min(120, Number(p.dias) || 30))
@@ -618,6 +622,8 @@ const pagosProveedores: Herramienta = {
     const semana = red(filas.filter((f) => !f.atrasado && (f.fecha ?? "") <= sumarDiasISO(ctx.hoy, 7)).reduce((s, f) => s + f.monto, 0))
     const total = red(filas.reduce((s, f) => s + f.monto, 0))
     const lim = limite(p.limite, 30)
+    // E-83: la deuda es una sola (cuenta corriente). El calendario dice CUÁNDO vence; no es otra deuda.
+    const deudaCC = await deudaSegunCuentaCorriente(ctx.db, provId)
     const bloque = tabla(
       `Pagos a proveedores — atrasados y próximos ${dias} días${nombre ? ` (${nombre})` : ""}`,
       [
@@ -631,6 +637,8 @@ const pagosProveedores: Herramienta = {
       consultado: `Vencimientos a proveedores hasta el ${hasta.slice(8, 10)}/${hasta.slice(5, 7)}${nombre ? ` de ${nombre}` : ""}`,
       datos: {
         total, atrasado, proximos_7_dias: semana, cantidad: filas.length, filas: filas.slice(0, lim),
+        que_es_el_total: `Suma de los vencimientos del calendario hasta el ${fecha(hasta)}. No es toda la deuda: puede haber deuda que vence después.`,
+        deuda_segun_cuenta_corriente: deudaCC ?? "No disponible (falta aplicar la migración 20261119c).",
         // Aparte, para ver lo que viene: NO es deuda todavía y no está sumado en los totales de arriba
         estimado_ordenes_de_compra: totalEstimadoOC > 0 ? {
           monto: totalEstimadoOC, cantidad: estimadosOC.length,
@@ -1762,12 +1770,24 @@ const gastosPagados: Herramienta = {
   },
 }
 
+// Compras y pagos a proveedores (lib/jarvis/herramientas-compras.ts): compras, ultima_compra,
+// ficha_proveedor, cuenta_corriente_proveedor, retenciones_proveedor, notas_esperadas,
+// ordenes_compra_pendientes, diferencias_factura, plan_de_pagos.
+const herramientasCompras = crearHerramientasCompras({
+  resolverProveedor: (db, texto) => resolverNombre(db, "proveedores", texto, "el proveedor"),
+  resolverArticulo: async (db, texto) => { const x = await resolverArticulo(db, texto); return { id: x.id, sku: x.sku, descripcion: x.descripcion } },
+  esAdmin: veReservados,
+  tabla,
+  error: (mensaje) => new ErrorHerramienta(mensaje),
+})
+
 export const HERRAMIENTAS: Herramienta[] = [
   indicadoresTablero, ventas, deudaClientes, clientesHabitos, fichaCliente, articulosVendidos,
   coberturaStock, proveedores, pagosProveedores, cheques, operacion, comisiones,
   agendarRecordatorio, proponerDecision, verAgenda, historialDecisionesH, clientesRetenidos,
   indicadoresExternos, insumosProveedor, clasificacionArticulos, calendarioViajes, ausenciasPersonal,
   facturacion, historiaPedido, cobrosRealizados, ordenesDePago, cambiosArticulo, gastosPagados,
+  ...herramientasCompras,
 ]
 
 /** Las que escriben en la agenda: /recalcular NUNCA las corre. */
