@@ -97,6 +97,20 @@ function OrdenesCompra() {
       .then(({ data }) => setProveedores((data as any[]) || []))
   }, [])
 
+  // Vuelta de Google después de "Conectar Gmail" (?gmail_connected=cuenta / ?gmail_error=motivo):
+  // se avisa y se abre el panel "Envío de órdenes" con el resultado.
+  const vueltaDeGoogle = useMemo(() => {
+    const conectada = busqueda.get("gmail_connected")
+    const error = busqueda.get("gmail_error")
+    return conectada || error ? { conectada, error } : null
+  }, [busqueda])
+  useEffect(() => {
+    if (!vueltaDeGoogle) return
+    if (vueltaDeGoogle.conectada) toast.success(`Cuenta conectada: ${vueltaDeGoogle.conectada}`)
+    else toast.error("No se conectó la cuenta de Gmail. Mirá el detalle en “Envío de órdenes”.", { duration: 10000 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Desde Jarvis (Playroom → "Armar orden de compra"): ?nueva=1&proveedor=…&sugerir=1&origen=jarvis
   // abre la orden con el proveedor elegido y la sugerencia ya cargada. No guarda nada.
   useEffect(() => {
@@ -146,7 +160,7 @@ function OrdenesCompra() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-3xl font-bold">Órdenes de compra</h1>
         <div className="flex gap-2">
-          <AjustesEnvioOrdenes />
+          <AjustesEnvioOrdenes vuelta={vueltaDeGoogle} />
           <ImportOrderDialog proveedores={proveedores} onImportSuccess={alImportar} />
           <Button onClick={abrirNueva}><Plus className="mr-2 h-4 w-4" /> Nueva orden</Button>
         </div>

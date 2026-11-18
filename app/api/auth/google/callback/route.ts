@@ -2,6 +2,10 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { exchangeCodeForTokens, setupGmailWatch } from '@/lib/ai/gmail'
 
+// A dónde vuelve el navegador después de Google. Antes volvía a "/", donde nada mostraba el
+// resultado; la conexión se pide (y se ve) desde Órdenes de compra → Envío de órdenes.
+const VUELTA = '/ordenes-compra'
+
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const code = searchParams.get('code')
@@ -11,20 +15,20 @@ export async function GET(request: NextRequest) {
     if (error) {
         console.error('Google OAuth error:', error)
         return NextResponse.redirect(
-            new URL('/?gmail_error=' + encodeURIComponent(error), request.url)
+            new URL(VUELTA + '?gmail_error=' + encodeURIComponent(error), request.url)
         )
     }
 
     if (!code) {
         return NextResponse.redirect(
-            new URL('/?gmail_error=no_code', request.url)
+            new URL(VUELTA + '?gmail_error=no_code', request.url)
         )
     }
 
     if (!userId) {
         console.error('Google OAuth callback: no user_id in state')
         return NextResponse.redirect(
-            new URL('/?gmail_error=no_user', request.url)
+            new URL(VUELTA + '?gmail_error=no_user', request.url)
         )
     }
 
@@ -38,12 +42,12 @@ export async function GET(request: NextRequest) {
         })
 
         return NextResponse.redirect(
-            new URL('/?gmail_connected=' + encodeURIComponent(email), request.url)
+            new URL(VUELTA + '?gmail_connected=' + encodeURIComponent(email), request.url)
         )
     } catch (err) {
         console.error('Error exchanging Google code for tokens:', err)
         return NextResponse.redirect(
-            new URL('/?gmail_error=token_exchange_failed', request.url)
+            new URL(VUELTA + '?gmail_error=token_exchange_failed', request.url)
         )
     }
 }

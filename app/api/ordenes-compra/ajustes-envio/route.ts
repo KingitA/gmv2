@@ -1,7 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserRoles, requireAuth } from '@/lib/auth';
-import { cuentaGmailConectada } from '@/lib/ai/gmail';
+import { estadoCuentaGmail } from '@/lib/ai/gmail';
 import { CONFIRMACION_APAGAR_PRUEBA, comoConectarCuenta, leerAjustesEnvio } from '@/lib/compras/envio-ajustes';
 import { mailValido } from '@/lib/compras/mail-orden';
 import { errorDeFuncion, MIGRACION_OC } from '@/lib/compras/orden-compra';
@@ -26,12 +26,15 @@ export async function GET() {
         const [roles, lectura] = await Promise.all([getUserRoles(auth.user.id), leerAjustesEnvio(supabase)]);
         const admin = roles.includes('admin');
         if (!lectura.ok) return NextResponse.json({ ok: false, bloqueo: lectura.motivo, admin });
-        const conectada = await cuentaGmailConectada(lectura.ajustes.cuenta_envio).catch(() => null);
+        const { estado } = await estadoCuentaGmail(lectura.ajustes.cuenta_envio).catch(() => ({ estado: 'no_conectada' as const }));
+        const conectada = estado === 'conectada';
         return NextResponse.json({
             ok: true, admin,
             cuenta_envio: lectura.ajustes.cuenta_envio,
-            cuenta_conectada: !!conectada,
-            como_conectar: conectada ? null : comoConectarCuenta(lectura.ajustes.cuenta_envio),
+            cuenta_conectada: conectada,
+            // conectada | vencida | sin_permiso | no_conectada (preguntándole a Google)
+            cuenta_estado: estado,
+            como_conectar: conectada ? null : comoConectarCuenta(lectura.ajustes.cuenta_envio, estado),
             modo_prueba: lectura.ajustes.modo_prueba,
             mail_prueba: lectura.ajustes.mail_prueba,
             actualizado_at: lectura.actualizado_at,

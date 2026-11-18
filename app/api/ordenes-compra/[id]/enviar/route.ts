@@ -1,7 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { cuentaGmailConectada, enviarMailGmail } from '@/lib/ai/gmail';
+import { enviarMailGmail, estadoCuentaGmail } from '@/lib/ai/gmail';
 import { cargarOrdenCompleta, type OrdenCompleta } from '@/lib/compras/orden-completa';
 import { datosEmpresa, excelDeOrden, lineasCondicion, nombreArchivoOrden, pdfDeOrden } from '@/lib/compras/orden-archivos';
 import { armarMime, asuntoOrden, cuerpoOrden, mailADespachar, rawParaGmail, type AdjuntoMail } from '@/lib/compras/mail-orden';
@@ -24,8 +24,12 @@ async function contexto(supabase: any, userId: string, id: string) {
         supabase.from('usuarios').select('nombre').eq('id', userId).maybeSingle(),
         leerAjustesEnvio(supabase),
     ]);
-    const cuentaConectada = lectura.ok ? await cuentaGmailConectada(lectura.ajustes.cuenta_envio).catch(() => null) : null;
-    return { oc, empresa, lectura, cuentaConectada, firma: (usuario.data as any)?.nombre ?? null };
+    const cuentaGmail = lectura.ok
+        ? await estadoCuentaGmail(lectura.ajustes.cuenta_envio).catch(() => ({ estado: 'no_conectada' as const, cuenta: null }))
+        : { estado: 'no_conectada' as const, cuenta: null };
+    // solo sirve para enviar si Google confirma que está conectada y con permiso
+    const cuentaConectada = cuentaGmail.estado === 'conectada' ? cuentaGmail.cuenta : null;
+    return { oc, empresa, lectura, cuentaConectada, cuentaEstado: cuentaGmail.estado, firma: (usuario.data as any)?.nombre ?? null };
 }
 
 function plantilla(oc: OrdenCompleta, empresa: any, firma: string | null) {
@@ -53,7 +57,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
         const { id } = await params;
         const ctx = await contexto(createAdminClient(), auth.user.id, id);
         if (!ctx) return NextResponse.json({ error: 'La orden no existe.' }, { status: 404 });
-        const { oc, empresa, lectura, cuentaConectada, firma } = ctx;
+        const { oc, empresa, lectura, cuentaConectada, cuentaEstado, firma } = ctx;
         const sugeridos = oc.proveedor.mails_sugeridos;
         const base = nombreArchivoOrden(oc.orden.numero_orden);
         return NextResponse.json({
@@ -72,7 +76,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
                     ok: true,
                     cuenta: lectura.ajustes.cuenta_envio,
                     cuenta_conectada: !!cuentaConectada,
-                    como_conectar: cuentaConectada ? null : comoConectarCuenta(lectura.ajustes.cuenta_envio),
+                    cuenta_estado: cuentaEstado,
+                    como_conectar: cuentaConectada ? null : comoConectarCuenta(lectura.ajustes.cuenta_envio, cuentaEstado),
                     modo_prueba: lectura.ajustes.modo_prueba,
                     mail_prueba: lectura.ajustes.modo_prueba ? lectura.ajustes.mail_prueba : null,
                 }
@@ -119,7 +124,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const supabase = createAdminClient();
         const ctx = await contexto(supabase, auth.user.id, id);
         if (!ctx) return NextResponse.json({ error: 'La orden no existe.' }, { status: 404 });
-        const { oc, empresa, lectura, cuentaConectada } = ctx;
+        const { oc, empresa, lectura, cuentaConectada, cuentaEstado } = ctx;
 
         // ── Falla segura: sin ajuste legible no sale nada ──
         if (!lectura.ok) return NextResponse.json({ error: lectura.motivo, codigo: 'ajuste_envio' }, { status: 503 });
@@ -153,7 +158,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         // Cuenta de envío: la del ajuste, y tiene que estar conectada
         if (!cuentaConectada) {
-            return NextResponse.json({ error: comoConectarCuenta(ajustes.cuenta_envio), codigo: 'sin_cuenta' }, { status: 409 });
+            return NextResponse.json({ error: comoConectarCuenta(ajustes.cuenta_envio, cuentaEstado), codigo: 'sin_cuenta', reconectar: true, cuenta: ajustes.cuenta_envio, cuenta_estado: cuentaEstado }, { status: 409 });
         }
         const de = cuentaConectada;
 
@@ -196,7 +201,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             enviado = await enviarMailGmail(de, rawParaGmail(mime));
         } catch (e: any) {
             console.error('[OC Enviar] Gmail:', e?.message);
-            return NextResponse.json({ error: e.message || 'No se pudo enviar el mail.', codigo: 'gmail' }, { status: 502 });
+            // Google rechazó el envío por la conexión (venció, la revocaron o le falta el permiso):
+            // la pantalla muestra el botón para volver a conectar
+            const reconectar = /volver a conectarla/.test(String(e?.message || ''));
+            return NextResponse.json({ error: e.message || 'No se pudo enviar el mail.', codigo: 'gmail', reconectar, cuenta: ajustes.cuenta_envio }, { status: 502 });
         }
 
         // ── Constancia en la orden: la dirección REAL a la que salió ──
