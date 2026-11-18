@@ -295,16 +295,33 @@ END;
 $$;
 
 -- ═══ 5. Vencimientos estimados de la orden ═══
--- Borra SOLO los estimados de esta orden que nadie pagó ni imputó.
-CREATE OR REPLACE FUNCTION public.oc_vencimientos_estimados_borrar(p_orden_id uuid, p_canal text DEFAULT NULL)
-RETURNS int
+-- NUNCA se borra un vencimiento: cada alta y cada cambio de un vencimiento deja una fila en
+-- vencimientos_historial (auditoría, 20261105), que es inmutable y cuelga del vencimiento con
+-- ON DELETE CASCADE; borrar el vencimiento intenta borrar su historia y la base lo rechaza
+-- ("vencimientos_historial es un historial: no se modifica ni se borra"). Los estimados que
+-- se reemplazan, se recalculan o quedan sin efecto pasan a estado = 'cancelado', con el motivo
+-- en observaciones y el monto sin tocar.
+--
+-- Cancela SOLO los estimados de esta orden que nadie pagó ni imputó. Devuelve cuántos.
+CREATE OR REPLACE FUNCTION public.oc_vencimientos_estimados_cancelar(
+  p_orden_id   uuid,
+  p_canal      text DEFAULT NULL,
+  p_motivo     text DEFAULT NULL,
+  p_usuario_id uuid DEFAULT NULL
+) RETURNS int
 LANGUAGE plpgsql
 SET search_path = public
 AS $$
 DECLARE
   v_n int;
 BEGIN
-  DELETE FROM vencimientos v
+  UPDATE vencimientos v SET
+    estado          = 'cancelado',
+    observaciones   = left(coalesce(nullif(trim(v.observaciones), '') || ' ', '')
+                        || '[Cancelado el ' || to_char(public.hoy_ar(), 'DD/MM/YYYY') || ': '
+                        || coalesce(nullif(trim(p_motivo), ''), 'estimado de orden de compra sin efecto') || ']', 2000),
+    actualizado_por = coalesce(p_usuario_id, v.actualizado_por),
+    updated_at      = now()
    WHERE v.referencia_tipo = 'orden_compra'
      AND v.referencia_id = p_orden_id
      AND v.es_estimado = true
@@ -314,6 +331,17 @@ BEGIN
      AND NOT EXISTS (SELECT 1 FROM ordenes_pago_imputaciones i WHERE i.vencimiento_id = v.id);
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RETURN v_n;
+END;
+$$;
+
+-- Nombre anterior (lo llaman funciones ya instaladas): ya no borra, cancela.
+CREATE OR REPLACE FUNCTION public.oc_vencimientos_estimados_borrar(p_orden_id uuid, p_canal text DEFAULT NULL)
+RETURNS int
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  RETURN public.oc_vencimientos_estimados_cancelar(p_orden_id, p_canal, NULL, NULL);
 END;
 $$;
 
@@ -347,7 +375,12 @@ BEGIN
     INTO o FROM ordenes_compra WHERE id = p_orden_id;
   IF NOT FOUND THEN RETURN 0; END IF;
 
-  PERFORM public.oc_vencimientos_estimados_borrar(p_orden_id, NULL);
+  -- Los estimados anteriores no se borran: quedan cancelados con el motivo (ver arriba)
+  PERFORM public.oc_vencimientos_estimados_cancelar(
+    p_orden_id, NULL,
+    CASE WHEN o.estado = 'cancelada' THEN 'orden ' || o.numero_orden || ' cancelada'
+         ELSE 'orden ' || o.numero_orden || ' editada: se recalculó el estimado' END,
+    p_usuario_id);
   IF o.estado = 'cancelada' THEN RETURN 0; END IF;
 
   -- Si ya hay un estimado de esta orden que alguien pagó o imputó, no se generan otros
@@ -431,12 +464,14 @@ END;
 $$;
 
 -- La llama quien valida la factura (Tanda 1-B) y quien finaliza la orden:
---   oc_vencimiento_estimado_reemplazar(orden)                 → borra todos los estimados de la orden
+--   oc_vencimiento_estimado_reemplazar(orden)                 → cancela todos los estimados de la orden
 --   oc_vencimiento_estimado_reemplazar(orden, 'blanco')       → solo los de ese canal
 --   oc_vencimiento_estimado_reemplazar(orden, 'blanco', 1000) → descuenta $1.000 de los estimados de ese
---        canal (del más próximo al más lejano) y borra los que quedan en cero: para cuando la orden se
---        factura en partes y todavía falta facturar el resto.
--- Devuelve cuántos vencimientos estimados borró. Nunca toca un vencimiento que no sea estimado de esa orden.
+--        canal (del más próximo al más lejano) y cancela los que quedan cubiertos: para cuando la orden
+--        se factura en partes y todavía falta facturar el resto.
+-- No borra nada (ver "NUNCA se borra un vencimiento"): el estimado cubierto pasa a 'cancelado' con
+-- el motivo en observaciones y su monto sin tocar; el que queda cubierto en parte baja su monto.
+-- Devuelve cuántos estimados canceló. Nunca toca un vencimiento que no sea estimado de esa orden.
 CREATE OR REPLACE FUNCTION public.oc_vencimiento_estimado_reemplazar(
   p_orden_id uuid,
   p_canal    text    DEFAULT NULL,
@@ -446,17 +481,29 @@ LANGUAGE plpgsql
 SET search_path = public
 AS $$
 DECLARE
-  v        record;
-  v_resto  numeric;
-  v_n      int := 0;
+  v         record;
+  v_resto   numeric;
+  v_n       int := 0;
+  v_factura text;
+  v_motivo  text;
 BEGIN
   IF p_orden_id IS NULL THEN RETURN 0; END IF;
   IF p_canal IS NOT NULL AND p_canal NOT IN ('blanco', 'negro') THEN
     RAISE EXCEPTION 'oc_vencimiento_estimado_reemplazar: canal inválido (%)', p_canal;
   END IF;
 
+  -- Por qué se cancela: la última factura validada de la orden, si la hay
+  SELECT c.tipo_comprobante || ' ' || c.numero_comprobante INTO v_factura
+    FROM comprobantes_compra c
+   WHERE c.orden_compra_id = p_orden_id AND c.estado IN ('validado', 'cerrado')
+     AND c.tipo_comprobante NOT IN ('Remito', 'NC', 'NCA', 'NCB', 'NCC', 'Reversa')
+   ORDER BY c.fecha_validacion DESC NULLS LAST, c.created_at DESC
+   LIMIT 1;
+  v_motivo := CASE WHEN v_factura IS NOT NULL THEN 'reemplazado por el vencimiento real de la factura ' || v_factura
+                   ELSE 'la orden se cerró sin factura para este estimado' END;
+
   IF p_monto IS NULL THEN
-    RETURN public.oc_vencimientos_estimados_borrar(p_orden_id, p_canal);
+    RETURN public.oc_vencimientos_estimados_cancelar(p_orden_id, p_canal, v_motivo, NULL);
   END IF;
 
   v_resto := p_monto;
@@ -472,10 +519,17 @@ BEGIN
   LOOP
     EXIT WHEN v_resto <= 0.01;
     IF v.monto - v_resto <= 0.01 THEN
-      DELETE FROM vencimientos WHERE id = v.id;
+      -- cubierto del todo: cancelado, con el monto como estaba
+      UPDATE vencimientos SET
+        estado        = 'cancelado',
+        observaciones = left(coalesce(nullif(trim(observaciones), '') || ' ', '')
+                          || '[Cancelado el ' || to_char(public.hoy_ar(), 'DD/MM/YYYY') || ': ' || v_motivo || ']', 2000),
+        updated_at    = now()
+      WHERE id = v.id;
       v_resto := v_resto - v.monto;
       v_n := v_n + 1;
     ELSE
+      -- cubierto en parte: queda estimado lo que falta facturar
       UPDATE vencimientos SET monto = round(v.monto - v_resto, 2), updated_at = now() WHERE id = v.id;
       v_resto := 0;
     END IF;
@@ -485,7 +539,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.oc_vencimiento_estimado_reemplazar(uuid, text, numeric) IS
-  'Quita (o descuenta) los vencimientos ESTIMADOS que generó una orden de compra, cuando llega el vencimiento real de la factura. Llamarla dentro de la misma transacción que crea el vencimiento real.';
+  'Cancela (o descuenta) los vencimientos ESTIMADOS que generó una orden de compra, cuando llega el vencimiento real de la factura. No borra: el estimado cubierto queda en estado cancelado. Llamarla dentro de la misma transacción que crea el vencimiento real.';
 
 -- ═══ 6. Kardex pendiente ("stock en camino") ═══
 -- APARTE A PROPÓSITO (E-31): la Tanda 1-B va a definir una sola fuente para el kardex de
@@ -975,6 +1029,8 @@ REVOKE ALL ON FUNCTION public.oc_totales(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.oc_neto_unitario(numeric, numeric, numeric, numeric, numeric, text) TO service_role, authenticated;
 REVOKE ALL ON FUNCTION public.oc_provision_sincronizar(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.oc_vencimientos_estimados_borrar(uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.oc_vencimientos_estimados_cancelar(uuid, text, text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.oc_vencimientos_estimados_cancelar(uuid, text, text, uuid) TO service_role;
 REVOKE ALL ON FUNCTION public.oc_vencimientos_estimados_sincronizar(uuid, uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.oc_vencimiento_estimado_reemplazar(uuid, text, numeric) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.oc_kardex_pendiente_sincronizar(uuid, uuid) FROM PUBLIC, anon, authenticated;
