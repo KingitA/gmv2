@@ -11,6 +11,7 @@ import { searchProductsByVector } from '@/lib/actions/embeddings'
 import type { AttachmentContent } from './attachment-content-extractor'
 import type { XlsxPriceListItem } from './types'
 import { hoyISO, parseFecha, parseMonto } from '@/lib/formato'
+import { crearListaProveedor } from '@/lib/compras/listas-servidor'
 
 export interface PriceChangeProcessingResult {
     processed: boolean
@@ -102,6 +103,8 @@ export async function processEmailAsPriceChange(
     const linkedItems: LinkedPriceItem[] = []
     let attachmentSaved = false
     let attachmentFilenames: string[] = []
+    /** Ruta del adjunto guardado (bucket "attachments"), para el enlace desde la lista */
+    let rutaAdjunto: string | null = null
 
     // Find XLSX attachments (either pre-downloaded or from email)
     const xlsxAttachments = preDownloadedAttachments?.filter(att =>
@@ -279,6 +282,7 @@ export async function processEmailAsPriceChange(
 
                 // Upload to storage
                 const storagePath = `price-lists/${proveedorId || 'unknown'}/${fechaHoy}_${att.filename}`
+                rutaAdjunto = storagePath
                 await db.storage.from('attachments').upload(storagePath, buffer, {
                     contentType: att.mimeType,
                     upsert: true,
@@ -296,7 +300,53 @@ export async function processEmailAsPriceChange(
 
     console.log(`[PriceListProcessor] Analysis complete: ${itemsDetected} items detected, ${itemsLinked} linked to DB, oferta: ${esOferta}`)
 
-    // ── 4. Create import record with linked items ─────────
+    // ── 4. Lista de precios → el MISMO circuito que las que carga la oficina (E-22) ─────────
+    // Antes iban a importaciones_articulos, un circuito paralelo que nadie revisaba junto con las
+    // listas. Ahora queda una lista "pendiente" en Listas de proveedores, con la misma vista previa
+    // (costo actual → nuevo, alertas, aviso de precios de venta): ahí se revisa y se aplica. No cambia
+    // ningún precio sola. Las OFERTAS siguen por el circuito de importaciones (no son costo de lista).
+    if (!esOferta && linkedItems.some((li) => li.originalPrice != null && Number(li.originalPrice) > 0)) {
+        try {
+            const r = await crearListaProveedor(db, {
+                proveedor_id: proveedorId || null,
+                nombre: `${proveedorName || emailData.fromName || 'Proveedor'} — por mail${attachmentFilenames.length ? ` (${attachmentFilenames[0]})` : ''}`.slice(0, 200),
+                fecha_vigencia: fechaVigencia || fechaHoy,
+                observaciones: `Llegó por mail de ${emailData.from}. Asunto: ${emailData.subject || '(sin asunto)'}${fechaVigencia ? '' : '. El mail no decía desde cuándo rige: se tomó la fecha en que llegó.'}`.slice(0, 1000),
+                storage_path: rutaAdjunto ? `attachments:${rutaAdjunto}` : null,
+                origen: 'mail',
+                email_id: savedEmailId || null,
+                items: linkedItems.map((li) => ({
+                    codigo: li.originalCode || null,
+                    descripcion: li.originalDescription || null,
+                    precio_compra: li.originalPrice != null && Number(li.originalPrice) > 0 ? Number(li.originalPrice) : null,
+                    // el mail no trae los descuentos por separado: no se tocan
+                    descuento1: null, descuento2: null, descuento3: null, descuento4: null,
+                    articulo_id: li.linkedArticuloId || null,
+                    // solo lo que la vinculación dio por seguro se aplica; el resto queda "por revisar"
+                    confianza: li.linkedArticuloId ? (li.matchConfidence === 'HIGH' ? 'segura' as const : 'dudosa' as const) : null,
+                })),
+            })
+            console.log(`[PriceListProcessor] ✅ Lista de proveedor ${r.lista_id}: ${r.stats.pendientes} para aplicar, ${r.stats.revisar} por revisar, ${r.stats.sin_articulo} sin artículo`)
+            return {
+                processed: true,
+                importCreated: true,
+                importId: r.lista_id,
+                proveedorFound: !!proveedorId,
+                proveedorId: proveedorId || undefined,
+                proveedorName: proveedorName || undefined,
+                fechaVigencia: fechaVigencia || undefined,
+                attachmentSaved,
+                itemsDetected,
+                itemsLinked,
+                esOferta,
+            }
+        } catch (e: any) {
+            // No se pudo dejar en Listas de proveedores: sigue por el circuito anterior para no perder el mail
+            console.error('[PriceListProcessor] no se pudo crear la lista de proveedor, va a importaciones:', e?.message || e)
+        }
+    }
+
+    // ── 4b. Ofertas (o si lo anterior falló): registro en importaciones ─────────
     try {
         const { data: importRec, error: importError } = await db.from('importaciones_articulos').insert({
             archivo_nombre: attachmentFilenames.join(', ') || emailData.subject || 'Email sin adjunto',
