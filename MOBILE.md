@@ -1342,9 +1342,41 @@ Visto en el NuStar con la v0.5.3. Solo cambia la app; el contrato del outbox (`r
   Vendedor y chofer lo reciben en su próxima APK.
 - Pruebas: `packages/core/test/entrada-recepcion-app.test.ts`.
 
-**Pendiente (necesita cambios del servidor, a coordinar):** varias fotos = un solo comprobante y
-cola sin señal para los documentos. Hoy la ruta recibe UN archivo y lo lee en el momento. Propuesta
-enviada al orquestador: outbox `recepcion.documento` que solo guarda las hojas + lectura aparte.
+### v0.5.5 (18/11/2026): documentos de la recepción — varias hojas, cola sin señal y lectura aparte (E-38)
+
+**Necesita en el servidor** la migración `20261118d_recepciones_documentos_hojas.sql` y el código de la
+rama `entrada-t1c-deposito`. Sin la migración el envío queda EN LA COLA (no se rechaza ni se pierde)
+y sale solo cuando se aplica. La v0.5.3 / v0.5.4 siguen usando `POST /api/recepciones/[id]/ocr`, que no cambió.
+
+- **Un documento = una o varias hojas.** En `/recibir/:id/documentos` el operario elige el tipo, saca
+  todas las hojas ("📷 Otra hoja") y toca "Subir". Cada foto se achica al sacarla (`comprimirFoto`,
+  2000 px / 0,78; si una sola pasa el tope, 1500 px / 0,6). Un PDF va solo (una hoja).
+- **Outbox nuevo `recepcion.documento`** (`lib/mobile/outbox/deposito.ts`): payload
+  `{ orden_compra_id, documento_local_id, tipo_documento, parte, partes, hojas: [{ nombre, mime, base64 }] }`.
+  El handler **solo guarda**: sube las hojas al bucket `comprobantes`
+  (`<recepción>/<documento_local_id>/p<parte>-<orden>.<ext>`, con `upsert`) y deja UNA fila en
+  `recepciones_documentos` con `lectura_estado = 'pendiente'` (RPC `recepcion_documento_guardar_hojas`).
+  No llama a la lectura automática: leer tarda hasta un minuto y trabaría la fila (O3), y un reintento
+  la repetiría. Idempotente por `documento_local_id` (único). Se acepta con la entrega ya finalizada
+  (la factura suele fotografiarse después de contar): usa `obtenerOCrearRecepcion` sin `abrirSiguiente`.
+- **Tope por envío**: 3.000.000 de caracteres de base64 (`LIMITE_BASE64_ENVIO`; el servidor tolera
+  3.700.000). Si las hojas no entran, `repartirEnEnvios` las parte en varios envíos del MISMO
+  documento (`parte` 0..`partes`−1) y la app lo dice. El documento se lee recién cuando llegaron todas
+  las partes (`documentoCompleto`).
+- **Lectura aparte, con señal**: `POST /api/recepciones/[id]/ocr/leer { document_id }` lee TODAS las
+  hojas en una sola llamada a Gemini (`processWithGemini` acepta un arreglo) ⇒ un solo comprobante.
+  La dispara la pantalla sola cuando ve un documento "pendiente" (una vez por documento y por
+  apertura de pantalla) y hay un botón "Leer ahora". **Idempotente**: la compuerta es la RPC
+  `recepcion_documento_tomar_lectura` (una lectura a la vez; ninguna si ya tiene comprobante; una
+  lectura colgada se puede retomar a los 3 minutos). Tipo "foto" = respaldo: no se lee.
+- **Lo que ve el operario** (`lecturaDeDocumento`): "El sistema leyó" (tipo, número, total, renglones),
+  "Subido. Falta leerlo", "Todavía están llegando hojas", "No se pudo leer" (con el motivo en
+  castellano y "Probar leerlo de nuevo") o "Ya estaba cargado" (factura repetida).
+- **Cola a la vista**: `documentosEnCola(ops, orden)` agrupa las partes por documento; se puede quitar
+  de la cola lo que todavía no salió (`outbox.retirar`).
+- La pantalla ya no exige señal ni que la recepción exista en el servidor para entrar.
+- Reglas puras: `apps/deposito/src/datos/documentos.ts` y `lib/deposito/documentos-reglas.ts`
+  (validación del envío, orden de las hojas). Servidor: `lib/deposito/documentos-recepcion.ts`.
 
 ---
 

@@ -452,14 +452,31 @@ Probado en una base local con el historial y su inmutabilidad creados igual que 
 
 ## Tanda 1-C — app Depósito, recepción (18/11, rama `entrada-t1c-deposito`)
 
-Solo la app (`mobile/apps/deposito`, más una línea en `@gm/core`). No cambia el contrato del outbox ni ninguna ruta del servidor: la app v0.5.3 instalada sigue funcionando igual. Detalle técnico en MOBILE.md §17 "v0.5.4".
+La app (`mobile/apps/deposito`, más una línea en `@gm/core`) y, para los documentos, el servidor. El contrato del outbox que ya existía no cambia (se AGREGA `recepcion.documento`) y la ruta de fotos de hoy tampoco: la app v0.5.3 instalada sigue funcionando igual. Detalle técnico en MOBILE.md §17 "v0.5.4" y "v0.5.5".
 
 | id | Qué quedó |
 |---|---|
 | E-92 (app) | Una línea con menos de lo pedido va en ámbar ("1 de 2 bultos · faltan 36 u"), en su propio grupo "Llegó menos de lo pedido". Verde es solo lo que llegó completo. |
 | E-93 | "Finalizar" con faltantes abre una confirmación con qué llegó y qué falta de cada artículo, y avisa que la orden queda abierta para recibir el resto. Tocar un renglón abre la pantalla de cantidad; la ficha queda en el botón ⓘ. |
 | Control de bultos | Lo escrito no se pierde al salir con "atrás"; "Bultos OK" deshabilitado hasta cargar los dos números; "Saltear" pide confirmación. |
-| E-38 (parte) | La foto se achica antes de subir; se puede subir un PDF desde archivos (hasta 4 MB); después de subir se ve lo que leyó el sistema (tipo, número, total, renglones) o por qué no se pudo leer, en castellano. |
+| E-38 | Un documento = una o varias hojas (la factura de 3 hojas es UN comprobante). Las fotos se achican al sacarlas; se puede subir un PDF. Anda sin señal: queda en la cola del equipo y sube solo. Cuando sube, el sistema lo lee y la app muestra tipo, número, total y renglones, o por qué no se pudo leer, en castellano. |
 | Avisos | Con la sesión vencida la barra dice "Sesión vencida: volvé a ingresar". |
 
-**E-38, lo que falta:** varias fotos de la misma factura = un solo comprobante, y cola sin señal para los documentos. No se puede hacer solo en la app: la ruta recibe un archivo y lo lee en el momento. Queda propuesto al orquestador (outbox `recepcion.documento` que solo guarda las hojas, lectura aparte con todas las hojas, dos columnas en `recepciones_documentos`).
+**E-38, segunda parte (hecha el 18/11, con el OK del orquestador al diseño): varias hojas = un comprobante y cola sin señal.** Toca el servidor, sobre `origin/entrada-t1-ocr-match`:
+
+| Qué | Dónde |
+|---|---|
+| Migración **`20261118d_recepciones_documentos_hojas.sql`** (escrita, sin aplicar, re-ejecutable, no toca documentos existentes): columnas `hojas`, `documento_local_id` (único), `partes_esperadas`, `lectura_estado`, `lectura_iniciada_at`; funciones `recepcion_documento_guardar_hojas` y `recepcion_documento_tomar_lectura` | `supabase/migrations` |
+| Outbox `recepcion.documento`: SOLO guarda las hojas y deja el documento "pendiente de leer". No llama a la lectura automática | `lib/mobile/outbox/deposito.ts`, `lib/deposito/documentos-recepcion.ts` |
+| `POST /api/recepciones/[id]/ocr/leer`: lee todas las hojas en una sola lectura; dos llamadas no crean dos comprobantes | `app/api/recepciones/[id]/ocr/leer/route.ts` |
+| `processWithGemini` acepta varias hojas del mismo comprobante | `lib/services/ocr.ts` |
+| Borrar un documento borra todas sus hojas del bucket | `app/api/recepciones/[id]/ocr/route.ts` (DELETE) |
+
+**Sin la migración:** la app vieja no cambia. La app nueva (v0.5.5) deja el documento en la cola del equipo hasta que se aplique (no lo rechaza ni lo pierde).
+
+**Para T1-B (se lo pasa el orquestador):**
+- La verificación muestra UNA imagen por documento (`url_imagen` = la primera hoja). Las hojas 2 y 3 están en `recepciones_documentos.hojas` (`[{path, nombre, mime, parte, orden}]`, rutas del bucket `comprobantes`): hay que firmarlas y mostrarlas.
+- El "reintentar la lectura" de la verificación (`/api/ordenes-compra/[id]/documentos`) baja solo `storage_path`: en un documento de varias hojas lee la primera nada más. Tiene que llamar a `leerDocumentoRecepcion` (o a `archivosDeDocumento`) de `lib/deposito/documentos-recepcion.ts`, que ya trae todas y usa la compuerta.
+- Un documento subido desde la app puede quedar "pendiente de leer" (`lectura_estado = 'pendiente'`) si el operario cerró la pantalla antes de que se leyera: la verificación debería mostrarlo como "falta leer" con el mismo botón.
+
+**Sin probar:** la lectura con varias hojas contra Gemini real, el handler contra Supabase y la pantalla en el NuStar. Probado: las dos funciones SQL en una base local y las reglas puras (25 pruebas).

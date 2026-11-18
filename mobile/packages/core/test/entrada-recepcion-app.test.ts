@@ -4,7 +4,8 @@
 import { describe, expect, it } from "vitest"
 import { lineaIncompleta, resumenCierre, textoFalta, unidadesFaltantes, vistaRecepcion } from "../../../apps/deposito/src/datos/overlay"
 import { faltaParaRegistrarBultos } from "../../../apps/deposito/src/datos/borradorBultos"
-import { lecturaDeDocumento, LIMITE_SUBIDA_BYTES, megas, motivoNoLeido, nombreTipoComprobante, revisarArchivo } from "../../../apps/deposito/src/datos/documentos"
+import { documentoCompleto, documentosEnCola, enviosDeDocumento, lecturaDeDocumento, LIMITE_SUBIDA_BYTES, megas, motivoNoLeido, nombreTipoComprobante, repartirEnEnvios, revisarArchivo, type HojaLocal } from "../../../apps/deposito/src/datos/documentos"
+import { documentoCompleto as completoServidor, hojasDeDocumento, validarEnvioDocumento } from "../../../../lib/deposito/documentos-reglas"
 import type { OrdenRecepcion } from "../../../apps/deposito/src/datasets"
 import { avisoErrorSync } from "../src/ui/aviso-sync"
 
@@ -139,5 +140,80 @@ describe("documentos de la recepción (E-38)", () => {
     expect(revisarArchivo({ type: "application/zip", name: "x.zip", size: 10 })).toMatchObject({ ok: false })
     expect(revisarArchivo({ type: "image/png", name: "x.png", size: 0 })).toMatchObject({ ok: false })
     expect(megas(3_355_443)).toBe("3,2 MB")
+  })
+})
+
+describe("varias hojas = un documento, por partes y con cola (E-38)", () => {
+  const hoja = (n: number, peso: number, mime = "image/jpeg"): HojaLocal => ({ id: `h${n}`, nombre: `hoja-${n}.jpg`, mime, base64: "A".repeat(peso) })
+  const OC = "11111111-1111-4111-8111-111111111111"
+  const DOC = "22222222-2222-4222-8222-222222222222"
+
+  it("tres hojas que entran en un envío: un solo envío, en orden", () => {
+    const r = repartirEnEnvios([hoja(1, 100), hoja(2, 100), hoja(3, 100)], 1000)
+    expect(r).toMatchObject({ ok: true })
+    expect((r as { grupos: HojaLocal[][] }).grupos.map((g) => g.map((h) => h.id))).toEqual([["h1", "h2", "h3"]])
+  })
+
+  it("si no entran, se parten en varios envíos del MISMO documento, sin cambiar el orden", () => {
+    const r = repartirEnEnvios([hoja(1, 600), hoja(2, 500), hoja(3, 400), hoja(4, 700)], 1000) as { ok: true; grupos: HojaLocal[][] }
+    expect(r.grupos.map((g) => g.map((h) => h.id))).toEqual([["h1"], ["h2", "h3"], ["h4"]])
+    const envios = enviosDeDocumento({ orden_compra_id: OC, documento_local_id: DOC, tipo_documento: "factura", grupos: r.grupos })
+    expect(envios.map((e) => [e.documento_local_id, e.parte, e.partes, e.hojas.length])).toEqual([[DOC, 0, 3, 1], [DOC, 1, 3, 2], [DOC, 2, 3, 1]])
+    // cada envío pasa la validación del servidor
+    expect(envios.map((e) => validarEnvioDocumento(e))).toEqual([null, null, null])
+  })
+
+  it("una hoja sola que pasa el tope no se puede enviar; sin hojas tampoco", () => {
+    expect(repartirEnEnvios([hoja(1, 100), hoja(2, 2000)], 1000)).toEqual({ ok: false, motivo: "La hoja 2 pesa demasiado para enviarse. Sacala de nuevo." })
+    expect(repartirEnEnvios([], 1000).ok).toBe(false)
+  })
+
+  it("el servidor rechaza un envío mal formado", () => {
+    const base = { orden_compra_id: OC, documento_local_id: DOC, tipo_documento: "factura", hojas: [{ nombre: "a.jpg", mime: "image/jpeg", base64: "AAAA" }] }
+    expect(validarEnvioDocumento(base)).toBeNull()
+    expect(validarEnvioDocumento({ ...base, orden_compra_id: "x" })).toMatch(/Orden/)
+    expect(validarEnvioDocumento({ ...base, documento_local_id: "" })).toMatch(/identificador/)
+    expect(validarEnvioDocumento({ ...base, tipo_documento: "contrato" })).toMatch(/Tipo/)
+    expect(validarEnvioDocumento({ ...base, hojas: [] })).toMatch(/no tiene hojas/)
+    expect(validarEnvioDocumento({ ...base, hojas: [{ nombre: "x.exe", mime: "application/zip", base64: "AA" }] })).toMatch(/foto ni un PDF/)
+    expect(validarEnvioDocumento({ ...base, parte: 2, partes: 2 })).toMatch(/Número de envío/)
+    expect(validarEnvioDocumento({ ...base, hojas: [{ nombre: "a.jpg", mime: "image/jpeg", base64: "A".repeat(3_700_001) }] })).toMatch(/pesa demasiado/)
+  })
+
+  it("documento completo recién cuando llegaron todas las partes (app y servidor dicen lo mismo)", () => {
+    const parcial = { partes_esperadas: 2, hojas: [{ path: "a", parte: 0, orden: 0 }, { path: "b", parte: 0, orden: 1 }] }
+    const entero = { partes_esperadas: 2, hojas: [...parcial.hojas, { path: "c", parte: 1, orden: 0 }] }
+    expect([documentoCompleto(parcial), completoServidor(parcial)]).toEqual([false, false])
+    expect([documentoCompleto(entero), completoServidor(entero)]).toEqual([true, true])
+    expect(documentoCompleto({ hojas: null, partes_esperadas: null })).toBe(true) // documento de antes
+    expect(completoServidor({ storage_path: "viejo.jpg" })).toBe(true)
+  })
+
+  it("las hojas se leen en orden: por parte y después por orden; un documento viejo tiene una sola", () => {
+    const doc = { hojas: [{ path: "p1-0", nombre: "h3", mime: "image/jpeg", parte: 1, orden: 0 }, { path: "p0-1", nombre: "h2", mime: "image/jpeg", parte: 0, orden: 1 }, { path: "p0-0", nombre: "h1", mime: "image/jpeg", parte: 0, orden: 0 }] }
+    expect(hojasDeDocumento(doc).map((h) => h.nombre)).toEqual(["h1", "h2", "h3"])
+    expect(hojasDeDocumento({ storage_path: "rec/1.jpg", nombre_archivo: "foto.jpg", tipo_mime: "image/jpeg" })).toEqual([{ path: "rec/1.jpg", nombre: "foto.jpg", mime: "image/jpeg" }])
+    expect(hojasDeDocumento({})).toEqual([])
+  })
+
+  it("subido y sin leer: pendiente; faltan partes: incompleto; factura repetida: lo dice", () => {
+    const pendiente = { id: "d", tipo_documento: "factura", procesado: false, lectura_estado: "pendiente", partes_esperadas: 1, hojas: [{ path: "a", parte: 0, orden: 0 }] }
+    expect(lecturaDeDocumento(pendiente).estado).toBe("pendiente")
+    expect(lecturaDeDocumento({ ...pendiente, partes_esperadas: 2 }).estado).toBe("incompleto")
+    const dup = lecturaDeDocumento({ ...pendiente, lectura_estado: "duplicado", datos_ocr: { duplicado: true, motivo: "La FA 0003-00045711 de este proveedor ya está cargada en esta orden." } })
+    expect([dup.estado, dup.motivo]).toEqual(["duplicado", "La FA 0003-00045711 de este proveedor ya está cargada en esta orden."])
+    expect(lecturaDeDocumento({ id: "d", tipo_documento: "foto", procesado: true, lectura_estado: "leido", datos_ocr: null }).estado).toBe("adjunto")
+  })
+
+  it("la cola del equipo: un renglón por documento aunque viaje en varias partes", () => {
+    const op = (key: string, estado: string, parte: number, hojas: number, doc = DOC, orden = OC) =>
+      ({ key, tipo: "recepcion.documento", estado, error: estado === "rechazado" ? "tipo desconocido" : null, payload: { orden_compra_id: orden, documento_local_id: doc, tipo_documento: "factura", parte, partes: 2, hojas: Array(hojas).fill({}) } })
+    const cola = documentosEnCola([
+      op("k1", "enviando", 0, 2), op("k2", "pendiente", 1, 1),
+      op("k3", "pendiente", 0, 1, "33333333-3333-4333-8333-333333333333", "otra-orden"),
+      { key: "k4", tipo: "recepcion.item", estado: "pendiente", payload: { orden_compra_id: OC } },
+    ], OC)
+    expect(cola).toEqual([{ documento_local_id: DOC, tipo_documento: "factura", hojas: 3, partes: 2, estado: "enviando", error: null, claves: ["k1", "k2"] }])
+    expect(documentosEnCola([op("k1", "rechazado", 0, 1)], OC)[0]).toMatchObject({ estado: "rechazado", error: "tipo desconocido" })
   })
 })
