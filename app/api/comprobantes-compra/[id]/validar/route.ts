@@ -283,7 +283,13 @@ async function validarSinFuncion(supabase: any, comprobante: any, proveedorId: s
     let movAdoptadoAntes: any = null;
     let vencCreado: string | null = null;
     const deshacer = async () => {
-        if (vencCreado) await supabase.from('vencimientos').delete().eq('id', vencCreado);
+        // Un vencimiento NO se puede borrar: su historia (vencimientos_historial) es inmutable y
+        // cuelga de él, así que la base rechaza el borrado. Se cancela, como en el resto del sistema.
+        if (vencCreado) {
+            await supabase.from('vencimientos')
+                .update({ estado: 'cancelado', observaciones: 'Cancelado: la validación del comprobante no se completó y se deshizo.' })
+                .eq('id', vencCreado);
+        }
         if (movCreado) await supabase.from('cuenta_corriente_proveedores').delete().eq('id', movCreado);
         if (movAdoptadoAntes) {
             const { id: movId, ...antes } = movAdoptadoAntes;
