@@ -348,33 +348,57 @@ ${text}`
 }
 
 /**
- * Llama a Claude y, si la respuesta se corta por límite de tokens
- * (stop_reason === "max_tokens"), continúa la extracción desde donde quedó hasta que
- * termine completa. Concatena los pedazos en un único JSON.
+ * Llama a Claude para extraer un pedido y, si la respuesta se corta por límite de longitud
+ * (stop_reason === "max_tokens"), pide LO QUE FALTA y lo une.
  *
- * Cómo continúa (E-82): el modelo actual NO acepta que el último mensaje sea del asistente
- * (el "prefill" que se usaba con Haiku 4.5 devuelve error 400). Ahora lo ya escrito va como
- * turno del asistente y después un mensaje del usuario pide seguir exactamente desde ahí.
+ * Cómo continúa: el modelo actual no acepta que el último mensaje sea del asistente (el
+ * "prefill" de Haiku 4.5 devuelve error 400), y pedirle "seguí desde el último carácter" puede
+ * devolver texto repetido o con formato y romper el JSON. Por eso NO se pegan textos: de la
+ * respuesta cortada se rescatan los renglones COMPLETOS, y se vuelve a pedir el mismo mensaje
+ * diciendo cuántos renglones ya están y cuál fue el último, para que devuelva un JSON solo con
+ * los que siguen. Al final se arma un único JSON { customer, items }.
  *
- * Garantía dura: o devuelve la respuesta COMPLETA, o lanza un error explícito.
+ * Garantía dura: o devuelve el pedido COMPLETO, o lanza un error explícito.
  * Nunca devuelve un pedido cortado en silencio.
  */
 const MAX_CONTINUACIONES = 10
+
+/** De un JSON posiblemente cortado: los renglones completos de "items" y el cliente, si llegó a escribirse. */
+function rescatarRenglones(texto: string): { customer: string | null | undefined; items: any[] } {
+    const items: any[] = []
+    const desde = texto.indexOf('"items"')
+    const cuerpo = desde >= 0 ? texto.slice(desde) : texto
+    // Los renglones no tienen objetos adentro: cada { ... } sin llaves internas es un renglón entero
+    for (const m of cuerpo.matchAll(/\{[^{}]*\}/g)) {
+        try {
+            const it = JSON.parse(m[0])
+            if (it && typeof it === "object" && ("description" in it || "quantity" in it)) items.push(it)
+        } catch { /* renglón a medio escribir: se descarta y se vuelve a pedir */ }
+    }
+    let customer: string | null | undefined
+    const c = /"customer"\s*:\s*("(?:[^"\\]|\\.)*"|null)/.exec(texto)
+    if (c) { try { customer = JSON.parse(c[1]) } catch { customer = undefined } }
+    return { customer, items }
+}
 
 async function extraerJSONConContinuacion(
     prompt: string,
     system: string,
     contexto: string,
 ): Promise<string> {
-    const messages: Array<{ role: "user" | "assistant"; content: string }> = [
-        { role: "user", content: prompt },
-    ]
-    const CONTINUAR = "Tu respuesta anterior se cortó por el límite de longitud. Seguí EXACTAMENTE desde el último carácter que escribiste: " +
-        "no repitas nada de lo anterior, no vuelvas a empezar el JSON, no agregues explicaciones ni bloques de código. " +
-        "Lo que escribas se va a pegar a continuación de lo anterior, tal cual."
-    let acumulado = ""
+    let customer: string | null | undefined
+    const items: any[] = []
+    let huboCorte = false
 
     for (let intento = 0; intento <= MAX_CONTINUACIONES; intento++) {
+        const pedido = items.length === 0 ? prompt : `${prompt}
+
+IMPORTANT — CONTINUATION: a previous answer for this same message was cut off by the length limit.
+The first ${items.length} items were ALREADY extracted, in the order they appear in the message. The LAST one already extracted is:
+${JSON.stringify(items[items.length - 1])}
+Now return ONLY this JSON, with the items that come AFTER that one in the message (do NOT repeat any item already extracted; if there are none left, return an empty list):
+{ "customer": null, "items": [ ... ] }`
+
         // Streaming obligatorio: con max_tokens alto el SDK rechaza la llamada
         // no-streaming (riesgo de superar 10 min). finalMessage() junta el
         // mensaje completo y nos da stop_reason igual que create().
@@ -384,9 +408,7 @@ async function extraerJSONConContinuacion(
             // sin temperature: los modelos actuales no la aceptan (error 400)
             output_config: { effort: ESFUERZO_SIMPLE },
             system,
-            messages: acumulado
-                ? [...messages, { role: "assistant", content: acumulado }, { role: "user", content: CONTINUAR }]
-                : messages,
+            messages: [{ role: "user", content: pedido }],
         })
         const msg = await stream.finalMessage()
 
@@ -395,17 +417,24 @@ async function extraerJSONConContinuacion(
         }
         // La respuesta puede empezar con un bloque de pensamiento: se lee el texto, no content[0]
         const trozo = textoDeRespuesta(msg)
-        if (!trozo && msg.stop_reason === "max_tokens") {
-            throw new Error(`La IA no llegó a escribir el ${contexto} (se quedó sin espacio antes de empezar). No se importó nada: dividilo en dos y volvé a importarlo.`)
-        }
-        acumulado += trozo
+        const cortada = msg.stop_reason === "max_tokens"
 
-        if (msg.stop_reason !== "max_tokens") {
-            // Terminó completa (end_turn u otro motivo no-truncante)
-            return acumulado
-        }
+        // Camino normal: terminó de una. Se devuelve tal cual (lo interpreta quien llama, como siempre)
+        if (!cortada && !huboCorte) return trozo
 
-        console.warn(`[extraerJSON ${contexto}] Respuesta cortada por límite de tokens, continuando (intento ${intento + 1}). Largo acumulado: ${acumulado.length}`)
+        const parte = rescatarRenglones(trozo)
+        if (customer === undefined && parte.customer !== undefined && items.length === 0) customer = parte.customer
+        if (cortada && parte.items.length === 0) {
+            throw new Error(`La IA no llegó a escribir más renglones del ${contexto} (se quedó sin espacio). No se importó nada: dividilo en dos y volvé a importarlo.`)
+        }
+        items.push(...parte.items)
+        huboCorte = true
+
+        if (!cortada) {
+            // Terminó: un único JSON con todo lo rescatado
+            return JSON.stringify({ customer: customer ?? null, items })
+        }
+        console.warn(`[extraerJSON ${contexto}] Respuesta cortada por límite de longitud, se pide lo que falta (intento ${intento + 1}). Renglones hasta ahora: ${items.length}`)
     }
 
     // Agotamos las continuaciones y SIGUE cortada: fallar fuerte, nunca devolver parcial.

@@ -53,7 +53,9 @@ export interface Herramienta {
 }
 
 /** Error que se le muestra a la IA tal cual (ej. "no encontré ese cliente"). */
-export class ErrorHerramienta extends Error {}
+export class ErrorHerramienta extends Error {
+  name = "ErrorHerramienta"
+}
 
 // ─── utilidades ────────────────────────────────────────────────────────────
 const num = (v: unknown): number | null => (v == null || v === "" ? null : Number(v))
@@ -1769,6 +1771,10 @@ const gastosPagados: Herramienta = {
     }
   },
 }
+
+/** Para los reportes de Playroom: el mismo buscador de proveedor y de artículo que usa Jarvis. */
+export const buscarProveedorParaReporte = (db: SupabaseClient, texto: string) => resolverNombre(db, "proveedores", texto, "el proveedor")
+export const buscarArticuloParaReporte = async (db: SupabaseClient, texto: string) => { const x = await resolverArticulo(db, texto); return { id: x.id, sku: x.sku, descripcion: x.descripcion } }
 
 // Compras y pagos a proveedores (lib/jarvis/herramientas-compras.ts): compras, ultima_compra,
 // ficha_proveedor, cuenta_corriente_proveedor, retenciones_proveedor, notas_esperadas,
