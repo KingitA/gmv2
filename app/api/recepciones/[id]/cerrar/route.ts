@@ -445,7 +445,7 @@ export async function POST(
                             : tipo === 'precio'
                                 ? (costo && !(costo.precio_compra > 0)
                                     ? 'Se aceptó el precio facturado. Como el artículo viene con precios distintos o la factura tiene un descuento al pie, el precio de lista del artículo NO se tocó: quedó solo el último costo.'
-                                    : 'Se tomó el precio facturado como costo del artículo.')
+                                    : 'Se tomó el precio facturado como costo del artículo. El precio de venta NO se tocó: revisalo en Artículos.')
                                 : 'La diferencia quedó asumida por la empresa.';
                 const devueltas = !r.ya_resuelta && Number(r.unidades_devueltas) > 0 ? ` Salieron ${Number(r.unidades_devueltas)} unidades del stock (mercadería devuelta).` : "";
                 results.push({ item_id, tipo, destino, accion: decision.accion, success: true, ...r, unidades: p.unidades, mensaje: mensaje + devueltas + avisoKardex + avisoHistorial + avisoCosto });

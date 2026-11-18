@@ -574,7 +574,10 @@ async function processAsPriceChange(db: any, emailData: ParsedEmail, targetEmail
         if (priceResult.importCreated) {
             await db.from('ai_agenda_events').insert({
                 title: `📊 Cambio de precios — ${priceResult.proveedorName || emailData.fromName || emailData.from}`,
-                description: `Se recibió una nueva lista de precios${priceResult.proveedorName ? ` de ${priceResult.proveedorName}` : ''}.${priceResult.fechaVigencia ? ` Vigencia: ${priceResult.fechaVigencia}.` : ''} Importación pendiente — ir a /articulos para aplicar.`,
+                // Las listas quedan en Listas de precios (mismo lugar que las que carga la oficina); las ofertas, en importaciones
+                description: priceResult.listaProveedorId
+                    ? `Se recibió una nueva lista de precios${priceResult.proveedorName ? ` de ${priceResult.proveedorName}` : ''}.${priceResult.fechaVigencia ? ` Vigencia: ${priceResult.fechaVigencia}.` : ''} Todavía no cambió ningún precio: ir a Listas de precios para ver la vista previa y aplicarla.`
+                    : `Se recibió una nueva lista de precios${priceResult.proveedorName ? ` de ${priceResult.proveedorName}` : ''}.${priceResult.fechaVigencia ? ` Vigencia: ${priceResult.fechaVigencia}.` : ''} Importación pendiente — ir a /articulos para aplicar.`,
                 event_type: 'cambio_precio',
                 priority: 'alta',
                 status: 'pendiente',
@@ -583,7 +586,10 @@ async function processAsPriceChange(db: any, emailData: ParsedEmail, targetEmail
                 source_ref_id: savedEmailId,
                 related_entity_type: 'proveedor',
                 related_entity_id: priceResult.proveedorId,
-                metadata: { email_subject: emailData.subject, email_from: emailData.from, import_id: priceResult.importId, fecha_vigencia: priceResult.fechaVigencia, proveedor_id: priceResult.proveedorId },
+                metadata: {
+                    email_subject: emailData.subject, email_from: emailData.from, import_id: priceResult.importId, fecha_vigencia: priceResult.fechaVigencia, proveedor_id: priceResult.proveedorId,
+                    ...(priceResult.listaProveedorId ? { lista_proveedor_id: priceResult.listaProveedorId, url: `/listas-proveedores/${priceResult.listaProveedorId}`, url_texto: 'Ir a Listas de precios' } : {}),
+                },
             })
             result.eventsCreated++
         } else {

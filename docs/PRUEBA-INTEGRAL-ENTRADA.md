@@ -374,6 +374,47 @@ Ahora, cuando lo facturado del artículo está en más de un comprobante y el im
 
 Sin migración: la cuenta está en `lib/compras/diferencias.ts` (`faltante_de`, `cantidad.opciones`); la asociación de la nota esperada la corrige el servidor después de crearla. No cambia la devolución de mercadería que entró ni la diferencia de precio, que siguen usando el promedio del artículo.
 
+## Tanda 2-C — precios de compra: listas de proveedor (19/11, rama `entrada-t2-listas`)
+
+| Id | Qué quedó |
+|---|---|
+| E-20 | **Aplicar una lista** lo hace la función `lista_proveedor_aplicar` (migración `20261119a`), en una transacción. Vigencia futura → la lista queda **programada** y se aplica sola ese día (pg_cron cada 15 minutos, el mismo programador de `aplicar_precios_programados`; además se intenta al abrir la pantalla de listas). Un renglón que falla queda con su motivo y la lista **no** pasa a "aplicada". Descuento vacío = no tocar; descuento 0 = cero. Acepta Excel, CSV, foto y **PDF** (lectura automática). El enlace al archivo se firma al mostrarlo (bucket privado). |
+| E-20 | **Vista previa** antes de aplicar (`/listas-proveedores/[id]`): por artículo, costo actual → nuevo (lista, descuentos y neto), % de cambio, alerta de subas o bajas de más de 15 % (se cambia en la pantalla), renglones por revisar y sin artículo. Los descuentos se aplican como dice la ficha del proveedor (cascada / sobre lista). |
+| E-21 | **Historial de costo**: aplicar una lista deja en `precios_compra_historial` el antes y el después, origen "lista", quién y cuándo, dentro de la misma transacción. En la ficha del artículo hay "Evolución del costo de compra" (listas, facturas validadas, precio aceptado, bonificados). |
+| E-22 | **Listas por mail**: `lib/ai/email-pricelist-processor.ts` deja una lista "pendiente" en Listas de proveedores (origen mail), con la misma vista previa. Lo vinculado con seguridad queda para aplicar; lo dudoso, "por revisar". Las ofertas siguen por `importaciones_articulos`. Si no se puede crear la lista, cae al circuito anterior para no perder el mail. |
+| — | **Aviso de precio de venta** (no se toca ninguno): la vista previa y el resultado de aplicar dicen qué artículos tienen precio de venta guardado y quedan con otro margen, y cuáles cambian solos porque se calculan desde el costo. Al validar una factura se avisa qué artículos se facturaron a un costo distinto del de su ficha. |
+| — | **Renglones leídos en una transacción** (pendiente de la Tanda 1): `comprobante_detalle_cargar` (migración `20261119b`) guarda cada renglón junto con lo que suma a la recepción. Sin la migración sigue el camino anterior. |
+
+**Por qué no se usa la tabla `precios_programados`:** ahí solo entra `precio_compra` (no los descuentos de compra), no queda el historial de costo ni el estado de la lista ni de cada renglón. Se usa el mismo programador (pg_cron) con una función propia.
+
+**Límites conocidos:**
+- La lista cambia `precio_compra` y `descuento1..4` del artículo. Los artículos que tienen **descuentos tipados** (`articulos_descuentos`, "Gestionar descuentos" en la ficha) calculan el precio de venta con esos y no con `descuento1..4`: para ellos el aviso de precio de venta puede no reflejar lo que hace el motor de precios.
+- Una foto o PDF de una lista da UN descuento por renglón (el equivalente). Una lista larga en PDF puede no leerse completa: conviene Excel.
+- El mail no trae los descuentos por separado: una lista por mail solo cambia el precio de lista.
+- El enlace "revisar en Artículos" lleva a la pantalla de artículos; hay que buscar el SKU.
+
+### Arreglos de la revisión de `entrada-t2-listas` (19/11)
+
+- **A. Precio por bulto o por unidad.** El costo del artículo es siempre por unidad. Cada lista dice en qué viene su precio (`listas_proveedores.precio_por`): lo que elige quien carga, o lo que dicen los títulos del archivo ("precio x bulto", "costo caja"), o lo guardado para ese proveedor (`proveedores.lista_precio_por`), o por unidad. Se cambia en la vista previa y queda guardado para el proveedor. Por bulto, el precio se divide por las unidades por bulto del artículo; si el artículo no las tiene, el renglón queda por revisar. **Tope de cambio** (50 %, se cambia en cada lista): una suba o baja mayor NO se aplica sin confirmar ese renglón ("Aplicar igual"). Una lista programada pasa por los mismos controles el día que se aplica: lo que supera el tope queda por revisar y la lista vuelve a pendiente.
+- **B. Descuento único de foto / PDF:** va en el descuento 1 y los otros tres en 0 explícito (con `normalizarDescuentoPct`).
+- **C. Lista anterior no pisa una posterior:** si ya hay una lista aplicada del mismo proveedor con vigencia posterior para ese artículo, el renglón no se aplica y se avisa cuál es.
+- **D. De a 200:** aplicar procesa 200 renglones por llamada con el avance a la vista; la vista previa trae 200 renglones por vez, ya filtrados en el servidor.
+- **E.** Si los renglones no se pueden guardar, la lista recién creada se borra (no queda vacía). Los descuentos de los renglones pasan a `numeric(7,4)`.
+- **F. Mail:** el evento de agenda dice "ir a Listas de precios" y trae el enlace a la lista; se guardan todos los adjuntos (antes solo el último, y en una de las dos ramas ninguno).
+- **Sin la migración `20261119a` no se aplica ninguna lista** (la pantalla dice que falta y no cambia ningún precio): la forma anterior ignoraba la vigencia, escondía errores y escribía el precio por bulto como precio por unidad.
+
+### Cómo probarlo (Tanda 2-C)
+
+1. Aplicar `20261119a` y `20261119b` (en ese orden; la b necesita la `20261118e`).
+2. **Lista con vigencia de hoy**: Listas de proveedores → Importar, elegir proveedor, un Excel con columnas código, descripción, precio, desc 1, desc 2 (dejar un descuento vacío y poner otro en 0). Abrir la lista: ver costo actual → nuevo, el descuento vacío sin cambio y el 0 en cero. Aplicar: el artículo cambia, en su ficha aparece el cambio en "Evolución del costo de compra".
+3. **Vigencia futura**: importar otra con fecha de mañana → el botón dice "Programar"; queda "programada" y los artículos no cambian. "Sacar de programada" la devuelve a pendiente.
+4. **Alertas**: un precio 30 % más caro aparece en naranja y en "Subas / bajas grandes"; cambiar el umbral a 40 y ver que deja de alertar.
+5. **Precio de venta**: un artículo con precio base guardado aparece en "Precio de venta" con el guardado y el que daría el costo nuevo; después de aplicar, se lista arriba para revisarlo. El precio de venta no cambió.
+6. **Error visible**: (difícil de provocar) un renglón cuyo artículo se borró queda "con error" y la lista sigue "pendiente".
+7. **PDF**: importar una lista corta en PDF; avisa que hay que controlarla contra el archivo. "Ver el archivo" abre el original.
+8. **Mail**: reenviar un mail de lista de precios con un Excel a la casilla; aparece en Listas de proveedores con "llegó por mail".
+9. **Renglones en una transacción**: subir una factura a una orden y comprobar que los renglones y lo documentado de la recepción coinciden (igual que antes, ahora en un paso).
+
 ### Orden de las migraciones de la Tanda 1
 
 Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `20261116c`, `20261116p`, `20261116q`, `20261117a_remito_no_se_valida`, `20261117a_op_ganancias_bases_neto`.
@@ -392,6 +433,8 @@ Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `2
 | 10 | `20261118b_oc_estimados_sin_borrar.sql` | la n |
 | 11 | `20261118c_provision_baja_por_lo_facturado.sql` | **la u y la 18b** (corta con mensaje si falta alguna). Reemplaza la función de validar. |
 | 12 | `20261118e_recepcion_documentado_atomico.sql` | independiente (sumado atómico de lo documentado y provisorio con bloqueo) |
+| 13 | `20261119a_listas_proveedores_aplicar.sql` | **la n** (usa `oc_neto_unitario`; corta con mensaje si falta). **El código de la Tanda 2-C la necesita** para aplicar o programar una lista. |
+| 14 | `20261119b_comprobante_detalle_cargar.sql` | **la 18e** (corta con mensaje si falta). Sin ella sigue el camino anterior. |
 
 Aparte, una sola vez y a mano: `scripts/entrada-limpieza-kardex-en-camino.sql`.
 

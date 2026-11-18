@@ -342,6 +342,9 @@ function DashboardEventCard({
                         {event.description}
                     </p>
                 )}
+                {typeof event.metadata?.url === 'string' && event.metadata.url.startsWith('/') && (
+                    <a href={event.metadata.url} className="mt-1 inline-block text-xs font-medium text-blue-600 underline">{String(event.metadata.url_texto || 'Abrir')}</a>
+                )}
             </div>
 
             {/* Complete button */}
