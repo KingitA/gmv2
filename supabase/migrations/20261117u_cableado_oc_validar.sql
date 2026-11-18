@@ -1,7 +1,7 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Cableado entre la orden de compra (Tanda 1-A) y la validación de la factura (Tanda 1-B).
--- 17/11/2026. VA DESPUÉS de 20261117d_validar_renglones_suman.sql y de 20261117n_oc_guardar.sql:
--- si falta alguna de las dos, corta con un mensaje y no cambia nada.
+-- 17/11/2026. VA DESPUÉS de 20261117d_validar_renglones_suman.sql, de 20261117n_oc_guardar.sql y de
+-- 20261117p_ordenes_pago_t1d.sql: si falta alguna de las tres, corta con un mensaje y no cambia nada.
 --
 -- A. La misma función comprobante_compra_validar de 20261117d con cuatro cambios:
 --   1. Vencimiento real en CUOTAS. El servidor manda en p_plan.pagos un pago por cada cuota del
@@ -17,12 +17,21 @@
 --   4. El neto de cada renglón para la regla de suma sale de oc_neto_unitario (la misma función
 --      que usa la orden): una sola regla para "en cascada / sobre precio de lista".
 --
+--   5. Si la deuda ya se había pagado (en todo o en parte) ANTES de validar —una factura que entró
+--      por mail deja la deuda en la cuenta corriente y se puede pagar con una orden de pago—, las
+--      cuotas recién creadas se acomodan al saldo real del movimiento
+--      (op_vencimientos_sincronizar_movimiento, de la 20261117p): no vuelve a aparecer como
+--      pendiente lo que ya se pagó.
+--   6. Una nota de débito no baja la provisión ni el estimado de la orden. La adquisición se lee
+--      como 'Adquisicion' o 'ADQ' (valor viejo del procesador de mails).
+--
 -- B. oc_cerrar_estimados(orden): al FINALIZAR la orden, quita en una sola transacción todo lo
 --    que era estimado y ya no va a pasar: provisión que quedó en la cuenta corriente, vencimientos
 --    estimados y mercadería "en camino". Solo actúa sobre una orden finalizada o cancelada.
 --
--- El servidor funciona con o sin esta migración: sin ella crea un solo vencimiento (primera
--- cuota, por el total) y reemplaza el estimado apenas termina de validar, en un paso aparte.
+-- C. entrada_cableado_version(): marca de que esto está instalado. Sin esta migración el servidor
+--    NO valida comprobantes de una orden de compra: contesta que falta aplicarla y no hace nada.
+--    (Los comprobantes sin orden se siguen validando como antes.)
 -- No modifica datos al instalarse. Se puede correr más de una vez.
 -- ─────────────────────────────────────────────────────────────────────────────
 
@@ -31,6 +40,10 @@ BEGIN
   IF to_regprocedure('public.oc_vencimiento_estimado_reemplazar(uuid, text, numeric)') IS NULL
      OR to_regprocedure('public.oc_neto_unitario(numeric, numeric, numeric, numeric, numeric, text)') IS NULL THEN
     RAISE EXCEPTION 'Falta aplicar ANTES la migración 20261117n_oc_guardar.sql (funciones de la orden de compra). No se cambió nada.';
+  END IF;
+  IF to_regprocedure('public.op_vencimientos_sincronizar_movimiento(uuid, uuid, boolean)') IS NULL
+     OR to_regprocedure('public.cc_proveedor_saldo_movimiento(uuid)') IS NULL THEN
+    RAISE EXCEPTION 'Falta aplicar ANTES la migración 20261117p_ordenes_pago_t1d.sql (pagos y saldo de la cuenta corriente). No se cambió nada.';
   END IF;
   IF to_regprocedure('public.comprobante_compra_validar(uuid, uuid, jsonb)') IS NULL
      OR position('renglones_no_suman' IN pg_get_functiondef('public.comprobante_compra_validar(uuid, uuid, jsonb)'::regprocedure)) = 0 THEN
@@ -87,6 +100,8 @@ DECLARE
   v_venc_i       uuid;
   v_creados      int := 0;
   v_estimados    int := 0;
+  v_saldo        numeric;
+  v_pagado_antes numeric := 0;
 BEGIN
   SELECT * INTO v FROM comprobantes_compra WHERE id = p_comprobante_id FOR UPDATE;
   IF NOT FOUND THEN
@@ -153,7 +168,7 @@ BEGIN
   -- A. Renglones contra el neto. El importe de un renglón se arma de dos formas (cantidad × lista ×
   --    descuentos redondeado una vez, o cantidad × neto por unidad ya redondeado); con muchas
   --    unidades difieren en centavos. Pasa si CUALQUIERA de las dos cierra.
-  IF v.tipo_comprobante IN ('FA', 'FB', 'FC', 'Adquisicion') THEN
+  IF v.tipo_comprobante IN ('FA', 'FB', 'FC', 'Adquisicion', 'ADQ') THEN
     -- Los descuentos del renglón se aplican como dice la ficha del proveedor: en cascada (uno sobre
     -- el otro) o sobre la lista (se suman). Sin dato: en cascada.
     SELECT coalesce(pr.tipo_descuento, 'cascada') INTO v_tipo_dto
@@ -264,7 +279,7 @@ BEGIN
          AND estado NOT IN ('validado', 'cerrado', 'esperada')
          AND tipo_comprobante NOT IN ('Remito', 'NC', 'NCA', 'NCB', 'NCC', 'Reversa')
          -- solo los del mismo canal: una adquisición (sin factura) no espera a una factura ni al revés
-         AND (tipo_comprobante = 'Adquisicion') = (p_plan ->> 'canal' = 'negro');
+         AND (tipo_comprobante IN ('Adquisicion', 'ADQ')) = (p_plan ->> 'canal' = 'negro');
 
       v_restante := v_total;
       v_provision := 'sin_provision';
@@ -374,6 +389,20 @@ BEGIN
     IF v_oc IS NOT NULL AND v_venc IS NOT NULL AND v_venc_nuevo AND NOT v_debito_nota THEN
       v_estimados := public.oc_vencimiento_estimado_reemplazar(v_oc, v_canal, v_total);
     END IF;
+
+    -- ── 8. Lo que ya se pagó antes de validar ──
+    -- Una factura que entró por mail deja la deuda en la cuenta corriente y se puede pagar con una
+    -- orden de pago antes de validarla. Los vencimientos que acaban de nacer salen por el total:
+    -- se acomodan al SALDO real del movimiento (cuotas más próximas primero), con la misma función
+    -- que usan las órdenes de pago. p_op_id va con un id que no es de ninguna orden: así la cuota
+    -- que queda cancelada se anota a nombre de la orden que de verdad pagó ese comprobante.
+    IF v_mov IS NOT NULL AND v_venc_nuevo THEN
+      v_saldo := public.cc_proveedor_saldo_movimiento(v_mov);
+      IF v_saldo IS NOT NULL AND v_saldo < v_total - 0.01 THEN
+        v_pagado_antes := round(v_total - greatest(v_saldo, 0), 2);
+        PERFORM public.op_vencimientos_sincronizar_movimiento(v_mov, '00000000-0000-0000-0000-000000000000'::uuid, false);
+      END IF;
+    END IF;
   END IF;
 
   RETURN jsonb_build_object(
@@ -383,7 +412,8 @@ BEGIN
     'vencimiento_id', v_venc, 'vencimiento_nuevo', v_venc_nuevo, 'vencimiento_monto', v_venc_monto,
     'sin_vencimiento', (NOT v_credito AND v_venc IS NULL),
     'provision', v_provision,
-    'vencimientos_creados', v_creados, 'estimados_reemplazados', v_estimados
+    'vencimientos_creados', v_creados, 'estimados_reemplazados', v_estimados,
+    'pagado_antes', v_pagado_antes
   );
 END;
 $$;
@@ -443,3 +473,15 @@ COMMENT ON FUNCTION public.oc_cerrar_estimados(uuid) IS
 
 REVOKE ALL ON FUNCTION public.oc_cerrar_estimados(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.oc_cerrar_estimados(uuid) TO service_role;
+
+-- ═══ C. Marca de que el cableado está instalado ═══
+-- El servidor la consulta antes de validar un comprobante de una orden de compra: si no está,
+-- contesta "falta aplicar la migración 20261117u" y no hace nada.
+CREATE OR REPLACE FUNCTION public.entrada_cableado_version()
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT '20261117u'::text $$;
+
+REVOKE ALL ON FUNCTION public.entrada_cableado_version() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.entrada_cableado_version() TO service_role;

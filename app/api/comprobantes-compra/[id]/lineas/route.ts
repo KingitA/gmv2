@@ -99,7 +99,7 @@ export async function POST(
         tipo_cantidad: tipoCantidad,
         match_estado: 'manual',
         recepcion_item_id: recepcionItemId,
-        iva_porcentaje: comp.tipo_comprobante === 'Adquisicion' ? 0 : 21,
+        iva_porcentaje: ['Adquisicion', 'ADQ'].includes(comp.tipo_comprobante) ? 0 : 21,
       })
       .select('id')
       .single()

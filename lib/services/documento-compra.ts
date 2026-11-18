@@ -121,7 +121,7 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
     // No discrimina IVA: adquisición, remito, o una factura B / C a la que no se le leyó IVA. Ahí
     // neto = total (menos percepciones) e IVA = 0: antes se inventaba neto = total ÷ 1,21 y el control
     // de suma rechazaba los renglones cuando lo que estaba mal era la cabecera.
-    const sinIva = tipoComp === 'Adquisicion' || tipoComp === 'Remito' || ((tipoComp === 'FB' || tipoComp === 'FC') && !(ivaLeido > 0));
+    const sinIva = tipoComp === 'Adquisicion' || tipoComp === 'ADQ' || tipoComp === 'Remito' || ((tipoComp === 'FB' || tipoComp === 'FC') && !(ivaLeido > 0));
     const totalNeto = sinIva
         ? r2(Math.max(0, totalFactura - extras))
         : r2(netoLeido > 0 ? netoLeido : ivaLeido > 0 ? totalFactura - ivaLeido - extras : (totalFactura > 0 ? (totalFactura - extras) / 1.21 : 0));

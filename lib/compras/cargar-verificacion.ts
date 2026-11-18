@@ -9,7 +9,7 @@
 
 import { aUnidadesBase, conversionLinea } from "@/lib/deposito/unidades"
 import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
-import { evaluarFinalizarOC, esComprobanteConPrecios, type ControlFinalizarOC } from "./finalizar-oc"
+import { evaluarFinalizarOC, esAdquisicion, esComprobanteConPrecios, type ControlFinalizarOC } from "./finalizar-oc"
 import { armarVerificacion, type DatosVerificacion, type Verificacion } from "./verificacion"
 import { controlSuma } from "./control-suma"
 import { tipoDescuentoDe } from "./diferencias"
@@ -194,7 +194,7 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
     { tipo_descuento: tipoDto, mixto_pct_factura: ordenFila.mixto_pct_factura ?? provOrden?.mixto_pct_factura ?? null, percepcion_iva: provOrden?.percepcion_iva, percepcion_iibb: provOrden?.percepcion_iibb },
   )
   const totalCanal = { blanco: Number(ordenFila.total_blanco ?? calculado.total_blanco) || 0, negro: Number(ordenFila.total_negro ?? calculado.total_negro) || 0 }
-  const validadoDelCanal = (canal: "blanco" | "negro") => comprobantes.some((c) => validados.has(c.id) && (c.tipo_comprobante === "Adquisicion") === (canal === "negro"))
+  const validadoDelCanal = (canal: "blanco" | "negro") => comprobantes.some((c) => validados.has(c.id) && esAdquisicion(c.tipo_comprobante) === (canal === "negro"))
   const estimados: any[] = ((rEstimados as any)?.data as any[]) || []
   const sumaCanal = (filas: any[], canal: string) => Math.round(filas.filter((x) => (x.canal || "blanco") === canal).reduce((s, x) => s + (Number(x.monto) || 0), 0) * 100) / 100
   const provisiones: any[] = ((rProvision as any)?.data as any[]) || []

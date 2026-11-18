@@ -16,7 +16,15 @@
  */
 
 /** Comprobantes que traen precios: con ellos se controlan cantidades Y precios. */
-export const TIPOS_CON_PRECIOS = ["FA", "FB", "FC", "Adquisicion"]
+/**
+ * Adquisición (compra sin factura, canal negro). El valor es "Adquisicion"; hasta el 18/11 el
+ * procesador de mails la guardaba como "ADQ" y esos comprobantes siguen en la base: al LEER se
+ * aceptan los dos, al escribir va siempre "Adquisicion".
+ */
+export const TIPOS_ADQUISICION = ["Adquisicion", "ADQ"]
+export const esAdquisicion = (tipo: unknown) => TIPOS_ADQUISICION.includes(String(tipo || ""))
+
+export const TIPOS_CON_PRECIOS = ["FA", "FB", "FC", ...TIPOS_ADQUISICION]
 export const esComprobanteConPrecios = (tipo: unknown) => TIPOS_CON_PRECIOS.includes(String(tipo || ""))
 export const esRemito = (tipo: unknown) => String(tipo || "") === "Remito"
 
