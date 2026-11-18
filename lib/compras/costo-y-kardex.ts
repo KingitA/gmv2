@@ -10,13 +10,20 @@
  *     "confirmado" y quedaban DOS compras del mismo artículo (la de la recepción y esta, con
  *     fecha futura). Ahora el pendiente refleja solo lo que falta recibir: baja con cada
  *     entrega y desaparece cuando llegó todo o la orden se cierra.
+ *     QUIÉN LO ESCRIBE (dos funciones que no se pisan):
+ *       - Antes de la primera recepción: `oc_kardex_pendiente_sincronizar` (SQL, 20261117n), al
+ *         crear, editar o cancelar la orden. Pone lo pedido completo; al cancelar lo borra.
+ *       - Desde la primera recepción: `sincronizarKardexEnCamino` (acá), con cada entrega, cada
+ *         validación y al finalizar. Lo baja a lo que falta recibir.
+ *       Una orden con recepción ya no se puede editar ni cancelar (lo impiden oc_guardar y
+ *       oc_cancelar), así que nunca corren las dos sobre la misma orden.
  *   · articulos.ultimo_costo = neto por unidad de la última factura validada, con el descuento
  *     al pie de la factura ya repartido. Cada cambio queda en precios_compra_historial.
  *     articulos.precio_compra (la lista) NO se toca acá: cambia SOLO cuando alguien elige "la
  *     empresa asume" al resolver una diferencia de precio (y también queda en el historial).
  */
 
-import { netoDocumento } from "./diferencias"
+import { netoCompra } from "./neto-compra"
 import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
 import { tipoDescuentoProveedor } from "./tipo-descuento-proveedor"
 import { esComprobanteConPrecios } from "./finalizar-oc"
@@ -100,7 +107,7 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
   const tipoDto = await tipoDescuentoProveedor(supabase, comprobante.proveedor_id)
 
   // E-46: lo que suman los renglones (todos, también flete y demás conceptos) contra el neto del comprobante
-  const netoRenglones = r2(lineas.reduce((s, l) => s + num(l.cantidad_facturada) * netoDocumento(l.precio_unitario, descuentos(l), tipoDto), 0))
+  const netoRenglones = r2(lineas.reduce((s, l) => s + r2(num(l.cantidad_facturada) * netoCompra(l.precio_unitario, descuentos(l), tipoDto)), 0))
   const netoComprobante = r2(
     num(comprobante.total_neto) > 0
       ? num(comprobante.total_neto)
@@ -133,7 +140,7 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
   const precio = new Map<string, { lista: number; neto: number }>()
   for (const l of conArticulo) {
     if (precio.has(l.articulo_id)) continue
-    const neto = netoDocumento(l.precio_unitario, descuentos(l), tipoDto) * factorPie
+    const neto = netoCompra(l.precio_unitario, descuentos(l), tipoDto) * factorPie
     if (!(neto > 0)) continue
     const f = l.tipo_cantidad === "bulto" ? ((factorItem.get(l.recepcion_item_id) || 0) > 1 ? factorItem.get(l.recepcion_item_id)! : unidadesPorBultoDe(art.get(l.articulo_id)?.unidades_por_bulto)) : 1
     precio.set(l.articulo_id, { lista: r4(num(l.precio_unitario) / f), neto: r4(neto / f) })

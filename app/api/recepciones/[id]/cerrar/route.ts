@@ -164,8 +164,8 @@ function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destin
             const soloUltimoCosto = dif.factura.precios_distintos || descuentoAlPie;
             return { ...base, unidades: p.unidades, neto: p.neto, iva: p.iva, total: p.total, origen_nc: null,
                 costo: soloUltimoCosto
-                    ? { precio_compra: 0, descuento1: 0, descuento2: 0, descuento3: 0, descuento4: 0, ultimo_costo: dif.factura.neto_unidad }
-                    : { precio_compra: dif.factura.lista_unidad, descuento1: d1, descuento2: d2, descuento3: d3, descuento4: d4, ultimo_costo: dif.factura.neto_unidad } };
+                    ? { precio_compra: 0, descuento1: 0, descuento2: 0, descuento3: 0, descuento4: 0, ultimo_costo: Math.round(dif.factura.neto_unidad * 10000) / 10000 }
+                    : { precio_compra: dif.factura.lista_unidad, descuento1: d1, descuento2: d2, descuento3: d3, descuento4: d4, ultimo_costo: Math.round(dif.factura.neto_unidad * 10000) / 10000 } };
         }
         if (p.a_favor !== 'nuestro') {
             throw new Rechazo('La factura vino MÁS BARATA que la orden: no hay nada para reclamarle al proveedor. Elegí "Empresa" para tomar el precio facturado como costo.', 'precio_a_favor_del_proveedor');

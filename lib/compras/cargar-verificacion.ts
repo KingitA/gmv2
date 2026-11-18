@@ -75,7 +75,7 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
 
   // ── Etapa 1: todo lo que cuelga directo de la orden, a la vez ──
   const [rOrden, rItems, rComps, rRecs, rTardios] = await Promise.all([
-    medir("orden", supabase.from("ordenes_compra").select("id, numero_orden, estado, proveedor_id, observaciones, proveedor:proveedores(nombre, tipo_descuento)").eq("id", ordenId).maybeSingle()),
+    medir("orden", supabase.from("ordenes_compra").select("*, proveedor:proveedores(nombre, tipo_descuento)").eq("id", ordenId).maybeSingle()),
     medir("detalle_oc", supabase.from("ordenes_compra_detalle").select("articulo_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4").eq("orden_compra_id", ordenId)),
     medir("comprobantes", supabase.from("comprobantes_compra").select("id, tipo_comprobante, numero_comprobante, fecha_comprobante, estado, total_factura_declarado, total_neto, total_iva, percepcion_iva_monto, percepcion_iibb_monto, retencion_ganancias_monto, impuestos_internos, otros_impuestos, descuento_fuera_factura, origen_nc, foto_url, created_at").eq("orden_compra_id", ordenId).order("created_at", { ascending: true })),
     medir("recepciones", supabase.from("recepciones").select("id, estado, numero_tanda, fecha_fin, transporte_id, conformidad_transporte, bultos_declarados, bultos_recibidos, conformidad_observaciones, created_at").eq("orden_compra_id", ordenId).neq("estado", "cancelada").order("created_at", { ascending: true })),
@@ -158,7 +158,7 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
   // Cómo aplica los descuentos el proveedor de la orden (su ficha): en cascada o sobre la lista
   const provOrden: any = Array.isArray(ordenFila.proveedor) ? ordenFila.proveedor[0] : ordenFila.proveedor
   const tipoDto = tipoDescuentoDe(provOrden?.tipo_descuento)
-  const verificacion = armarVerificacion({ tipo_descuento: tipoDto, ocItems, articulos, comprobantes, detalle, recItems, resoluciones })
+  const verificacion = armarVerificacion({ tipo_descuento: tipoDto, total_oc_guardado: ordenFila.total_neto ?? null, ocItems, articulos, comprobantes, detalle, recItems, resoluciones })
 
   // ¿Se puede finalizar? (misma regla que POST /finalizar)
   const validados = new Set(comprobantes.filter((c) => esComprobanteConPrecios(c.tipo_comprobante) && ["validado", "cerrado"].includes(c.estado)).map((c) => c.id))

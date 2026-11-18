@@ -17,7 +17,8 @@
  * Archivo PURO. Tests: mobile/packages/core/test/entrada-verificacion.test.ts
  */
 
-import { calcularDiferencia, combinarLineasOC, precioNeto, type DiferenciaLinea, type LineaFactura, type TipoDescuento } from "./diferencias"
+import { totalesOC } from "./oc-totales"
+import { calcularDiferencia, combinarLineasOC, netoCompra, type DiferenciaLinea, type LineaFactura, type TipoDescuento } from "./diferencias"
 import { esComprobanteConPrecios, esRemito } from "./finalizar-oc"
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
@@ -30,6 +31,12 @@ const ES_DEBITO_NOTA = ["ND", "NDA", "NDB", "NDC"]
 export interface DatosVerificacion {
   /** Cómo aplica los descuentos el proveedor de la orden (su ficha). Sin dato: en cascada. */
   tipo_descuento?: TipoDescuento | null
+  /**
+   * Total sin impuestos que la orden tiene GUARDADO (`ordenes_compra.total_neto`, lo escribe
+   * oc_guardar). Es el mismo número que muestran la orden, el PDF y el mail. null = orden anterior
+   * a que se guardara: se calcula con la misma cuenta (lib/compras/oc-totales.ts).
+   */
+  total_oc_guardado?: number | null
   ocItems: Array<{
     articulo_id: string; cantidad_pedida: number; tipo_cantidad?: string | null; precio_unitario: number
     descuento1?: number | null; descuento2?: number | null; descuento3?: number | null; descuento4?: number | null
@@ -167,7 +174,7 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
       const c = comp.get(l.comprobante_id)!
       const f = factorDe(l)
       const unidades = num(l.cantidad_facturada) * f
-      const neto = precioNeto(l.precio_unitario, descuentos(l), tipoDto) / f
+      const neto = netoCompra(l.precio_unitario, descuentos(l), tipoDto) / f
       const pc = (porComprobante[c.id] ??= { unidades: 0, neto_unidad: 0 })
       pc.unidades += unidades
       if (!pc.neto_unidad && neto > 0) pc.neto_unidad = r2(neto)
@@ -223,11 +230,12 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
     .filter((c) => c.estado !== "esperada" && conRenglones.has(c.id))
     .map((c) => ({ id: c.id, tipo: c.tipo_comprobante, numero: c.numero_comprobante, estado: c.estado, es_remito: esRemito(c.tipo_comprobante), con_precios: esComprobanteConPrecios(c.tipo_comprobante) }))
 
-  let totalOC = 0
-  for (const i of d.ocItems) {
-    const upb = upbDe(art.get(i.articulo_id)?.unidades_por_bulto)
-    totalOC += precioNeto(i.precio_unitario, descuentos(i), tipoDto) * num(i.cantidad_pedida) * (i.tipo_cantidad !== "unidad" ? upb : 1)
-  }
+  // Total de la orden: el guardado; si no hay, la MISMA cuenta que usa la orden (renglón =
+  // unidades × neto sin redondear, redondeado a centavos). Así no hay centavos de diferencia
+  // entre la orden y la verificación.
+  const totalOC = d.total_oc_guardado != null && Number.isFinite(Number(d.total_oc_guardado))
+    ? num(d.total_oc_guardado)
+    : totalesOC(d.ocItems.map((i) => ({ ...i, unidades_por_bulto: art.get(i.articulo_id)?.unidades_por_bulto ?? null })), { tipo_descuento: tipoDto }).neto
   let totalFacturado = 0
   let ncEsperadas = 0
   let ndEsperadas = 0
@@ -263,7 +271,7 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
         return {
           comprobante: `${c.tipo_comprobante} ${c.numero_comprobante}`,
           descripcion: l.descripcion_proveedor || "(sin descripción)",
-          importe: r2(num(l.cantidad_facturada) * precioNeto(l.precio_unitario, descuentos(l), tipoDto)),
+          importe: r2(num(l.cantidad_facturada) * netoCompra(l.precio_unitario, descuentos(l), tipoDto)),
         }
       }),
   }

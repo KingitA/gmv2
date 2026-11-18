@@ -5,6 +5,7 @@ import { nowArgentina } from '@/lib/utils';
 import { fechaISO, mediodiaAR, moneda, sumarDiasISO } from '@/lib/formato';
 import { aplicarCostoDeFactura, sincronizarKardexEnCamino } from '@/lib/compras/costo-y-kardex';
 import { tipoDescuentoProveedor } from '@/lib/compras/tipo-descuento-proveedor';
+import { acuerdoDelCanal, acuerdoDeProveedorConLegado, formaPagoVencimiento, modalidadVencimiento, normalizarAcuerdo, planDePagos, tienePlazo, type AcuerdoPago } from '@/lib/compras/acuerdo-pago';
 import { controlSuma } from '@/lib/compras/control-suma';
 import { normalizarNumeroComprobante } from '@/lib/services/numero-comprobante';
 import { faltaLaColumna, faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
@@ -46,6 +47,13 @@ interface PlanVencimiento {
     modalidad: string | null;
     fecha_validez: string | null;
     numero_orden: string | null;
+    /**
+     * Un vencimiento por pago acordado (uno solo, o uno por cuota "30/60/90"). Los campos sueltos de
+     * arriba repiten el primero: es lo que entiende la función SQL anterior a la migración 20261117u.
+     */
+    pagos: Array<{ cuota: number; de: number; fecha: string; monto: number; forma_pago: string | null; modalidad: string | null; fecha_validez: string | null }>;
+    /** El plazo salió del dato viejo de la ficha (el proveedor no tiene acuerdo de pago cargado) */
+    acuerdo_de_legado?: boolean;
     /** Movimiento de cuenta corriente que dejó el mail y hay que reutilizar (buscarMovimientoPrevio) */
     movimiento_adoptar?: string | null;
 }
@@ -58,67 +66,78 @@ interface Resultado {
     vencimiento_nuevo?: boolean;
     /** Importe del vencimiento (el que ya existía no se modifica) */
     vencimiento_monto?: number | null;
+    /** Cuántos vencimientos reales se crearon (más de uno = cuotas). Migración 20261117u */
+    vencimientos_creados?: number;
+    /** Vencimientos ESTIMADOS de la orden que se quitaron al nacer el real. Migración 20261117u */
+    estimados_reemplazados?: number;
     sin_vencimiento?: boolean;
     provision?: string;
 }
 
-/** Vencimiento según el acuerdo de pago del CANAL del proveedor (Ficha Fiscal, fase S3). Solo calcula: no escribe. */
-async function armarPlan(supabase: any, comprobante: any, proveedorId: string | null, ocId: string | null, numeroOrden: string | null): Promise<PlanVencimiento> {
+/**
+ * Vencimiento(s) del comprobante según el acuerdo de pago: UNA sola regla, lib/compras/acuerdo-pago.ts
+ * (la misma que usa la orden de compra para el vencimiento estimado). Solo calcula: no escribe.
+ *   · El acuerdo es el que quedó COPIADO en la orden (ordenes_compra.acuerdo_pago, editable ahí);
+ *     si la orden no lo tiene (orden vieja o comprobante sin orden), el de la ficha del proveedor.
+ *   · Canal: adquisición = sin factura (negro); el resto, con factura (blanco). Negro sin acuerdo
+ *     propio usa el de blanco.
+ *   · Si el comprobante trae su fecha de vencimiento, manda esa (un solo pago).
+ *   · Si no, el plazo corre desde la factura o desde la recepción, y con cuotas ("30/60/90") sale
+ *     un vencimiento por cuota.
+ *   · Sin plazo acordado y sin fecha en el comprobante: no hay vencimiento (se avisa en pantalla).
+ */
+async function armarPlan(supabase: any, comprobante: any, proveedorId: string | null, ocId: string | null, numeroOrden: string | null, total: number): Promise<PlanVencimiento> {
     // Adquisición = canal negro
     const canal: 'blanco' | 'negro' = comprobante.tipo_comprobante === 'Adquisicion' ? 'negro' : 'blanco';
     const plan: PlanVencimiento = {
         canal,
         fecha_vencimiento: comprobante.fecha_vencimiento ? String(comprobante.fecha_vencimiento).slice(0, 10) : null,
-        forma_pago: null, modalidad: null, fecha_validez: null, numero_orden: numeroOrden,
+        forma_pago: null, modalidad: null, fecha_validez: null, numero_orden: numeroOrden, pagos: [],
     };
     if (!proveedorId) return plan;
 
-    const { data: prov } = await supabase
-        .from('proveedores')
-        .select('dias_vencimiento, pago_blanco_medio, pago_blanco_plazo_cheque, pago_blanco_entrega, pago_blanco_dias, pago_blanco_desde, pago_negro_medio, pago_negro_plazo_cheque, pago_negro_entrega, pago_negro_dias, pago_negro_desde')
-        .eq('id', proveedorId)
-        .maybeSingle();
-    const p: any = prov || {};
-    // Canal negro sin configurar → hereda el acuerdo blanco
-    const cfg = canal === 'negro' && (p.pago_negro_medio || p.pago_negro_dias != null || p.pago_negro_entrega)
-        ? { medio: p.pago_negro_medio, plazoCheque: p.pago_negro_plazo_cheque, entrega: p.pago_negro_entrega, dias: p.pago_negro_dias, desde: p.pago_negro_desde }
-        : { medio: p.pago_blanco_medio, plazoCheque: p.pago_blanco_plazo_cheque, entrega: p.pago_blanco_entrega, dias: p.pago_blanco_dias, desde: p.pago_blanco_desde };
+    // Acuerdo: el de la orden; si no tiene, el de la ficha (con el plazo viejo como respaldo).
+    // select('*'): las columnas del acuerdo son de las migraciones 20261117m / n; si faltan, no rompe.
+    let acuerdo: AcuerdoPago | null = null;
+    if (ocId) {
+        const { data: orden } = await supabase.from('ordenes_compra').select('*').eq('id', ocId).maybeSingle();
+        acuerdo = normalizarAcuerdo((orden as any)?.acuerdo_pago);
+    }
+    if (!acuerdo) {
+        const { data: prov } = await supabase.from('proveedores').select('*').eq('id', proveedorId).maybeSingle();
+        acuerdo = acuerdoDeProveedorConLegado(prov);
+    }
+    const c = acuerdoDelCanal(acuerdo, canal);
+    plan.forma_pago = formaPagoVencimiento(c.medio);
+    plan.modalidad = modalidadVencimiento(c.entrega);
+    plan.acuerdo_de_legado = c.de_legado === true;
 
-    // Medio → forma_pago del vencimiento (cheques, e-cheq y mixto = 'cheque').
-    // 'echeq' lo agrega T1-A al acuerdo del proveedor: un e-cheq se paga como cheque, no puede
-    // quedar sin forma de pago. Al integrar, este mapeo pasa a lib/compras/acuerdo-pago.ts.
-    plan.forma_pago = cfg.medio === 'transferencia' ? 'transferencia'
-        : cfg.medio === 'efectivo' ? 'efectivo'
-        : (cfg.medio === 'cheques' || cfg.medio === 'cheques_y_efectivo' || cfg.medio === 'echeq' || cfg.medio === 'e-cheq' || cfg.medio === 'echeqs') ? 'cheque'
-        : null;
-    // Entrega → modalidad
-    plan.modalidad = cfg.entrega === 'deposito_bancario' ? 'deposito'
-        : cfg.entrega === 'retira_oficina' ? 'entrega'
-        : cfg.entrega === 'envio_grimar' ? 'grimar'
-        : null;
-
-    if (!plan.fecha_vencimiento) {
+    if (plan.fecha_vencimiento) {
+        // La fecha la trae el comprobante: un solo pago, ese día
+        const validez = plan.forma_pago === 'cheque' && Number(c.plazo_cheque ?? 0) > 0 ? sumarDiasISO(plan.fecha_vencimiento, Number(c.plazo_cheque)) : null;
+        plan.pagos = total > 0 ? [{ cuota: 1, de: 1, fecha: plan.fecha_vencimiento, monto: total, forma_pago: plan.forma_pago, modalidad: plan.modalidad, fecha_validez: validez }] : [];
+    } else if (tienePlazo(c)) {
         // Base del plazo: fecha de factura o de recepción según el acuerdo
-        let fechaBase: string | null = comprobante.fecha_comprobante || null;
-        if (cfg.desde === 'recepcion' && ocId) {
+        let fechaBase: string | null = comprobante.fecha_comprobante ? String(comprobante.fecha_comprobante).slice(0, 10) : null;
+        if (c.desde === 'recepcion' && ocId) {
             const { data: rec } = await supabase
                 .from('recepciones')
                 .select('fecha_fin, fecha_inicio, created_at')
                 .eq('orden_compra_id', ocId)
+                .neq('estado', 'cancelada')
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
             const f = (rec as any)?.fecha_fin || (rec as any)?.fecha_inicio || (rec as any)?.created_at;
-            if (f) fechaBase = fechaISO(f) || null; // timestamptz → día argentino
+            if (f) fechaBase = fechaISO(f) || fechaBase; // timestamptz → día argentino
         }
-        const dias = Number(cfg.dias ?? p.dias_vencimiento ?? 0);
-        // cfg.dias explícito admite 0 (contado); sin config, exige > 0
-        if (fechaBase && (cfg.dias != null || dias > 0)) plan.fecha_vencimiento = sumarDiasISO(fechaBase, dias);
+        if (fechaBase) {
+            plan.pagos = planDePagos(total, fechaBase, c).map((p) => ({ cuota: p.cuota, de: p.de, fecha: p.fecha, monto: p.monto, forma_pago: p.forma_pago, modalidad: p.modalidad, fecha_validez: p.fecha_validez }));
+        }
     }
-    // Cheques con plazo: validez = vencimiento + plazo del cheque
-    if (plan.fecha_vencimiento && plan.forma_pago === 'cheque' && Number(cfg.plazoCheque ?? 0) > 0) {
-        plan.fecha_validez = sumarDiasISO(plan.fecha_vencimiento, Number(cfg.plazoCheque));
-    }
+    // Lo que entiende la función anterior a 20261117u (un solo vencimiento): el primer pago
+    plan.fecha_vencimiento = plan.pagos[0]?.fecha ?? plan.fecha_vencimiento;
+    plan.fecha_validez = plan.pagos[0]?.fecha_validez ?? null;
     return plan;
 }
 
@@ -457,8 +476,8 @@ export async function POST(
 
         // El plan solo hace falta para generar el vencimiento de una deuda nueva
         const plan: PlanVencimiento = yaEstaba || esRemito || esCredito
-            ? { canal: 'blanco', fecha_vencimiento: null, forma_pago: null, modalidad: null, fecha_validez: null, numero_orden: oc?.numero_orden || null }
-            : await armarPlan(supabase, comprobante, proveedorId, ocId, oc?.numero_orden || null);
+            ? { canal: 'blanco', fecha_vencimiento: null, forma_pago: null, modalidad: null, fecha_validez: null, numero_orden: oc?.numero_orden || null, pagos: [] }
+            : await armarPlan(supabase, comprobante, proveedorId, ocId, oc?.numero_orden || null, Number(comprobante.total_factura_declarado || 0));
 
         const total = Number(comprobante.total_factura_declarado || 0);
 
@@ -498,11 +517,28 @@ export async function POST(
             }, { status: 500 });
         }
 
+        // Vencimiento ESTIMADO de la orden (lo crea la orden de compra): cuando nace el real, el
+        // estimado de ese canal baja por el importe de este comprobante y desaparece al llegar a cero.
+        // Con la migración 20261117u lo hace la misma función que valida, en la misma transacción
+        // (contesta estimados_reemplazados). Sin ella se hace acá, apenas validado.
+        const avisosEstimado: string[] = [];
+        if (!resultado.ya_validado && !resultado.sin_deuda && !esCredito && !esRemito && ocId
+            && resultado.vencimiento_id && resultado.estimados_reemplazados === undefined) {
+            const est = await supabase.rpc('oc_vencimiento_estimado_reemplazar', { p_orden_id: ocId, p_canal: plan.canal, p_monto: total });
+            if (est.error && !faltaLaFuncion(est.error, 'oc_vencimiento_estimado_reemplazar')) {
+                console.error('[Validar Comprobante] vencimiento estimado de la orden:', est.error.message);
+                avisosEstimado.push('El comprobante quedó validado con su vencimiento, pero no se pudo quitar el vencimiento ESTIMADO de la orden: va a figurar dos veces en Finanzas hasta que se finalice la orden. Avisá a sistemas.');
+            }
+        }
+
         // Costo y kardex (lib/compras/costo-y-kardex.ts): repetible, no mueve plata ni stock.
         //  · el kardex de la recepción queda valorizado con lo facturado y el artículo con su último costo;
         //  · el kardex "en camino" de la orden se ajusta a lo que falta recibir (ya no se "confirma":
         //    eso duplicaba la compra de la recepción, E-31).
-        const avisos: string[] = [];
+        const avisos: string[] = [...avisosEstimado];
+        if (!resultado.ya_validado && plan.acuerdo_de_legado && resultado.vencimiento_nuevo) {
+            avisos.push('El proveedor no tiene acuerdo de pago cargado: el plazo del vencimiento salió del dato viejo de su ficha. Cargá el acuerdo en la ficha del proveedor.');
+        }
         if (!resultado.sin_deuda && !esRemito) {
             try {
                 if (ocId) await sincronizarKardexEnCamino(supabase, ocId);

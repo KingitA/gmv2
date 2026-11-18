@@ -50,7 +50,7 @@ describe("diferencias de precio y cantidad", () => {
     d.recItems = [rec("i2", "b", 48)]
     const b = armarVerificacion(d).filas.find((f) => f.articulo_id === "b")!
     expect(b.banderas).toEqual(["precio"])
-    expect(b.dif.precio).toMatchObject({ neto: 1677.6, total: 2029.9 })
+    expect(b.dif.precio).toMatchObject({ neto: 1677.7, total: 2030.02 })
     expect(b.por_comprobante.fa).toEqual({ unidades: 48, neto_unidad: 1450 })
     expect(b.recepcion_item_id).toBe("i2")
   })
@@ -154,5 +154,33 @@ describe("E-97 encabezados, totales y avisos", () => {
     expect(a.por_comprobante.fa!.unidades).toBe(96)
     expect(a.dif.factura).toBeNull() // el remito no es factura: no hay diferencia de precio ni reclamo
     expect(a.banderas).toEqual([])
+  })
+})
+
+describe("cableado con la orden de compra: el total de la orden", async () => {
+  const { armarVerificacion: armar } = await import("../../../../lib/compras/verificacion")
+  const base = {
+    ocItems: [{ articulo_id: "a", cantidad_pedida: 600, tipo_cantidad: "unidad", precio_unitario: 1572.276, descuento1: 10 }],
+    articulos: [{ id: "a", sku: "A", descripcion: "Art", unidades_por_bulto: 1 }],
+    comprobantes: [], detalle: [], recItems: [], resoluciones: [],
+  }
+  it("usa el total que la orden tiene guardado", () => {
+    expect(armar({ ...base, total_oc_guardado: 849029.04 }).resumen.total_oc).toBe(849029.04)
+  })
+  it("sin total guardado: la misma cuenta que la orden (neto sin redondear por unidades, a centavos)", () => {
+    expect(armar(base).resumen.total_oc).toBe(849029.04)
+  })
+  it("con descuentos sobre la lista", () => {
+    const v = armar({ ...base, tipo_descuento: "sobre_lista", ocItems: [{ articulo_id: "a", cantidad_pedida: 10, tipo_cantidad: "unidad", precio_unitario: 1000, descuento1: 10, descuento2: 5 }] })
+    expect(v.resumen.total_oc).toBe(8500)
+  })
+})
+
+describe("una sola función de neto de compra", async () => {
+  const dif = await import("../../../../lib/compras/diferencias")
+  const neto = await import("../../../../lib/compras/neto-compra")
+  it("la de diferencias ES la de neto-compra", () => {
+    expect(dif.netoCompra).toBe(neto.netoCompra)
+    expect(dif.tipoDescuentoDe).toBe(neto.tipoDescuentoDe)
   })
 })

@@ -123,6 +123,7 @@ export default function VerificacionOCPage() {
                 body: JSON.stringify({ aceptar_faltantes: pendientes.length > 0 }),
             })
             const fin = await res.json().catch(() => ({}))
+            for (const a of (fin.avisos || []) as string[]) avisos.push(a)
             if (avisos.length > 0) toast.warning(avisos.join(" · "), { duration: 15000 })
             if (!res.ok) { toast.error(fin.error || `La orden no se finalizó (error ${res.status})`, { duration: 20000 }); return }
             toast.success(fin.cerrada_sin_el_resto ? "Orden cerrada sin el resto de la mercadería" : "Orden finalizada")

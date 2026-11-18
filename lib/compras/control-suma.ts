@@ -19,7 +19,7 @@
  * Archivo PURO. Tests: mobile/packages/core/test/entrada-control-suma.test.ts
  */
 
-import { netoDocumento, precioNeto, type TipoDescuento } from "./diferencias"
+import { netoCompra, type TipoDescuento } from "./neto-compra"
 import { esComprobanteConPrecios, esRemito } from "./finalizar-oc"
 
 /**
@@ -82,8 +82,8 @@ export function controlSuma(c: CabeceraComprobante, renglones: RenglonComprobant
   // 1.415,05 × 600 = $1,20). El control pasa si CUALQUIERA de las dos cierra.
   //   1. cantidad × lista × descuentos, redondeado UNA vez por renglón
   //   2. cantidad × (neto por unidad ya redondeado a centavos)
-  const sumaRenglon = r2(renglones.reduce((s, l) => s + r2(num(l.cantidad_facturada) * precioNeto(l.precio_unitario, descuentos(l), c.tipo_descuento)), 0))
-  const sumaUnidad = r2(renglones.reduce((s, l) => s + r2(num(l.cantidad_facturada) * netoDocumento(l.precio_unitario, descuentos(l), c.tipo_descuento)), 0))
+  const sumaRenglon = r2(renglones.reduce((s, l) => s + r2(num(l.cantidad_facturada) * netoCompra(l.precio_unitario, descuentos(l), c.tipo_descuento)), 0))
+  const sumaUnidad = r2(renglones.reduce((s, l) => s + r2(num(l.cantidad_facturada) * r2(netoCompra(l.precio_unitario, descuentos(l), c.tipo_descuento))), 0))
   const cerca = (a: number, b: number) => Math.abs(a - b) < TOLERANCIA_SUMA_PESOS
   // La que quedó más cerca es la que se informa
   const netoRenglones = Math.abs(sumaRenglon - netoComprobante) <= Math.abs(sumaUnidad - netoComprobante) ? sumaRenglon : sumaUnidad

@@ -22,11 +22,11 @@ const SELECT_FULL = `*, recepciones_items(*), recepciones_documentos(*)`
 /** Un finalizador que lleva más que esto sin terminar se considera caído y se retoma */
 const CANDADO_FINALIZAR_MS = 2 * 60_000
 /**
- * Estados de la ORDEN en los que el depósito la puede recibir. "enviada", "confirmada" y
- * "en_camino" los escribe la pantalla de órdenes de compra (envío al proveedor): una orden
- * enviada tiene que seguir viéndose en depósito.
+ * Estados de la ORDEN en los que el depósito la puede recibir: recién creada, enviada al
+ * proveedor (una orden enviada tiene que seguir viéndose en depósito) o recibida en parte.
+ * "confirmada" y "en_camino" no existen (decisión de Juan): nadie los escribe.
  */
-export const ESTADOS_A_RECIBIR = ["pendiente", "enviada", "confirmada", "en_camino", "recibida_parcial"]
+export const ESTADOS_A_RECIBIR = ["pendiente", "enviada", "recibida_parcial"]
 
 /** Estados en los que una recepción todavía se puede contar y finalizar */
 const ABIERTA = ["en_proceso", "borrador"]

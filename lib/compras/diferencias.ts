@@ -18,45 +18,16 @@ const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 const r4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0)
 
-/**
- * Cómo aplica sus descuentos el proveedor. Lo dice su ficha (`proveedores.tipo_descuento`):
- *   · "cascada":     uno sobre el otro  → lista × (1 − d1) × (1 − d2) × …
- *   · "sobre_lista": todos sobre la lista → lista × (1 − (d1 + d2 + …))
- * Decisión de Juan (17/11): «Lo aclara en la ficha del proveedor, hay dos opciones: En cascada /
- * sobre precio lista.» Misma regla que el motor de precios de venta (lib/pricing/calculator.ts).
- */
-export type TipoDescuento = "cascada" | "sobre_lista"
-
-export function tipoDescuentoDe(v: unknown): TipoDescuento {
-  return v === "sobre_lista" ? "sobre_lista" : "cascada"
-}
-
-/**
- * Precio de lista menos los descuentos (D1..D4, en %), según cómo los aplica el proveedor.
- * ÚNICA cuenta del neto de compra: la usan la verificación, las diferencias, la regla de suma
- * y el costo. (T1-A arma la misma función con esta firma; se unifican al integrar.)
- */
-export function netoCompra(lista: unknown, descuentos: unknown[] = [], tipo: TipoDescuento | null | undefined = "cascada"): number {
-  if (tipo === "sobre_lista") {
-    const suma = descuentos.reduce<number>((s, d) => s + num(d), 0)
-    return num(lista) * Math.max(0, 1 - suma / 100)
-  }
-  return descuentos.reduce<number>((p, d) => p * (1 - num(d) / 100), num(lista))
-}
-
-/** Igual que netoCompra (nombre anterior). */
-export function precioNeto(lista: unknown, descuentos: unknown[] = [], tipo?: TipoDescuento | null): number {
-  return netoCompra(lista, descuentos, tipo)
-}
-
-/**
- * Neto tal como se lee en un documento: a centavos. La orden y la factura muestran (y el
- * proveedor factura) precios con dos decimales; sin este redondeo 1.768,81 − 20 % daba
- * 1.415,048 y la diferencia por 48 u salía $1.677,70 en vez de los $1.677,60 de la pantalla.
- */
-export function netoDocumento(lista: unknown, descuentos: unknown[] = [], tipo?: TipoDescuento | null): number {
-  return r2(netoCompra(lista, descuentos, tipo))
-}
+// UNA sola función y UN solo redondeo para todo el circuito de compras:
+//   · el neto por unidad sale de netoCompra (lib/compras/neto-compra.ts), que aplica los
+//     descuentos como dice la ficha del proveedor, y NO se redondea;
+//   · lo que se redondea es el IMPORTE (unidades × neto), una sola vez, a centavos.
+// Es la misma cuenta que usa la orden de compra (lib/compras/oc-totales.ts) y la regla de suma,
+// así el total de la orden, lo verificado y las notas esperadas no difieren en centavos.
+// (Antes acá se redondeaba el neto por unidad a centavos antes de multiplicar: 1.768,81 − 20 % =
+// 1.415,048 pasaba a 1.415,05 y con muchas unidades se iba de lo que dice la orden.)
+import { netoCompra, tipoDescuentoDe, type TipoDescuento } from "./neto-compra"
+export { netoCompra, tipoDescuentoDe, type TipoDescuento }
 
 export interface LineaOC {
   /** En la unidad pedida (bultos si tipo_cantidad = bulto) */
@@ -153,7 +124,7 @@ export function calcularDiferencia(p: {
 }): DiferenciaLinea {
   const tipo = p.tipo_descuento
   const oc = p.oc
-    ? { unidades: r4(num(p.oc.cantidad_pedida) * (num(p.oc.factor) || 1)), neto_unidad: netoDocumento(p.oc.precio_unitario, p.oc.descuentos, tipo) }
+    ? { unidades: r4(num(p.oc.cantidad_pedida) * (num(p.oc.factor) || 1)), neto_unidad: netoCompra(p.oc.precio_unitario, p.oc.descuentos, tipo) }
     : null
 
   let factura: DiferenciaLinea["factura"] = null
@@ -166,7 +137,7 @@ export function calcularDiferencia(p: {
     for (const l of lineas) {
       const f = num(l.factor) || 1
       const u = num(l.cantidad_facturada) * f
-      const neto = netoDocumento(l.precio_unitario, l.descuentos, tipo)
+      const neto = netoCompra(l.precio_unitario, l.descuentos, tipo)
       unidades += u
       // Lo bonificado (sin cargo) cuenta como mercadería facturada pero NO baja el precio:
       // el precio se compara solo sobre lo que se cobra (E-42).
@@ -177,10 +148,10 @@ export function calcularDiferencia(p: {
       }
     }
     // Lista, descuentos e IVA: los del primer renglón con cargo
-    const ref = lineas.find((l) => netoDocumento(l.precio_unitario, l.descuentos, tipo) > 0) ?? lineas[0]!
+    const ref = lineas.find((l) => netoCompra(l.precio_unitario, l.descuentos, tipo) > 0) ?? lineas[0]!
     factura = {
       unidades: r4(unidades),
-      neto_unidad: conCargo > 0 ? r4(netoTotal / conCargo) : 0,
+      neto_unidad: conCargo > 0 ? netoTotal / conCargo : 0,
       lista_unidad: r4(num(ref.precio_unitario) / (num(ref.factor) || 1)),
       descuentos: ref.descuentos.map(num),
       iva_porcentaje: num(ref.iva_porcentaje),
@@ -201,7 +172,7 @@ export function calcularDiferencia(p: {
     const cobradas = r4(Math.min(factura.unidades - factura.bonificadas, recibido))
     if (cobradas > 0 && (Math.abs(dif) / oc.neto_unidad > TOLERANCIA_PRECIO || Math.abs(dif) * cobradas > TOPE_DIFERENCIA_PESOS)) {
       precio = {
-        por_unidad: r4(Math.abs(dif)),
+        por_unidad: Math.abs(dif),
         unidades: cobradas,
         // facturado más caro que lo acordado ⇒ la diferencia es a NUESTRO favor (se reclama)
         a_favor: dif > 0 ? "nuestro" : "proveedor",
