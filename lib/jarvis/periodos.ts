@@ -7,7 +7,7 @@ import { fecha, hoyISO, sumarDiasISO } from "@/lib/formato"
 
 export const PERIODOS = [
   "hoy", "ayer", "semana_actual", "mes_actual", "mes_anterior",
-  "ultimos_7_dias", "ultimos_30_dias", "ultimos_90_dias", "anio_actual",
+  "ultimos_7_dias", "ultimos_30_dias", "ultimos_90_dias", "ultimos_12_meses", "anio_actual", "anio_anterior",
 ] as const
 export type PeriodoNombre = (typeof PERIODOS)[number]
 
@@ -76,6 +76,14 @@ export function resolverPeriodo(
       const desde = sumarDiasISO(hoy, -(n - 1))
       return { desde, hasta: hoy, etiqueta: `últimos ${n} días`, ...anterior(desde, hoy) }
     }
+    case "ultimos_12_meses": {
+      // "el último año": desde el día siguiente al mismo día del año pasado, hasta hoy (E-83)
+      const mismoDia = `${a - 1}-${dosDig(m)}-${dosDig(Math.min(d, finDeMes(a - 1, m)))}`
+      const desde = sumarDiasISO(mismoDia, 1)
+      return { desde, hasta: hoy, etiqueta: "últimos 12 meses", ...anterior(desde, hoy) }
+    }
+    case "anio_anterior":
+      return { desde: `${a - 1}-01-01`, hasta: `${a - 1}-12-31`, etiqueta: String(a - 1), prevDesde: `${a - 2}-01-01`, prevHasta: `${a - 2}-12-31` }
     case "anio_actual": {
       const desde = `${a}-01-01`
       return { desde, hasta: hoy, etiqueta: `${a} hasta hoy`, prevDesde: `${a - 1}-01-01`, prevHasta: `${a - 1}-${dosDig(m)}-${dosDig(Math.min(d, finDeMes(a - 1, m)))}` }

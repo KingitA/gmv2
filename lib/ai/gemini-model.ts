@@ -54,8 +54,27 @@ export async function conRespaldoGemini<T>(fn: (modelo: string) => Promise<T>, e
   try {
     return await fn(GEMINI_MODEL)
   } catch (e) {
+    // E-101: sin saldo o sin cuota no se falla en silencio: queda anotado y con aviso para admin
+    await avisarFallaGemini(e, etiqueta)
     if (!GEMINI_MODEL_FALLBACK || GEMINI_MODEL_FALLBACK === GEMINI_MODEL || !esErrorDeModeloGemini(e)) throw e
     console.warn(`[${etiqueta}] ${GEMINI_MODEL} falló, se reintenta con ${GEMINI_MODEL_FALLBACK}:`, (e as Error)?.message)
-    return fn(GEMINI_MODEL_FALLBACK)
+    try {
+      return await fn(GEMINI_MODEL_FALLBACK)
+    } catch (e2) {
+      await avisarFallaGemini(e2, etiqueta)
+      throw e2
+    }
   }
+}
+
+/**
+ * E-101: anota una falla de Gemini por saldo o cuota (402 / 429) y deja el aviso en la bandeja
+ * de Jarvis. No lanza nunca. Se importa a demanda para no cargar el cliente de la base en los
+ * lugares que solo necesitan el nombre del modelo.
+ */
+export async function avisarFallaGemini(e: unknown, origen: string): Promise<void> {
+  try {
+    const { registrarFallaIA } = await import("./fallas-ia")
+    await registrarFallaIA("gemini", e, origen)
+  } catch { /* nunca rompe la lectura */ }
 }
