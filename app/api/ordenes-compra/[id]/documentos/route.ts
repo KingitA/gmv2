@@ -208,7 +208,7 @@ export async function POST(
         foto_url: publicUrl || signedUrl,
     });
     const comprobante = r.comprobante;
-    const aviso = r.error
+    const avisoNumero = r.error
         ? `El archivo se leyó pero no se pudo crear el comprobante (${r.error}).`
         : r.sumado_a_provisorio
             ? 'No se leyó el número del comprobante: los renglones se sumaron al comprobante provisorio de esta orden. Completale el número con el lápiz.'
@@ -217,6 +217,8 @@ export async function POST(
             : !numeroExtraido
                 ? 'No se leyó el número del comprobante: quedó como provisorio. Completale el número con el lápiz.'
                 : undefined;
+    // Renglones juntados, que faltan o que no se pudieron guardar: siempre a la vista
+    const aviso = [avisoNumero, ...(r.avisos || [])].filter(Boolean).join(' ') || undefined;
 
     return NextResponse.json({
         success: true,
@@ -344,7 +346,7 @@ export async function PATCH(
             await supabase.from('recepciones_documentos').update({ datos_ocr: datosNoLeido(ocrResult, r.error), procesado: false }).eq('id', doc.id);
             return NextResponse.json({ error: `El archivo se leyó pero no se pudo crear el comprobante. Detalle para sistemas: ${r.error}` }, { status: 500 });
         }
-        return NextResponse.json({ success: true, comprobante: r.comprobante, items_detectados: ocrResult.items.length });
+        return NextResponse.json({ success: true, comprobante: r.comprobante, items_detectados: ocrResult.items.length, ...(r.avisos?.length ? { aviso: r.avisos.join(' ') } : {}) });
     } catch (error: any) {
         console.error('[Docs OC] reintentar:', error);
         return NextResponse.json({ error: `No se pudo reintentar la lectura. Detalle para sistemas: ${error.message || error}` }, { status: 500 });

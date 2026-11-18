@@ -3,6 +3,7 @@
 // Processes supplier invoices from emails
 // =====================================================
 
+import { sumarDocumentado } from '@/lib/compras/documentado'
 import { acuerdoDeProveedorConLegado, acuerdoDelCanal, diasDePago, formaPagoVencimiento, modalidadVencimiento, normalizarAcuerdo } from '@/lib/compras/acuerdo-pago'
 import { downloadAttachment, type ParsedEmail } from './gmail'
 import { analyzeXlsxInvoice } from './claude-xlsx-analyzer'
@@ -431,7 +432,18 @@ export async function processEmailAsInvoice(
             const existingCC = convierteProvision ? await provisionDelCanal(db, proveedorId, pendingOC.id, canalComprobante) : null
 
             let ccResult: any = null
-            if (existingCC) {
+            // La provisión baja por lo FACTURADO, igual que el vencimiento estimado. Si este comprobante
+            // es por menos que la provisión (la orden se factura en partes), la provisión queda por el
+            // resto y la deuda entra como movimiento propio. Solo si la cubre entera se convierte.
+            const restoProvision = existingCC && existingCC.monto != null ? Math.round((Number(existingCC.monto) - Math.abs(montoFinal)) * 100) / 100 : 0
+            if (existingCC && restoProvision > 0.01) {
+                await db.from('cuenta_corriente_proveedores')
+                    .update({ monto: restoProvision, descripcion: `Provisión OC: ${pendingOC.numero_orden} (resto sin facturar)`, updated_at: new Date().toISOString() })
+                    .eq('id', existingCC.id)
+                ccResult = await createCCMovement(db, proveedorId, invoiceData, tipoComp, fechaHoy, { sinVencimiento: true })
+                await vincularMovimientoAComprobante(db, ccResult?.id, comprobante.id)
+                console.log(`[InvoiceProcessor] Provisión ${existingCC.id} reducida a ${restoProvision}; ${tipoComp} entra como movimiento propio`)
+            } else if (existingCC) {
                 // Update the OC movement → becomes the factura
                 const { data: updated } = await db.from('cuenta_corriente_proveedores')
                     .update({
@@ -872,7 +884,7 @@ async function plazoDePago(db: any, proveedorId: string, ordenCompraId: string |
 }
 
 /** La provisión de una orden de compra que corresponde a un canal (ver el uso). Solo lee. */
-async function provisionDelCanal(db: any, proveedorId: string, ordenCompraId: string, canal: 'blanco' | 'negro'): Promise<{ id: string } | null> {
+async function provisionDelCanal(db: any, proveedorId: string, ordenCompraId: string, canal: 'blanco' | 'negro'): Promise<{ id: string; monto?: number | null } | null> {
     const leer = (columnas: string) => db.from('cuenta_corriente_proveedores')
         .select(columnas)
         .eq('proveedor_id', proveedorId)
@@ -880,9 +892,9 @@ async function provisionDelCanal(db: any, proveedorId: string, ordenCompraId: st
         .eq('referencia_id', ordenCompraId)
         .eq('tipo_movimiento', 'orden_compra')
         .order('created_at', { ascending: true })
-    let { data, error } = await leer('id, canal')
+    let { data, error } = await leer('id, canal, monto')
     // base sin la columna canal (migración 20261117n sin aplicar): había una sola provisión por orden
-    if (error) ({ data, error } = await leer('id'))
+    if (error) ({ data, error } = await leer('id, monto'))
     const filas: any[] = data || []
     return filas.find((m) => m.canal === canal) ?? filas.find((m) => m.canal == null) ?? null
 }
@@ -974,7 +986,8 @@ async function runArticleLevelOCR(
                 ...item
             }
 
-            const matchResult = await engine.resolveItem(rawItem, proveedorId)
+            // contexto de compra: primero los artículos de la orden (las líneas de esta recepción), después el proveedor
+            const matchResult = await engine.resolveItem(rawItem, proveedorId, { ordenArticuloIds: (currentItems as any[]).filter((ci) => !ci.fuera_de_oc && ci.articulo_id).map((ci) => ci.articulo_id) })
 
             if (matchResult.status === 'matched' && matchResult.bestCandidate?.sku_id) {
                 const articuloId = matchResult.bestCandidate.sku_id
@@ -996,18 +1009,19 @@ async function runArticleLevelOCR(
                     const cantidadBase = (item.cantidad || 0) * conversion.factor
 
                     // Update recepciones_items (same as processOCRData does)
-                    await db.from('recepciones_items').update({
-                        cantidad_documentada: Number(matchedItem.cantidad_documentada || 0) + cantidadBase,
+                    // la suma la hace la base en un solo paso (lib/compras/documentado.ts): un mail y una
+                    // foto de la misma orden procesados a la vez suman los dos
+                    const quedo = await sumarDocumentado(db, matchedItem.id, cantidadBase, {
                         precio_documentado: item.precio_unitario || 0,
                         precio_real: item.precio_unitario || matchedItem.precio_oc || 0,
                         cantidad_base: cantidadBase,
                         factor_conversion: conversion.factor,
                         conversion_source: conversion.source,
-                        requires_review: conversion.requiresReview
-                    }).eq('id', matchedItem.id)
+                        requires_review: conversion.requiresReview,
+                    })
 
                     // Update local copy for accumulation
-                    matchedItem.cantidad_documentada = Number(matchedItem.cantidad_documentada || 0) + cantidadBase
+                    matchedItem.cantidad_documentada = quedo ?? Number(matchedItem.cantidad_documentada || 0) + cantidadBase
 
                     // Also save to comprobantes_compra_detalle for per-comprobante view
                     if (comprobanteId) {

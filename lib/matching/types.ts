@@ -1,4 +1,4 @@
-export type MatchMethod = 'exact_code' | 'exact_ean' | 'exact_name' | 'trigram' | 'vector' | 'manual' | 'none';
+export type MatchMethod = 'exact_sku' | 'exact_code' | 'exact_ean' | 'exact_name' | 'trigram' | 'vector' | 'manual' | 'none';
 
 export interface MatchSignal {
     type: 'brand' | 'measure' | 'unit' | 'content' | 'embedding_score';
@@ -14,6 +14,12 @@ export interface MatchCandidate {
     method: MatchMethod;
     signals: MatchSignal[];
     confidence_level: 'auto_approve' | 'suggestion' | 'low';
+    /** Proveedor del artículo candidato (para preferir los del proveedor del comprobante) */
+    proveedor_id?: string | null;
+    /** Compras: el candidato es de OTRO proveedor (último recurso: nunca se asigna solo) */
+    otro_proveedor?: boolean;
+    /** Compras: el candidato está en la orden de compra del comprobante */
+    en_orden?: boolean;
 }
 
 export interface MatchResult {

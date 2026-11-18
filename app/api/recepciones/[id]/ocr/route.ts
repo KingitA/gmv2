@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { sumarDocumentado } from '@/lib/compras/documentado'
 import { NextRequest, NextResponse } from "next/server";
 import { processWithGemini, inferirTipoComprobante } from "@/lib/services/ocr";
 import { resolveFactorConversion, UnidadFactura } from "@/lib/services/conversion";
@@ -154,6 +155,8 @@ export async function POST(
             else if (r.sumado_a_provisorio) aviso = 'No se leyó el número del comprobante: los renglones se sumaron al comprobante provisorio de esta orden. La oficina tiene que completarle el número.';
             else if (r.otro_provisorio) aviso = 'No se leyó el número del comprobante y ya había otro sin número en esta orden con otro total o fecha: se cargó como un comprobante aparte. La oficina tiene que completarles el número.';
             else if (!ocrResult.comprobante?.numero_comprobante) aviso = 'No se leyó el número del comprobante: quedó como provisorio. La oficina tiene que completarle el número.';
+            // Renglones juntados, que faltan o que no se pudieron guardar: siempre a la vista
+            if (r.avisos?.length) aviso = [aviso, ...r.avisos].filter(Boolean).join(' ');
         } else {
             // 6. Sin comprobante (recepción sin OC vinculada) — actualizar items directo.
             processingResults = await processOCRData(supabase, recepcion_id, ocrResult);
@@ -216,7 +219,8 @@ async function processOCRData(supabase: any, recepcion_id: string, ocrData: any)
             ...item
         };
 
-        const matchResult = await engine.resolveItem(rawItem, proveedorId);
+        // contexto de compra (sin orden): el código exacto y los artículos del proveedor primero
+        const matchResult = await engine.resolveItem(rawItem, proveedorId, proveedorId ? {} : null);
 
         matchedItems.push({
             ...item,
@@ -271,18 +275,15 @@ async function processOCRData(supabase: any, recepcion_id: string, ocrData: any)
                     });
                 }
 
-                await supabase
-                    .from("recepciones_items")
-                    .update({
-                        cantidad_documentada: Number(matchedItem.cantidad_documentada || 0) + cantidadBase,
-                        precio_documentado: item.precio_unitario || 0,
-                        precio_real: item.precio_unitario || matchedItem.precio_oc || 0,
-                        cantidad_base: cantidadBase,
-                        factor_conversion: conversion.factor,
-                        conversion_source: conversion.source,
-                        requires_review: conversion.requiresReview
-                    })
-                    .eq("id", matchedItem.id);
+                // la suma la hace la base en un solo paso: dos fotos leídas a la vez suman las dos
+                await sumarDocumentado(supabase, matchedItem.id, cantidadBase, {
+                    precio_documentado: item.precio_unitario || 0,
+                    precio_real: item.precio_unitario || matchedItem.precio_oc || 0,
+                    cantidad_base: cantidadBase,
+                    factor_conversion: conversion.factor,
+                    conversion_source: conversion.source,
+                    requires_review: conversion.requiresReview,
+                });
 
                 if ((match_result.match_type === "vector" || match_result.match_type === "exact_code") && match_result.mapping_id) {
                     await supabase.rpc('increment_mapping_usage', { mapping_id: match_result.mapping_id });

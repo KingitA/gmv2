@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { formatearNumeroComprobante } from '@/lib/services/numero-comprobante';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { parseFecha } from '@/lib/formato';
@@ -30,7 +31,8 @@ export async function POST(
         if (['finalizada', 'cancelada'].includes(oc.estado)) return NextResponse.json({ error: 'La orden está cerrada: no se le pueden cargar comprobantes.' }, { status: 409 });
 
         const tipo = String(body.tipo_comprobante || '');
-        const numero = String(body.numero_comprobante || '').trim();
+        // con el formato del papel: 0001-00008821
+        const numero = formatearNumeroComprobante(String(body.numero_comprobante || '').trim());
         const fecha = parseFecha(body.fecha_comprobante);
         if (!TIPOS.includes(tipo)) return NextResponse.json({ error: 'Elegí el tipo de comprobante.' }, { status: 400 });
         if (!numero) return NextResponse.json({ error: 'Falta el número del comprobante.' }, { status: 400 });

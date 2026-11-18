@@ -17,8 +17,9 @@
 import { todayArgentina } from '@/lib/utils';
 import { inferirTipoComprobante, type ParseResult } from '@/lib/services/ocr';
 import { matchAndCreateDetalle } from '@/lib/services/detalle';
-import { esNumeroProvisorio, normalizarNumeroComprobante, tiposCompatibles } from '@/lib/services/numero-comprobante';
+import { esNumeroProvisorio, formatearNumeroComprobante, normalizarNumeroComprobante, tiposCompatibles } from '@/lib/services/numero-comprobante';
 import { fechaISO } from '@/lib/formato';
+import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 
 export { esNumeroProvisorio, normalizarNumeroComprobante, tiposCompatibles };
 
@@ -106,9 +107,10 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
     ocr: ParseResult;
     tipo_documento?: string;
     foto_url?: string | null;
-}): Promise<{ comprobante: any | null; sumado_a_provisorio: boolean; otro_provisorio?: boolean; error?: string; vinculados: any[] }> {
+}): Promise<{ comprobante: any | null; sumado_a_provisorio: boolean; otro_provisorio?: boolean; error?: string; vinculados: any[]; /** Lo que la oficina tiene que saber: renglones juntados, que faltan o que no se pudieron guardar */ avisos?: string[] }> {
     const meta = p.ocr.comprobante;
-    const numero = meta?.numero_comprobante && !esNumeroProvisorio(meta.numero_comprobante) ? String(meta.numero_comprobante).trim() : '';
+    // Con el formato del papel (0001-00008821): la lectura a veces agrega o saca un cero
+    const numero = meta?.numero_comprobante && !esNumeroProvisorio(meta.numero_comprobante) ? formatearNumeroComprobante(meta.numero_comprobante) : '';
     const tipoComp = inferirTipoComprobante(p.ocr, p.tipo_documento);
     const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
     const totalFactura = Number(meta?.total_factura || 0);
@@ -146,8 +148,38 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
     let sumado = false;
     let otroProvisorio = false;
 
-    // Sin número: ¿ya hay un comprobante provisorio abierto de esta orden y este tipo?
+    // Sin número: el provisorio de la orden lo decide la base CON LA ORDEN BLOQUEADA (migración
+    // 20261118e): dos hojas leídas a la vez ya no crean dos provisorios. Sin la migración sigue el
+    // camino de abajo.
+    let resueltoEnBase = false;
     if (!numero) {
+        const rpc = await supabase.rpc('comprobante_provisorio_obtener', {
+            p_orden_id: p.orden_compra_id, p_proveedor_id: p.proveedor_id, p_tipo: tipoComp,
+            p_datos: {
+                ...totales,
+                numero_provisorio: `PENDIENTE-${Date.now()}`,
+                fecha_comprobante: meta?.fecha || todayArgentina(),
+                fecha_leida: meta?.fecha || null,
+                foto_url: p.foto_url || null,
+                descuento_fuera_factura: Number(meta?.descuento_global || 0),
+            },
+        });
+        if (!rpc.error && rpc.data?.id) {
+            const { data: comp } = await supabase.from('comprobantes_compra').select('*').eq('id', rpc.data.id).maybeSingle();
+            if (comp) {
+                comprobante = comp;
+                sumado = !!rpc.data.sumado;
+                otroProvisorio = !!rpc.data.otro_provisorio;
+                resueltoEnBase = true;
+            }
+        } else if (rpc.error && !faltaLaFuncion(rpc.error, 'comprobante_provisorio_obtener')) {
+            console.error('[documento-compra] provisorio:', rpc.error.message);
+            return { comprobante: null, sumado_a_provisorio: false, error: rpc.error.message, vinculados: [] };
+        }
+    }
+
+    // Sin número (y sin la migración): ¿ya hay un comprobante provisorio abierto de esta orden y este tipo?
+    if (!numero && !resueltoEnBase) {
         const { data: abiertos } = await supabase
             .from('comprobantes_compra')
             .select('*')
@@ -214,5 +246,11 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
         documento_id: p.documento_id || undefined,
     });
 
-    return { comprobante, sumado_a_provisorio: sumado, otro_provisorio: otroProvisorio, vinculados };
+    // Ningún renglón leído desaparece en silencio
+    const avisos: string[] = [...(p.ocr.avisos || [])];
+    const descartados: Array<{ descripcion: string; motivo: string }> = (vinculados as any).descartados || [];
+    if (descartados.length > 0) {
+        avisos.push(`ATENCIÓN: ${descartados.length} renglón(es) leído(s) NO se pudieron guardar en el comprobante: ${descartados.map((d) => d.descripcion).join('; ')}. Agregalos a mano (botón +). Detalle para sistemas: ${descartados[0]!.motivo}`);
+    }
+    return { comprobante, sumado_a_provisorio: sumado, otro_provisorio: otroProvisorio, vinculados, ...(avisos.length > 0 ? { avisos } : {}) };
 }
