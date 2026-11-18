@@ -109,10 +109,10 @@ export default function ListasProveedoresPage() {
             </div>
 
             <div className="flex gap-3">
-                <Select value={filtroEstado} onValueChange={setFiltroEstado}>
+                <Select value={filtroEstado || "todos"} onValueChange={(v) => setFiltroEstado(v === "todos" ? "" : v)}>
                     <SelectTrigger className="w-40"><SelectValue placeholder="Todos los estados" /></SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="">Todos</SelectItem>
+                        <SelectItem value="todos">Todos</SelectItem>
                         <SelectItem value="pendiente">Pendiente</SelectItem>
                         <SelectItem value="programada">Programada</SelectItem>
                         <SelectItem value="aplicada">Aplicada</SelectItem>
