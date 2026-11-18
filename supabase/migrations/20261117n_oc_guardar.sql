@@ -73,6 +73,9 @@ ALTER TABLE public.ordenes_compra
   ADD COLUMN IF NOT EXISTS envio_mensaje_id    text,
   ADD COLUMN IF NOT EXISTS envio_hilo_id       text,
   ADD COLUMN IF NOT EXISTS envios              int NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS prueba_enviada_at   timestamptz,
+  ADD COLUMN IF NOT EXISTS prueba_enviada_a    text,
+  ADD COLUMN IF NOT EXISTS envios_prueba       int NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS cancelada_at        timestamptz,
   ADD COLUMN IF NOT EXISTS cancelada_por       uuid,
   ADD COLUMN IF NOT EXISTS motivo_cancelacion  text;
@@ -89,7 +92,30 @@ COMMENT ON COLUMN public.ordenes_compra.editada_at IS
   'Última vez que se cambió el contenido de la orden. Si es posterior a enviada_at, el proveedor tiene una versión vieja.';
 COMMENT ON COLUMN public.ordenes_compra.enviada_a IS 'Casillas a las que se mandó la orden por última vez.';
 COMMENT ON COLUMN public.ordenes_compra.envio_mensaje_id IS 'Id del mensaje de Gmail del último envío.';
-COMMENT ON COLUMN public.ordenes_compra.envios IS 'Cuántas veces se envió (1 = una vez; más = reenvíos).';
+COMMENT ON COLUMN public.ordenes_compra.envios IS 'Cuántas veces se le envió AL PROVEEDOR (1 = una vez; más = reenvíos). Los envíos en modo prueba no cuentan: van en envios_prueba.';
+COMMENT ON COLUMN public.ordenes_compra.prueba_enviada_at IS
+  'Último envío en MODO PRUEBA (fue a la dirección de prueba, no al proveedor). No cambia el estado de la orden: sigue pendiente hasta que se le mande de verdad.';
+COMMENT ON COLUMN public.ordenes_compra.prueba_enviada_a IS 'A qué dirección salió el último envío de prueba.';
+
+-- Registro de CADA envío de una orden (real o de prueba): quién, cuándo, a quién salió de verdad.
+CREATE TABLE IF NOT EXISTS public.ordenes_compra_envios (
+  id               bigserial PRIMARY KEY,
+  orden_compra_id  uuid NOT NULL REFERENCES public.ordenes_compra(id) ON DELETE CASCADE,
+  enviado_at       timestamptz NOT NULL DEFAULT now(),
+  usuario_id       uuid,
+  modo_prueba      boolean NOT NULL,
+  para             text,
+  cc               text,
+  mensaje_id       text,
+  hilo_id          text
+);
+CREATE INDEX IF NOT EXISTS idx_ordenes_compra_envios_orden ON public.ordenes_compra_envios (orden_compra_id, enviado_at);
+ALTER TABLE public.ordenes_compra_envios ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.ordenes_compra_envios FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT ON public.ordenes_compra_envios TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.ordenes_compra_envios_id_seq TO service_role;
+COMMENT ON TABLE public.ordenes_compra_envios IS
+  'Cada mail de orden de compra que salió: modo_prueba = true si fue a la dirección de prueba (no al proveedor). para / cc = direcciones a las que salió de verdad. Lo escribe oc_marcar_enviada.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ordenes_compra_clave_creacion
   ON public.ordenes_compra (clave_creacion) WHERE clave_creacion IS NOT NULL;
@@ -793,7 +819,11 @@ COMMENT ON FUNCTION public.oc_cancelar(uuid, uuid, text) IS
   'Cancela una orden de compra sin recepción ni comprobantes: revierte la provisión, el stock en camino y los vencimientos estimados. No borra la orden (E-09).';
 
 -- ═══ 9. Constancia del envío por mail ═══
--- p_datos: { para, cc, mensaje_id, hilo_id }
+-- p_datos: { para, cc, mensaje_id, hilo_id, modo_prueba }
+-- Cada envío queda en ordenes_compra_envios. Un envío en MODO PRUEBA (el mail fue a la dirección
+-- de prueba, no al proveedor) NO pasa la orden a "enviada" ni cuenta como envío: solo deja
+-- cuándo y a dónde fue la prueba. Así, al apagar el modo prueba, ninguna orden figura como
+-- enviada sin que le haya llegado al proveedor. Solo un envío real la pasa a "enviada".
 CREATE OR REPLACE FUNCTION public.oc_marcar_enviada(
   p_orden_id   uuid,
   p_usuario_id uuid,
@@ -803,11 +833,30 @@ LANGUAGE plpgsql
 SET search_path = public
 AS $$
 DECLARE
-  o record;
+  o        record;
+  v_prueba boolean;
 BEGIN
   SELECT * INTO o FROM ordenes_compra WHERE id = p_orden_id FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'La orden no existe.' USING ERRCODE = 'P0002', DETAIL = 'no_encontrada';
+  END IF;
+
+  v_prueba := coalesce(p_datos ->> 'modo_prueba', '') = 'true';
+
+  INSERT INTO ordenes_compra_envios (orden_compra_id, usuario_id, modo_prueba, para, cc, mensaje_id, hilo_id)
+  VALUES (p_orden_id, p_usuario_id, v_prueba, nullif(p_datos ->> 'para', ''), nullif(p_datos ->> 'cc', ''),
+          nullif(p_datos ->> 'mensaje_id', ''), nullif(p_datos ->> 'hilo_id', ''));
+
+  IF v_prueba THEN
+    UPDATE ordenes_compra SET
+      prueba_enviada_at = now(),
+      prueba_enviada_a  = nullif(p_datos ->> 'para', ''),
+      envios_prueba     = coalesce(envios_prueba, 0) + 1,
+      updated_at        = now()
+    WHERE id = p_orden_id;
+    RETURN jsonb_build_object('success', true, 'orden_id', p_orden_id, 'numero_orden', o.numero_orden,
+                              'modo_prueba', true, 'envios', coalesce(o.envios, 0),
+                              'envios_prueba', coalesce(o.envios_prueba, 0) + 1, 'estado', o.estado);
   END IF;
 
   UPDATE ordenes_compra SET
@@ -824,7 +873,8 @@ BEGIN
   WHERE id = p_orden_id;
 
   RETURN jsonb_build_object('success', true, 'orden_id', p_orden_id, 'numero_orden', o.numero_orden,
-                            'envios', coalesce(o.envios, 0) + 1,
+                            'modo_prueba', false, 'envios', coalesce(o.envios, 0) + 1,
+                            'envios_prueba', coalesce(o.envios_prueba, 0),
                             'estado', CASE WHEN o.estado = 'pendiente' THEN 'enviada' ELSE o.estado END);
 END;
 $$;

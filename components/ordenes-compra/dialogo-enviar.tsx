@@ -18,7 +18,7 @@ import { CargaProgreso } from "@/components/ui/carga-progreso"
 import { fechaHora, moneda } from "@/lib/formato"
 
 interface Previa {
-  orden: { id: string; numero_orden: string; estado: string; envios: number; enviada_at: string | null; enviada_a: string | null; cambio_sin_enviar: boolean; total: number; renglones: number }
+  orden: { id: string; numero_orden: string; estado: string; envios: number; enviada_at: string | null; enviada_a: string | null; prueba_enviada_at?: string | null; prueba_enviada_a?: string | null; cambio_sin_enviar: boolean; total: number; renglones: number }
   proveedor: { id: string; nombre: string }
   puede_enviar: boolean
   motivo: string | null
@@ -129,7 +129,7 @@ export function DialogoEnviarOrden({ ordenId, onCerrar, onEnviada }: { ordenId: 
                   <div className="text-base font-bold">MODO PRUEBA: este mail va a {envio.mail_prueba}, no al proveedor</div>
                   <div className="text-sm">
                     Sería: <b>{seria || "(sin destinatario)"}</b>. El asunto sale con “[PRUEBA]” adelante y el texto aclara que es una prueba.
-                    En la orden queda registrado que se mandó a {envio.mail_prueba}. El modo prueba lo apaga un administrador desde “Envío de órdenes”, en el listado.
+                    La orden NO pasa a “Enviada”: en el listado va a figurar “Enviada a prueba” y sigue pendiente de mandársela al proveedor. El modo prueba lo apaga un administrador desde “Envío de órdenes”, en el listado.
                   </div>
                 </div>
               </div>
@@ -155,6 +155,11 @@ export function DialogoEnviarOrden({ ordenId, onCerrar, onEnviada }: { ordenId: 
                 {previa.orden.enviada_at ? `, la última el ${fechaHora(previa.orden.enviada_at)}` : ""}
                 {previa.orden.enviada_a ? ` a ${previa.orden.enviada_a}` : ""}.
                 {previa.orden.cambio_sin_enviar && <b> La orden cambió después de ese envío: el proveedor tiene una versión vieja.</b>}
+              </div>
+            )}
+            {previa.orden.prueba_enviada_at && (
+              <div className="rounded-md border bg-gray-50 p-3 text-sm text-gray-700">
+                Ya se mandó a prueba el {fechaHora(previa.orden.prueba_enviada_at)}{previa.orden.prueba_enviada_a ? ` a ${previa.orden.prueba_enviada_a}` : ""}. Ese mail no le llegó al proveedor.
               </div>
             )}
             {previa.para_origen === null && (

@@ -6,7 +6,7 @@ import { MIGRACION_OC } from '@/lib/compras/orden-compra';
 import { totalesOC } from '@/lib/compras/oc-totales';
 import { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all';
 
-const COLS_NUEVAS = 'id, numero_orden, proveedor_id, fecha_orden, fecha_estimada_recepcion, estado, observaciones, condicion_pago, usuario_creador, total_neto, total_estimado, cantidad_renglones, editada_at, enviada_at, enviada_a, envios, cancelada_at, motivo_cancelacion';
+const COLS_NUEVAS = 'id, numero_orden, proveedor_id, fecha_orden, fecha_estimada_recepcion, estado, observaciones, condicion_pago, usuario_creador, total_neto, total_estimado, cantidad_renglones, editada_at, enviada_at, enviada_a, envios, prueba_enviada_at, prueba_enviada_a, cancelada_at, motivo_cancelacion';
 const COLS_VIEJAS = 'id, numero_orden, proveedor_id, fecha_orden, fecha_estimada_recepcion, estado, observaciones, condicion_pago, usuario_creador';
 const COLS_PROVEEDOR = 'id, nombre, sigla, percepcion_iva, percepcion_iibb, tipo_descuento';
 
@@ -105,6 +105,9 @@ export async function GET() {
                 enviada_at: o.enviada_at ?? null,
                 enviada_a: o.enviada_a ?? null,
                 envios: o.envios ?? 0,
+                // se mandó solo en MODO PRUEBA (a la dirección de prueba): al proveedor no le llegó
+                prueba_enviada_at: o.prueba_enviada_at ?? null,
+                prueba_enviada_a: o.prueba_enviada_a ?? null,
                 // se cambió después de mandársela al proveedor: tiene una versión vieja
                 cambio_sin_enviar: !!(o.enviada_at && o.editada_at && new Date(o.editada_at).getTime() > new Date(o.enviada_at).getTime()),
                 cancelada_at: o.cancelada_at ?? null,
