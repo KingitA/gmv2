@@ -1,5 +1,6 @@
 import { MatchingEngine } from '@/lib/matching/matcher';
 import { sumarDocumentado } from '@/lib/compras/documentado';
+import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 import { resolveFactorConversion } from '@/lib/services/conversion';
 
 // El OCR a veces devuelve el descuento como MONTO en pesos en vez de %.
@@ -69,7 +70,10 @@ export async function matchAndCreateDetalle(supabase: any, params: {
     const ivaPorcentaje = ['Adquisicion', 'Reversa', 'ADQ', 'REV'].includes(compData?.tipo_comprobante) ? 0 : 21;
 
     const currentRecItems: any[] = recItems || [];
-    const detalleRows: any[] = [];
+    // Cada fila = el renglón del comprobante + lo que le suma a la recepción. Se guardan JUNTOS, al
+    // final, en una sola transacción (comprobante_detalle_cargar, migración 20261119b): si el
+    // servidor se corta a mitad de la lectura no quedan sumas sin renglón.
+    const filas: Array<{ detalle: any; crear_linea: boolean; documentado: any | null; aviso?: any }> = [];
     const matched: any[] = [];
 
     // Artículos de la ORDEN: el matching busca primero ahí, después en el proveedor (lib/matching/compra.ts)
@@ -125,14 +129,18 @@ export async function matchAndCreateDetalle(supabase: any, params: {
         };
 
         if (!isMatched) {
-            detalleRows.push({
-                ...baseRow,
-                articulo_id: null,
-                articulo_sugerido_id: isSuggestion ? best!.sku_id : null,
-                match_estado: isSuggestion ? 'sugerido' : 'sin_match',
-                recepcion_item_id: null,
-                tipo_cantidad: 'unidad',
-                costo_final: precioNeto,
+            filas.push({
+                detalle: {
+                    ...baseRow,
+                    articulo_id: null,
+                    articulo_sugerido_id: isSuggestion ? best!.sku_id : null,
+                    match_estado: isSuggestion ? 'sugerido' : 'sin_match',
+                    recepcion_item_id: null,
+                    tipo_cantidad: 'unidad',
+                    costo_final: precioNeto,
+                },
+                crear_linea: false,
+                documentado: null,
             });
             continue;
         }
@@ -146,28 +154,15 @@ export async function matchAndCreateDetalle(supabase: any, params: {
             candidatas.find((ri: any) => !ri.fuera_de_oc) ||
             candidatas[0];
 
-        // Ítem facturado que no estaba en la OC: crear la línea de recepción
-        // marcada fuera_de_oc para que depósito y verificación la vean.
+        // Ítem facturado que no estaba en la OC: la línea de recepción (fuera de la orden) se crea
+        // JUNTO con el renglón, para que depósito y verificación la vean. Acá solo se leen los datos
+        // del artículo que hacen falta para convertir bultos.
+        const crearLinea = !recItem;
+        let articulo = recItem?.articulo;
         if (!recItem) {
-            const { data: nuevaLinea } = await supabase
-                .from('recepciones_items')
-                .insert({
-                    recepcion_id: params.recepcion_id,
-                    articulo_id: articuloId,
-                    cantidad_oc: 0,
-                    cantidad_fisica: 0,
-                    estado_linea: 'pendiente',
-                    fuera_de_oc: true,
-                })
-                .select('*, articulo:articulos(id, sku, unidades_por_bulto, precio_compra, iva_compras)')
-                .single();
-            if (nuevaLinea) {
-                recItem = nuevaLinea;
-                currentRecItems.push(nuevaLinea);
-            }
+            const { data: art } = await supabase.from('articulos').select('id, sku, unidades_por_bulto, precio_compra, iva_compras').eq('id', articuloId).maybeSingle();
+            articulo = art;
         }
-
-        const articulo = recItem?.articulo;
 
         const conversion = resolveFactorConversion({
             proveedorDefaultUnidad: proveedor?.default_unidad_factura,
@@ -180,18 +175,28 @@ export async function matchAndCreateDetalle(supabase: any, params: {
 
         const cantBase = (item.cantidad || 0) * conversion.factor;
 
-        detalleRows.push({
-            ...baseRow,
-            articulo_id: articuloId,
-            articulo_sugerido_id: null,
-            match_estado: 'auto',
-            recepcion_item_id: recItem?.id ?? null,
-            tipo_cantidad: conversion.factor === 1 ? 'unidad' : 'bulto',
-            costo_final: precioNeto,
-        });
-
-        if (conversion.requiresReview) {
-            await supabase.from('ocr_conversion_warnings').insert({
+        filas.push({
+            detalle: {
+                ...baseRow,
+                articulo_id: articuloId,
+                articulo_sugerido_id: null,
+                match_estado: 'auto',
+                recepcion_item_id: recItem?.id ?? null,
+                tipo_cantidad: conversion.factor === 1 ? 'unidad' : 'bulto',
+                costo_final: precioNeto,
+            },
+            crear_linea: crearLinea,
+            // Acumular (no pisar): puede haber varios documentos por recepción
+            documentado: {
+                delta: cantBase,
+                precio_documentado: precioNeto,
+                precio_real: precioNeto || recItem?.precio_oc || 0,
+                cantidad_base: cantBase,
+                factor_conversion: conversion.factor,
+                conversion_source: conversion.source,
+                requires_review: conversion.requiresReview,
+            },
+            aviso: conversion.requiresReview ? {
                 recepcion_id: params.recepcion_id,
                 documento_id: params.documento_id,
                 proveedor_id: params.proveedor_id,
@@ -201,25 +206,8 @@ export async function matchAndCreateDetalle(supabase: any, params: {
                 warning_type: conversion.warningType || '',
                 warning_message: conversion.warningMessage || '',
                 conversion_attempted: conversion,
-            }).then(({ error }: any) => {
-                if (error) console.error('[matchAndCreateDetalle] warning insert error:', error.message);
-            });
-        }
-
-        if (recItem) {
-            // Acumular (no pisar): puede haber varios documentos por recepción. La suma la hace la
-            // base en un solo paso (lib/compras/documentado.ts): dos documentos de la misma orden
-            // leídos a la vez suman los dos.
-            const quedo = await sumarDocumentado(supabase, recItem.id, cantBase, {
-                precio_documentado: precioNeto,
-                precio_real: precioNeto || recItem.precio_oc || 0,
-                cantidad_base: cantBase,
-                factor_conversion: conversion.factor,
-                conversion_source: conversion.source,
-                requires_review: conversion.requiresReview,
-            });
-            recItem.cantidad_documentada = quedo ?? Number(recItem.cantidad_documentada || 0) + cantBase;
-        }
+            } : null,
+        });
 
         matched.push({ articulo_id: articuloId, descripcion: item.descripcion });
     }
@@ -227,22 +215,57 @@ export async function matchAndCreateDetalle(supabase: any, params: {
     // Renglones leídos que NO se pudieron guardar: se devuelven para avisarlos en pantalla
     // (antes solo quedaban en el registro del servidor y el comprobante salía con un renglón menos).
     const descartados: Array<{ descripcion: string; motivo: string }> = [];
-    if (detalleRows.length > 0) {
-        const { error } = await supabase.from('comprobantes_compra_detalle').insert(detalleRows);
-        if (error) {
-            // Insert resiliente: una línea inválida no debe perder las demás
-            console.error('[matchAndCreateDetalle] Batch insert error, reintentando por fila:', error.message);
-            for (const row of detalleRows) {
-                const { error: rowError } = await supabase.from('comprobantes_compra_detalle').insert(row);
+    let guardados = 0;
+    if (filas.length > 0) {
+        const rpc = await supabase.rpc('comprobante_detalle_cargar', {
+            p_comprobante_id: params.comprobante_id,
+            p_recepcion_id: params.recepcion_id,
+            p_filas: filas.map(({ aviso: _aviso, ...f }) => f),
+        });
+        if (!rpc.error) {
+            guardados = Number(rpc.data?.guardados || 0);
+            for (const d of (rpc.data?.descartados || []) as any[]) descartados.push({ descripcion: String(d.descripcion || '(sin descripción)'), motivo: String(d.motivo || '') });
+        } else if (faltaLaFuncion(rpc.error, 'comprobante_detalle_cargar')) {
+            // Sin la migración 20261119b: fila por fila desde el servidor (renglón y, enseguida, su suma)
+            for (const f of filas) {
+                let itemId: string | null = f.detalle.recepcion_item_id;
+                if (!itemId && f.crear_linea) {
+                    const { data: existente } = await supabase.from('recepciones_items').select('id').eq('recepcion_id', params.recepcion_id).eq('articulo_id', f.detalle.articulo_id).limit(1);
+                    itemId = existente?.[0]?.id ?? null;
+                    if (!itemId) {
+                        const { data: nueva } = await supabase.from('recepciones_items')
+                            .insert({ recepcion_id: params.recepcion_id, articulo_id: f.detalle.articulo_id, cantidad_oc: 0, cantidad_fisica: 0, estado_linea: 'pendiente', fuera_de_oc: true })
+                            .select('id').single();
+                        itemId = nueva?.id ?? null;
+                    }
+                }
+                const { error: rowError } = await supabase.from('comprobantes_compra_detalle').insert({ ...f.detalle, recepcion_item_id: itemId });
                 if (rowError) {
-                    console.error('[matchAndCreateDetalle] Fila descartada:', rowError.message, row.descripcion_proveedor);
-                    descartados.push({ descripcion: String(row.descripcion_proveedor || row.codigo_proveedor || '(sin descripción)'), motivo: rowError.message });
+                    console.error('[matchAndCreateDetalle] Fila descartada:', rowError.message, f.detalle.descripcion_proveedor);
+                    descartados.push({ descripcion: String(f.detalle.descripcion_proveedor || f.detalle.codigo_proveedor || '(sin descripción)'), motivo: rowError.message });
+                    continue;
+                }
+                guardados++;
+                if (itemId && f.documentado) {
+                    const { delta, ...datos } = f.documentado;
+                    await sumarDocumentado(supabase, itemId, delta, datos);
                 }
             }
+        } else {
+            // No se guardó ninguno (la transacción se deshizo entera): se avisan todos
+            console.error('[matchAndCreateDetalle] no se pudieron guardar los renglones:', rpc.error.message);
+            for (const f of filas) descartados.push({ descripcion: String(f.detalle.descripcion_proveedor || f.detalle.codigo_proveedor || '(sin descripción)'), motivo: rpc.error.message });
+        }
+
+        // Avisos de conversión de bultos (no son plata ni stock: van aparte)
+        const avisos = filas.map((f) => f.aviso).filter(Boolean);
+        if (avisos.length > 0 && guardados > 0) {
+            const { error } = await supabase.from('ocr_conversion_warnings').insert(avisos);
+            if (error) console.error('[matchAndCreateDetalle] warning insert error:', error.message);
         }
     }
 
-    return Object.assign(matched, { descartados, renglones_leidos: params.items.length, renglones_guardados: detalleRows.length - descartados.length });
+    return Object.assign(matched, { descartados, renglones_leidos: params.items.length, renglones_guardados: guardados });
 }
 
 // Revierte lo que el OCR de un documento aplicó: resta cantidades documentadas
