@@ -1312,6 +1312,40 @@ el stock de lo vendible sube UNA vez y que la devolución queda `confirmado`.
 | Lector físico | — | 🟡 este equipo no tiene servicio de escaneo; ráfaga simulada con `adb input text` (tiempos irregulares). Validar el doble gatillo con un lector real |
 | Backend real (handlers contra Supabase) | — | 🟡 tipado y build en verde; sin ejecutar: necesita el deploy en `main` y un usuario `deposito` |
 
+### v0.5.4 (18/11/2026): recepción — faltantes a la vista, cantidad con un toque, bultos y documentos (Tanda 1-C de entrada)
+
+Visto en el NuStar con la v0.5.3. Solo cambia la app; el contrato del outbox (`recepcion.iniciar`,
+`recepcion.conformidad`, `recepcion.item`, `recepcion.cerrar`) y las rutas del servidor NO cambian.
+
+- **Una línea con menos de lo pedido no es "completa"** (E-92). El servidor guarda `estado_linea = 'ok'`
+  para cualquier cantidad mayor a cero, y la app la pintaba verde. Regla pura en
+  `apps/deposito/src/datos/overlay.ts`: `unidadesFaltantes(l)` (pedido − contado, en unidades),
+  `lineaIncompleta(l)`, `textoFalta(l)` ("1 bulto (36 u)" / "22 u"). La lista las separa en
+  "Llegó menos de lo pedido" (ámbar: "1 de 2 bultos · faltan 36 u") y "Recibidos completos".
+- **Finalizar con faltantes pide confirmación** (E-93): `resumenCierre(r)` arma qué llegó y qué falta
+  de cada artículo; la hoja (`useOverlay("finalizar")`) dice que la orden queda abierta para recibir el
+  resto. Sin faltantes finaliza directo, como antes. La hoja es una entrada de historial: al confirmar
+  se vuelve `pasos + 1`.
+- **Tocar un renglón abre la cantidad** (`/recibir/:id/item/:articuloId`). La ficha del artículo quedó
+  en el botón ⓘ del renglón (`onFicha` de `Linea`; el botón frena la propagación para no abrir la cantidad).
+- **Control de bultos** (`ControlBultos`): lo escrito se guarda en el equipo en cada tecla
+  (`datos/borradorBultos.ts`, `localStorage` por orden) y se borra al registrar; "Bultos OK" queda
+  deshabilitado hasta tener los dos números (`faltaParaRegistrarBultos`, que también exige la
+  observación si no coinciden); "Saltear" abre una confirmación (`useOverlay("saltear-bultos")`).
+- **Documentos** (sigue siendo ONLINE-ONLY, misma ruta `POST /api/recepciones/[id]/ocr`):
+  la foto se achica antes de subir (`comprimirFoto` de `@gm/cheques/foto`, 2000 px, JPEG 0,78);
+  botón "PDF o archivo" (PDF hasta 4 MB: Vercel corta en 4,5); después de subir se muestra lo que
+  leyó el sistema (tipo, número, total, renglones) o por qué no se pudo leer, en castellano
+  (`datos/documentos.ts`: `lecturaDeDocumento`, `motivoNoLeido`, `revisarArchivo`).
+- **Barra de datos** (`Frescura`, en `@gm/core`: las tres apps): con la sesión vencida dice
+  "Sesión vencida: volvé a ingresar" en vez de "último intento falló" (`ui/aviso-sync.ts`).
+  Vendedor y chofer lo reciben en su próxima APK.
+- Pruebas: `packages/core/test/entrada-recepcion-app.test.ts`.
+
+**Pendiente (necesita cambios del servidor, a coordinar):** varias fotos = un solo comprobante y
+cola sin señal para los documentos. Hoy la ruta recibe UN archivo y lo lee en el momento. Propuesta
+enviada al orquestador: outbox `recepcion.documento` que solo guarda las hojas + lectura aparte.
+
 ---
 
 ## 18. Vendedor (com.gm.vendedor) — Sesión 1
