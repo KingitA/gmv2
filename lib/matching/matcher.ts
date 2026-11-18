@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { normalizeText, extractFeatures } from './normalizer';
 import { porcentaje } from '../formato';
 import { MatchCandidate, MatchResult, ImportItemRaw, MatchSignal } from './types';
+import { codigoComparable, elegirCandidatoCompra, elegirPorCodigo, parecidoPorPalabras, type ContextoCompra } from './compra';
 
 const getSupabase = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
@@ -10,7 +11,13 @@ export class MatchingEngine {
     /**
      * Main entry point to resolve a single item.
      */
-    async resolveItem(item: ImportItemRaw, providerId: string): Promise<MatchResult> {
+    /**
+     * `compra`: el renglón es de un comprobante de compra de ese proveedor (lib/matching/compra.ts):
+     * el código exacto gana siempre, se busca primero en la orden y en el proveedor, y un artículo
+     * de otro proveedor es el último recurso (queda como sugerencia, marcado). Sin `compra` el
+     * motor se comporta como siempre (listas de precios, etc.).
+     */
+    async resolveItem(item: ImportItemRaw, providerId: string, compra?: ContextoCompra | null): Promise<MatchResult> {
         // 1. DEFENSIVE CASTING: Ensure we work with strings
         const descriptionStr = item.description ? String(item.description) : "";
         const codeStr = item.code ? String(item.code) : undefined;
@@ -29,12 +36,13 @@ export class MatchingEngine {
         // Let's override the item properties for the subsequent logic to be safe
         const safeItem = { ...item, description: descriptionStr, code: codeStr, ean: eanStr };
 
-        const exactMatch = await this.findExactMatch(safeItem, providerId, normDesc);
+        const exactMatch = await this.findExactMatch(safeItem, providerId, normDesc, compra);
         if (exactMatch) {
             return {
                 bestCandidate: exactMatch,
                 allCandidates: [exactMatch],
-                status: 'matched'
+                // un artículo de otro proveedor nunca se asigna solo, aunque coincida el código de barras
+                status: exactMatch.otro_proveedor ? 'pending' : 'matched'
             };
         }
 
@@ -43,14 +51,17 @@ export class MatchingEngine {
             return { bestCandidate: null, allCandidates: [], status: 'pending' };
         }
 
-        const [trigramCandidates, vectorCandidates] = await Promise.all([
+        const [trigramCandidates, vectorCandidates, ordenCandidates] = await Promise.all([
             this.findTrigramMatches(descriptionStr),
             this.generateEmbedding(descriptionStr).then(emb => this.findVectorMatches(emb)),
+            // Compras: los artículos de la orden SIEMPRE son candidatos (la búsqueda general trae
+            // los 10 más parecidos de todo el catálogo y el de la orden puede no estar entre ellos)
+            compra ? this.findOrdenMatches(descriptionStr, compra) : Promise.resolve([] as MatchCandidate[]),
         ]);
 
         // Merge pools by article id, keeping the best score (both scales are 0-1)
         const pool = new Map<string, MatchCandidate>();
-        for (const c of [...trigramCandidates, ...vectorCandidates]) {
+        for (const c of [...trigramCandidates, ...vectorCandidates, ...ordenCandidates]) {
             const existing = pool.get(c.sku_id);
             if (!existing) {
                 pool.set(c.sku_id, c);
@@ -70,14 +81,26 @@ export class MatchingEngine {
         reranked.sort((a, b) => b.score - a.score);
 
         // Determine status based on best score
-        const best = reranked.length > 0 ? reranked[0] : null;
+        let best = reranked.length > 0 ? reranked[0] : null;
+        // Compras: primero la orden, después el proveedor; otro proveedor solo como último recurso
+        let otroProveedor = false;
+        if (compra && reranked.length > 0) {
+            const elegido = elegirCandidatoCompra(reranked, providerId, compra);
+            if (elegido) {
+                best = elegido.candidato;
+                otroProveedor = elegido.otro_proveedor;
+                best.otro_proveedor = elegido.otro_proveedor;
+                best.en_orden = elegido.en_orden;
+                if (elegido.otro_proveedor) best.signals.push({ type: 'brand', score_impact: 0, description: 'Artículo de otro proveedor' });
+            }
+        }
 
         // Thresholds
         const AUTO_APPROVE_THRESHOLD = 0.93;
         const SUGGESTION_THRESHOLD = 0.75;
 
         if (best) {
-            if (best.score >= AUTO_APPROVE_THRESHOLD) {
+            if (best.score >= AUTO_APPROVE_THRESHOLD && !otroProveedor) {
                 best.confidence_level = 'auto_approve';
             } else if (best.score >= SUGGESTION_THRESHOLD) {
                 best.confidence_level = 'suggestion';
@@ -93,7 +116,7 @@ export class MatchingEngine {
         };
     }
 
-    private async findExactMatch(item: ImportItemRaw, providerId: string, normDesc: string): Promise<MatchCandidate | null> {
+    private async findExactMatch(item: ImportItemRaw, providerId: string, normDesc: string, compra?: ContextoCompra | null): Promise<MatchCandidate | null> {
         // 1. Check by Provider Code
         if (item.code) {
             // ... existing logic ...
@@ -107,6 +130,7 @@ export class MatchingEngine {
                 .eq('proveedor_id', providerId)
                 .eq('codigo_proveedor', item.code)
                 .eq('articulos.activo', true)
+                .limit(1)
                 .maybeSingle();
 
             if (data && data.articulos) {
@@ -123,26 +147,66 @@ export class MatchingEngine {
             }
         }
 
+        // 1b. SOLO en compras, y DESPUÉS de la equivalencia aprendida (que manda): el código leído ES
+        //     el SKU de un artículo de la orden o de este proveedor. (Antes el código solo se comparaba
+        //     con las equivalencias aprendidas: un artículo cuyo SKU era exactamente el código de la
+        //     factura no se encontraba y se iba a buscar por parecido.) Fuera de compras —importar una
+        //     lista de precios— no corre: ahí el código del proveedor no tiene por qué ser nuestro SKU.
+        if (compra && item.code && providerId) {
+            const codigo = String(item.code).trim();
+            const variantes = [...new Set([codigo, codigoComparable(codigo), codigo.replace(/^0+(?=.)/, '')].filter(Boolean))];
+            const { data: porSku } = await getSupabase()
+                .from('articulos')
+                .select('id, descripcion, sku, proveedor_id')
+                .eq('activo', true)
+                .in('sku', variantes)
+                .limit(50);
+            const art: any = elegirPorCodigo(codigo, (porSku || []) as any[], providerId, compra);
+            if (art) {
+                return {
+                    sku_id: art.id,
+                    sku_code: art.sku,
+                    sku_name: art.descripcion,
+                    score: 1.0,
+                    method: 'exact_sku',
+                    signals: [{ type: 'unit', score_impact: 0, description: 'El código del renglón es el SKU del artículo' }],
+                    confidence_level: 'auto_approve',
+                    proveedor_id: art.proveedor_id ?? null,
+                };
+            }
+        }
+
         // 2. Check by EAN (Global check, ignoring provider)
         // articulos.ean13 es TEXT[] desde 20260424_ean13_array.sql
-        if (item.ean) {
+        // (el "código" de un renglón de compra muchas veces ES el código de barras)
+        const posibleEan = item.ean ? String(item.ean) : (compra && item.code && /^\d{12,14}$/.test(String(item.code).trim()) ? String(item.code).trim() : '');
+        if (posibleEan) {
             const { data: eanRows } = await getSupabase()
                 .from('articulos')
-                .select('id, descripcion, sku')
+                .select('id, descripcion, sku, proveedor_id')
                 .eq('activo', true)
-                .contains('ean13', [String(item.ean)])
-                .limit(1);
+                .contains('ean13', [posibleEan])
+                .limit(10);
 
-            const data = eanRows?.[0];
+            // Con el mismo código de barras en más de un artículo: el de la orden, después el del proveedor
+            const enOrden = new Set(compra?.ordenArticuloIds || []);
+            const data: any = (eanRows || []).find((a: any) => enOrden.has(a.id))
+                || (eanRows || []).find((a: any) => a.proveedor_id === providerId)
+                || eanRows?.[0];
+            // Compras: un código de barras que cae en un artículo que no es de la orden ni del
+            // proveedor NO se asigna solo: queda como sugerencia, marcado "de otro proveedor".
+            const otroProveedor = !!compra && !!data && !enOrden.has(data.id) && data.proveedor_id !== providerId;
             if (data) {
                 return {
                     sku_id: data.id,
                     sku_code: data.sku,
                     sku_name: data.descripcion,
-                    score: 1.0,
+                    score: otroProveedor ? 0.9 : 1.0,
                     method: 'exact_ean',
-                    signals: [{ type: 'unit', score_impact: 0, description: 'Matched by EAN' }],
-                    confidence_level: 'auto_approve'
+                    signals: [{ type: 'unit', score_impact: 0, description: otroProveedor ? 'Código de barras de un artículo de otro proveedor' : 'Matched by EAN' }],
+                    confidence_level: otroProveedor ? 'suggestion' : 'auto_approve',
+                    proveedor_id: data.proveedor_id ?? null,
+                    ...(otroProveedor ? { otro_proveedor: true } : {}),
                 };
             }
         }
@@ -217,7 +281,7 @@ export class MatchingEngine {
         if (rows.length === 0) return [];
         const { data: arts } = await getSupabase()
             .from('articulos')
-            .select('id, descripcion, sku')
+            .select('id, descripcion, sku, proveedor_id')
             .in('id', rows.map(r => r.id))
             .eq('activo', true); // los dados de baja no son candidatos
         const byId = new Map((arts || []).map((a: any) => [a.id, a]));
@@ -233,8 +297,34 @@ export class MatchingEngine {
                     method,
                     signals: [{ type: 'embedding_score' as const, score_impact: 0, description: `${signalLabel}: ${porcentaje(r.score * 100, 1)}` }],
                     confidence_level: 'low' as const,
+                    proveedor_id: art.proveedor_id ?? null,
                 };
             });
+    }
+
+    // Compras: los artículos de la orden, puntuados por parecido de palabras con el renglón.
+    // El puntaje va de 0,60 a 0,92: por parecido solo, nunca se asigna sin que alguien lo confirme.
+    private async findOrdenMatches(description: string, compra: ContextoCompra): Promise<MatchCandidate[]> {
+        const ids = [...new Set(compra.ordenArticuloIds || [])];
+        if (ids.length === 0) return [];
+        const { data: arts } = await getSupabase()
+            .from('articulos')
+            .select('id, descripcion, sku, proveedor_id')
+            .in('id', ids.slice(0, 500))
+            .eq('activo', true);
+        return (arts || [])
+            .map((a: any) => ({ a, parecido: parecidoPorPalabras(description, a.descripcion) }))
+            .filter((x: any) => x.parecido >= 0.34)
+            .map((x: any) => ({
+                sku_id: x.a.id,
+                sku_code: x.a.sku,
+                sku_name: x.a.descripcion,
+                score: Math.min(0.60 + 0.32 * x.parecido, 0.92),
+                method: 'trigram' as const,
+                signals: [{ type: 'embedding_score' as const, score_impact: 0, description: `Artículo de la orden, parecido ${porcentaje(x.parecido * 100, 0)}` }],
+                confidence_level: 'low' as const,
+                proveedor_id: x.a.proveedor_id ?? null,
+            }));
     }
 
     // Capa léxica: RPC search_articulos (trigram token-AND typo-tolerante sobre

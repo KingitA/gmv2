@@ -55,8 +55,9 @@ export default function CuentaCorrienteProveedorPage() {
     const [nc, setNc] = useState<{ tipo: string; numero: string; fecha: string; total: number | null; total_neto: number | null }>({ tipo: "NC", numero: "", fecha: "", total: null, total_neto: null })
     const [ncSaving, setNcSaving] = useState(false)
 
-    // Nombre completo del proveedor (la sigla sola no dice quién es); la sigla va al lado
+    // El NOMBRE del proveedor (la sigla sola no dice quién es); la sigla va chica al lado
     const provNombre = proveedor?.nombre || proveedor?.sigla || ""
+    const provSigla = proveedor?.sigla && proveedor.sigla !== provNombre ? proveedor.sigla : ""
 
     async function cargar() {
         setLoading(true)
@@ -168,7 +169,7 @@ export default function CuentaCorrienteProveedorPage() {
                     <Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button>
                 </Link>
                 <div>
-                    <h1 className="text-2xl font-bold">Cuenta corriente{provNombre && ` — ${provNombre}`}</h1>
+                    <h1 className="text-2xl font-bold">Cuenta corriente{provNombre && ` — ${provNombre}`}{provSigla && <span className="ml-2 text-sm font-normal text-muted-foreground">({provSigla})</span>}</h1>
                     <p className="text-muted-foreground">Comprobantes, pagos y retenciones, con el saldo al día</p>
                 </div>
                 <div className="ml-auto flex flex-wrap gap-2">

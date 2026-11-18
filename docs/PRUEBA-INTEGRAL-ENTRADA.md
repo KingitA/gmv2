@@ -338,6 +338,31 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 3. **Adquisición, un solo valor:** el procesador de mails guarda `Adquisicion` (antes `ADQ`). Al leer se aceptan los dos (`esAdquisicion` en `lib/compras/finalizar-oc.ts`, y la función SQL), porque hay comprobantes viejos con `ADQ`.
 4. **Sin la migración u**, validar un comprobante de una orden de compra contesta "falta aplicar la migración 20261117u" y no hace nada (el servidor pregunta `entrada_cableado_version()`). Se quitó el camino por partes.
 
+### Prueba en producción del 18/11 (OC-000012, HORNAL) — rama `entrada-t1-ocr-match`
+
+1. **Un renglón leído que no se guardó** (FA 0003-00045711: se leyeron rollo aluminio y rollo film, quedó solo el film). En el código no hay ninguna deduplicación entre documentos ni filtro de "ya documentado": lo que se guarda en `datos_ocr.items` es lo que sale de interpretar el JSON que devuelve la IA. Si la IA repite la lista `items` (o pone una adentro de otra parte del JSON), al interpretarlo queda solo la última. **Arreglo** (`lib/services/lectura-renglones.ts`): se recorre el texto de la lectura y se juntan todas las listas de renglones; si el texto menciona más renglones de los que quedaron, se avisa. Y un renglón que no se puede guardar en el comprobante (error de la base) ya no queda solo en el registro del servidor: se avisa en pantalla con su descripción. Los avisos salen al subir el documento y quedan en `datos_ocr.avisos`. **Sin confirmar contra el dato real:** no se pudo leer el `raw_text` de producción desde esta sesión; si el texto de `fa2.png` no tiene la lista repetida, hay que mirarlo de nuevo.
+2. **Sugerencia de un artículo de otro proveedor** (190138 de HORNAL sugerido al 961950 de YASH). El motor comparaba el código solo contra las equivalencias aprendidas (`articulos_proveedores`), nunca contra el SKU, y después buscaba por parecido en todo el catálogo. **Arreglo** (`lib/matching/compra.ts` + `matcher.ts`): el código exacto gana siempre (SKU del artículo de la orden o del proveedor, código de proveedor, EAN); por parecido se elige primero entre los artículos de la orden, después del proveedor; uno de otro proveedor es el último recurso, nunca se asigna solo y en "Revisar matches" sale marcado "Artículo de otro proveedor".
+3. **Número con un cero de más** ("0001-000008821"): el número se guarda con el formato del papel, punto de venta de 4 (o 5) dígitos y número de 8 (`formatearNumeroComprobante`), en la lectura automática, la carga a mano y la edición.
+
+4. **Dos documentos subidos juntos** (dato del orquestador: la misma factura subida sola se leyó completa). La pantalla ahora sube los archivos de a uno (cada uno espera al anterior), lo documentado de la recepción se lee fresco antes de sumar, y la lectura avisa al cargar si los renglones leídos no suman el neto del comprobante, si vinieron renglones fuera de la lista principal o si se usó el modelo de respaldo. La causa exacta sigue sin confirmarse contra el dato real.
+5. **Agregar un renglón a mano**: se elige la unidad (unidades o bultos de N), con descuentos D1..D4, y se ve a cuántas unidades equivale, el neto por unidad y el importe antes de guardar. No se precarga nada de la orden (se muestra como referencia). Cuenta en `lib/compras/renglon-manual.ts`.
+6. **Corregir y borrar un renglón** de un comprobante sin validar (botón "Ver los renglones"): acomoda lo documentado de la recepción y queda anotado quién, cuándo, antes y después en `comprobantes_compra_cambios` (migración `20261118a_comprobantes_compra_cambios.sql`, independiente; sin ella se hace igual y queda en el registro del servidor).
+7. **Borrar un comprobante** se lleva también su archivo (foto o PDF): ya no queda suelto en la lista de la verificación.
+
+### Prueba en producción de punta a punta (18/11, OC-000012) — segunda parte, misma rama
+
+8. **Costo con reclamo al proveedor.** Si la diferencia de precio se reclama (nota de crédito esperada), el último costo del artículo y el kardex de la compra quedan al precio de la ORDEN; si la empresa la acepta, al facturado. Vale en los dos órdenes: resolver y después validar, o validar y después resolver (al resolver se recalcula el costo de ese artículo con las facturas ya validadas de la orden). La vista previa de la ventana dice lo mismo que pasa. `lib/compras/costo-y-kardex.ts`.
+9. **La provisión baja por lo facturado**, igual que el vencimiento estimado: un comprobante por una parte de la orden ya no se lleva la provisión entera del canal. Migración `20261118c_provision_baja_por_lo_facturado.sql` (va después de la u). El procesador de mails hace lo mismo: si la factura es por menos que la provisión, la provisión queda por el resto y la deuda entra como movimiento propio.
+10. **Pestaña que se cuelga en la verificación.** No se pudo medir con el navegador desde la sesión de trabajo: la causa NO está confirmada. Se corrigió lo que la pantalla hacía de más en cada refresco: (a) el enlace firmado de la foto cambia en cada carga y el visor volvía a descargar y dibujar la imagen cada vez (ahora conserva el enlace mientras sea el mismo documento); (b) "Revisar matches" volvía a pedir los renglones de todos los comprobantes cada vez que la pantalla se dibujaba (al abrir un cartel, por ejemplo) porque recibía una lista nueva en cada dibujado. Si vuelve a pasar, hace falta el perfil del navegador.
+11. **Nombre del proveedor en lugar de la sigla** en la cuenta corriente (la sigla va chica al lado) y en la lista de órdenes de pago.
+
+### Arreglos de la revisión de `entrada-t1-ocr-match` (18/11)
+
+1. **La provisión se baja una sola vez.** La validación la baja solo cuando el movimiento de deuda nace ahí (`v_mov_nuevo`); si la factura entró por mail, el procesador ya la bajó (o la convirtió) al dejar la deuda. `20261118c` corta si falta la `20261118b`. Con orden de compra y sin la función de validar, el servidor contesta "falta migración" (ya no hay camino por partes).
+2. **Dos lecturas a la vez, resuelto en la base** (`20261118e_recepcion_documentado_atomico.sql`, independiente): lo documentado de una línea se suma en un solo UPDATE (`recepcion_item_sumar_documentado`, lo usan la oficina, la app Depósito, el mail, "Revisar matches" y los renglones a mano) y el comprobante provisorio lo decide la base con la orden bloqueada (`comprobante_provisorio_obtener`). Sin la migración sigue el camino anterior.
+3. **Matching:** "el código es el SKU" corre solo en compras y después de la equivalencia aprendida del proveedor. Un código de barras que cae en un artículo de otro proveedor queda sugerido y marcado, nunca asignado solo.
+4. El mail y la recepción sin orden pasan el contexto de compra. Al corregir un renglón se usa un solo factor de bulto para lo de antes y lo nuevo, sin pisar el factor de la recepción.
+
 ### Orden de las migraciones de la Tanda 1
 
 Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `20261116c`, `20261116p`, `20261116q`, `20261117a_remito_no_se_valida`, `20261117a_op_ganancias_bases_neto`.
@@ -351,7 +376,11 @@ Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `2
 | 5 | `20261117n_oc_guardar.sql` | conviene después de la m (lee columnas del proveedor que agrega la m) |
 | 6 | `20261117p_ordenes_pago_t1d.sql` | `20261116p` y `20261116q` (corta si faltan) |
 | 7 | `20261117r_retencion_transporte_minimo.sql` | independiente |
-| 8 | `20261117u_cableado_oc_validar.sql` | **la d, la n y la p** (corta con mensaje si falta alguna). Va última. Sin ella el servidor no valida comprobantes de una orden de compra (avisa que falta). |
+| 8 | `20261117u_cableado_oc_validar.sql` | **la d, la n y la p** (corta con mensaje si falta alguna). Sin ella el servidor no valida comprobantes de una orden de compra (avisa que falta). |
+| 9 | `20261118a_comprobantes_compra_cambios.sql` | independiente (registro de renglones tocados a mano) |
+| 10 | `20261118b_oc_estimados_sin_borrar.sql` | la n |
+| 11 | `20261118c_provision_baja_por_lo_facturado.sql` | **la u y la 18b** (corta con mensaje si falta alguna). Reemplaza la función de validar. |
+| 12 | `20261118e_recepcion_documentado_atomico.sql` | independiente (sumado atómico de lo documentado y provisorio con bloqueo) |
 
 Aparte, una sola vez y a mano: `scripts/entrada-limpieza-kardex-en-camino.sql`.
 

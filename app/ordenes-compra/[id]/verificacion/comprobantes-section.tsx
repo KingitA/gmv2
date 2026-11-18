@@ -10,7 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Upload, Loader2, CheckCircle2, XCircle, Edit, Trash2, FileText, Plus, RefreshCw, Eye, PenLine } from "lucide-react"
+import { Upload, Loader2, CheckCircle2, XCircle, Edit, Trash2, FileText, Plus, RefreshCw, Eye, PenLine, ListChecks } from "lucide-react"
+import { RenglonesComprobante } from "./renglones-comprobante"
 import { useConfirmar } from "@/components/ui/confirmar"
 import type { DocumentoRecepcion } from "@/lib/compras/cargar-verificacion"
 import { hoyISO } from "@/lib/formato"
@@ -106,67 +107,38 @@ export function ComprobantesSection({
         total_factura_declarado: null, total_neto: null, total_iva: null, percepcion_iva_monto: null, percepcion_iibb_monto: null, retencion_ganancias_monto: null, impuestos_internos: null, otros_impuestos: null,
     })
 
-    // Subida no bloqueante: cada archivo es un job independiente; se puede
-    // seguir trabajando mientras el OCR procesa.
+    // Subida no bloqueante (se puede seguir trabajando mientras se leen), pero DE A UN ARCHIVO:
+    // dos documentos de la misma orden leídos a la vez se pisaban (prueba del 18/11: subiendo una
+    // factura y una adquisición juntas, a la factura le quedó un renglón de menos; sola, se leyó
+    // bien). Cada archivo espera a que termine el anterior.
+    const colaSubida = useRef<Promise<void>>(Promise.resolve())
     const subirArchivos = (files: File[]) => {
         for (const file of files) {
             const jobId = ++jobSeq.current
             setUploads(prev => [...prev, { id: jobId, nombre: file.name, estado: "procesando" }])
-            const fd = new FormData()
-            fd.append("file", file)
-            fetch(`/api/ordenes-compra/${ordenId}/documentos`, { method: "POST", body: fd })
-                .then(async res => {
+            colaSubida.current = colaSubida.current.then(async () => {
+                try {
+                    const fd = new FormData()
+                    fd.append("file", file)
+                    const res = await fetch(`/api/ordenes-compra/${ordenId}/documentos`, { method: "POST", body: fd })
                     const data = await res.json().catch(() => ({}))
                     if (!res.ok) throw new Error(data.error || `No se pudo cargar el archivo (error ${res.status})`)
-                    // no_leido (E-37): la IA no pudo leerlo, quedó guardado sin comprobante. aviso (E-36): sin número.
+                    // no_leido (E-37): la IA no pudo leerlo, quedó guardado sin comprobante. aviso (E-36): sin número, renglones dudosos.
                     const base = data.comprobante ? `${data.comprobante.tipo_comprobante} ${data.comprobante.numero_comprobante}` : "Documento cargado"
                     setUploads(prev => prev.map(u => u.id === jobId
                         ? { ...u, estado: data.no_leido ? "error" : "ok", mensaje: data.no_leido ? data.aviso : data.aviso ? `${base} — ${data.aviso}` : base }
                         : u))
+                    if (data.aviso && !data.no_leido) toast.warning(`${base}: ${data.aviso}`, { duration: 20000 })
                     refrescar()
-                })
-                .catch(e => {
-                    setUploads(prev => prev.map(u => u.id === jobId ? { ...u, estado: "error", mensaje: e.message } : u))
-                })
-        }
-    }
-
-    // Agregar a mano una linea que el OCR no extrajo (ej. primera fila cortada)
-    const [lineaComp, setLineaComp] = useState<any>(null)
-    const [ocArts, setOcArts] = useState<any[]>([])
-    const [lineaArt, setLineaArt] = useState("")
-    const [lineaCant, setLineaCant] = useState<number | null>(null)
-    const [lineaPrecio, setLineaPrecio] = useState<number | null>(null)
-    const [lineaGuardando, setLineaGuardando] = useState(false)
-
-    const abrirAgregarLinea = async (comp: any) => {
-        setLineaComp(comp); setLineaArt(""); setLineaCant(null); setLineaPrecio(null)
-        const { data } = await supabase
-            .from("ordenes_compra_detalle")
-            .select("articulo_id, cantidad_pedida, precio_unitario, articulos:articulo_id(sku, descripcion)")
-            .eq("orden_compra_id", ordenId)
-        setOcArts(data || [])
-    }
-
-    const guardarLinea = async () => {
-        const cant = lineaCant ?? 0
-        const precio = lineaPrecio ?? 0
-        if (!lineaArt || !cant || cant <= 0) { toast.error("Elegí el artículo y la cantidad"); return }
-        setLineaGuardando(true)
-        try {
-            const res = await fetch(`/api/comprobantes-compra/${lineaComp.id}/lineas`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ articulo_id: lineaArt, cantidad: cant, precio_unitario: precio || 0 }),
+                } catch (e: any) {
+                    setUploads(prev => prev.map(u => u.id === jobId ? { ...u, estado: "error", mensaje: e?.message || "No se pudo cargar el archivo" } : u))
+                }
             })
-            const data = await res.json().catch(() => ({}))
-            if (!res.ok) { toast.error(data.error || "No se pudo agregar el renglón"); return }
-            setLineaComp(null)
-            refrescar()
-        } finally {
-            setLineaGuardando(false)
         }
     }
+
+    // Renglones del comprobante: verlos, agregar uno a mano, corregirlo o borrarlo (renglones-comprobante.tsx)
+    const [renglonesDe, setRenglonesDe] = useState<{ comp: any; agregar: boolean } | null>(null)
 
     const validar = async (comp: any) => {
         if (!(await confirmar({
@@ -187,7 +159,7 @@ export function ComprobantesSection({
     const eliminar = async (comp: any) => {
         if (!(await confirmar({
             titulo: `¿Eliminar ${comp.tipo_comprobante} ${comp.numero_comprobante}?`,
-            detalle: "Se borran el comprobante y sus renglones, y se descuenta de la orden lo que había documentado. No se puede deshacer.",
+            detalle: "Se borran el comprobante, sus renglones y el archivo (foto o PDF) del que se leyó, y se descuenta de la orden lo que había documentado. No se puede deshacer.",
             confirmar: "Eliminar", peligro: true,
         }))) return
         const res = await fetch(`/api/comprobantes-compra/${comp.id}`, { method: "DELETE" })
@@ -358,6 +330,9 @@ export function ComprobantesSection({
                                                         <Eye className="h-4 w-4" />
                                                     </Button>
                                                 )}
+                                                <Button variant="ghost" size="icon" className="h-7 w-7" title="Ver los renglones (corregir o borrar uno)" onClick={() => setRenglonesDe({ comp, agregar: false })}>
+                                                    <ListChecks className="h-4 w-4" />
+                                                </Button>
                                                 {!soloLectura && comp.estado !== "validado" && comp.estado !== "cerrado" && (
                                                     <div className="flex gap-1 justify-end">
                                                         {comp.tipo_comprobante !== "Remito" && (
@@ -367,7 +342,7 @@ export function ComprobantesSection({
                                                             </Button>
                                                         )}
                                                         <Button variant="ghost" size="icon" className="h-7 w-7" title="Agregar un renglón a mano"
-                                                            onClick={() => abrirAgregarLinea(comp)}>
+                                                            onClick={() => setRenglonesDe({ comp, agregar: true })}>
                                                             <Plus className="h-4 w-4 text-blue-600" />
                                                         </Button>
                                                         <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar a mano"
@@ -479,46 +454,9 @@ export function ComprobantesSection({
                 </DialogContent>
             </Dialog>
 
-            {lineaComp && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setLineaComp(null)}>
-                    <div className="bg-white rounded-xl p-5 w-[440px] shadow-xl space-y-3" onClick={e => e.stopPropagation()}>
-                        <h3 className="font-bold text-sm">Agregar línea — {lineaComp.tipo_comprobante} {lineaComp.numero_comprobante}</h3>
-                        <p className="text-xs text-muted-foreground">Para líneas que el OCR no extrajo del documento. Suma también la cantidad documentada en la recepción.</p>
-                        <div>
-                            <label className="text-xs font-medium">Artículo (de la OC)</label>
-                            <select className="w-full rounded-md border px-2 py-1.5 text-sm" value={lineaArt}
-                                onChange={e => {
-                                    setLineaArt(e.target.value)
-                                    const it = ocArts.find((a: any) => a.articulo_id === e.target.value)
-                                    if (it && !lineaPrecio) setLineaPrecio(it.precio_unitario != null ? Number(it.precio_unitario) : null)
-                                    if (it && !lineaCant) setLineaCant(it.cantidad_pedida != null ? Number(it.cantidad_pedida) : null)
-                                }}>
-                                <option value="">Elegir artículo…</option>
-                                {ocArts.map((a: any) => (
-                                    <option key={a.articulo_id} value={a.articulo_id}>
-                                        {a.articulos?.sku} — {a.articulos?.descripcion} (OC: {a.cantidad_pedida})
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                            <div>
-                                <label className="text-xs font-medium">Cantidad</label>
-                                <InputMonto decimales={3} soloPositivos className="h-auto w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={lineaCant}
-                                    onChange={setLineaCant} />
-                            </div>
-                            <div>
-                                <label className="text-xs font-medium">Precio unitario</label>
-                                <InputMonto decimales={4} soloPositivos className="h-auto w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={lineaPrecio}
-                                    onChange={setLineaPrecio} />
-                            </div>
-                        </div>
-                        <div className="flex justify-end gap-2 pt-1">
-                            <Button variant="outline" size="sm" onClick={() => setLineaComp(null)}>Cancelar</Button>
-                            <Button size="sm" disabled={lineaGuardando} onClick={guardarLinea}>{lineaGuardando ? "Guardando…" : "Agregar línea"}</Button>
-                        </div>
-                    </div>
-                </div>
+            {renglonesDe && (
+                <RenglonesComprobante comprobante={renglonesDe.comp} abrirEnAgregar={renglonesDe.agregar} soloLectura={soloLectura}
+                    onCerrar={() => setRenglonesDe(null)} onCambio={refrescar} />
             )}
         </div>
     )
