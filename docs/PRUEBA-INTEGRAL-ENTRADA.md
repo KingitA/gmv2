@@ -193,7 +193,7 @@ Probado OK en pantalla: E-02 (sugerencia en bultos), E-30/E-40 (2 bultos × 24 �
 | E-99 | El vencimiento que nace al validar no tiene forma de pago si el proveedor no tiene acuerdo cargado. ~~Una OC finalizada queda sin acceso a la verificación.~~ **(hecho T1-A: botón Verificación en el listado y en el detalle)** ~~En Nueva OP dos vencimientos del mismo día e importe se ven idénticos (no muestra forma de pago).~~ **T1-D hecho:** la Nueva OP muestra en cada vencimiento la forma de pago, modalidad, validez del cheque, canal y observaciones. | T1-A / T1-D |
 | ~~E-100~~ | Una leyenda como "sin valor fiscal" en la factura hace que el OCR la clasifique como Adquisición (negro) y no lea neto/IVA. Pedir confirmación del tipo cuando hay CUIT + CAE + letra. **Hecho (T2-B):** con CUIT + CAE + letra el tipo sale Factura A/B/C y la lectura lleva el aviso "CONFIRMÁ EL TIPO". | T2-B |
 | ~~E-101~~ | Gemini sin crédito el 17/11 (402): OCR caído sin que nadie se entere. Falta un vigía/alerta de saldo o de fallas de OCR. **Hecho (T2-B):** cada rechazo por saldo o cuota (402 / 429) se anota en `ia_fallas` y deja un aviso en la bandeja de Jarvis. | T2-B |
-| E-102 | Al validar el comprobante de una factura que ya estaba anotada a mano en el calendario, la validación crea OTRO vencimiento (`20261117u`, donde inserta los vencimientos del comprobante) y el anotado a mano sigue pendiente: la misma deuda queda dos veces en el calendario. Falta que la validación ofrezca enlazar el vencimiento a mano existente en vez de duplicarlo. Mientras tanto, Jarvis y el reporte de deuda no cuentan el anotado a mano si repite un comprobante (mismo número, o mismo importe ± $1 y fecha ± 5 días); el calendario y "Pagos de la semana" sí lo muestran dos veces. | T2 |
+| E-102 | Al validar el comprobante de una factura que ya estaba anotada a mano en el calendario, la validación crea OTRO vencimiento (`20261117u`, donde inserta los vencimientos del comprobante) y el anotado a mano sigue pendiente: la misma deuda queda dos veces en el calendario. **Hecho 19/11 (rama `entrada-t2-cierre`, migración `20261119k`): la validación ofrece enlazar el vencimiento a mano en vez de duplicarlo.** Mientras tanto, Jarvis y el reporte de deuda no cuentan el anotado a mano si repite un comprobante (mismo número, o mismo importe ± $1 y fecha ± 5 días); el calendario y "Pagos de la semana" sí lo muestran dos veces. | T2 |
 
 Datos de prueba que quedaron: OC-000011, FA 0003-00045678 (validada), 2 NC esperadas, **vencimiento HORNAL $218.969,34 al 17/12/2026 (de prueba, en el calendario real)**, stock 190039 = 178 (debería ser 228).
 
@@ -422,6 +422,44 @@ Sin migración: la cuenta está en `lib/compras/diferencias.ts` (`faltante_de`, 
 8. **Mail**: reenviar un mail de lista de precios con un Excel a la casilla; aparece en Listas de proveedores con "llegó por mail".
 9. **Renglones en una transacción**: subir una factura a una orden y comprobar que los renglones y lo documentado de la recepción coinciden (igual que antes, ahora en un paso).
 
+## Tanda 2 — cierre (19/11, rama `entrada-t2-cierre`)
+
+### E-102 — una factura que ya estaba anotada a mano en el calendario
+
+Al validar un comprobante, el servidor busca vencimientos **anotados a mano** del mismo proveedor (pendientes, no estimados, sin referencia) que puedan ser esa factura: el número del comprobante aparece en el concepto (entero, o su última parte sin ceros: "45711"), o el importe coincide (± $1) y la fecha está a 5 días o menos. Mismo criterio que `jarvis_vencimientos_a_mano`. Si hay alguno, **no valida**: la pantalla los muestra y pregunta.
+
+- **"Es esta factura: enlazar"** → el vencimiento anotado a mano pasa a referenciar el comprobante (o su movimiento de cuenta corriente) y **no se crea otro**. Conserva su fecha y su concepto; en observaciones queda que se enlazó. Si el importe anotado no era el total del comprobante, se ajusta al total y queda dicho. El estimado de la orden baja y, si ya se había pagado algo, se acomoda al saldo, igual que con un vencimiento nuevo.
+- **"Es otra cosa"** → se valida como siempre (se crea el vencimiento del comprobante) y lo anotado a mano no se toca.
+- **Cuotas:** si el proveedor tiene cuotas acordadas y se enlaza UN vencimiento a mano, vale lo anotado: queda ese solo, por el total, y no se crean las cuotas. Si Juan ya había anotado las cuotas y se eligen varios, quedan todos enlazados con su importe; si entre todos no suman el total, la diferencia va al último.
+- **"Finalizar orden"** (que valida de corrido lo que falte): si uno de esos comprobantes tiene coincidencias, la orden no se finaliza y avisa que hay que validarlo con su botón para decidir.
+- Nunca se borra un vencimiento: solo UPDATE. Migración `20261119k_validar_enlazar_vencimiento_a_mano.sql` (después de la `20261118c`). Sin ella no se ofrece enlazar y todo sigue como antes.
+
+**No se pudo contar contra la base cuántos coincidirían hoy** (esta sesión no tiene la clave de la conexión de solo lectura). Consulta para correrla (no cambia nada):
+
+```sql
+-- Vencimientos anotados a mano que hoy coinciden con un comprobante de compra del mismo proveedor
+SELECT p.nombre AS proveedor, v.concepto, v.monto, v.fecha_vencimiento,
+       c.tipo_comprobante || ' ' || c.numero_comprobante AS comprobante, c.estado AS estado_comprobante,
+       c.total_factura_declarado AS total_comprobante, c.fecha_vencimiento AS vence_comprobante,
+       CASE WHEN position(lower(c.numero_comprobante) IN lower(coalesce(v.concepto, ''))) > 0 THEN 'numero' ELSE 'importe_y_fecha' END AS coincide
+  FROM vencimientos v
+  JOIN comprobantes_compra c ON c.proveedor_id = v.proveedor_id
+  JOIN proveedores p ON p.id = v.proveedor_id
+ WHERE v.estado IN ('pendiente', 'vencido') AND NOT coalesce(v.es_estimado, false) AND coalesce(v.monto, 0) > 0
+   AND NOT (v.referencia_id IS NOT NULL AND coalesce(v.referencia_tipo, '') IN ('cuenta_corriente', 'comprobante_compra', 'orden_compra'))
+   AND c.tipo_comprobante NOT IN ('NC', 'NCA', 'NCB', 'NCC', 'Reversa', 'Remito') AND c.estado <> 'esperada'
+   AND c.numero_comprobante NOT ILIKE 'PENDIENTE-%'
+   AND ( (length(c.numero_comprobante) >= 4 AND position(lower(c.numero_comprobante) IN lower(coalesce(v.concepto, ''))) > 0)
+      OR (abs(v.monto - c.total_factura_declarado) <= 1
+          AND abs(v.fecha_vencimiento - coalesce(c.fecha_vencimiento::date, c.fecha_comprobante::date)) <= 5) )
+ ORDER BY p.nombre, v.fecha_vencimiento;
+```
+Los que salgan con `estado_comprobante = 'validado'` son deuda que **ya está duplicada** en el calendario (se validó antes de este arreglo): esos no los corrige la validación; hay que cancelar a mano el vencimiento repetido.
+
+### Limpieza de los datos de prueba de compras
+
+`docs/entrada/limpieza-compras-prueba.sql` — **solo escrito, nunca ejecutado**. PASO 1 lista todo lo que toca; PASO 2 limpia dentro de `BEGIN … ROLLBACK` (se cambia a `COMMIT` cuando esté revisado). Criterio propuesto: OC-000010 a 000013 y cualquier orden creada desde el 16/11/2026, con todo lo que cuelga de ellas. Los vencimientos de prueba se cancelan, no se borran. No toca vencimientos a mano, comprobantes sin orden ni la cuenta corriente real. Las órdenes de pago de prueba se anulan antes desde la pantalla. Quedan dos decisiones abiertas que el PASO 1 muestra: el stock que sumaron las recepciones de prueba y los costos que cambiaron las facturas de prueba.
+
 ### Orden de las migraciones de la Tanda 1
 
 Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `20261116c`, `20261116p`, `20261116q`, `20261117a_remito_no_se_valida`, `20261117a_op_ganancias_bases_neto`.
@@ -442,6 +480,7 @@ Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `2
 | 12 | `20261118e_recepcion_documentado_atomico.sql` | independiente (sumado atómico de lo documentado y provisorio con bloqueo) |
 | 13 | `20261119a_listas_proveedores_aplicar.sql` | **la n** (usa `oc_neto_unitario`; corta con mensaje si falta). **El código de la Tanda 2-C la necesita** para aplicar o programar una lista. |
 | 14 | `20261119b_comprobante_detalle_cargar.sql` | **la 18e** (corta con mensaje si falta). Sin ella sigue el camino anterior. |
+| 15 | `20261119k_validar_enlazar_vencimiento_a_mano.sql` | **la 18c** (corta con mensaje si falta). Reemplaza la función de validar. Sin ella no se ofrece enlazar. |
 
 Aparte, una sola vez y a mano: `scripts/entrada-limpieza-kardex-en-camino.sql`.
 

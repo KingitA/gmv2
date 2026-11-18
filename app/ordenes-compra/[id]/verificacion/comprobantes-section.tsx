@@ -146,8 +146,23 @@ export function ComprobantesSection({
             detalle: `Se da por bueno el comprobante por ${formatCurrency(comp.total_factura_declarado || 0)}: se registra la deuda en la cuenta corriente del proveedor, se genera el vencimiento de pago y se actualiza el costo de los artículos.\n\nDespués de validar no se puede editar ni eliminar.`,
             confirmar: "Validar",
         }))) return
-        const res = await fetch(`/api/comprobantes-compra/${comp.id}/validar`, { method: "POST" })
+        await enviarValidacion(comp, {})
+    }
+
+    // E-102: la factura puede estar ya anotada a mano en el calendario. Si el servidor encuentra
+    // vencimientos a mano que coinciden, no valida: devuelve los candidatos y acá se pregunta.
+    const [aMano, setAMano] = useState<{ comp: any; candidatos: any[]; total: number; cuotas: number; elegidos: string[] } | null>(null)
+    const enviarValidacion = async (comp: any, decision: { vencimiento_a_mano?: "enlazar" | "otra_cosa"; vencimientos_ids?: string[] }) => {
+        const res = await fetch(`/api/comprobantes-compra/${comp.id}/validar`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(decision) })
         const data = await res.json().catch(() => ({}))
+        if (res.status === 409 && data.codigo === "vencimiento_a_mano") {
+            const candidatos: any[] = data.candidatos || []
+            // por defecto marcado solo si hay uno, o los que coinciden por número
+            const porNumero = candidatos.filter((v) => v.coincide === "numero").map((v) => v.vencimiento_id)
+            setAMano({ comp, candidatos, total: Number(data.total || 0), cuotas: Number(data.cuotas || 0), elegidos: candidatos.length === 1 ? [candidatos[0].vencimiento_id] : porNumero })
+            return
+        }
+        setAMano(null)
         if (!res.ok) { toast.error(`No se validó ${comp.tipo_comprobante} ${comp.numero_comprobante}: ${data.error || `error ${res.status}`}`, { duration: 12000 }); return }
         // El servidor avisa si ya estaba validado, si es un remito (sin deuda) o si quedó sin vencimiento
         const avisos: string[] = data.avisos || []
@@ -453,6 +468,40 @@ export function ComprobantesSection({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {aMano && (
+                <Dialog open onOpenChange={(abierto) => { if (!abierto) setAMano(null) }}>
+                    <DialogContent className="max-w-xl">
+                        <DialogHeader><DialogTitle>¿Esta factura ya estaba anotada en el calendario?</DialogTitle></DialogHeader>
+                        <p className="text-sm">
+                            Vas a validar <strong>{aMano.comp.tipo_comprobante} {aMano.comp.numero_comprobante}</strong> por <strong>{formatCurrency(aMano.total)}</strong>.
+                            Este proveedor tiene {aMano.candidatos.length === 1 ? "un vencimiento anotado a mano" : `${aMano.candidatos.length} vencimientos anotados a mano`} que {aMano.candidatos.length === 1 ? "puede" : "pueden"} ser esta misma factura:
+                        </p>
+                        <div className="space-y-2">
+                            {aMano.candidatos.map((v) => (
+                                <label key={v.vencimiento_id} className="flex items-start gap-2 border rounded-md p-2 text-sm cursor-pointer">
+                                    <input type="checkbox" className="mt-1" checked={aMano.elegidos.includes(v.vencimiento_id)}
+                                        onChange={(e) => setAMano({ ...aMano, elegidos: e.target.checked ? [...aMano.elegidos, v.vencimiento_id] : aMano.elegidos.filter((id) => id !== v.vencimiento_id) })} />
+                                    <span>
+                                        <span className="font-medium">{v.concepto || "(sin concepto)"}</span>
+                                        <span className="block text-muted-foreground">{formatCurrency(Number(v.monto || 0))} · vence el {formatDateAR(v.fecha_vencimiento)} · coincide por {v.coincide === "numero" ? "el número del comprobante" : "importe y fecha"}</span>
+                                    </span>
+                                </label>
+                            ))}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            <strong>Es esta factura:</strong> lo anotado a mano pasa a ser el vencimiento de este comprobante y no se crea otro (la deuda no queda dos veces en el calendario). Conserva su fecha; si el importe anotado era distinto, queda en el total del comprobante.
+                            {aMano.cuotas > 1 ? ` El proveedor tiene ${aMano.cuotas} cuotas acordadas: si enlazás, vale lo que ya estaba anotado y no se crean las cuotas.` : ""}
+                            {" "}<strong>Es otra cosa:</strong> se valida como siempre y se crea el vencimiento del comprobante; lo anotado a mano no se toca.
+                        </p>
+                        <DialogFooter className="gap-2">
+                            <Button variant="outline" onClick={() => setAMano(null)}>Cancelar</Button>
+                            <Button variant="outline" onClick={() => enviarValidacion(aMano.comp, { vencimiento_a_mano: "otra_cosa" })}>Es otra cosa</Button>
+                            <Button disabled={aMano.elegidos.length === 0} onClick={() => enviarValidacion(aMano.comp, { vencimiento_a_mano: "enlazar", vencimientos_ids: aMano.elegidos })}>Es esta factura: enlazar</Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
 
             {renglonesDe && (
                 <RenglonesComprobante comprobante={renglonesDe.comp} abrirEnAgregar={renglonesDe.agregar} soloLectura={soloLectura}

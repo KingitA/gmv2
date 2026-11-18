@@ -48,6 +48,8 @@ interface PlanVencimiento {
     modalidad: string | null;
     fecha_validez: string | null;
     numero_orden: string | null;
+    /** E-102: vencimientos anotados a mano que quien valida dijo que SON esta factura (se enlazan, no se crea otro) */
+    enlazar_vencimientos?: string[];
     /**
      * Un vencimiento por pago acordado (uno solo, o uno por cuota "30/60/90"). Los campos sueltos de
      * arriba repiten el primero: es lo que entiende la función SQL anterior a la migración 20261117u.
@@ -71,6 +73,8 @@ interface Resultado {
     vencimientos_creados?: number;
     /** Vencimientos ESTIMADOS de la orden que se quitaron al nacer el real. Migración 20261117u */
     estimados_reemplazados?: number;
+    /** Vencimientos anotados a mano que quedaron enlazados a este comprobante (E-102). Migración 20261119k */
+    vencimientos_enlazados?: number;
     /** Lo que ya se había pagado de esta deuda antes de validarla (entró por mail). Migración 20261117u */
     pagado_antes?: number;
     sin_vencimiento?: boolean;
@@ -432,6 +436,8 @@ export async function POST(
 
     try {
         const { id: comprobante_id } = await params;
+        // { vencimiento_a_mano?: 'enlazar' | 'otra_cosa', vencimientos_ids?: string[] }   (E-102)
+        const body: any = await request.json().catch(() => ({}));
         const supabase = createAdminClient();
 
         const { data: comprobante, error: compErr } = await supabase
@@ -497,6 +503,32 @@ export async function POST(
             // Se resuelve ANTES de escribir nada, igual para los dos caminos.
             if (!yaEstaba && !esRemito && proveedorId && total > 0) {
                 plan.movimiento_adoptar = await buscarMovimientoPrevio(supabase, comprobante, proveedorId, ocId, total);
+            }
+
+            // E-102: ¿esta factura ya estaba ANOTADA A MANO en el calendario? Si hay vencimientos a mano
+            // del proveedor que pueden ser ella, no se valida sin que alguien decida: enlazar (el anotado
+            // pasa a ser el vencimiento del comprobante y no se crea otro) o "es otra cosa" (como siempre).
+            // Sin la migración 20261119k la función no existe: no se ofrece nada y se valida como antes.
+            if (!yaEstaba && !esRemito && !esCredito && proveedorId && total > 0) {
+                const cand = await supabase.rpc('comprobante_compra_vencimientos_a_mano', { p_comprobante_id: comprobante_id, p_fecha: plan.fecha_vencimiento });
+                if (cand.error && !faltaLaFuncion(cand.error, 'comprobante_compra_vencimientos_a_mano')) throw cand.error;
+                const candidatos: any[] = cand.error ? [] : (cand.data || []);
+                if (candidatos.length > 0) {
+                    if (body?.vencimiento_a_mano === 'enlazar') {
+                        const validos = new Set(candidatos.map((v) => v.vencimiento_id));
+                        const elegidos: string[] = (Array.isArray(body.vencimientos_ids) ? body.vencimientos_ids : []).filter((id: unknown) => typeof id === 'string' && validos.has(id));
+                        if (elegidos.length === 0) throw new Rechazo('Elegí cuál de los vencimientos anotados a mano es esta factura.', 'vencimiento_a_mano', 400);
+                        plan.enlazar_vencimientos = elegidos;
+                    } else if (body?.vencimiento_a_mano !== 'otra_cosa') {
+                        return NextResponse.json({
+                            error: `Hay ${candidatos.length} vencimiento(s) anotado(s) a mano de este proveedor que pueden ser esta misma factura. Antes de validar hay que decir si es esta factura (se enlaza, sin duplicar la deuda en el calendario) o si es otra cosa.`,
+                            codigo: 'vencimiento_a_mano',
+                            candidatos,
+                            total,
+                            cuotas: plan.pagos.length,
+                        }, { status: 409 });
+                    }
+                }
             }
 
             // Un comprobante de una ORDEN de compra se valida solo con la migración 20261117u: es la que
@@ -577,6 +609,9 @@ export async function POST(
             }
         }
 
+        if (!resultado.ya_validado && Number(resultado.vencimientos_enlazados || 0) > 0) {
+            avisos.push(`Se enlazó el vencimiento que ya estaba anotado a mano en el calendario (${resultado.vencimientos_enlazados}): no se creó otro. Conserva su fecha; el importe quedó en el total del comprobante.`);
+        }
         if (resultado.ya_validado) avisos.push('Este comprobante ya estaba validado: no se generó ninguna deuda ni vencimiento nuevo.');
         if (!resultado.ya_validado && resultado.vencimiento_id && resultado.vencimiento_nuevo === false
             && resultado.vencimiento_monto != null && Math.abs(Number(resultado.vencimiento_monto) - total) > 0.01) {
