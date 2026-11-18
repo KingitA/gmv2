@@ -157,6 +157,9 @@ export function RevisarMatches({
                                     <div className="min-w-0">
                                         <p className="text-sm truncate">{sugerido.descripcion}</p>
                                         <p className="text-xs text-muted-foreground">SKU {sugerido.sku}</p>
+                                        {row.sugerido_otro_proveedor && (
+                                            <p className="text-xs font-semibold text-red-700">⚠ Artículo de otro proveedor ({row.sugerido_otro_proveedor}). Antes de confirmarlo, buscá el artículo de este proveedor.</p>
+                                        )}
                                     </div>
                                     <Button
                                         size="sm"

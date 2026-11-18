@@ -19,7 +19,7 @@ export async function GET(
         .select(`
             *,
             articulo:articulos!comprobantes_compra_detalle_articulo_id_fkey(id, sku, descripcion),
-            sugerido:articulos!comprobantes_compra_detalle_articulo_sugerido_id_fkey(id, sku, descripcion)
+            sugerido:articulos!comprobantes_compra_detalle_articulo_sugerido_id_fkey(id, sku, descripcion, proveedor_id, proveedor:proveedores(nombre))
         `)
         .eq('comprobante_id', comprobante_id)
         .order('created_at', { ascending: true });
@@ -27,7 +27,22 @@ export async function GET(
     if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    return NextResponse.json(data || []);
+    // Una sugerencia de un artículo de OTRO proveedor es el último recurso del matching: se marca
+    // para que nadie la confirme sin mirar (lib/matching/compra.ts).
+    const { data: comp } = await supabase
+        .from('comprobantes_compra')
+        .select('proveedor_id, orden_compra:ordenes_compra(proveedor_id)')
+        .eq('id', comprobante_id)
+        .maybeSingle();
+    const oc: any = Array.isArray((comp as any)?.orden_compra) ? (comp as any).orden_compra[0] : (comp as any)?.orden_compra;
+    const proveedorComprobante: string | null = (comp as any)?.proveedor_id || oc?.proveedor_id || null;
+    const filas = (data || []).map((r: any) => {
+        const s = Array.isArray(r.sugerido) ? r.sugerido[0] : r.sugerido;
+        const p = Array.isArray(s?.proveedor) ? s.proveedor[0] : s?.proveedor;
+        const otro = !!s && !!proveedorComprobante && !!s.proveedor_id && s.proveedor_id !== proveedorComprobante;
+        return { ...r, sugerido_otro_proveedor: otro ? (p?.nombre || 'otro proveedor') : null };
+    });
+    return NextResponse.json(filas);
 }
 
 // PATCH: confirmar/corregir el match de una línea del comprobante.

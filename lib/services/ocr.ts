@@ -11,6 +11,8 @@ import { GEMINI_MODEL, GEMINI_MODEL_FALLBACK } from "@/lib/ai/gemini-model";
 const urlGemini = (modelo: string, version: "v1" | "v1beta") =>
     `https://generativelanguage.googleapis.com/${version}/models/${modelo}:generateContent`;
 
+import { renglonesDeLectura } from "./lectura-renglones";
+
 export interface ExtractedItem {
     descripcion: string;
     codigo: string | null;
@@ -46,6 +48,8 @@ export interface ParseResult {
     items: ExtractedItem[];
     comprobante?: ComprobanteMeta | null;
     raw_text?: string;
+    /** Cosas que la oficina tiene que saber de esta lectura (renglones juntados, renglones que faltan…) */
+    avisos?: string[];
     metadata?: any;
     error?: string;
 }
@@ -196,10 +200,14 @@ FORMATO JSON:
         const jsonStr = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
         const parsedData = JSON.parse(jsonStr || '{}');
 
-        const saneado = sanearOcr(parsedData);
+        // Ningún renglón leído se pierde en silencio: se juntan todas las listas de renglones que
+        // traiga el texto (no solo la que queda al interpretar el JSON) y se avisa si falta alguno.
+        const leidos = renglonesDeLectura(jsonStr, parsedData?.items);
+        const saneado = sanearOcr({ ...parsedData, items: leidos.items });
         return {
             items: saneado.items,
             comprobante: saneado.comprobante,
+            ...(leidos.avisos.length > 0 ? { avisos: leidos.avisos } : {}),
             raw_text: text,
             metadata: { model: modeloUsado }
         };

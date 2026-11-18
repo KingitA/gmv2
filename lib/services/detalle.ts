@@ -71,15 +71,23 @@ export async function matchAndCreateDetalle(supabase: any, params: {
     const detalleRows: any[] = [];
     const matched: any[] = [];
 
+    // Artículos de la ORDEN: el matching busca primero ahí, después en el proveedor (lib/matching/compra.ts)
+    let ordenArticuloIds: string[] = [];
+    if (recActual?.orden_compra_id) {
+        const { data: ocDet } = await supabase.from('ordenes_compra_detalle').select('articulo_id').eq('orden_compra_id', recActual.orden_compra_id);
+        ordenArticuloIds = [...new Set(((ocDet || []) as any[]).map((d) => d.articulo_id).filter(Boolean))] as string[];
+    }
+
     for (const item of params.items) {
         const matchResult = await engine.resolveItem(
             { description: item.descripcion, code: item.codigo, ean: item.ean, price: item.precio_unitario },
-            params.proveedor_id
+            params.proveedor_id,
+            { ordenArticuloIds },
         );
 
         const best = matchResult.bestCandidate;
-        const isMatched = matchResult.status === 'matched' && !!best?.sku_id;
-        const isSuggestion = !isMatched && !!best?.sku_id && best.confidence_level === 'suggestion';
+        const isMatched = matchResult.status === 'matched' && !!best?.sku_id && !best?.otro_proveedor;
+        const isSuggestion = !isMatched && !!best?.sku_id && (best.confidence_level === 'suggestion' || (!!best.otro_proveedor && best.confidence_level !== 'low'));
 
         // Coherencia de precios contra el IMPORTE de línea (el dato más confiable
         // de la factura). Detecta cuando el OCR extrajo el unitario YA NETO y
@@ -217,6 +225,9 @@ export async function matchAndCreateDetalle(supabase: any, params: {
         matched.push({ articulo_id: articuloId, descripcion: item.descripcion });
     }
 
+    // Renglones leídos que NO se pudieron guardar: se devuelven para avisarlos en pantalla
+    // (antes solo quedaban en el registro del servidor y el comprobante salía con un renglón menos).
+    const descartados: Array<{ descripcion: string; motivo: string }> = [];
     if (detalleRows.length > 0) {
         const { error } = await supabase.from('comprobantes_compra_detalle').insert(detalleRows);
         if (error) {
@@ -226,12 +237,13 @@ export async function matchAndCreateDetalle(supabase: any, params: {
                 const { error: rowError } = await supabase.from('comprobantes_compra_detalle').insert(row);
                 if (rowError) {
                     console.error('[matchAndCreateDetalle] Fila descartada:', rowError.message, row.descripcion_proveedor);
+                    descartados.push({ descripcion: String(row.descripcion_proveedor || row.codigo_proveedor || '(sin descripción)'), motivo: rowError.message });
                 }
             }
         }
     }
 
-    return matched;
+    return Object.assign(matched, { descartados, renglones_leidos: params.items.length, renglones_guardados: detalleRows.length - descartados.length });
 }
 
 // Revierte lo que el OCR de un documento aplicó: resta cantidades documentadas

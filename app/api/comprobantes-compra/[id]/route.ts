@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { formatearNumeroComprobante } from '@/lib/services/numero-comprobante';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { revertirComprobanteOCR } from '@/lib/services/detalle';
@@ -40,6 +41,8 @@ export async function PATCH(
         if (Object.keys(cambios).length === 0) {
             return NextResponse.json({ error: 'Nada para actualizar' }, { status: 400 });
         }
+        // con el formato del papel: 0001-00008821
+        if (typeof cambios.numero_comprobante === 'string') cambios.numero_comprobante = formatearNumeroComprobante(cambios.numero_comprobante);
         cambios.updated_at = new Date().toISOString();
 
         const { data, error } = await supabase
