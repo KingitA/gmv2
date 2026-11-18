@@ -47,6 +47,10 @@ interface Cheque {
   cliente_nombre?: string | null
   cuenta_deposito_nombre?: string | null
   proveedor_nombre?: string | null
+  /** Número de la orden de pago PENDIENTE que lo tiene reservado (no se puede depositar) */
+  reservado_op?: string | null
+  /** Cheque propio: cuenta bancaria de la que sale (si falta, se pide al debitarlo) */
+  cuenta_banco_id?: string | null
 }
 
 type Cartera = "BLANCO" | "NEGRO" | "ECHEQ"
@@ -247,6 +251,10 @@ function ChequesContenido() {
   const ejecutarAccion = async () => {
     if (!accion) return
     const { tipo: t, cheque } = accion
+    if (t === "debitar" && !cheque.cuenta_banco_id && !cuentaBanco) {
+      toast.error("Elegí de qué cuenta bancaria se debitó el cheque")
+      return
+    }
     if (t === "depositar" && !cuentaBanco) {
       toast.error("Seleccioná la cuenta bancaria")
       return
@@ -257,7 +265,7 @@ function ChequesContenido() {
       const body =
         t === "depositar" ? { cuenta_banco_id: cuentaBanco, gastos: g }
         : t === "acreditar" ? { gastos: g }
-        : t === "debitar" ? { fecha_debito: fechaDebito || hoy }
+        : t === "debitar" ? { fecha_debito: fechaDebito || hoy, ...(cheque.cuenta_banco_id ? {} : { cuenta_bancaria_id: cuentaBanco || null }) }
         : { motivo_rechazo: motivo || "Cheque rechazado", gastos: g }
       const res = await fetch(`/api/cheques/${cheque.id}/${t}`, {
         method: "POST",
@@ -770,6 +778,20 @@ function ChequesContenido() {
                   </Select>
                 </div>
               )}
+              {accion.tipo === "debitar" && !accion.cheque.cuenta_banco_id && (
+                <div className="space-y-1">
+                  <Label className="text-[13px] font-semibold text-neutro-600">¿De qué cuenta bancaria se debitó?</Label>
+                  <Select value={cuentaBanco || undefined} onValueChange={setCuentaBanco}>
+                    <SelectTrigger><SelectValue placeholder="Seleccioná cuenta" /></SelectTrigger>
+                    <SelectContent>
+                      {cuentas.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-neutro-500">Este cheque no tenía cargada la cuenta. Al debitarlo baja el saldo de esa cuenta.</p>
+                </div>
+              )}
               {accion.tipo === "rechazar" && (
                 <div className="space-y-1">
                   <Label className="text-[13px] font-semibold text-neutro-600">Motivo del rechazo</Label>
@@ -909,9 +931,14 @@ function FilaCheque({ c, hoy, onAccion, onCambiarColor }: { c: Cheque; hoy: stri
       </td>
       <td className="whitespace-nowrap border-b border-neutro-100 px-3 py-2 text-right">
         <div className="flex justify-end gap-1.5">
-          {c.estado === "EN_CARTERA" && (
+          {c.estado === "EN_CARTERA" && (c.reservado_op ? (
+            <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800"
+              title="Una orden de pago pendiente eligió este cheque. Para depositarlo, primero confirmá o eliminá esa orden.">
+              Reservado para OP {c.reservado_op}
+            </span>
+          ) : (
             <Button size="sm" variant="outline" onClick={() => onAccion("depositar", c)}>Depositar</Button>
-          )}
+          ))}
           {c.estado === "DEPOSITADO" && (
             <Button size="sm" onClick={() => onAccion("acreditar", c)}>Acreditar</Button>
           )}

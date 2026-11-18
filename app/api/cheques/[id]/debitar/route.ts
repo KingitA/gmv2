@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
 
 /**
@@ -19,7 +19,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  // Debitar un cheque propio baja el saldo del banco: mismo permiso que confirmar un pago (solo admin)
+  const auth = await requirePermiso("ordenes_pago_confirmar")
   if (auth.error) return auth.error
   try {
     const { id } = await params

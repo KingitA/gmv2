@@ -221,9 +221,11 @@ export async function calcularIndicadores(sb: SupabaseClient, idsPedidos: string
     },
     async pagos_7dias() {
       const [prox, atras] = await Promise.all([
-        fetchAllRows(() => sb.from("vencimientos").select("id, monto").eq("estado", "pendiente").gte("fecha_vencimiento", hoy).lte("fecha_vencimiento", sumarDias(hoy, 7)), "id"),
-        fetchAllRows(() => sb.from("vencimientos").select("id, monto").eq("estado", "pendiente").lt("fecha_vencimiento", hoy), "id"),
-      ])
+        fetchAllRows(() => sb.from("vencimientos").select("id, monto, es_estimado, referencia_tipo").eq("estado", "pendiente").gte("fecha_vencimiento", hoy).lte("fecha_vencimiento", sumarDias(hoy, 7)), "id"),
+        fetchAllRows(() => sb.from("vencimientos").select("id, monto, es_estimado, referencia_tipo").eq("estado", "pendiente").lt("fecha_vencimiento", hoy), "id"),
+      ]).then((listas) => listas.map((l) =>
+        // Los estimados de órdenes de compra (mercadería pedida sin factura) no son deuda: no cuentan
+        (l as any[]).filter((v) => !(v.es_estimado === true && v.referencia_tipo === "orden_compra"))))
       const atrasado = sumar(atras, v => v.monto)
       return {
         tipo: "numero", titulo: "Pagos próximos 7 días", valor: sumar(prox, v => v.monto), formato: "pesos",

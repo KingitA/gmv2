@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { chequesReservados } from "@/lib/cheques/reserva"
 
 /**
  * POST /api/cheques/[id]/depositar — EN_CARTERA → DEPOSITADO vía RPC
@@ -23,6 +24,15 @@ export async function POST(
 
     if (!cuenta_banco_id) {
       return NextResponse.json({ error: "cuenta_banco_id es requerido" }, { status: 400 })
+    }
+
+    // E-66: un cheque elegido en una orden de pago pendiente está reservado para ese pago
+    const reservado = (await chequesReservados([chequeId])).get(chequeId)
+    if (reservado) {
+      return NextResponse.json({
+        error: `Este cheque está reservado para la orden de pago ${reservado} (pendiente). Para depositarlo, primero confirmá o eliminá esa orden.`,
+        error_code: "CHEQUE_RESERVADO", orden_pago: reservado,
+      }, { status: 409 })
     }
 
     const { data, error } = await supabase.rpc("caja_depositar_cheque", {
