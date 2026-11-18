@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Plus, DollarSign, CheckCircle2, FileText, Receipt, Trash2, Undo2 } from "lucide-react"
+import { ArrowLeft, Plus, DollarSign, CheckCircle2, FileText, Landmark, Receipt, Trash2, Undo2 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { Input } from "@/components/ui/input"
@@ -19,6 +19,7 @@ import { formatCurrency } from "@/lib/utils"
 import { fecha, hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { CredicoopOrdenPago } from "@/components/bancos/credicoop-orden-pago"
 
 export default function OrdenesPagoPage() {
     const [ordenes, setOrdenes] = useState<any[]>([])
@@ -33,6 +34,10 @@ export default function OrdenesPagoPage() {
     const [retHoy, setRetHoy] = useState<any>(null)
     const [retCargando, setRetCargando] = useState(false)
     const [trabajando, setTrabajando] = useState(false)
+    // Tanda 2-A: orden cuyos pagos (transferencia / e-cheq) se están mandando a Credicoop para firmar
+    const [credicoopOp, setCredicoopOp] = useState<string | null>(null)
+    // Pagos que pueden pasar por el banco: transferencia, e-cheq propio o cheque de un cliente (si es e-cheq)
+    const pasaPorBanco = (op: any) => (op.ordenes_pago_detalle ?? []).some((d: any) => d.medio === "transferencia" || d.es_echeq || (d.medio === "cheque" && d.cheque_id))
     // Si el usuario ya vio y aceptó la retención nueva (se conserva si hay que elegir la cuenta bancaria)
     const aceptaRetRef = useRef(false)
     // E-61: hasta qué día están presentadas ante ARCA las retenciones (cierra el período)
@@ -384,6 +389,13 @@ export default function OrdenesPagoPage() {
                                                             </Button>
                                                         </a>
                                                     )}
+                                                    {esAdmin && (op.estado === "pendiente" || op.estado === "pagada") && pasaPorBanco(op) && (
+                                                        <Button variant="ghost" size="sm" className="text-azul-700 hover:bg-azul-50"
+                                                            onClick={() => setCredicoopOp(op.id)}
+                                                            title="Credicoop: mandar el pago a firmar con token y ver su estado">
+                                                            <Landmark className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
                                                     {op.estado === "pendiente" && esAdmin && (
                                                         <Button variant="ghost" size="sm" disabled={trabajando}
                                                             className="text-green-600 hover:bg-green-50"
@@ -420,6 +432,8 @@ export default function OrdenesPagoPage() {
             </main>
 
             {/* Marcar un mes como presentado ante ARCA */}
+            <CredicoopOrdenPago ordenPagoId={credicoopOp} abierto={!!credicoopOp} onCerrar={() => setCredicoopOp(null)} />
+
             <AlertDialog open={confirmaPresentar} onOpenChange={setConfirmaPresentar}>
                 <AlertDialogContent>
                     <AlertDialogHeader>

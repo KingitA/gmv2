@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requirePermiso } from '@/lib/auth'
 import { anotarResponsableOP } from '@/lib/ordenes-pago/responsable'
+import { bloqueoPorBanco } from '@/lib/bancos/operaciones'
 
 /**
  * POST /api/ordenes-pago/[id]/confirmar — confirma la OP vía RPC atómica
@@ -25,6 +26,11 @@ export async function POST(
     try {
         const body = await request.json().catch(() => ({}))
         const supabase = createAdminClient()
+
+        // Tanda 2-A: si un pago de esta orden se mandó a Credicoop y todavía no está firmado y
+        // procesado, la orden no se confirma: el pago no se da por hecho hasta que el banco lo diga.
+        const esperaBanco = await bloqueoPorBanco(supabase, opId)
+        if (esperaBanco) return NextResponse.json({ error: esperaBanco, error_code: 'ESPERA_BANCO' }, { status: 409 })
 
         // Si la OP guardó el origen de fondos al crearse (cuenta_origen_* en el
         // detalle), usarlo sin volver a preguntar. El body explícito gana.
