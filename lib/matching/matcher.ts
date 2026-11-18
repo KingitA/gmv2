@@ -41,7 +41,8 @@ export class MatchingEngine {
             return {
                 bestCandidate: exactMatch,
                 allCandidates: [exactMatch],
-                status: 'matched'
+                // un artículo de otro proveedor nunca se asigna solo, aunque coincida el código de barras
+                status: exactMatch.otro_proveedor ? 'pending' : 'matched'
             };
         }
 
@@ -116,33 +117,6 @@ export class MatchingEngine {
     }
 
     private async findExactMatch(item: ImportItemRaw, providerId: string, normDesc: string, compra?: ContextoCompra | null): Promise<MatchCandidate | null> {
-        // 0. El código leído ES el SKU de un artículo de la orden o de este proveedor.
-        //    (Antes el código solo se comparaba con las equivalencias aprendidas: un artículo cuyo SKU
-        //    era exactamente el código de la factura no se encontraba y se iba a buscar por parecido.)
-        if (item.code && providerId) {
-            const codigo = String(item.code).trim();
-            const variantes = [...new Set([codigo, codigoComparable(codigo), codigo.replace(/^0+(?=.)/, '')].filter(Boolean))];
-            const { data: porSku } = await getSupabase()
-                .from('articulos')
-                .select('id, descripcion, sku, proveedor_id')
-                .eq('activo', true)
-                .in('sku', variantes)
-                .limit(50);
-            const art: any = elegirPorCodigo(codigo, (porSku || []) as any[], providerId, compra);
-            if (art) {
-                return {
-                    sku_id: art.id,
-                    sku_code: art.sku,
-                    sku_name: art.descripcion,
-                    score: 1.0,
-                    method: 'exact_sku',
-                    signals: [{ type: 'unit', score_impact: 0, description: 'El código del renglón es el SKU del artículo' }],
-                    confidence_level: 'auto_approve',
-                    proveedor_id: art.proveedor_id ?? null,
-                };
-            }
-        }
-
         // 1. Check by Provider Code
         if (item.code) {
             // ... existing logic ...
@@ -173,6 +147,35 @@ export class MatchingEngine {
             }
         }
 
+        // 1b. SOLO en compras, y DESPUÉS de la equivalencia aprendida (que manda): el código leído ES
+        //     el SKU de un artículo de la orden o de este proveedor. (Antes el código solo se comparaba
+        //     con las equivalencias aprendidas: un artículo cuyo SKU era exactamente el código de la
+        //     factura no se encontraba y se iba a buscar por parecido.) Fuera de compras —importar una
+        //     lista de precios— no corre: ahí el código del proveedor no tiene por qué ser nuestro SKU.
+        if (compra && item.code && providerId) {
+            const codigo = String(item.code).trim();
+            const variantes = [...new Set([codigo, codigoComparable(codigo), codigo.replace(/^0+(?=.)/, '')].filter(Boolean))];
+            const { data: porSku } = await getSupabase()
+                .from('articulos')
+                .select('id, descripcion, sku, proveedor_id')
+                .eq('activo', true)
+                .in('sku', variantes)
+                .limit(50);
+            const art: any = elegirPorCodigo(codigo, (porSku || []) as any[], providerId, compra);
+            if (art) {
+                return {
+                    sku_id: art.id,
+                    sku_code: art.sku,
+                    sku_name: art.descripcion,
+                    score: 1.0,
+                    method: 'exact_sku',
+                    signals: [{ type: 'unit', score_impact: 0, description: 'El código del renglón es el SKU del artículo' }],
+                    confidence_level: 'auto_approve',
+                    proveedor_id: art.proveedor_id ?? null,
+                };
+            }
+        }
+
         // 2. Check by EAN (Global check, ignoring provider)
         // articulos.ean13 es TEXT[] desde 20260424_ean13_array.sql
         // (el "código" de un renglón de compra muchas veces ES el código de barras)
@@ -190,15 +193,20 @@ export class MatchingEngine {
             const data: any = (eanRows || []).find((a: any) => enOrden.has(a.id))
                 || (eanRows || []).find((a: any) => a.proveedor_id === providerId)
                 || eanRows?.[0];
+            // Compras: un código de barras que cae en un artículo que no es de la orden ni del
+            // proveedor NO se asigna solo: queda como sugerencia, marcado "de otro proveedor".
+            const otroProveedor = !!compra && !!data && !enOrden.has(data.id) && data.proveedor_id !== providerId;
             if (data) {
                 return {
                     sku_id: data.id,
                     sku_code: data.sku,
                     sku_name: data.descripcion,
-                    score: 1.0,
+                    score: otroProveedor ? 0.9 : 1.0,
                     method: 'exact_ean',
-                    signals: [{ type: 'unit', score_impact: 0, description: 'Matched by EAN' }],
-                    confidence_level: 'auto_approve'
+                    signals: [{ type: 'unit', score_impact: 0, description: otroProveedor ? 'Código de barras de un artículo de otro proveedor' : 'Matched by EAN' }],
+                    confidence_level: otroProveedor ? 'suggestion' : 'auto_approve',
+                    proveedor_id: data.proveedor_id ?? null,
+                    ...(otroProveedor ? { otro_proveedor: true } : {}),
                 };
             }
         }
