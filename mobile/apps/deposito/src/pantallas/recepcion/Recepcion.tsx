@@ -778,7 +778,7 @@ export function RecepcionDocumentos() {
     if (!recepcionId || leyendo) return
     setLeyendo(doc.id)
     try {
-      const data = await api.post<{ document?: Documento; aviso?: string; en_curso?: boolean }>(`/api/recepciones/${recepcionId}/ocr/leer`, { document_id: doc.id }, { timeoutMs: 150_000 })
+      const data = await api.post<{ document?: Documento; aviso?: string; en_curso?: boolean }>(`/api/recepciones/${recepcionId}/ocr/leer`, { document_id: doc.id }, { timeoutMs: 310_000 })
       if (data.document) setDocs((p) => (p || []).map((d) => (d.id === doc.id ? data.document! : d)))
       const l = data.document ? lecturaDeDocumento(data.document) : null
       if (data.en_curso) mostrar("Ya se está leyendo: esperá un momento")

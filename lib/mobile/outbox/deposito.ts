@@ -28,7 +28,7 @@ import {
   type ConformidadTransporte,
 } from "@/lib/deposito/recepciones"
 import { esUnidadConteo, type UnidadConteo } from "@/lib/deposito/unidades"
-import { guardarHojasDocumento, validarEnvioDocumento, type EnvioDocumento } from "@/lib/deposito/documentos-recepcion"
+import { guardarHojasDocumento, recepcionDeDocumento, validarEnvioDocumento, type EnvioDocumento } from "@/lib/deposito/documentos-recepcion"
 import type { FilaReplica } from "../contrato"
 import { cargarArticulosDeposito, cargarPedidosDeposito, cargarRecepcionDeposito } from "../sync/deposito"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
@@ -285,8 +285,13 @@ const recepcionDocumento: HandlerDef<EnvioDocumento> = {
   roles: ROLES,
   validar: (p) => validarEnvioDocumento(p),
   async aplicar(ctx, m) {
-    const rec = await negocio(() => obtenerOCrearRecepcion(ctx.supabase, m.payload.orden_compra_id, ctx.sesion.user.id))
-    const r = await guardarHojasDocumento(ctx.admin, rec.id, m.payload)
+    // Antes de subir nada: ¿está la migración? ¿ya llegó otra parte de este documento? Todas las
+    // partes van a la recepción de la primera, aunque después se haya abierto otra tanda.
+    const previa = await recepcionDeDocumento(ctx.admin, m.payload.documento_local_id, m.payload.orden_compra_id)
+    if (!previa.ok) throw new RechazoNegocio(previa.mensaje, previa.codigo)
+    const recepcionId = previa.recepcion_id
+      ?? (await negocio(() => obtenerOCrearRecepcion(ctx.supabase, m.payload.orden_compra_id, ctx.sesion.user.id))).id
+    const r = await guardarHojasDocumento(ctx.admin, recepcionId, m.payload)
     if (!r.ok) throw new RechazoNegocio(r.mensaje, r.codigo)
     return { ...r.resultado, replica: [await parcheRecepcion(ctx, m.payload.orden_compra_id)] }
   },

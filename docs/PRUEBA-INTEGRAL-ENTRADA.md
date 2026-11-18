@@ -480,11 +480,26 @@ La app (`mobile/apps/deposito`, más una línea en `@gm/core`) y, para los docum
 | `processWithGemini` acepta varias hojas del mismo comprobante | `lib/services/ocr.ts` |
 | Borrar un documento borra todas sus hojas del bucket | `app/api/recepciones/[id]/ocr/route.ts` (DELETE) |
 
-**Sin la migración:** la app vieja no cambia. La app nueva (v0.5.5) deja el documento en la cola del equipo hasta que se aplique (no lo rechaza ni lo pierde).
+**Sin la migración:** la app vieja no cambia. La app nueva rechaza el envío con un mensaje claro ("Falta actualizar el sistema…"); por eso el orden es servidor y migración primero, APK después.
 
 **Para T1-B (se lo pasa el orquestador):**
 - La verificación muestra UNA imagen por documento (`url_imagen` = la primera hoja). Las hojas 2 y 3 están en `recepciones_documentos.hojas` (`[{path, nombre, mime, parte, orden}]`, rutas del bucket `comprobantes`): hay que firmarlas y mostrarlas.
 - El "reintentar la lectura" de la verificación (`/api/ordenes-compra/[id]/documentos`) baja solo `storage_path`: en un documento de varias hojas lee la primera nada más. Tiene que llamar a `leerDocumentoRecepcion` (o a `archivosDeDocumento`) de `lib/deposito/documentos-recepcion.ts`, que ya trae todas y usa la compuerta.
 - Un documento subido desde la app puede quedar "pendiente de leer" (`lectura_estado = 'pendiente'`) si el operario cerró la pantalla antes de que se leyera: la verificación debería mostrarlo como "falta leer" con el mismo botón.
 
-**Sin probar:** la lectura con varias hojas contra Gemini real, el handler contra Supabase y la pantalla en el NuStar. Probado: las dos funciones SQL en una base local y las reglas puras (25 pruebas).
+**Arreglos de la revisión (18/11, APK v0.5.6; sobre `origin/entrada-t1-integra3`):**
+
+| # | Qué | Dónde |
+|---|---|---|
+| 1 | La lectura dura hasta 300 s y es todo o nada: lo que quedó a medias se deshace y se relee; la compuerta retoma un "leyendo" de más de 6 minutos | `ocr/leer/route.ts`, `leerDocumentoRecepcion`, migración 18d |
+| 2 | Documento de más de 12 MB: se lee en tandas de hojas y se unen los renglones. El motivo de "no leído" va en castellano; el error crudo, aparte (`detalle_tecnico`) | `documentos-reglas.ts`, `leerHojas` |
+| 3 | `/ocr` y `/ocr/leer` piden el permiso `documentos_recepcion` (admin, administrativo, deposito) | `lib/auth.ts` y las dos rutas |
+| 4 | Sin la migración: rechazo claro antes de subir nada ("Falta actualizar el sistema…: avisá a la oficina"). Encabezado de la 18d corregido | `recepcionDeDocumento`, handler |
+| 5 | Si la base rechaza el envío, lo subido en ese intento se borra del bucket | `guardarHojasDocumento` |
+| 6 | Todas las partes de un documento van a la recepción de la primera | `recepcionDeDocumento` |
+| 7 | Una app vieja ve el documento pendiente como "no leído" | `documentoParaApp`, `firmarDocumentosRecepcion` |
+| 8 | No se guardan direcciones firmadas: se guarda la ruta y se firma al mostrar | `guardarHojasDocumento`, `leerDocumentoRecepcion` |
+
+**Lo que NO queda cerrado (para T1-B / ocr-match):** `matchAndCreateDetalle` (`lib/services/detalle.ts`) suma lo documentado a la recepción renglón por renglón y guarda el detalle del comprobante al final. Si el servidor corta la lectura justo en el medio de esa carga, las cantidades ya sumadas no tienen renglón que las respalde y `revertirComprobanteOCR` no las puede restar. Para cerrarlo del todo esa carga tiene que ser una sola transacción en la base. Tampoco se deshace sola una lectura a medias sobre un provisorio compartido con otro documento (los renglones no dicen de qué documento salieron): queda "no leído" con aviso a la oficina. La ruta vieja `POST /ocr` (web de depósito) sigue guardando la dirección firmada por 7 días; se ve bien porque todo firma de nuevo al mostrar.
+
+**Sin probar:** la lectura con varias hojas contra Gemini real, el handler contra Supabase y la pantalla en el NuStar. Probado: las dos funciones SQL en una base local (incluida la compuerta nueva) y las reglas puras (33 pruebas).

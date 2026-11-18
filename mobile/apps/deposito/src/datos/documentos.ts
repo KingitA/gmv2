@@ -28,6 +28,8 @@ export interface DocumentoRecepcion {
     /** Esa factura del proveedor ya estaba cargada: el motivo es el mensaje para mostrar tal cual */
     duplicado?: boolean
     motivo?: string | null
+    /** Por qué no se leyó, ya en castellano y para el operario (el servidor manda el detalle técnico en `motivo`) */
+    motivo_operario?: string | null
   } | null
 }
 
@@ -83,8 +85,9 @@ export function lecturaDeDocumento(doc: DocumentoRecepcion): LecturaDocumento {
   const renglones = Array.isArray(d?.items) ? d!.items!.length : 0
   const c = d?.comprobante
   const base = { tipo: nombreTipoComprobante(c?.tipo_comprobante), numero: c?.numero_comprobante ? String(c.numero_comprobante) : null, total: aNumero(c?.total_factura), renglones }
-  // Documentos subidos por la cola: el estado de lectura lo dice el servidor
-  if (!doc.procesado && !doc.comprobante_id) {
+  // Documentos subidos por la cola: el estado de lectura lo dice el servidor. Vale aunque ya tenga
+  // un comprobante vinculado: si no llegó a "leido", la lectura quedó a medias y se va a rehacer.
+  if (!doc.procesado && doc.lectura_estado) {
     if (doc.lectura_estado === "duplicado" || d?.duplicado) return { ...base, estado: "duplicado", motivo: d?.motivo ? String(d.motivo) : "Ese comprobante ya estaba cargado." }
     if (doc.lectura_estado === "pendiente" || doc.lectura_estado === "leyendo") {
       return documentoCompleto(doc)
@@ -94,7 +97,7 @@ export function lecturaDeDocumento(doc: DocumentoRecepcion): LecturaDocumento {
   }
   if (doc.tipo_documento === "foto" && doc.procesado && !doc.comprobante_id && renglones === 0) return { ...base, estado: "adjunto", motivo: null }
   if (d?.no_leido || (!doc.procesado && d && renglones === 0 && !c?.numero_comprobante)) {
-    return { ...base, estado: "no_leido", motivo: motivoNoLeido(d?.motivo) }
+    return { ...base, estado: "no_leido", motivo: d?.motivo_operario ? String(d.motivo_operario) : motivoNoLeido(d?.motivo) }
   }
   if (doc.procesado && (renglones > 0 || base.numero || base.total != null)) return { ...base, estado: "leido", motivo: null }
   return { ...base, estado: "adjunto", motivo: null }

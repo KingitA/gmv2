@@ -1345,8 +1345,7 @@ Visto en el NuStar con la v0.5.3. Solo cambia la app; el contrato del outbox (`r
 ### v0.5.5 (18/11/2026): documentos de la recepción — varias hojas, cola sin señal y lectura aparte (E-38)
 
 **Necesita en el servidor** la migración `20261118d_recepciones_documentos_hojas.sql` y el código de la
-rama `entrada-t1c-deposito`. Sin la migración el envío queda EN LA COLA (no se rechaza ni se pierde)
-y sale solo cuando se aplica. La v0.5.3 / v0.5.4 siguen usando `POST /api/recepciones/[id]/ocr`, que no cambió.
+rama `entrada-t1c-deposito`. Sin la migración el envío se RECHAZA con un mensaje claro (cambió en la v0.5.6, ver abajo). La v0.5.3 / v0.5.4 siguen usando `POST /api/recepciones/[id]/ocr`, que no cambió.
 
 - **Un documento = una o varias hojas.** En `/recibir/:id/documentos` el operario elige el tipo, saca
   todas las hojas ("📷 Otra hoja") y toca "Subir". Cada foto se achica al sacarla (`comprimirFoto`,
@@ -1377,6 +1376,34 @@ y sale solo cuando se aplica. La v0.5.3 / v0.5.4 siguen usando `POST /api/recepc
 - La pantalla ya no exige señal ni que la recepción exista en el servidor para entrar.
 - Reglas puras: `apps/deposito/src/datos/documentos.ts` y `lib/deposito/documentos-reglas.ts`
   (validación del envío, orden de las hojas). Servidor: `lib/deposito/documentos-recepcion.ts`.
+
+### v0.5.6 (18/11/2026): arreglos de la revisión de documentos
+
+**Orden de despliegue: primero el servidor (rama + migración `20261118d`), después la APK.**
+La v0.5.5 no se instaló en ningún equipo; esta la reemplaza.
+
+- **Lectura todo o nada** (`leerDocumentoRecepcion`): el documento queda "leido" recién cuando el
+  comprobante tiene todos sus renglones. Si la lectura se corta antes, lo que quedó a medias se
+  deshace (`revertirComprobanteOCR`) y se lee de nuevo. La compuerta deja retomar un documento
+  "leyendo" de hace más de 6 minutos (la ruta tiene `maxDuration = 300`). No se deshace solo si el
+  comprobante lo comparte otro documento o ya está validado: queda "no leído" y avisa a la oficina.
+- **Documento muy pesado**: el lector acepta ~20 MB por pedido. Si las hojas pasan de 12 MB
+  (`TOPE_BYTES_POR_LECTURA`) se leen en tandas (`tandasDeLectura`) y se unen (`unirLecturas`:
+  renglones de todas, cabecera de la primera, totales de la última). Una tanda que falla = no leído.
+- **Motivo en castellano**: el servidor manda `motivo` (para el operario, `motivoParaOperario`) y
+  `detalle_tecnico` (el error crudo). En `datos_ocr` quedan `motivo_operario` y `motivo` (técnico,
+  que es lo que usa la verificación de la oficina). La app muestra `motivo_operario`.
+- **Permiso** `documentos_recepcion` (admin, administrativo, deposito) en `/ocr` y `/ocr/leer`.
+- **Sin la migración**: el handler lo revisa ANTES de subir al bucket y RECHAZA con "Falta
+  actualizar el sistema…: avisá a la oficina" (antes reintentaba subiendo todas las hojas cada vez).
+- **Sin hojas huérfanas**: si la base rechaza el envío, lo subido en ese intento se borra del bucket.
+- **Partes juntas**: todas las partes de un `documento_local_id` van a la recepción de la primera,
+  aunque después se haya abierto otra tanda de la orden (`recepcionDeDocumento`).
+- **App vieja**: un documento pendiente de leer se le sirve como "no leído" con el motivo
+  "Pendiente de lectura" (`documentoParaApp`), no como leído ni como foto de respaldo.
+- **Sin direcciones firmadas guardadas**: en `url_imagen` / `foto_url` se guarda la ruta
+  (`/comprobantes/<ruta>`) y se firma al mostrar, como ya hacía el resto del sistema.
+- La app espera la lectura hasta 310 s y muestra "pendiente" si la lectura quedó a medias.
 
 ---
 

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 import { lineaIncompleta, resumenCierre, textoFalta, unidadesFaltantes, vistaRecepcion } from "../../../apps/deposito/src/datos/overlay"
 import { faltaParaRegistrarBultos } from "../../../apps/deposito/src/datos/borradorBultos"
 import { documentoCompleto, documentosEnCola, enviosDeDocumento, lecturaDeDocumento, LIMITE_SUBIDA_BYTES, megas, motivoNoLeido, nombreTipoComprobante, repartirEnEnvios, revisarArchivo, type HojaLocal } from "../../../apps/deposito/src/datos/documentos"
-import { documentoCompleto as completoServidor, hojasDeDocumento, validarEnvioDocumento } from "../../../../lib/deposito/documentos-reglas"
+import { documentoCompleto as completoServidor, documentoParaApp, hojasDeDocumento, motivoParaOperario, tandasDeLectura, unirLecturas, validarEnvioDocumento } from "../../../../lib/deposito/documentos-reglas"
 import type { OrdenRecepcion } from "../../../apps/deposito/src/datasets"
 import { avisoErrorSync } from "../src/ui/aviso-sync"
 
@@ -215,5 +215,79 @@ describe("varias hojas = un documento, por partes y con cola (E-38)", () => {
     ], OC)
     expect(cola).toEqual([{ documento_local_id: DOC, tipo_documento: "factura", hojas: 3, partes: 2, estado: "enviando", error: null, claves: ["k1", "k2"] }])
     expect(documentosEnCola([op("k1", "rechazado", 0, 1)], OC)[0]).toMatchObject({ estado: "rechazado", error: "tipo desconocido" })
+  })
+})
+
+describe("lectura: tandas por peso, unión, motivo en castellano y app vieja (revisión T1-C)", () => {
+  const MB = 1024 * 1024
+
+  it("lo normal es una sola lectura con todas las hojas", () => {
+    expect(tandasDeLectura([2 * MB, 2 * MB, 2 * MB])).toEqual([[0, 1, 2]])
+    expect(tandasDeLectura([])).toEqual([])
+  })
+
+  it("si pesan más que el tope del lector se leen en tandas, en orden; una hoja enorme va sola", () => {
+    expect(tandasDeLectura([5, 5, 5, 5, 5], 12)).toEqual([[0, 1], [2, 3], [4]])
+    expect(tandasDeLectura([20, 3, 3], 12)).toEqual([[0], [1, 2]])
+    // 30 hojas de 2,5 MB con el tope real: ninguna tanda pasa los 12 MB
+    const pesos = Array(30).fill(2.5 * MB)
+    const tandas = tandasDeLectura(pesos)
+    expect(tandas.flat()).toEqual(pesos.map((_, i) => i))
+    expect(Math.max(...tandas.map((t) => t.length * 2.5 * MB))).toBeLessThanOrEqual(12 * MB)
+  })
+
+  it("unir tandas: todos los renglones, cabecera de la primera hoja y totales de la última", () => {
+    const u = unirLecturas([
+      { items: [{ d: "a" }, { d: "b" }], comprobante: { numero_comprobante: "0003-00045711", tipo_comprobante: "FA", fecha: "2026-11-17", total_factura: null, total_iva: 0 }, avisos: ["uno"] },
+      { items: [{ d: "c" }], comprobante: { numero_comprobante: null, tipo_comprobante: null, fecha: null, total_factura: 121000, total_iva: 21000 } },
+    ])
+    expect(u.items).toEqual([{ d: "a" }, { d: "b" }, { d: "c" }])
+    expect(u.comprobante).toEqual({ numero_comprobante: "0003-00045711", tipo_comprobante: "FA", fecha: "2026-11-17", total_factura: 121000, total_iva: 21000 })
+    expect(u.avisos?.[0]).toBe("uno")
+    expect(u.avisos?.[1]).toMatch(/2 tandas/)
+  })
+
+  it("una sola lectura vuelve igual; si una tanda falla, falla todo (no hay comprobante a medias)", () => {
+    const una = { items: [{ d: "a" }], comprobante: null }
+    expect(unirLecturas([una])).toBe(una)
+    const u = unirLecturas([{ items: [{ d: "a" }] }, { items: [], error: "Request payload size exceeds the limit" }])
+    expect(u.items).toEqual([])
+    expect(u.error).toMatch(/tanda 2 de 2: Request payload/)
+  })
+
+  it("el operario nunca ve el error crudo del lector", () => {
+    for (const crudo of ["[400 Bad Request] Request payload size exceeds the limit", "429 RESOURCE_EXHAUSTED quota", "fetch failed", "La lectura automática no encontró ningún renglón en el documento.", "algo raro"]) {
+      const m = motivoParaOperario(crudo)
+      expect(m).not.toContain(crudo)
+      expect(m).toMatch(/^(No se|El lector)/)
+    }
+    expect(motivoParaOperario("La lectura automática no encontró ningún renglón en el documento.")).toMatch(/No se encontraron renglones/)
+    expect(motivoParaOperario("La lectura automática falló: [400 Bad Request] payload too large")).toMatch(/no aceptó el documento/)
+  })
+
+  it("la app usa el motivo en castellano que manda el servidor", () => {
+    const l = lecturaDeDocumento({ id: "d", tipo_documento: "factura", procesado: false, lectura_estado: "no_leido", datos_ocr: { items: [], no_leido: true, motivo: "[400 Bad Request] x", motivo_operario: "El lector no aceptó el documento." } })
+    expect([l.estado, l.motivo]).toEqual(["no_leido", "El lector no aceptó el documento."])
+  })
+
+  it("una lectura que quedó a medias (comprobante vinculado, sin terminar) se ve como pendiente, no como leída", () => {
+    const aMedias = { id: "d", tipo_documento: "factura", procesado: false, comprobante_id: "c1", lectura_estado: "pendiente", partes_esperadas: 1, hojas: [{ path: "a", parte: 0, orden: 0 }] }
+    expect(lecturaDeDocumento(aMedias).estado).toBe("pendiente")
+    expect(lecturaDeDocumento({ ...aMedias, lectura_estado: "leyendo" }).estado).toBe("pendiente")
+  })
+
+  it("una app vieja ve el documento pendiente como NO leído (no como leído ni como foto de respaldo)", () => {
+    const pendiente = { id: "d", tipo_documento: "factura", procesado: false, lectura_estado: "pendiente", datos_ocr: null }
+    const servido = documentoParaApp(pendiente)
+    expect(servido.datos_ocr).toMatchObject({ no_leido: true, pendiente_de_lectura: true })
+    // lo que hacía la v0.5.4 con eso (sin lectura_estado): "no leído"
+    expect(lecturaDeDocumento({ id: "d", tipo_documento: "factura", procesado: false, datos_ocr: servido.datos_ocr as never }).estado).toBe("no_leido")
+    // la app nueva sigue viendo "pendiente"
+    expect(lecturaDeDocumento({ ...(servido as never as typeof pendiente), partes_esperadas: 1, hojas: [{ path: "a", parte: 0, orden: 0 }] } as never).estado).toBe("pendiente")
+    // lo ya leído, lo no leído de verdad y los documentos de antes no se tocan
+    const leido = { lectura_estado: "leido", procesado: true, datos_ocr: { items: [1] } }
+    expect(documentoParaApp(leido)).toBe(leido)
+    const viejo = { lectura_estado: null, procesado: false, datos_ocr: null }
+    expect(documentoParaApp(viejo)).toBe(viejo)
   })
 })

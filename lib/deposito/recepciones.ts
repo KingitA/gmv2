@@ -10,6 +10,7 @@
  *    por artículo contra el kardex de esa recepción. Finalizar dos veces = una.
  */
 
+import { documentoParaApp } from "./documentos-reglas"
 import { insertarKardex } from "@/lib/kardex/insertar-kardex"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { nowArgentina } from "@/lib/utils"
@@ -168,6 +169,8 @@ export async function firmarDocumentosRecepcion<T extends { url_imagen?: string 
   return Promise.all(
     lista.map(async (doc) => {
       const ruta = doc.storage_path || doc.url_imagen?.match(/\/comprobantes\/(.+?)(\?|$)/)?.[1] || null
+      // Documento subido por la cola y todavía sin leer: una app vieja lo tiene que ver como "no leído"
+      doc = documentoParaApp(doc as T & { lectura_estado?: string | null; datos_ocr?: unknown; procesado?: boolean | null })
       if (!ruta) return doc
       try {
         const { data } = await storage.createSignedUrl(decodeURIComponent(ruta), 3600)

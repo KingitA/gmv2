@@ -18,10 +18,14 @@
 --        NULL en los documentos de antes (se leían al subirlos).
 --   · recepcion_documento_guardar_hojas(...)     guarda / agrega las hojas de un envío (idempotente).
 --   · recepcion_documento_tomar_lectura(doc)     compuerta: una sola lectura por documento a la vez
---        y ninguna si ya tiene comprobante. Dos llamadas a "leer" no crean dos comprobantes.
+--        y ninguna si ya quedó leído. Dos llamadas a "leer" no crean dos comprobantes. Una lectura
+--        que se cortó a medias (quedó "leyendo" más de 6 minutos, o volvió a "pendiente" con un
+--        comprobante a medio armar) se puede retomar: el servidor limpia lo anterior y relee.
 --
--- Se puede correr más de una vez. Sin esta migración la app nueva (v0.5.5) no puede subir
--- documentos: el envío queda rechazado con un mensaje que lo dice. La app vieja no cambia.
+-- Se puede correr más de una vez. ORDEN: primero esta migración y el servidor, después la APK
+-- nueva (v0.5.6). Sin esta migración la app nueva no puede subir documentos: el servidor lo
+-- revisa ANTES de guardar nada y rechaza el envío con "Falta actualizar el sistema: avisá a la
+-- oficina" (no reintenta subiendo las hojas cada vez). La app vieja no cambia.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 ALTER TABLE public.recepciones_documentos
@@ -131,8 +135,11 @@ BEGIN
 END;
 $$;
 
--- Compuerta de la lectura: true = esta llamada es la que lee. false = no hay que leer (ya tiene
--- comprobante, o hay otra lectura en curso hace menos de 3 minutos).
+-- Compuerta de la lectura: true = esta llamada es la que lee. false = no hay que leer (ya quedó
+-- leído, o hay otra lectura en curso hace menos de 6 minutos: la lectura puede tardar hasta 5).
+--   · Documento de antes (lectura_estado NULL): solo si no tiene comprobante.
+--   · Documento de la app nueva: también si quedó A MEDIAS (tiene comprobante vinculado pero no
+--     llegó a "leido"): quien toma la lectura limpia ese comprobante antes de leer de nuevo.
 CREATE OR REPLACE FUNCTION public.recepcion_documento_tomar_lectura(p_documento_id uuid)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -141,11 +148,10 @@ AS $$
 BEGIN
   UPDATE recepciones_documentos SET lectura_estado = 'leyendo', lectura_iniciada_at = now()
    WHERE id = p_documento_id
-     AND comprobante_id IS NULL
      AND coalesce(procesado, false) = false
-     AND (lectura_estado IS NULL
+     AND (   (lectura_estado IS NULL AND comprobante_id IS NULL)
           OR lectura_estado IN ('pendiente', 'no_leido', 'duplicado')
-          OR (lectura_estado = 'leyendo' AND lectura_iniciada_at < now() - interval '3 minutes'));
+          OR (lectura_estado = 'leyendo' AND lectura_iniciada_at < now() - interval '6 minutes'));
   RETURN FOUND;
 END;
 $$;

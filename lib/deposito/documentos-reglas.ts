@@ -65,3 +65,93 @@ export function documentoCompleto(doc: any): boolean {
   const recibidas = new Set((Array.isArray(doc?.hojas) ? doc.hojas : []).map((h: any) => Number(h?.parte) || 0)).size
   return Array.isArray(doc?.hojas) ? recibidas >= esperadas : !!doc?.storage_path
 }
+
+// ─── Lectura: tope de peso, tandas de hojas y motivo para el operario ────────
+
+/**
+ * El lector recibe las hojas dentro del pedido y tiene un tope (~20 MB con todo): por encima
+ * devuelve un error. 12 MB de archivos son ~16 MB ya codificados, con margen para el resto.
+ */
+export const TOPE_BYTES_POR_LECTURA = 12 * 1024 * 1024
+
+/**
+ * Reparte las hojas (por su peso, en orden) en tandas que entran en una lectura. Casi siempre es
+ * una sola. Devuelve los índices de cada tanda. Una hoja que sola pasa el tope va sola (la lectura
+ * dirá si la pudo leer). Función pura.
+ */
+export function tandasDeLectura(pesos: number[], tope: number = TOPE_BYTES_POR_LECTURA): number[][] {
+  const tandas: number[][] = []
+  let actual: number[] = []
+  let suma = 0
+  pesos.forEach((peso, i) => {
+    const p = Math.max(0, Number(peso) || 0)
+    if (actual.length > 0 && suma + p > tope) { tandas.push(actual); actual = []; suma = 0 }
+    actual.push(i)
+    suma += p
+  })
+  if (actual.length > 0) tandas.push(actual)
+  return tandas
+}
+
+interface LecturaParcial {
+  items?: unknown[] | null
+  comprobante?: object | null
+  avisos?: string[]
+  error?: string
+}
+
+const ES_IMPORTE = /total|subtotal|percepcion|retencion|impuestos_internos|otros_impuestos|descuento/
+const vacio = (v: unknown) => v === null || v === undefined || v === ""
+
+/**
+ * Une las lecturas de varias tandas de hojas del MISMO comprobante: los renglones de todas, en
+ * orden; la cabecera (número, tipo, fecha) de la primera tanda que la trae; los importes de la
+ * última que los trae (los totales están en la última hoja). Si una tanda falló, falla todo: un
+ * comprobante con hojas sin leer no sirve. Función pura.
+ */
+export function unirLecturas<T extends LecturaParcial>(lecturas: T[]): T {
+  if (lecturas.length === 1) return lecturas[0]
+  const conError = lecturas.findIndex((l) => !!l.error)
+  if (conError >= 0) return { ...lecturas[conError], items: [], error: `tanda ${conError + 1} de ${lecturas.length}: ${lecturas[conError].error}` }
+  const cabecera: Record<string, unknown> = {}
+  for (const l of lecturas) {
+    for (const [k, v] of Object.entries(l.comprobante ?? {})) {
+      if (ES_IMPORTE.test(k)) {
+        if (!vacio(v) && Number(v) !== 0) cabecera[k] = v
+        else if (!(k in cabecera)) cabecera[k] = v
+      } else if (vacio(cabecera[k])) cabecera[k] = v
+    }
+  }
+  const avisos = lecturas.flatMap((l) => l.avisos ?? [])
+  avisos.push(`El documento pesa mucho y se leyó en ${lecturas.length} tandas de hojas: revisá que no falte ni se repita ningún renglón.`)
+  return {
+    ...lecturas[0],
+    items: lecturas.flatMap((l) => l.items ?? []),
+    comprobante: Object.keys(cabecera).length > 0 ? cabecera : (lecturas[0].comprobante ?? null),
+    avisos,
+  } as T
+}
+
+/**
+ * Por qué no se pudo leer, para el operario: en castellano y diciéndole qué hacer. El error crudo
+ * del lector (a veces en inglés) va aparte, como detalle técnico para sistemas. Función pura.
+ */
+export function motivoParaOperario(tecnico: string | null | undefined): string {
+  const m = String(tecnico ?? "").toLowerCase()
+  if (/ning[uú]n rengl|sin renglones|no items|empty/.test(m)) return "No se encontraron renglones en el documento. Sacalo de nuevo: de frente, con buena luz y que entre toda la hoja."
+  if (/quota|credit|402|429|billing|saldo|resource_exhausted/.test(m)) return "El lector automático no está disponible en este momento. El documento quedó adjunto: probá leerlo más tarde o avisá a la oficina."
+  if (/timeout|timed out|deadline|504|503|network|fetch|unavailable|overloaded/.test(m)) return "El lector tardó demasiado o no respondió. El documento quedó adjunto: probá leerlo de nuevo en un rato."
+  if (/too large|payload|size|413|exceeds|400/.test(m)) return "El lector no aceptó el documento (pesa mucho o alguna hoja no se puede abrir). Quedó adjunto: sacá las hojas de nuevo o avisá a la oficina."
+  return "No se pudo leer el documento. Quedó adjunto: si salió movido u oscuro sacalo de nuevo; si no, avisá a la oficina para que lo cargue a mano."
+}
+
+/**
+ * Lo que ve una app VIEJA (hasta la v0.5.5 no conoce "pendiente de leer"): un documento subido y
+ * todavía sin leer se le manda como "no leído" con el motivo, para que no lo muestre como leído
+ * ni como foto de respaldo. La app nueva mira `lectura_estado` y no usa este agregado. Pura.
+ */
+export function documentoParaApp<D extends { lectura_estado?: string | null; datos_ocr?: unknown; procesado?: boolean | null; tipo_documento?: string | null }>(doc: D): D {
+  if (doc.datos_ocr || doc.procesado) return doc
+  if (doc.lectura_estado !== "pendiente" && doc.lectura_estado !== "leyendo") return doc
+  return { ...doc, datos_ocr: { items: [], no_leido: true, pendiente_de_lectura: true, motivo: "Pendiente de lectura: el documento se subió y el sistema todavía no lo leyó." } }
+}
