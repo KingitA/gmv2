@@ -28,6 +28,9 @@ export function RevisarMatches({
     const [seleccion, setSeleccion] = useState<Record<string, any>>({})
     const [error, setError] = useState<string | null>(null)
 
+    // Se vuelve a pedir solo cuando cambian los comprobantes de verdad (cuáles son y en qué estado
+    // están), no cada vez que la pantalla de arriba se vuelve a dibujar con una lista nueva.
+    const clave = comprobantes.map((c) => `${c.id}:${c.estado}:${c.updated_at || ""}`).join("|")
     const cargar = useCallback(async () => {
         if (comprobantes.length === 0) {
             setPendientes([])
@@ -49,7 +52,8 @@ export function RevisarMatches({
         } finally {
             setLoading(false)
         }
-    }, [comprobantes])
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [clave])
 
     useEffect(() => {
         cargar()
