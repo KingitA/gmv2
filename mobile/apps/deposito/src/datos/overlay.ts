@@ -7,7 +7,7 @@
 // ya actualizada (parche de réplica) y el overlay de esa operación desaparece.
 
 import type { ItemOutbox } from "@gm/core"
-import { aUnidadesBase, calcularBonificados, calcularBonificadosPorCupo, conversionLinea, estadoBonificadoPicking, estadoItemPicking, estadoLineaRecepcion, usaCupos, type UnidadConteo } from "@gm/deposito"
+import { aUnidadesBase, calcularBonificados, calcularBonificadosPorCupo, cant, cantidadConUnidad, conversionLinea, estadoBonificadoPicking, estadoItemPicking, estadoLineaRecepcion, usaCupos, type UnidadConteo } from "@gm/deposito"
 import type {
   Articulo, DetallePedido, Devolucion, EstadoItem, EstadoLinea, OpDatos, OpPickingItem, OpRecepcionItem, OpStock,
   OrdenRecepcion, PedidoDeposito, Preparador,
@@ -168,6 +168,67 @@ export interface RecepcionVista {
   /** id de la recepción en el servidor (null = todavía no se creó allá: fotos deshabilitadas) */
   recepcionId: string | null
   documentos: number
+}
+
+// ── Lo que falta de una línea y el resumen antes de finalizar (E-92, E-93) ──
+
+/**
+ * Unidades PEDIDAS que no llegaron en esta línea: lo pedido menos lo contado, en unidades.
+ * 0 si llegó todo, si sobró, si la línea está sin contar o si el artículo no estaba pedido.
+ * Una línea marcada "faltante" debe todo lo pedido.
+ */
+export function unidadesFaltantes(l: LineaRecepcion): number {
+  if (l.fuera_de_oc || l.estado_linea === "pendiente") return 0
+  if (l.estado_linea === "faltante") return l.ocUnidades
+  return Math.max(0, Math.round((l.ocUnidades - l.fisicaUnidades) * 10000) / 10000)
+}
+
+/** Línea contada con MENOS de lo pedido: no es "completa" (no se pinta verde). */
+export const lineaIncompleta = (l: LineaRecepcion): boolean => l.estado_linea === "ok" && unidadesFaltantes(l) > 0
+
+/** "1 bulto (36 u)" si lo que falta son bultos enteros; si no, "36 u". */
+export function textoFalta(l: LineaRecepcion): string {
+  const falta = unidadesFaltantes(l)
+  const upb = l.unidadesPorBulto
+  if (l.unidadOC === "bulto" && upb > 1 && falta > 0 && falta % upb === 0) return `${cantidadConUnidad(falta / upb, "bulto")} (${cant(falta)} u)`
+  return `${cant(falta)} u`
+}
+
+export interface ItemResumenCierre { articulo_id: string; descripcion: string; llego: string; falta: string }
+export interface ResumenCierre {
+  /** Líneas pedidas que llegaron completas (o con de más) */
+  completas: number
+  /** Llegaron, pero menos de lo pedido */
+  incompletas: ItemResumenCierre[]
+  /** No llegó nada de la línea */
+  noLlegaron: ItemResumenCierre[]
+  /** Recibido que no estaba en la orden */
+  fueraDeOC: number
+  /** Sin contar todavía (no se puede finalizar) */
+  pendientes: number
+  /** Falta algo de lo pedido: la orden queda abierta para recibir el resto */
+  hayFaltantes: boolean
+}
+
+/** Qué llegó y qué falta, para preguntarle al operario antes de finalizar. Función pura. */
+export function resumenCierre(r: RecepcionVista): ResumenCierre {
+  const item = (l: LineaRecepcion): ItemResumenCierre => ({
+    articulo_id: l.articulo_id,
+    descripcion: l.articulo?.descripcion || l.articulo_id,
+    llego: l.estado_linea === "ok" ? cantidadConUnidad(l.cantidad_fisica, l.unidadConteo) : "nada",
+    falta: textoFalta(l),
+  })
+  const pedidas = r.lineas.filter((l) => !l.fuera_de_oc)
+  const incompletas = pedidas.filter(lineaIncompleta).map(item)
+  const noLlegaron = pedidas.filter((l) => l.estado_linea === "faltante").map(item)
+  return {
+    completas: pedidas.filter((l) => l.estado_linea === "ok" && !lineaIncompleta(l)).length,
+    incompletas,
+    noLlegaron,
+    fueraDeOC: r.lineas.filter((l) => l.fuera_de_oc && l.estado_linea === "ok").length,
+    pendientes: r.lineas.filter((l) => l.estado_linea === "pendiente").length,
+    hayFaltantes: incompletas.length + noLlegaron.length > 0,
+  }
 }
 
 export function vistaRecepcion(o: OrdenRecepcion, ops: ItemOutbox[], articulo: (id: string) => Articulo | undefined): RecepcionVista {

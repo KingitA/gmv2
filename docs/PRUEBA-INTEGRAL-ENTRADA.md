@@ -428,3 +428,17 @@ Juan va a renovar todos los datos de los proveedores con el Excel. Fichas de pro
 **Quién lee estimados** (revisado: ninguno muestra los cancelados): calendario (descarta `cancelado`), Nueva OP y panel de Finanzas (`estado=pendiente`), pagos de la semana, Jarvis, indicadores de Playroom y proyección de retenciones (`estado = 'pendiente'`), verificación (`pendiente` / `vencido`), detalle de la orden (distinto de `cancelado`). En la lista de vencimientos, con el filtro "Cancelado", se ven con su motivo.
 
 Probado en una base local con el historial y su inmutabilidad creados igual que en producción, encima de la `20261117n` que está hoy en main: editar, validar en partes, finalizar y cancelar funcionan; no se borra ninguna fila y la historia registra cada cancelación.
+
+## Tanda 1-C — app Depósito, recepción (18/11, rama `entrada-t1c-deposito`)
+
+Solo la app (`mobile/apps/deposito`, más una línea en `@gm/core`). No cambia el contrato del outbox ni ninguna ruta del servidor: la app v0.5.3 instalada sigue funcionando igual. Detalle técnico en MOBILE.md §17 "v0.5.4".
+
+| id | Qué quedó |
+|---|---|
+| E-92 (app) | Una línea con menos de lo pedido va en ámbar ("1 de 2 bultos · faltan 36 u"), en su propio grupo "Llegó menos de lo pedido". Verde es solo lo que llegó completo. |
+| E-93 | "Finalizar" con faltantes abre una confirmación con qué llegó y qué falta de cada artículo, y avisa que la orden queda abierta para recibir el resto. Tocar un renglón abre la pantalla de cantidad; la ficha queda en el botón ⓘ. |
+| Control de bultos | Lo escrito no se pierde al salir con "atrás"; "Bultos OK" deshabilitado hasta cargar los dos números; "Saltear" pide confirmación. |
+| E-38 (parte) | La foto se achica antes de subir; se puede subir un PDF desde archivos (hasta 4 MB); después de subir se ve lo que leyó el sistema (tipo, número, total, renglones) o por qué no se pudo leer, en castellano. |
+| Avisos | Con la sesión vencida la barra dice "Sesión vencida: volvé a ingresar". |
+
+**E-38, lo que falta:** varias fotos de la misma factura = un solo comprobante, y cola sin señal para los documentos. No se puede hacer solo en la app: la ruta recibe un archivo y lo lee en el momento. Queda propuesto al orquestador (outbox `recepcion.documento` que solo guarda las hojas, lectura aparte con todas las hojas, dos columnas en `recepciones_documentos`).

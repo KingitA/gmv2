@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.5.4 (versionCode 18) — 2026-11-18
+
+- Recepcion: faltantes en ambar y confirmacion al finalizar; tocar un renglon abre la cantidad; control de bultos no pierde lo cargado; fotos comprimidas, PDF y lo que leyo el sistema; aviso de sesion vencida
+
 ## v0.5.3 (versionCode 17) — 2026-11-18
 
 - Actualización con un botón: la app avisa en el inicio cuando hay una versión nueva y se actualiza sola (ACTUALIZAR → INSTALAR)
