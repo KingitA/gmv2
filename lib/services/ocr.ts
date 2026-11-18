@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import { parseFecha, parseMonto } from "@/lib/formato";
 
-import { GEMINI_MODEL, GEMINI_MODEL_FALLBACK } from "@/lib/ai/gemini-model";
+import { GEMINI_MODEL, GEMINI_MODEL_FALLBACK, avisarFallaGemini } from "@/lib/ai/gemini-model";
 
 // Native fetch to Gemini REST API — no SDK dependency, immune to SDK deprecations.
 // El modelo sale de lib/ai/gemini-model.ts (env GEMINI_MODEL, sin deploy). E-37: si el
@@ -42,6 +42,10 @@ export interface ComprobanteMeta {
     impuestos_discriminados: boolean | null;
     leyenda_no_valido_factura: boolean | null;
     tiene_precios: boolean | null;
+    /** E-100: datos fiscales del papel. Con los tres (CUIT del emisor, CAE y letra) es una factura. */
+    cuit_emisor?: string | null;
+    cae?: string | null;
+    letra?: string | null;
 }
 
 export interface ParseResult {
@@ -62,6 +66,44 @@ export interface ParseResult {
 // - No dice factura pero tiene precios → Adquisición
 // - Sin precios → Remito (solo respaldo de cantidades)
 // - NC/ND explícitas se respetan
+// - E-100: si el papel trae CUIT del emisor + CAE + letra (A/B/C) ES una factura, aunque tenga
+//   una leyenda tipo "sin valor fiscal" o no se hayan leído los impuestos. Antes esa leyenda
+//   la mandaba a Adquisición (canal negro) y se perdían el neto y el IVA. En ese caso la lectura
+//   lleva un aviso para que la oficina CONFIRME el tipo en la verificación.
+
+/** Letra de la factura (A, B o C) según lo leído, o null. */
+function letraDe(meta: ComprobanteMeta | null | undefined): 'A' | 'B' | 'C' | null {
+    const l = String(meta?.letra || '').toUpperCase().trim();
+    if (l === 'A' || l === 'B' || l === 'C') return l;
+    const t = String(meta?.tipo_comprobante || '').toUpperCase().trim();
+    const m = /^F([ABC])$/.exec(t) || /FACTURA\s+([ABC])\b/.exec(t);
+    return m ? (m[1] as 'A' | 'B' | 'C') : null;
+}
+
+/** ¿El papel tiene respaldo fiscal? CUIT del emisor (11 dígitos) + CAE (14 dígitos) + letra. */
+export function tieneRespaldoFiscal(meta: ComprobanteMeta | null | undefined): boolean {
+    const cuit = String(meta?.cuit_emisor || '').replace(/[^0-9]/g, '');
+    const cae = String(meta?.cae || '').replace(/[^0-9]/g, '');
+    return cuit.length === 11 && cae.length === 14 && letraDe(meta) !== null;
+}
+
+/**
+ * E-100: aviso para la oficina cuando el tipo salió de los datos fiscales pero el papel dice
+ * otra cosa (leyenda "no válido como factura" / sin impuestos a la vista). null si no hay duda.
+ */
+export function avisoTipoAConfirmar(parsed: ParseResult): string | null {
+    const meta = parsed.comprobante;
+    if (!tieneRespaldoFiscal(meta)) return null;
+    const texto = String(meta?.tipo_comprobante || '').toUpperCase();
+    if (texto === 'NC' || texto === 'ND' || /^N[CD][ABC]$/.test(texto) || texto.includes('NOTA DE')) return null;
+    const noValido = meta?.leyenda_no_valido_factura === true;
+    const impuestosOK = meta?.impuestos_discriminados === true || Number(meta?.total_iva || 0) > 0
+        || Number(meta?.percepcion_iva || 0) > 0 || Number(meta?.percepcion_iibb || 0) > 0;
+    if (!noValido && impuestosOK) return null;
+    const motivo = noValido ? 'tiene una leyenda del tipo "sin valor fiscal / no válido como factura"' : 'no se leyeron impuestos discriminados';
+    return `CONFIRMÁ EL TIPO: el papel trae CUIT, CAE y letra ${letraDe(meta)} (es una factura) pero ${motivo}. Se cargó como Factura ${letraDe(meta)}, no como Adquisición: revisá el tipo, el neto y el IVA contra el papel antes de validar.`;
+}
+
 export function inferirTipoComprobante(parsed: ParseResult, tipoDocumento?: string): string {
     const meta = parsed.comprobante;
     const texto = (meta?.tipo_comprobante || '').toUpperCase().trim();
@@ -82,6 +124,9 @@ export function inferirTipoComprobante(parsed: ParseResult, tipoDocumento?: stri
         || Number(meta?.percepcion_iibb || 0) > 0;
 
     const diceFactura = texto === 'FA' || texto === 'FB' || texto === 'FC' || texto.includes('FACTURA');
+
+    // E-100: CUIT + CAE + letra = factura, diga lo que diga la leyenda (se pide confirmar: avisoTipoAConfirmar)
+    if (tieneRespaldoFiscal(meta)) return `F${letraDe(meta)}`;
 
     if (diceFactura && impuestosOK && !noValido) {
         if (texto === 'FB' || texto.includes('FACTURA B')) return 'FB';
@@ -128,6 +173,7 @@ TAREA:
 Extraé TODA la información del documento: encabezado del comprobante Y los ítems de detalle.
 Listá TODOS los renglones del detalle, sin saltear ninguno aunque se parezcan entre sí: un objeto por renglón, todos en la ÚNICA lista "items" (no repitas la clave "items" ni pongas renglones en otra parte del JSON). La suma de los importes de los renglones tiene que dar el subtotal del documento.
 Priorizá exactitud en códigos, descripciones y valores monetarios.
+Una leyenda como "sin valor fiscal" o "documento no válido como factura" NO cambia qué hay que leer: si el documento muestra subtotal neto, IVA, percepciones, CUIT, CAE o la letra, leelos igual y marcá la leyenda en su campo.
 Si hay precios por bulto/pack y precios unitarios, extraé ambos.
 Los documentos son de Argentina: las fechas vienen dd/mm/aaaa (día primero, NUNCA mes/día) y los montos 1.234,56 (punto = miles, coma = decimales). Devolvé las fechas como AAAA-MM-DD y los montos como número JSON con punto decimal y sin separador de miles (ej: 1234.56).
 
@@ -147,8 +193,11 @@ FORMATO JSON:
     "otros_impuestos": number o null (cualquier otro impuesto o cargo del pie que no sea IVA, percepción ni impuestos internos),
     "descuento_global": number o null,
     "impuestos_discriminados": boolean (true si el documento discrimina IVA/percepciones como conceptos separados),
-    "leyenda_no_valido_factura": boolean (true si dice "documento no válido como factura" o similar),
-    "tiene_precios": boolean (true si los ítems tienen precios)
+    "leyenda_no_valido_factura": boolean (true si dice "documento no válido como factura", "sin valor fiscal" o similar),
+    "tiene_precios": boolean (true si los ítems tienen precios),
+    "cuit_emisor": "CUIT de quien EMITE el comprobante (el proveedor), 11 dígitos, o null si no figura",
+    "cae": "número de CAE (Código de Autorización Electrónico, 14 dígitos; suele estar al pie junto a 'Vto. CAE') o null si no figura. NO es el CAI ni el código de barras",
+    "letra": "A, B o C (la letra grande del recuadro del encabezado) o null si no figura"
   },
   "items": [
     {
@@ -195,12 +244,22 @@ FORMATO JSON:
             data = await llamar(GEMINI_MODEL, "v1");
         } catch (e: any) {
             if (!GEMINI_MODEL_FALLBACK || GEMINI_MODEL_FALLBACK === GEMINI_MODEL) throw e;
+            // E-101: sin crédito (402) se avisa ya; un 429 del principal solo si el respaldo también falla
+            await avisarFallaGemini(e, "lectura de comprobante de compra", { soloSaldo: true });
             console.warn(`[OCR] ${GEMINI_MODEL} falló, se reintenta con ${GEMINI_MODEL_FALLBACK}:`, e?.message);
             modeloUsado = GEMINI_MODEL_FALLBACK;
-            data = await llamar(GEMINI_MODEL_FALLBACK, "v1beta");
+            try {
+                data = await llamar(GEMINI_MODEL_FALLBACK, "v1beta");
+            } catch (e2: any) {
+                await avisarFallaGemini(e, "lectura de comprobante de compra");   // fallaron los dos
+                throw e2;
+            }
         }
 
-        const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        // Se junta el texto de todas las partes de la respuesta (los modelos nuevos pueden partirla
+        // o anteponer una parte de razonamiento, que se saltea)
+        const text: string = ((data.candidates?.[0]?.content?.parts || []) as any[])
+            .filter((p) => p && p.thought !== true && typeof p.text === 'string').map((p) => p.text).join('');
         if (!text.trim()) {
             // Respuesta vacía (bloqueo de seguridad, corte): es un fallo de lectura, no "0 ítems"
             const motivo = data.candidates?.[0]?.finishReason || data.promptFeedback?.blockReason || 'sin texto';
@@ -218,6 +277,8 @@ FORMATO JSON:
         const avisos = [...leidos.avisos];
         const descuadre = avisoRenglonesContraTotal(saneado.items, saneado.comprobante);
         if (descuadre) avisos.push(descuadre);
+        const confirmarTipo = avisoTipoAConfirmar({ items: saneado.items, comprobante: saneado.comprobante });
+        if (confirmarTipo) avisos.push(confirmarTipo);
         if (modeloUsado !== GEMINI_MODEL) avisos.push('Se leyó con el modelo de respaldo (el principal no respondió): controlá los renglones contra el papel.');
         return {
             items: saneado.items,
@@ -229,6 +290,8 @@ FORMATO JSON:
 
     } catch (error: any) {
         console.error("Gemini OCR Error:", error);
+        // E-101: acá ya no queda otro intento: si fue por saldo o cuota (402 / 429), queda anotado y con aviso
+        await avisarFallaGemini(error, "lectura de comprobante de compra");
         return { items: [], error: error.message };
     }
 }
@@ -343,6 +406,9 @@ function sanearOcr(parsed: any): any {
         impuestos_internos: num(c.impuestos_internos),
         otros_impuestos: num(c.otros_impuestos),
         descuento_global: num(c.descuento_global),
+        cuit_emisor: c.cuit_emisor ? String(c.cuit_emisor).replace(/[^0-9]/g, '') || null : null,
+        cae: c.cae ? String(c.cae).replace(/[^0-9]/g, '') || null : null,
+        letra: /^[ABC]$/i.test(String(c.letra || '').trim()) ? String(c.letra).trim().toUpperCase() : null,
     } : null;
     return { items, comprobante };
 }

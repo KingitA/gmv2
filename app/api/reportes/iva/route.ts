@@ -90,43 +90,38 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── 2. IVA Compras (Crédito Fiscal) — desde comprobantes_compra_detalle ──
-    const comprasDetalle = await fetchAllRows(() => supabase
-      .from("comprobantes_compra_detalle")
-      .select(`
-        cantidad_facturada, precio_unitario, iva_porcentaje,
-        descuento1, descuento2, descuento3, descuento4,
-        comprobante:comprobante_id(
-          fecha_comprobante, tipo_comprobante, estado_pago
-        )
-      `)
-      .gte("comprobante.fecha_comprobante", desde)
-      .lte("comprobante.fecha_comprobante", hasta))
-
+    // ── 2. IVA Compras (Crédito Fiscal) ──
+    // E-81: la cuenta la hace la base (función reporte_iva_compras, migración 20261119c). Antes se
+    // traían TODOS los renglones de compras a este servidor, no se restaban las notas de crédito
+    // y entraban comprobantes sin validar. Ahora: solo comprobantes VALIDADOS con IVA discriminado
+    // (factura A, notas de débito y de crédito A), las notas de crédito restan, y el total sale del
+    // IVA del encabezado de cada comprobante (el que se controló al validar).
     let credito_fiscal_21 = 0
     let credito_fiscal_10 = 0
     let credito_fiscal_0 = 0
     let base_imponible_compras = 0
-
-    for (const d of comprasDetalle) {
-      const comp = Array.isArray(d.comprobante) ? d.comprobante[0] : d.comprobante
-      if (!comp) continue
-      // Solo facturas A (tipo_comprobante FA) generan crédito fiscal
-      if (!["FA", "NDA"].includes(comp.tipo_comprobante || "")) continue
-
-      let precio = d.precio_unitario || 0
-      if (d.descuento1) precio *= (1 - d.descuento1 / 100)
-      if (d.descuento2) precio *= (1 - d.descuento2 / 100)
-      if (d.descuento3) precio *= (1 - d.descuento3 / 100)
-      if (d.descuento4) precio *= (1 - d.descuento4 / 100)
-
-      const neto = precio * (d.cantidad_facturada || 0)
-      const ivaAmt = neto * ((d.iva_porcentaje || 0) / 100)
-      base_imponible_compras += neto
-
-      if (d.iva_porcentaje === 21) credito_fiscal_21 += ivaAmt
-      else if (d.iva_porcentaje === 10.5) credito_fiscal_10 += ivaAmt
-      else credito_fiscal_0 += ivaAmt
+    let percepciones_iva_compras = 0
+    let percepciones_iibb_compras = 0
+    let comprobantes_compra = 0
+    let notas_credito_compra = 0
+    let aviso_compras: string | null = null
+    {
+      const { data: ivaCompras, error: ivaComprasError } = await supabase.rpc("reporte_iva_compras", { p_desde: desde, p_hasta: hasta })
+      if (ivaComprasError) {
+        // No se inventa un crédito fiscal: sin la consulta, va en cero y se avisa
+        console.error("[Reportes/IVA] IVA compras:", ivaComprasError.message)
+        aviso_compras = "No se pudo calcular el IVA de compras (falta aplicar la migración 20261119c_jarvis_compras.sql): el crédito fiscal figura en cero y el saldo de IVA NO es válido."
+      } else {
+        const c = (ivaCompras ?? {}) as Record<string, number>
+        credito_fiscal_21 = Number(c.iva_21 ?? 0)
+        credito_fiscal_10 = Number(c.iva_10_5 ?? 0)
+        credito_fiscal_0 = Number(c.iva_otras ?? 0)
+        base_imponible_compras = Number(c.base_imponible ?? 0)
+        percepciones_iva_compras = Number(c.percepciones_iva ?? 0)
+        percepciones_iibb_compras = Number(c.percepciones_iibb ?? 0)
+        comprobantes_compra = Number(c.comprobantes ?? 0)
+        notas_credito_compra = Number(c.notas_credito ?? 0)
+      }
     }
 
     const r = (n: number) => Math.round(n * 100) / 100
@@ -166,12 +161,19 @@ export async function GET(request: NextRequest) {
         base_imponible: r(base_imponible_compras),
         iva_21: r(credito_fiscal_21),
         iva_10_5: r(credito_fiscal_10),
+        // Otras alícuotas (ni 21 % ni 10,5 %): antes este campo sumaba renglones sin IVA y daba siempre 0
         iva_exento: r(credito_fiscal_0),
-        total_credito: r(credito_fiscal_21 + credito_fiscal_10),
+        total_credito: r(credito_fiscal_21 + credito_fiscal_10 + credito_fiscal_0),
+        // Percepciones que nos hicieron los proveedores en esas compras (a cuenta nuestra)
+        percepciones_iva_sufridas: r(percepciones_iva_compras),
+        percepciones_iibb_sufridas: r(percepciones_iibb_compras),
+        comprobantes: comprobantes_compra,
+        notas_credito: notas_credito_compra,
+        aviso: aviso_compras,
       },
 
       // ── Saldo IVA ─────────────────────────────────────────────────────────
-      saldo_iva: r((debito_fiscal_21 + debito_fiscal_10) - (credito_fiscal_21 + credito_fiscal_10)),
+      saldo_iva: r((debito_fiscal_21 + debito_fiscal_10) - (credito_fiscal_21 + credito_fiscal_10 + credito_fiscal_0)),
 
       // ── Percepciones IVA ──────────────────────────────────────────────────
       percepciones_iva: r(percepciones_iva_total),

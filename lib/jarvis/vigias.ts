@@ -24,6 +24,7 @@ import { crearPropuesta } from "./agenda"
 import { estadoIndicadores } from "./exterior"
 import { armarMes, diaLaboral, viajesAfuera } from "./vigias-calendario"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { VIGIAS_COMPRAS } from "./vigias-compras"
 
 const EMPEORA_PARA_REABRIR = 1.25 // un aviso descartado vuelve si empeora 25 %
 const DIAS_REVISION_TRABADA = 1
@@ -276,6 +277,9 @@ export const VIGIAS: Record<string, Vigia> = {
   cheques: chequesPorVencer,
   cobros_sin_verificar: cobrosSinVerificar,
   revision_trabada: revisionTrabada,
+  // Compras (lib/jarvis/vigias-compras.ts): notas de crédito sin llegar, órdenes atrasadas,
+  // diferencias de precio sin resolver, documentos sin leer y fallas de la IA por saldo o cuota
+  ...VIGIAS_COMPRAS,
 }
 
 /** Corre todos los vigías. Si uno falla, los demás siguen (y se informa cuál falló). */

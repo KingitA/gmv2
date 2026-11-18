@@ -5,7 +5,7 @@
 // informes de siempre. Nada de lo que se haga acá modifica datos del sistema.
 
 import { useEffect, useRef, useState, type ComponentType } from 'react'
-import { ArrowLeft, BarChart3, Bot, ClipboardCheck, FileSpreadsheet, Lightbulb, Package, Receipt, RefreshCw, Users, Wallet, Sparkles, X, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, BarChart3, Bot, ClipboardCheck, FileSpreadsheet, Lightbulb, Package, Receipt, RefreshCw, ShoppingCart, Users, Wallet, Sparkles, X, type LucideIcon } from 'lucide-react'
 import { useUrlParams } from '@/lib/hooks/use-url-state'
 import { cn } from '@/lib/utils'
 import { fecha as fmtFecha, hora, partesAR } from '@/lib/formato'
@@ -20,6 +20,7 @@ import ArticulosVendidos from '@/components/playroom/reportes/ArticulosVendidos'
 import ComisionesViajantes from '@/components/playroom/reportes/ComisionesViajantes'
 import ComprobantesFiscal from '@/components/playroom/reportes/ComprobantesFiscal'
 import PreparacionDeposito from '@/components/playroom/reportes/PreparacionDeposito'
+import ReportesCompras from '@/components/playroom/reportes/ReportesCompras'
 
 const INFORMES: { id: string; titulo: string; descripcion: string; icono: LucideIcon; Componente: ComponentType }[] = [
   { id: 'articulos', titulo: 'Artículos vendidos', descripcion: 'Venta neta, márgenes y comparativos', icono: BarChart3, Componente: ArticulosVendidos },
@@ -28,6 +29,7 @@ const INFORMES: { id: string; titulo: string; descripcion: string; icono: Lucide
   { id: 'comisiones', titulo: 'Comisiones', descripcion: 'Devengadas y desempeño por viajante', icono: Receipt, Componente: ComisionesViajantes },
   { id: 'rotacion', titulo: 'Rotación y stock muerto', descripcion: 'Capital inmovilizado y qué liquidar', icono: Package, Componente: RotacionStockMuerto },
   { id: 'preparacion', titulo: 'Preparación por empleado', descripcion: 'Pedidos, renglones, plata y tiempo de cada uno en el depósito', icono: ClipboardCheck, Componente: PreparacionDeposito },
+  { id: 'compras', titulo: 'Compras y proveedores', descripcion: 'Compras por proveedor, costos, deuda, retenciones, órdenes pendientes y notas esperadas', icono: ShoppingCart, Componente: ReportesCompras },
   { id: 'fiscal', titulo: 'Fiscal ARCA', descripcion: 'Libro IVA ventas y exportación', icono: FileSpreadsheet, Componente: ComprobantesFiscal },
   { id: 'jarvis', titulo: 'Jarvis: reglas y decisiones', descripcion: 'Reglas de los avisos, lo que tiene que saber, modelo, gasto y quién decidió qué', icono: Bot, Componente: JarvisAjustes },
 ]
