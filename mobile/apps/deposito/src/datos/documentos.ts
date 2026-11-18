@@ -217,3 +217,57 @@ export function documentosEnCola(ops: { key: string; tipo: string; estado: strin
   }
   return [...porDoc.values()]
 }
+
+// ─── Varios archivos elegidos de una vez (fotos que llegaron por WhatsApp) ───
+
+export interface SeleccionRevisada<A> {
+  /** Los que entran al documento, en el orden en que se eligieron */
+  aceptados: { archivo: A; esPdf: boolean; esImagen: boolean }[]
+  /** Lo que hay que decirle al operario (archivos que no entraron y por qué) */
+  avisos: string[]
+}
+
+/**
+ * Qué archivos de una selección entran al documento que se está armando. Reglas:
+ *   · un PDF va solo: no se mezcla con fotos ni con otro PDF;
+ *   · las fotos se suman como hojas, en el orden elegido, hasta MAX_HOJAS_DOCUMENTO;
+ *   · lo que no es foto ni PDF se deja afuera y se avisa.
+ * `hojasActuales`: los tipos (mime) de las hojas que el documento ya tiene. Función pura.
+ */
+export function revisarSeleccion<A extends { type?: string | null; name?: string | null; size: number }>(archivos: A[], hojasActuales: { mime: string }[]): SeleccionRevisada<A> {
+  const avisos: string[] = []
+  const validos: { archivo: A; esPdf: boolean; esImagen: boolean }[] = []
+  for (const archivo of archivos) {
+    const r = revisarArchivo(archivo)
+    if (r.ok) validos.push({ archivo, esPdf: r.esPdf, esImagen: r.esImagen })
+    else avisos.push(archivos.length > 1 && archivo.name ? `${archivo.name}: ${r.motivo}` : r.motivo)
+  }
+  const yaHayPdf = hojasActuales.some((h) => h.mime === "application/pdf")
+  const yaHayFotos = hojasActuales.length > 0 && !yaHayPdf
+  if (yaHayPdf) {
+    if (validos.length > 0) avisos.push("Este documento ya es un PDF: subilo y después cargá lo demás como otro documento.")
+    return { aceptados: [], avisos }
+  }
+  const pdfs = validos.filter((v) => v.esPdf)
+  const fotos = validos.filter((v) => !v.esPdf)
+  if (pdfs.length > 0 && yaHayFotos) {
+    avisos.push("Un PDF va solo: terminá de subir las fotos de este documento antes de elegir un PDF.")
+    return { aceptados: limitar(fotos, hojasActuales.length, avisos), avisos }
+  }
+  if (pdfs.length > 0 && fotos.length > 0) {
+    avisos.push("Elegiste un PDF junto con fotos: un PDF va solo. Se tomaron las fotos; el PDF subilo como otro documento.")
+    return { aceptados: limitar(fotos, hojasActuales.length, avisos), avisos }
+  }
+  if (pdfs.length > 1) {
+    avisos.push("Un PDF por documento: se tomó el primero. Los otros subilos como otros documentos.")
+    return { aceptados: [pdfs[0]], avisos }
+  }
+  if (pdfs.length === 1) return { aceptados: pdfs, avisos }
+  return { aceptados: limitar(fotos, hojasActuales.length, avisos), avisos }
+}
+
+function limitar<T>(fotos: T[], yaHay: number, avisos: string[]): T[] {
+  const lugar = Math.max(0, MAX_HOJAS_DOCUMENTO - yaHay)
+  if (fotos.length > lugar) avisos.push(`Un documento lleva hasta ${MAX_HOJAS_DOCUMENTO} hojas: entraron ${lugar} de las ${fotos.length} elegidas.`)
+  return fotos.slice(0, lugar)
+}
