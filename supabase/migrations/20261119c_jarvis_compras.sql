@@ -14,9 +14,20 @@
 --     notas "esperadas", sin estimados ni provisiones de órdenes de compra.
 --   · Notas de crédito y reversas RESTAN.
 --   · Canal: Adquisición y Reversa = sin factura ("negro"); el resto = con factura ("blanco").
---   · DEUDA con un proveedor = saldo de su cuenta corriente (lo comprometido por órdenes de
---     compra NO es deuda y va aparte) + vencimientos cargados a mano que no tienen comprobante.
---     Una sola cuenta para todas las herramientas (E-83).
+--   · DEUDA con un proveedor = lo que el CALENDARIO de pagos tiene pendiente (E-83, revisión del
+--     19/11). Marcar un vencimiento como pagado desde el calendario NO baja la cuenta corriente
+--     (no genera imputación): con datos reales, 62 facturas de mar-abr/2026 cargadas desde Gmail
+--     por $192,5 M tenían todos sus vencimientos pagados y la cuenta corriente las seguía dando
+--     como deuda. Por eso:
+--       - un comprobante de la cuenta corriente cuenta como deuda SOLO por sus vencimientos que
+--         siguen pendientes (pagado o cancelado = saldado), cada cuota con su propia fecha;
+--       - si un comprobante no tiene NINGÚN vencimiento, vale su saldo de cuenta corriente;
+--       - se suman los vencimientos cargados a mano sin comprobante, salvo los que repiten un
+--         comprobante que ya cuenta (mismo número, o mismo importe ± $1 y fecha ± 5 días);
+--       - lo comprometido por órdenes de compra NO es deuda y va aparte;
+--       - los créditos a favor sin aplicar (notas de crédito, pagos a cuenta) se informan
+--         APARTE: no bajan la deuda hasta que se aplican contra una factura.
+--     Una sola cuenta para todas las herramientas.
 --
 -- Permisos: solo el servidor (service_role). Quién puede ver qué lo decide el código que llama.
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -37,49 +48,88 @@ COMMENT ON TABLE public.ia_fallas IS
 
 -- ═════════════════════ 1. Cuenta corriente de proveedores ═════════════════════
 
--- 1.a Ítems ABIERTOS de la cuenta corriente: deudas con saldo, créditos sin aplicar y lo
---     comprometido por órdenes de compra. Los pagos anulados y su anulación no figuran (se
---     compensan entre sí).
+-- 1.a PARTIDAS ABIERTAS de un proveedor (la deuda, cuota por cuota):
+--     clase 'deuda'        una fila por cada vencimiento PENDIENTE de un comprobante de la cuenta
+--                          corriente (o una fila por el saldo del comprobante, si no tiene ningún
+--                          vencimiento). saldo = lo que falta de esa cuota; vence = su fecha.
+--     clase 'credito'      notas de crédito y pagos a cuenta sin aplicar (saldo negativo). Solo
+--                          los de comprobantes de compra y órdenes de pago: los movimientos viejos
+--                          sin imputar no son confiables como crédito.
+--     clase 'comprometido' provisión de una orden de compra sin facturar (no es deuda).
+--     Los pagos anulados y su anulación no figuran (se compensan entre sí).
+DROP FUNCTION IF EXISTS public.jarvis_cc_abiertos(uuid);
 CREATE OR REPLACE FUNCTION public.jarvis_cc_abiertos(p_proveedor_id uuid DEFAULT NULL)
-RETURNS TABLE(proveedor_id uuid, movimiento_id uuid, fecha date, clase text, tipo_movimiento text,
-              tipo_comprobante text, numero_comprobante text, descripcion text,
+RETURNS TABLE(partida_id uuid, proveedor_id uuid, movimiento_id uuid, fecha date, clase text, tipo_movimiento text,
+              tipo_comprobante text, numero_comprobante text, descripcion text, cuota text,
               monto numeric, saldo numeric, vence date, dias_vencido integer)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  WITH base AS (
+  WITH mov AS (
     SELECT cc.id, cc.proveedor_id, (cc.fecha AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS fecha,
            cc.tipo_movimiento::text AS tipo_movimiento, cc.tipo_comprobante::text AS tipo_comprobante,
            cc.numero_comprobante::text AS numero_comprobante, cc.descripcion, cc.monto,
-           CASE WHEN cc.tipo_movimiento = 'orden_compra' THEN cc.monto
-                ELSE public.cc_proveedor_saldo_movimiento(cc.id) END AS saldo,
-           COALESCE(cc.fecha_vencimiento,
-                    (SELECT min(v.fecha_vencimiento) FROM vencimientos v
-                      WHERE v.referencia_tipo = 'cuenta_corriente' AND v.referencia_id = cc.id
-                        AND v.estado IN ('pendiente', 'vencido') AND NOT COALESCE(v.es_estimado, false)),
-                    (cc.fecha AT TIME ZONE 'America/Argentina/Buenos_Aires')::date) AS vence
+           cc.referencia_tipo, cc.referencia_id, cc.fecha_vencimiento
     FROM cuenta_corriente_proveedores cc
     WHERE (p_proveedor_id IS NULL OR cc.proveedor_id = p_proveedor_id)
       AND cc.tipo_movimiento <> 'anulacion'
       AND NOT (cc.referencia_tipo = 'orden_pago' AND EXISTS (
             SELECT 1 FROM cuenta_corriente_proveedores an
              WHERE an.referencia_tipo = 'orden_pago_anulacion' AND an.referencia_id = cc.referencia_id))
+  ), venc AS (     -- vencimientos (reales, no estimados) de cada comprobante de deuda, en cualquier estado
+    SELECT m.id AS mov_id, v.id AS venc_id, v.estado::text AS estado, v.monto, v.fecha_vencimiento, v.concepto::text AS concepto
+    FROM mov m
+    JOIN vencimientos v
+      ON NOT COALESCE(v.es_estimado, false)
+     AND ( (v.referencia_tipo = 'cuenta_corriente' AND v.referencia_id = m.id)
+        OR (v.referencia_tipo = 'comprobante_compra' AND m.referencia_tipo = 'comprobante_compra' AND v.referencia_id = m.referencia_id) )
+    WHERE m.monto > 0 AND m.tipo_movimiento <> 'orden_compra'
+  ), partidas AS (
+    -- deuda con vencimientos: cada cuota pendiente
+    SELECT ve.venc_id AS partida_id, m.proveedor_id, m.id AS movimiento_id, m.fecha, 'deuda'::text AS clase, m.tipo_movimiento, m.tipo_comprobante,
+           m.numero_comprobante, m.descripcion, ve.concepto AS cuota, m.monto, ve.monto AS saldo, ve.fecha_vencimiento AS vence
+    FROM mov m JOIN venc ve ON ve.mov_id = m.id
+    WHERE ve.estado IN ('pendiente', 'vencido') AND COALESCE(ve.monto, 0) > 0.01
+    UNION ALL
+    -- deuda SIN ningún vencimiento: el saldo de la cuenta corriente
+    SELECT m.id, m.proveedor_id, m.id, m.fecha, 'deuda', m.tipo_movimiento, m.tipo_comprobante,
+           m.numero_comprobante, m.descripcion, NULL, m.monto, public.cc_proveedor_saldo_movimiento(m.id),
+           COALESCE(m.fecha_vencimiento, m.fecha)
+    FROM mov m
+    WHERE m.monto > 0 AND m.tipo_movimiento <> 'orden_compra'
+      AND NOT EXISTS (SELECT 1 FROM venc ve WHERE ve.mov_id = m.id)
+    UNION ALL
+    -- créditos a favor sin aplicar
+    SELECT m.id, m.proveedor_id, m.id, m.fecha, 'credito', m.tipo_movimiento, m.tipo_comprobante,
+           m.numero_comprobante, m.descripcion, NULL, m.monto, public.cc_proveedor_saldo_movimiento(m.id), NULL::date
+    FROM mov m
+    WHERE m.monto < 0 AND m.referencia_tipo IN ('comprobante_compra', 'orden_pago')
+    UNION ALL
+    -- comprometido por órdenes de compra
+    SELECT m.id, m.proveedor_id, m.id, m.fecha, 'comprometido', m.tipo_movimiento, m.tipo_comprobante,
+           m.numero_comprobante, m.descripcion, NULL, m.monto, m.monto, NULL::date
+    FROM mov m
+    WHERE m.tipo_movimiento = 'orden_compra'
   )
-  SELECT b.proveedor_id, b.id, b.fecha,
-         CASE WHEN b.tipo_movimiento = 'orden_compra' THEN 'comprometido'
-              WHEN b.saldo > 0 THEN 'deuda' ELSE 'credito' END,
-         b.tipo_movimiento, b.tipo_comprobante, b.numero_comprobante, b.descripcion,
-         round(b.monto, 2), round(b.saldo, 2),
-         CASE WHEN b.tipo_movimiento <> 'orden_compra' AND b.saldo > 0 THEN b.vence END,
-         CASE WHEN b.tipo_movimiento <> 'orden_compra' AND b.saldo > 0 AND b.vence < public.hoy_ar()
-              THEN (public.hoy_ar() - b.vence) END
-  FROM base b
-  WHERE abs(b.saldo) > 0.01
+  SELECT pa.partida_id, pa.proveedor_id, pa.movimiento_id, pa.fecha, pa.clase, pa.tipo_movimiento, pa.tipo_comprobante,
+         pa.numero_comprobante, pa.descripcion, pa.cuota, round(pa.monto, 2), round(pa.saldo, 2), pa.vence,
+         CASE WHEN pa.clase = 'deuda' AND pa.vence < public.hoy_ar() THEN (public.hoy_ar() - pa.vence) END
+  FROM partidas pa
+  WHERE abs(pa.saldo) > 0.01
 $$;
 
 -- 1.b Vencimientos de proveedor cargados A MANO (sin comprobante ni movimiento de cuenta
 --     corriente detrás): son deuda que la cuenta corriente no conoce. Sin estimados.
+--     NO se cuenta uno que repite un comprobante que ya está contando como deuda: cuando se
+--     valida la factura de algo que ya estaba anotado a mano, la validación crea OTRO vencimiento
+--     y el anotado a mano sigue (problema E-102). Se considera repetido si, del mismo proveedor,
+--     hay una partida de deuda de un comprobante con el MISMO NÚMERO (el número aparece en el
+--     concepto del vencimiento) o con el mismo importe (± $1) y fecha de vencimiento (± 5 días).
 CREATE OR REPLACE FUNCTION public.jarvis_vencimientos_a_mano(p_proveedor_id uuid DEFAULT NULL)
 RETURNS TABLE(proveedor_id uuid, vencimiento_id uuid, concepto text, tipo text, monto numeric, vence date, dias_vencido integer)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  WITH deuda AS (
+    SELECT a.proveedor_id, a.saldo, a.vence, NULLIF(trim(COALESCE(a.numero_comprobante, '')), '') AS numero
+    FROM public.jarvis_cc_abiertos(p_proveedor_id) a WHERE a.clase = 'deuda'
+  )
   SELECT v.proveedor_id, v.id, v.concepto::text, v.tipo::text, round(v.monto, 2), v.fecha_vencimiento,
          CASE WHEN v.fecha_vencimiento < public.hoy_ar() THEN (public.hoy_ar() - v.fecha_vencimiento) END
   FROM vencimientos v
@@ -89,14 +139,21 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     AND NOT COALESCE(v.es_estimado, false)
     AND COALESCE(v.monto, 0) > 0
     AND NOT (v.referencia_id IS NOT NULL AND COALESCE(v.referencia_tipo, '') IN ('cuenta_corriente', 'comprobante_compra', 'orden_compra'))
+    AND NOT EXISTS (
+      SELECT 1 FROM deuda d
+      WHERE d.proveedor_id = v.proveedor_id
+        AND ( (d.numero IS NOT NULL AND length(d.numero) >= 4 AND position(lower(d.numero) IN lower(COALESCE(v.concepto, ''))) > 0)
+           OR (abs(d.saldo - v.monto) <= 1 AND d.vence IS NOT NULL AND abs(d.vence - v.fecha_vencimiento) <= 5) ))
 $$;
 
 -- 1.c Resumen por proveedor: LA deuda (E-83) y su antigüedad.
---     saldo_cc           = suma de la cuenta corriente (sin lo comprometido por órdenes de compra)
---     vencimientos_a_mano = deuda anotada en el calendario sin comprobante
---     deuda_total        = saldo_cc + vencimientos_a_mano      ← "cuánto le debemos"
---     La antigüedad reparte lo ABIERTO (comprobantes con saldo + vencimientos a mano) por días
---     de vencido; los créditos sin aplicar van en su columna y ya están restados en deuda_total.
+--     deuda_abierta       = cuotas pendientes de comprobantes (jarvis_cc_abiertos, clase deuda)
+--     vencimientos_a_mano = deuda anotada en el calendario sin comprobante (sin los repetidos)
+--     deuda_total         = deuda_abierta + vencimientos_a_mano        ← "cuánto le debemos"
+--     creditos_sin_aplicar: a favor nuestro, NO restados de deuda_total (negativo).
+--     saldo_cc: saldo CONTABLE de la cuenta corriente, solo informativo: puede ser mucho mayor
+--               que la deuda, porque marcar pagado en el calendario no la baja.
+--     La antigüedad reparte deuda_total por los días de vencido de CADA cuota.
 CREATE OR REPLACE FUNCTION public.jarvis_cc_proveedores(p_proveedor_id uuid DEFAULT NULL)
 RETURNS TABLE(proveedor_id uuid, proveedor text, saldo_cc numeric, vencimientos_a_mano numeric, deuda_total numeric,
               deuda_abierta numeric, creditos_sin_aplicar numeric, comprometido_oc numeric,
@@ -108,19 +165,21 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     FROM cuenta_corriente_proveedores cc
     WHERE (p_proveedor_id IS NULL OR cc.proveedor_id = p_proveedor_id)
     GROUP BY 1
+  ), ab AS (
+    SELECT * FROM public.jarvis_cc_abiertos(p_proveedor_id)
   ), abiertos AS (
     SELECT a.proveedor_id,
            sum(a.saldo) FILTER (WHERE a.clase = 'deuda') AS deuda_abierta,
            sum(a.saldo) FILTER (WHERE a.clase = 'credito') AS creditos,
            sum(a.saldo) FILTER (WHERE a.clase = 'comprometido') AS comprometido,
-           count(*) FILTER (WHERE a.clase = 'deuda') AS n
-    FROM public.jarvis_cc_abiertos(p_proveedor_id) a GROUP BY 1
+           count(DISTINCT a.movimiento_id) FILTER (WHERE a.clase = 'deuda') AS n
+    FROM ab a GROUP BY 1
+  ), mano AS (
+    SELECT * FROM public.jarvis_vencimientos_a_mano(p_proveedor_id)
   ), partidas AS (       -- todo lo que hay que pagar, con su fecha
-    SELECT a.proveedor_id, a.saldo AS importe, a.vence, COALESCE(a.dias_vencido, 0) AS dias
-    FROM public.jarvis_cc_abiertos(p_proveedor_id) a WHERE a.clase = 'deuda'
+    SELECT a.proveedor_id, a.saldo AS importe, a.vence, COALESCE(a.dias_vencido, 0) AS dias FROM ab a WHERE a.clase = 'deuda'
     UNION ALL
-    SELECT m.proveedor_id, m.monto, m.vence, COALESCE(m.dias_vencido, 0)
-    FROM public.jarvis_vencimientos_a_mano(p_proveedor_id) m
+    SELECT m.proveedor_id, m.monto, m.vence, COALESCE(m.dias_vencido, 0) FROM mano m
   ), tramos AS (
     SELECT pa.proveedor_id,
            sum(pa.importe) FILTER (WHERE pa.dias <= 0) AS a_vencer,
@@ -130,12 +189,12 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
            sum(pa.importe) FILTER (WHERE pa.dias > 90) AS vmas,
            min(pa.vence) FILTER (WHERE pa.vence >= public.hoy_ar()) AS prox
     FROM partidas pa GROUP BY 1
-  ), mano AS (
-    SELECT m.proveedor_id, sum(m.monto) AS total FROM public.jarvis_vencimientos_a_mano(p_proveedor_id) m GROUP BY 1
+  ), mano_total AS (
+    SELECT m.proveedor_id, sum(m.monto) AS total FROM mano m GROUP BY 1
   )
   SELECT p.id, p.nombre::text,
          round(COALESCE(s.saldo_cc, 0), 2), round(COALESCE(mn.total, 0), 2),
-         round(COALESCE(s.saldo_cc, 0) + COALESCE(mn.total, 0), 2),
+         round(COALESCE(ab.deuda_abierta, 0) + COALESCE(mn.total, 0), 2),
          round(COALESCE(ab.deuda_abierta, 0), 2), round(COALESCE(ab.creditos, 0), 2), round(COALESCE(ab.comprometido, 0), 2),
          round(COALESCE(t.a_vencer, 0), 2), round(COALESCE(t.v30, 0), 2), round(COALESCE(t.v60, 0), 2),
          round(COALESCE(t.v90, 0), 2), round(COALESCE(t.vmas, 0), 2),
@@ -144,11 +203,11 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   LEFT JOIN saldos s ON s.proveedor_id = p.id
   LEFT JOIN abiertos ab ON ab.proveedor_id = p.id
   LEFT JOIN tramos t ON t.proveedor_id = p.id
-  LEFT JOIN mano mn ON mn.proveedor_id = p.id
+  LEFT JOIN mano_total mn ON mn.proveedor_id = p.id
   WHERE (p_proveedor_id IS NULL OR p.id = p_proveedor_id)
     AND (p_proveedor_id IS NOT NULL
-         OR abs(COALESCE(s.saldo_cc, 0)) > 0.01 OR COALESCE(mn.total, 0) > 0.01
-         OR abs(COALESCE(ab.comprometido, 0)) > 0.01 OR COALESCE(ab.n, 0) > 0)
+         OR COALESCE(ab.deuda_abierta, 0) > 0.01 OR COALESCE(mn.total, 0) > 0.01
+         OR abs(COALESCE(ab.creditos, 0)) > 0.01 OR abs(COALESCE(ab.comprometido, 0)) > 0.01)
 $$;
 
 -- 1.d jarvis_proveedores_resumen: MISMA firma y columnas que 20261014h; cambia solo de dónde sale
@@ -198,8 +257,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     (au.ultimo AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS ultimo_aumento,
     public.hoy_ar() - (au.ultimo AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS dias_sin_aumento,
     COALESCE(au.n90, 0) AS articulos_aumentados_90d, ROUND(au.pct90, 1) AS aumento_promedio_pct_90d,
-    -- E-83: la deuda es la MISMA que muestra la cuenta corriente del proveedor (jarvis_cc_proveedores):
-    -- saldo de la cuenta corriente + vencimientos cargados a mano que no tienen comprobante.
+    -- E-83: la deuda es la MISMA en todos lados (jarvis_cc_proveedores): lo que el calendario tiene
+    -- pendiente de cada comprobante + vencimientos cargados a mano que no tienen comprobante.
     -- "deuda_estimada" pasa a ser lo COMPROMETIDO por órdenes de compra sin facturar (no es deuda).
     ROUND(COALESCE(cc.deuda_total, 0), 2) AS deuda_pendiente, ROUND(COALESCE(cc.vencido, 0), 2) AS deuda_vencida, cc.proximo_vencimiento,
     (SELECT COUNT(*) FROM ordenes_compra o WHERE o.proveedor_id = p.id
@@ -377,11 +436,12 @@ $$;
 -- hecha la nota de crédito?", las que YA llegaron en los últimos p_dias_llegadas días (la misma
 -- fila pasa a validada con el número real). p_texto busca por palabras en el proveedor, el motivo
 -- y los artículos ("cremas dentales colgate"): tienen que aparecer TODAS las palabras.
+DROP FUNCTION IF EXISTS public.jarvis_notas_esperadas(uuid, text, int);
 CREATE OR REPLACE FUNCTION public.jarvis_notas_esperadas(
   p_proveedor_id uuid DEFAULT NULL, p_texto text DEFAULT NULL, p_dias_llegadas int DEFAULT 365
 ) RETURNS TABLE(nota_id uuid, tipo text, situacion text, motivo text, proveedor_id uuid, proveedor text,
                 anotada date, dias integer, total numeric, neto numeric,
-                numero_real text, fecha_real date, orden text, factura text, articulos text, unidades numeric)
+                numero_real text, fecha_real date, orden text, factura text, articulos jsonb, unidades numeric)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   WITH notas AS (
     SELECT c.id, c.proveedor_id, c.estado, c.origen_nc, c.tipo_comprobante, c.numero_comprobante, c.fecha_comprobante,
@@ -394,16 +454,18 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
               AND COALESCE(c.fecha_validacion, c.created_at) >= now() - make_interval(days => GREATEST(COALESCE(p_dias_llegadas, 365), 0)) ) )
   ), arts AS (
     -- de qué artículos es: lo que se resolvió en la recepción y, si los tiene, los renglones de la nota
-    SELECT n.id AS nota_id, string_agg(DISTINCT x.txt, '; ') AS articulos, sum(x.unidades) AS unidades
+    -- Los números van como número: el formato (coma decimal) lo pone el código que lo muestra
+    SELECT n.id AS nota_id,
+           jsonb_agg(jsonb_build_object('articulo', x.nombre, 'unidades', x.unidades, 'en', x.en)) AS articulos,
+           string_agg(x.nombre, ' ') AS nombres, sum(x.unidades) AS unidades
     FROM notas n
     JOIN LATERAL (
-      SELECT COALESCE(a.sku || ' ', '') || COALESCE(a.descripcion, rd.descripcion, '(sin artículo)')
-             || ' (' || trim(to_char(rd.unidades, 'FM999G999G990D##')) || ' u.)' AS txt, rd.unidades
+      SELECT COALESCE(a.sku || ' ', '') || COALESCE(a.descripcion, rd.descripcion, '(sin artículo)') AS nombre, rd.unidades, 'unidades'::text AS en
       FROM recepciones_diferencias rd LEFT JOIN articulos a ON a.id = rd.articulo_id
       WHERE rd.nc_esperada_id = n.id
       UNION ALL
-      SELECT COALESCE(a.sku || ' ', '') || COALESCE(a.descripcion, d.descripcion_proveedor, '(sin artículo)')
-             || ' (' || trim(to_char(d.cantidad_facturada, 'FM999G999G990D##')) || ')', d.cantidad_facturada
+      SELECT COALESCE(a.sku || ' ', '') || COALESCE(a.descripcion, d.descripcion_proveedor, '(sin artículo)'), d.cantidad_facturada,
+             CASE WHEN d.tipo_cantidad = 'bulto' THEN 'bultos' ELSE 'unidades' END
       FROM comprobantes_compra_detalle d LEFT JOIN articulos a ON a.id = d.articulo_id
       WHERE d.comprobante_id = n.id
     ) x ON true
@@ -430,7 +492,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
           -- sin acentos y sin el plural: "cremas dentales" encuentra "CREMA DENTAL"
           SELECT 1 FROM regexp_split_to_table(translate(lower(trim(p_texto)), 'áéíóúü', 'aeiouu'), '\s+') w
           WHERE length(w) > 1
-            AND translate(lower(COALESCE(pr.nombre, '') || ' ' || COALESCE(n.origen_nc, '') || ' ' || COALESCE(ar.articulos, '')
+            AND translate(lower(COALESCE(pr.nombre, '') || ' ' || COALESCE(n.origen_nc, '') || ' ' || COALESCE(ar.nombres, '')
                       || ' ' || COALESCE(n.numero_comprobante, '') || ' ' || COALESCE(oc.numero_orden, '')), 'áéíóúü', 'aeiouu')
                 NOT LIKE '%' || replace(replace(CASE WHEN length(w) > 4 THEN regexp_replace(w, '(es|s)$', '') ELSE w END, '%', ''), '_', '') || '%')
 $$;

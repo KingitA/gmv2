@@ -244,9 +244,16 @@ FORMATO JSON:
             data = await llamar(GEMINI_MODEL, "v1");
         } catch (e: any) {
             if (!GEMINI_MODEL_FALLBACK || GEMINI_MODEL_FALLBACK === GEMINI_MODEL) throw e;
+            // E-101: sin crédito (402) se avisa ya; un 429 del principal solo si el respaldo también falla
+            await avisarFallaGemini(e, "lectura de comprobante de compra", { soloSaldo: true });
             console.warn(`[OCR] ${GEMINI_MODEL} falló, se reintenta con ${GEMINI_MODEL_FALLBACK}:`, e?.message);
             modeloUsado = GEMINI_MODEL_FALLBACK;
-            data = await llamar(GEMINI_MODEL_FALLBACK, "v1beta");
+            try {
+                data = await llamar(GEMINI_MODEL_FALLBACK, "v1beta");
+            } catch (e2: any) {
+                await avisarFallaGemini(e, "lectura de comprobante de compra");   // fallaron los dos
+                throw e2;
+            }
         }
 
         // Se junta el texto de todas las partes de la respuesta (los modelos nuevos pueden partirla
@@ -283,7 +290,7 @@ FORMATO JSON:
 
     } catch (error: any) {
         console.error("Gemini OCR Error:", error);
-        // E-101: si fue por saldo o cuota (402 / 429), queda anotado y con aviso para admin
+        // E-101: acá ya no queda otro intento: si fue por saldo o cuota (402 / 429), queda anotado y con aviso
         await avisarFallaGemini(error, "lectura de comprobante de compra");
         return { items: [], error: error.message };
     }

@@ -9,13 +9,16 @@
  *  - Comprado = comprobantes de compra VALIDADOS; sin remitos, notas esperadas ni estimados.
  *  - Notas de crédito y reversas restan.
  *  - "Con factura" (blanco) / "sin factura" (negro: Adquisición y Reversa).
- *  - Deuda = saldo de la cuenta corriente + vencimientos cargados a mano sin comprobante.
- *    Lo comprometido por órdenes de compra NO es deuda.
+ *  - Deuda = lo que el CALENDARIO tiene pendiente: las cuotas pendientes de cada comprobante
+ *    (o su saldo de cuenta corriente, si no tiene ningún vencimiento) + vencimientos cargados a
+ *    mano sin comprobante. Un vencimiento marcado pagado o cancelado es deuda saldada, aunque la
+ *    cuenta corriente no lo sepa. Lo comprometido por órdenes de compra NO es deuda, y los
+ *    créditos a favor sin aplicar se informan aparte.
  */
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Formato } from "@/lib/playroom/bloques"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
-import { finDiaAR, inicioDiaAR } from "@/lib/formato"
+import { finDiaAR, inicioDiaAR, numero } from "@/lib/formato"
 
 export interface TablaReporte {
   titulo: string
@@ -66,6 +69,10 @@ const n0 = (v: unknown) => Number(v) || 0
 const red = (v: unknown, dec = 2) => Math.round(n0(v) * 10 ** dec) / 10 ** dec
 const fechaSola = (v: unknown) => (v == null ? null : String(v).slice(0, 10))
 const suma = (filas: Fila[], clave: string) => red(filas.reduce((s, f) => s + n0(f[clave]), 0))
+/** "2026-11" → "11/2026" (así se muestra un mes, docs/FORMATOS.md) */
+export const mesAR = (aaaaMm: unknown) => { const [a, m] = String(aaaaMm ?? "").split("-"); return a && m ? `${m}/${a}` : String(aaaaMm ?? "") }
+/** Cantidad con coma decimal y sin ceros de más: 1,5 · 12 */
+export const cantidadAR = (v: unknown) => numero(n0(v), 0, 2)
 
 export const MOTIVO_NOTA: Record<string, string> = {
   faltante: "faltante", diferencia_precio: "diferencia de precio", descuento_fuera_factura: "descuento fuera de factura",
@@ -96,7 +103,7 @@ export async function repComprasProveedorMes(db: SupabaseClient, f: FiltrosCompr
   const filas = rows.map((r) => ({
     proveedor: String(r.proveedor ?? "—"), mes: String(r.mes), comprobantes: n0(r.comprobantes),
     con_factura_neto: red(r.blanco_neto), con_factura_total: red(r.blanco_total), sin_factura: red(r.negro_total), total: red(r.total),
-  })).sort((a, b) => a.proveedor.localeCompare(b.proveedor) || b.mes.localeCompare(a.mes))
+  })).sort((a, b) => a.proveedor.localeCompare(b.proveedor) || b.mes.localeCompare(a.mes)).map((x) => ({ ...x, mes: mesAR(x.mes) }))
   return {
     titulo: `Compras por proveedor y mes${f.proveedorNombre ? ` — ${f.proveedorNombre}` : ""}`,
     columnas: [
@@ -158,7 +165,7 @@ export async function repDeudaProveedores(db: SupabaseClient, f: FiltrosCompras)
     vencido_1_30: red(r.vencido_1_30), vencido_31_60: red(r.vencido_31_60), vencido_61_90: red(r.vencido_61_90), vencido_mas_90: red(r.vencido_mas_90),
     creditos_sin_aplicar: red(r.creditos_sin_aplicar), anotado_a_mano: red(r.vencimientos_a_mano), comprometido_oc: red(r.comprometido_oc),
     proximo_vencimiento: fechaSola(r.proximo_vencimiento),
-  })).filter((x) => f.proveedorId || Math.abs(x.deuda) > 0.01 || x.comprometido_oc > 0.01).sort((a, b) => b.deuda - a.deuda)
+  })).filter((x) => f.proveedorId || x.deuda > 0.01 || x.comprometido_oc > 0.01 || Math.abs(x.creditos_sin_aplicar) > 0.01).sort((a, b) => b.deuda - a.deuda)
   const claves = ["deuda", "a_vencer", "vencido_1_30", "vencido_31_60", "vencido_61_90", "vencido_mas_90", "comprometido_oc"]
   return {
     titulo: "Deuda a proveedores por antigüedad",
@@ -166,12 +173,12 @@ export async function repDeudaProveedores(db: SupabaseClient, f: FiltrosCompras)
       { clave: "proveedor", titulo: "Proveedor" }, { clave: "deuda", titulo: "Le debemos", formato: "pesos" }, { clave: "a_vencer", titulo: "A vencer", formato: "pesos" },
       { clave: "vencido_1_30", titulo: "Vencido 1-30 d", formato: "pesos" }, { clave: "vencido_31_60", titulo: "31-60 d", formato: "pesos" },
       { clave: "vencido_61_90", titulo: "61-90 d", formato: "pesos" }, { clave: "vencido_mas_90", titulo: "Más de 90 d", formato: "pesos" },
-      { clave: "creditos_sin_aplicar", titulo: "Créditos sin aplicar", formato: "pesos" }, { clave: "anotado_a_mano", titulo: "Anotado a mano", formato: "pesos" },
+      { clave: "anotado_a_mano", titulo: "De eso, anotado a mano", formato: "pesos" }, { clave: "creditos_sin_aplicar", titulo: "Créditos a favor (aparte)", formato: "pesos" },
       { clave: "comprometido_oc", titulo: "Comprometido por órdenes", formato: "pesos" }, { clave: "proximo_vencimiento", titulo: "Próx. vencimiento", formato: "fecha" },
     ],
     filas,
     total: Object.fromEntries(claves.map((c) => [c, suma(filas, c)])),
-    nota: "“Le debemos” = saldo de la cuenta corriente + vencimientos anotados a mano que no tienen comprobante (columna “Anotado a mano”, ya incluida). Los tramos reparten lo abierto por días de vencido; los créditos sin aplicar ya están restados en “Le debemos”. “Comprometido por órdenes” es mercadería pedida sin factura: NO es deuda y no está sumado.",
+    nota: "“Le debemos” = lo que el calendario de pagos tiene pendiente: las cuotas pendientes de cada comprobante (un vencimiento marcado pagado o cancelado ya no cuenta) más lo anotado a mano sin comprobante (ya incluido). Los tramos reparten ese total por los días de vencida de cada cuota. Los créditos a favor sin aplicar (notas de crédito, pagos a cuenta) van aparte: NO están restados. “Comprometido por órdenes” es mercadería pedida sin factura: no es deuda y no está sumado.",
   }
 }
 
@@ -263,8 +270,16 @@ export async function filasNotas(db: SupabaseClient, f: FiltrosCompras, diasLleg
     tipo: String(r.tipo), situacion: String(r.situacion), motivo: MOTIVO_NOTA[String(r.motivo)] ?? (String(r.motivo || "") || "—"),
     proveedor: String(r.proveedor ?? "—"), anotada: fechaSola(r.anotada), dias: n0(r.dias), total: red(r.total),
     numero_real: r.numero_real ?? null, fecha_real: fechaSola(r.fecha_real), orden: r.orden ?? null, factura: r.factura ?? null,
-    articulos: r.articulos ?? null,
+    articulos: textoArticulos(r.articulos),
   }))
+}
+
+/** [{ articulo, unidades, en }] → "10032 CREMA DENTAL (12 unidades); …" con los números en formato argentino */
+function textoArticulos(v: unknown): string | null {
+  const lista = Array.isArray(v) ? (v as Fila[]) : []
+  if (!lista.length) return null
+  const partes = [...new Set(lista.map((a) => `${String(a.articulo ?? "(sin artículo)")}${a.unidades == null ? "" : ` (${cantidadAR(a.unidades)} ${a.en === "bultos" ? "bultos" : "u."})`}`))]
+  return partes.join("; ")
 }
 
 export async function repNotasEsperadas(db: SupabaseClient, f: FiltrosCompras): Promise<TablaReporte> {

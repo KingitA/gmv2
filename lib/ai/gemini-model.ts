@@ -54,27 +54,34 @@ export async function conRespaldoGemini<T>(fn: (modelo: string) => Promise<T>, e
   try {
     return await fn(GEMINI_MODEL)
   } catch (e) {
-    // E-101: sin saldo o sin cuota no se falla en silencio: queda anotado y con aviso para admin
-    await avisarFallaGemini(e, etiqueta)
-    if (!GEMINI_MODEL_FALLBACK || GEMINI_MODEL_FALLBACK === GEMINI_MODEL || !esErrorDeModeloGemini(e)) throw e
+    // E-101: no se falla en silencio, pero tampoco se alarma por un 429 pasajero o de un solo modelo.
+    //  - sin crédito / facturación (402): se avisa ya, el respaldo es de la misma cuenta;
+    //  - cuota o demasiados pedidos (429): se avisa solo si no hay respaldo o si el respaldo también falla.
+    const hayRespaldo = !!GEMINI_MODEL_FALLBACK && GEMINI_MODEL_FALLBACK !== GEMINI_MODEL && esErrorDeModeloGemini(e)
+    await avisarFallaGemini(e, etiqueta, { soloSaldo: hayRespaldo })
+    if (!hayRespaldo) throw e
     console.warn(`[${etiqueta}] ${GEMINI_MODEL} falló, se reintenta con ${GEMINI_MODEL_FALLBACK}:`, (e as Error)?.message)
     try {
       return await fn(GEMINI_MODEL_FALLBACK)
     } catch (e2) {
+      // Fallaron los dos: ahora sí cuenta también la cuota (la del principal o la del respaldo)
       await avisarFallaGemini(e2, etiqueta)
+      await avisarFallaGemini(e, etiqueta)
       throw e2
     }
   }
 }
 
 /**
- * E-101: anota una falla de Gemini por saldo o cuota (402 / 429) y deja el aviso en la bandeja
- * de Jarvis. No lanza nunca. Se importa a demanda para no cargar el cliente de la base en los
- * lugares que solo necesitan el nombre del modelo.
+ * E-101: anota una falla de Gemini por saldo o cuota y deja el aviso en la bandeja de Jarvis.
+ * No lanza nunca. Se importa a demanda para no cargar el cliente de la base en los lugares que
+ * solo necesitan el nombre del modelo.
+ * `soloSaldo`: avisar solo si es por plata (402 / facturación). Por defecto avisa también por
+ * cuota (429): usarlo así solo cuando ya no queda otro intento.
  */
-export async function avisarFallaGemini(e: unknown, origen: string): Promise<void> {
+export async function avisarFallaGemini(e: unknown, origen: string, opciones: { soloSaldo?: boolean } = {}): Promise<void> {
   try {
     const { registrarFallaIA } = await import("./fallas-ia")
-    await registrarFallaIA("gemini", e, origen)
+    await registrarFallaIA("gemini", e, origen, opciones.soloSaldo === true)
   } catch { /* nunca rompe la lectura */ }
 }

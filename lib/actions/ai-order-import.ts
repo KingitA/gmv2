@@ -363,22 +363,51 @@ ${text}`
  */
 const MAX_CONTINUACIONES = 10
 
-/** De un JSON posiblemente cortado: los renglones completos de "items" y el cliente, si llegó a escribirse. */
-function rescatarRenglones(texto: string): { customer: string | null | undefined; items: any[] } {
+/**
+ * De un JSON posiblemente cortado: los renglones completos de "items" y el cliente, si llegó a
+ * escribirse. Recorre el texto carácter por carácter sabiendo cuándo está dentro de un texto
+ * entre comillas, así una descripción con { o } ("trapo {gris}") no parte el renglón.
+ *   items       renglones enteros y bien formados
+ *   ilegibles   renglones que CERRARON pero no se pudieron interpretar (no se pierden en silencio:
+ *               quien llama corta con un error)
+ *   incompleto  el texto terminó en medio de un renglón (el corte por longitud: es lo esperado)
+ */
+function rescatarRenglones(texto: string): { customer: string | null | undefined; items: any[]; ilegibles: number; incompleto: boolean } {
     const items: any[] = []
-    const desde = texto.indexOf('"items"')
-    const cuerpo = desde >= 0 ? texto.slice(desde) : texto
-    // Los renglones no tienen objetos adentro: cada { ... } sin llaves internas es un renglón entero
-    for (const m of cuerpo.matchAll(/\{[^{}]*\}/g)) {
-        try {
-            const it = JSON.parse(m[0])
-            if (it && typeof it === "object" && ("description" in it || "quantity" in it)) items.push(it)
-        } catch { /* renglón a medio escribir: se descarta y se vuelve a pedir */ }
+    let ilegibles = 0
+    const clave = texto.indexOf('"items"')
+    const abre = clave >= 0 ? texto.indexOf("[", clave) : -1
+    let incompleto = false
+    if (abre >= 0) {
+        let enTexto = false, escape = false, nivel = 0, inicio = -1
+        for (let i = abre + 1; i < texto.length; i++) {
+            const c = texto[i]
+            if (enTexto) {
+                if (escape) escape = false
+                else if (c === "\\") escape = true
+                else if (c === '"') enTexto = false
+                continue
+            }
+            if (c === '"') { enTexto = true; continue }
+            if (c === "{") { if (nivel === 0) inicio = i; nivel++; continue }
+            if (c === "}") {
+                if (nivel > 0 && --nivel === 0 && inicio >= 0) {
+                    try {
+                        const it = JSON.parse(texto.slice(inicio, i + 1))
+                        if (it && typeof it === "object") items.push(it); else ilegibles++
+                    } catch { ilegibles++ }
+                    inicio = -1
+                }
+                continue
+            }
+            if (c === "]" && nivel === 0) break   // fin de la lista
+        }
+        incompleto = nivel > 0 || enTexto
     }
     let customer: string | null | undefined
     const c = /"customer"\s*:\s*("(?:[^"\\]|\\.)*"|null)/.exec(texto)
     if (c) { try { customer = JSON.parse(c[1]) } catch { customer = undefined } }
-    return { customer, items }
+    return { customer, items, ilegibles, incompleto }
 }
 
 async function extraerJSONConContinuacion(
@@ -423,6 +452,10 @@ Now return ONLY this JSON, with the items that come AFTER that one in the messag
         if (!cortada && !huboCorte) return trozo
 
         const parte = rescatarRenglones(trozo)
+        // Un renglón que cerró y no se pudo leer NO se saltea: se corta acá, nunca se importa de menos
+        if (parte.ilegibles > 0) {
+            throw new Error(`La IA devolvió ${parte.ilegibles} renglón(es) del ${contexto} que no se pudieron interpretar. No se importó nada para no cargar el ${contexto} incompleto: volvé a importarlo o dividilo en dos.`)
+        }
         if (customer === undefined && parte.customer !== undefined && items.length === 0) customer = parte.customer
         if (cortada && parte.items.length === 0) {
             throw new Error(`La IA no llegó a escribir más renglones del ${contexto} (se quedó sin espacio). No se importó nada: dividilo en dos y volvé a importarlo.`)

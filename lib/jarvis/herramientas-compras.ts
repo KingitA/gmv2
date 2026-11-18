@@ -19,7 +19,7 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import type { Contexto, Herramienta } from "./herramientas"
 import { PERIODOS, resolverPeriodo } from "./periodos"
 import {
-  consulta, DESTINO_DIFERENCIA, ESTADO_OC, FaltaMigracion, filasNotas, repOcPendientes, repRetenciones, type Fila,
+  cantidadAR, consulta, DESTINO_DIFERENCIA, ESTADO_OC, FaltaMigracion, filasNotas, mesAR, repOcPendientes, repRetenciones, type Fila,
 } from "./reportes-compras"
 
 type Params = Record<string, unknown>
@@ -89,6 +89,7 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
         con_factura_neto: red(x.blanco_neto), con_factura_total: x.blanco_total == null ? null : red(x.blanco_total),
         sin_factura: red(x.negro_total), total: red(x.total), unidades: x.unidades == null ? null : red(x.unidades, 2),
       })).sort((x, y) => (agrupar === "mes" ? x.nombre.localeCompare(y.nombre) : y.total - x.total))
+        .map((x) => (agrupar === "mes" ? { ...x, nombre: mesAR(x.nombre) } : x))
       const lim = limite(p.limite, agrupar === "mes" ? 24 : 15)
       const titulo = `Compras ${r.etiqueta}${prov ? ` — ${prov.nombre}` : ""}${art ? ` — ${art.sku} ${art.descripcion}` : ""}`
       const cols: { clave: string; titulo: string; formato?: Formato }[] = [
@@ -123,7 +124,7 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
       const mapear = (x: Fila) => ({
         fecha: fechaSola(x.fecha), proveedor: String(x.proveedor ?? "—"), comprobante: `${x.tipo_comprobante} ${x.numero_comprobante}`,
         con_factura: x.canal === "negro" ? "no" : "sí", orden: x.orden ?? null,
-        articulo: `${x.sku ?? ""} ${x.articulo ?? ""}`.trim(), cantidad: `${red(x.cantidad, 2)} ${x.tipo_cantidad === "bulto" ? "bultos" : "unidades"}`,
+        articulo: `${x.sku ?? ""} ${x.articulo ?? ""}`.trim(), cantidad: `${cantidadAR(x.cantidad)} ${x.tipo_cantidad === "bulto" ? "bultos" : "unidades"}`,
         unidades: red(x.unidades, 2), precio_lista: x.precio_lista == null ? null : red(x.precio_lista, 2), descuentos: x.descuentos ?? null,
         costo_neto_unidad: x.neto_unitario == null ? null : red(x.neto_unitario, 2), neto_renglon: red(x.neto_linea, 2),
       })
@@ -246,39 +247,42 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
   const cuentaCorrienteProveedor: Herramienta = {
     nombre: "cuenta_corriente_proveedor",
     descripcion:
-      "Cuánto LE DEBEMOS a un proveedor y por qué: saldo de su cuenta corriente, comprobantes abiertos (con lo que falta de cada uno y cuándo vence), créditos sin aplicar (notas de crédito, pagos a cuenta), " +
-      "vencimientos anotados a mano sin comprobante, y APARTE lo comprometido por órdenes de compra sin facturar (que NO es deuda). Es LA cifra oficial de deuda con un proveedor: usala para \"¿cuánto le debemos a X?\", \"¿qué facturas le debemos?\". " +
+      "Cuánto LE DEBEMOS a un proveedor y por qué: lo que el calendario de pagos tiene pendiente, cuota por cuota (comprobante, cuánto falta y cuándo vence cada una), más lo anotado a mano sin comprobante. " +
+      "APARTE informa los créditos a favor sin aplicar (notas de crédito, pagos a cuenta: no están restados) y lo comprometido por órdenes de compra sin facturar (que NO es deuda). " +
+      "Una factura cuyo vencimiento se marcó pagado en el calendario ya no es deuda. Es LA cifra oficial de deuda con un proveedor: usala para \"¿cuánto le debemos a X?\", \"¿qué facturas le debemos?\". " +
       "Sin proveedor, devuelve el ranking de a quién le debemos más.",
     esquema: { type: "object", properties: { proveedor: { type: "string" }, ...P_LIMITE } },
     ejecutar: seguro(async (ctx, p) => {
       const prov = await proveedorDe(ctx, p)
       const lim = limite(p.limite, 20)
-      const FUENTE = "Cuenta corriente del proveedor (saldo único) + vencimientos cargados a mano sin comprobante. Lo comprometido por órdenes de compra no es deuda."
+      const FUENTE = "Calendario de pagos: cuotas pendientes de cada comprobante de la cuenta corriente + vencimientos anotados a mano sin comprobante. Lo marcado pagado o cancelado no cuenta. Los créditos a favor y lo comprometido por órdenes de compra van aparte."
       if (!prov) {
         const rows = await consulta(ctx.db, "jarvis_cc_proveedores", { p_proveedor_id: null }, ["proveedor_id"])
         const filas = rows.map((r) => ({
           proveedor: String(r.proveedor), deuda: red(r.deuda_total), vencido: red(n0(r.vencido_1_30) + n0(r.vencido_31_60) + n0(r.vencido_61_90) + n0(r.vencido_mas_90)),
           proximo_vencimiento: fechaSola(r.proximo_vencimiento), comprometido_oc: red(r.comprometido_oc),
-        })).filter((x) => Math.abs(x.deuda) > 0.5 || x.comprometido_oc > 0.5).sort((x, y) => y.deuda - x.deuda)
+        })).filter((x) => x.deuda > 0.5 || x.comprometido_oc > 0.5).sort((x, y) => y.deuda - x.deuda)
         const total = red(filas.reduce((s, x) => s + x.deuda, 0)), comprometido = red(filas.reduce((s, x) => s + x.comprometido_oc, 0))
         const bloque = a.tabla("Lo que les debemos a los proveedores", [
           { clave: "proveedor", titulo: "Proveedor" }, { clave: "deuda", titulo: "Le debemos", formato: "pesos" }, { clave: "vencido", titulo: "Vencido", formato: "pesos" },
           { clave: "proximo_vencimiento", titulo: "Próx. vencimiento", formato: "fecha" }, { clave: "comprometido_oc", titulo: "Comprometido (no es deuda)", formato: "pesos" },
         ], filas.slice(0, lim), { total: { deuda: total, comprometido_oc: comprometido } })
         return {
-          consultado: "Cuenta corriente de todos los proveedores",
+          consultado: "Calendario de pagos y cuenta corriente de todos los proveedores",
           datos: { deuda_total: total, vencido_total: red(filas.reduce((s, x) => s + x.vencido, 0)), comprometido_por_ordenes_de_compra: comprometido, proveedores: filas.length, filas: filas.slice(0, lim), fuente: FUENTE },
           bloques: [{ ...bloque, recalcular: { herramienta: "cuenta_corriente_proveedor", parametros: { ...p } } }],
         }
       }
       const [res, abiertos, aMano] = await Promise.all([
         consulta(ctx.db, "jarvis_cc_proveedores", { p_proveedor_id: prov.id }),
-        consulta(ctx.db, "jarvis_cc_abiertos", { p_proveedor_id: prov.id }, ["movimiento_id"]),
+        consulta(ctx.db, "jarvis_cc_abiertos", { p_proveedor_id: prov.id }, ["partida_id"]),
         consulta(ctx.db, "jarvis_vencimientos_a_mano", { p_proveedor_id: prov.id }, ["vencimiento_id"]),
       ])
       const r = res[0] ?? {}
       const item = (x: Fila) => ({
-        fecha: fechaSola(x.fecha), comprobante: [x.tipo_comprobante, x.numero_comprobante].filter(Boolean).join(" ") || String(x.descripcion ?? x.tipo_movimiento),
+        fecha: fechaSola(x.fecha),
+        // Con cuotas, el concepto del vencimiento ya dice el comprobante y la cuota ("FA 0003-… — cuota 2/3")
+        comprobante: (x.cuota && /cuota/i.test(String(x.cuota)) ? String(x.cuota) : [x.tipo_comprobante, x.numero_comprobante].filter(Boolean).join(" ")) || String(x.descripcion ?? x.tipo_movimiento),
         importe: red(x.monto, 2), falta_pagar: red(x.saldo, 2), vence: fechaSola(x.vence), dias_vencido: x.dias_vencido == null ? null : n0(x.dias_vencido),
       })
       const deudas = abiertos.filter((x) => x.clase === "deuda").map(item).sort((x, y) => String(x.vence).localeCompare(String(y.vence)))
@@ -291,16 +295,23 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
       ], [
         ...deudas,
         ...manuales.map((m) => ({ comprobante: `${m.concepto} (anotado a mano)`, fecha: null, importe: m.importe, falta_pagar: m.importe, vence: m.vence, dias_vencido: m.dias_vencido })),
-        ...creditos.map((c) => ({ comprobante: `${c.comprobante} (crédito a favor)`, fecha: c.fecha, importe: c.importe, falta_pagar: -c.disponible, vence: null, dias_vencido: null })),
-      ].slice(0, lim), { total: { falta_pagar: red(r.deuda_total, 2) }, nota: "El total es lo que le debemos: comprobantes abiertos + anotado a mano − créditos a favor. Lo comprometido por órdenes de compra no está sumado." })
+      ].slice(0, lim), { total: { falta_pagar: red(r.deuda_total, 2) }, nota: "El total es lo que le debemos: cuotas pendientes de cada comprobante + anotado a mano. \"Importe\" es el del comprobante entero. No están restados los créditos a favor ni sumado lo comprometido por órdenes de compra." })
       return {
-        consultado: `Cuenta corriente de ${prov.nombre}`,
+        consultado: `Calendario de pagos y cuenta corriente de ${prov.nombre}`,
         datos: {
           proveedor: prov.nombre, le_debemos: red(r.deuda_total, 2),
-          composicion: { saldo_cuenta_corriente: red(r.saldo_cc, 2), anotado_a_mano_sin_comprobante: red(r.vencimientos_a_mano, 2), creditos_a_favor_sin_aplicar: red(-n0(r.creditos_sin_aplicar), 2) },
+          composicion: { cuotas_pendientes_de_comprobantes: red(r.deuda_abierta, 2), anotado_a_mano_sin_comprobante: red(r.vencimientos_a_mano, 2) },
+          creditos_a_favor_sin_aplicar: {
+            importe: red(-n0(r.creditos_sin_aplicar), 2),
+            aclaracion: "Notas de crédito o pagos a cuenta que todavía no se aplicaron contra una factura. NO están restados de \"le_debemos\": se descuentan al armar la orden de pago.",
+          },
           por_antiguedad: { a_vencer: red(r.a_vencer), vencido_1_a_30_dias: red(r.vencido_1_30), vencido_31_a_60: red(r.vencido_31_60), vencido_61_a_90: red(r.vencido_61_90), vencido_mas_de_90: red(r.vencido_mas_90) },
           proximo_vencimiento: fechaSola(r.proximo_vencimiento),
-          comprobantes_abiertos: deudas.slice(0, lim), creditos_a_favor: creditos.slice(0, lim), anotado_a_mano: manuales.slice(0, lim),
+          cuotas_pendientes: deudas.slice(0, lim), creditos_a_favor: creditos.slice(0, lim), anotado_a_mano: manuales.slice(0, lim),
+          saldo_contable_de_la_cuenta_corriente: {
+            importe: red(r.saldo_cc, 2),
+            aclaracion: "Solo informativo, NO es la deuda: la cuenta corriente no baja cuando un vencimiento se marca pagado desde el calendario, así que puede ser mucho mayor que lo que de verdad se debe. No lo uses como deuda.",
+          },
           comprometido_por_ordenes_de_compra: { importe: red(r.comprometido_oc, 2), aclaracion: "Mercadería pedida que todavía no tiene factura. NO es deuda y no está sumado en \"le_debemos\".", detalle: comprometido.slice(0, 10) },
           fuente: FUENTE,
         },
@@ -530,9 +541,10 @@ export async function deudaSegunCuentaCorriente(db: SupabaseClient, proveedorId:
     const rows = await consulta(db, "jarvis_cc_proveedores", { p_proveedor_id: proveedorId }, ["proveedor_id"])
     const s = (c: string) => red(rows.reduce((t, r) => t + n0(r[c]), 0))
     return {
-      le_debemos: s("deuda_total"), saldo_cuenta_corriente: s("saldo_cc"), anotado_a_mano_sin_comprobante: s("vencimientos_a_mano"),
+      le_debemos: s("deuda_total"), cuotas_pendientes_de_comprobantes: s("deuda_abierta"), anotado_a_mano_sin_comprobante: s("vencimientos_a_mano"),
+      creditos_a_favor_sin_aplicar: red(-rows.reduce((t, r) => t + n0(r.creditos_sin_aplicar), 0)),
       comprometido_por_ordenes_de_compra: s("comprometido_oc"),
-      aclaracion: "Esta es LA deuda (cuenta corriente + anotado a mano sin comprobante). Lo comprometido por órdenes de compra no es deuda.",
+      aclaracion: "Esta es LA deuda: lo que el calendario tiene pendiente (cuotas de comprobantes + anotado a mano). Lo marcado pagado o cancelado no cuenta. Los créditos a favor no están restados y lo comprometido por órdenes de compra no es deuda.",
     }
   } catch (e) {
     if (e instanceof FaltaMigracion) return null

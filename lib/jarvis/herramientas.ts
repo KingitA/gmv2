@@ -537,7 +537,7 @@ const coberturaStock: Herramienta = {
 const proveedores: Herramienta = {
   nombre: "proveedores",
   descripcion:
-    "Resumen por proveedor: cuánto vendemos de lo suyo (30 días), último aumento de costo cargado (historial de precios desde el 18/09/2026), aumento promedio de los últimos 90 días, lo que le debemos (la MISMA cifra que cuenta_corriente_proveedor: cuenta corriente + anotado a mano; sin estimados de órdenes de compra), próximo vencimiento y órdenes de compra abiertas. Para el detalle de la deuda de UN proveedor usá cuenta_corriente_proveedor. Orden: venta, deuda, sin_aumento (los que hace más que no aumentan) o aumento.",
+    "Resumen por proveedor: cuánto vendemos de lo suyo (30 días), último aumento de costo cargado (historial de precios desde el 18/09/2026), aumento promedio de los últimos 90 días, lo que le debemos (la MISMA cifra que cuenta_corriente_proveedor: lo que el calendario tiene pendiente; sin estimados de órdenes de compra), próximo vencimiento y órdenes de compra abiertas. Para el detalle de la deuda de UN proveedor usá cuenta_corriente_proveedor. Orden: venta, deuda, sin_aumento (los que hace más que no aumentan) o aumento.",
   esquema: {
     type: "object",
     properties: { proveedor: { type: "string" }, orden: { type: "string", enum: ["venta", "deuda", "sin_aumento", "aumento"] }, ...P_LIMITE },
@@ -569,13 +569,13 @@ const proveedores: Herramienta = {
         { clave: "deuda", titulo: "Le debemos", formato: "pesos" }, { clave: "proximo_vencimiento", titulo: "Próx. vencimiento", formato: "fecha" },
       ],
       filas.slice(0, lim),
-      { nota: "Aumentos según el historial de precios del sistema (desde el 18/09/2026). Sin fecha = no se le cargó aumento desde entonces. \"Le debemos\" sale de la cuenta corriente del proveedor más lo anotado a mano sin comprobante; no incluye lo comprometido por órdenes de compra." },
+      { nota: "Aumentos según el historial de precios del sistema (desde el 18/09/2026). Sin fecha = no se le cargó aumento desde entonces. \"Le debemos\" es lo que el calendario de pagos tiene pendiente (cuotas de comprobantes y lo anotado a mano); no incluye lo comprometido por órdenes de compra." },
     )
     return {
       consultado: nombre ? `Ventas, historial de precios, vencimientos y órdenes de ${nombre}` : `Ventas, historial de precios, vencimientos y órdenes de ${rows.length} proveedores`,
       datos: {
         filas: filas.slice(0, lim), cantidad: filas.length,
-        sobre_la_deuda: "deuda = cuenta corriente del proveedor + vencimientos anotados a mano sin comprobante (igual que cuenta_corriente_proveedor). deuda_estimada = comprometido por órdenes de compra sin facturar: NO es deuda.",
+        sobre_la_deuda: "deuda = lo que el calendario de pagos tiene pendiente: cuotas pendientes de cada comprobante + vencimientos anotados a mano sin comprobante (igual que cuenta_corriente_proveedor). deuda_estimada = comprometido por órdenes de compra sin facturar: NO es deuda.",
       },
       bloques: [{ ...bloque, recalcular: { herramienta: "proveedores", parametros: { ...p } } }],
     }
@@ -585,7 +585,7 @@ const proveedores: Herramienta = {
 // ─── 9. Pagos a proveedores ────────────────────────────────────────────────
 const pagosProveedores: Herramienta = {
   nombre: "pagos_proveedores",
-  descripcion: "Vencimientos pendientes de pago a proveedores (el CALENDARIO de pagos): los atrasados y los que vencen en los próximos N días (por defecto 30). Sirve para \"¿qué vence?\" y \"¿qué hay que pagar?\". No suma los estimados de órdenes de compra. Informa además cuánto le debemos según la cuenta corriente (la deuda oficial): para \"¿cuánto le debemos a X?\" usá cuenta_corriente_proveedor.",
+  descripcion: "Vencimientos pendientes de pago a proveedores (el CALENDARIO de pagos): los atrasados y los que vencen en los próximos N días (por defecto 30). Sirve para \"¿qué vence?\" y \"¿qué hay que pagar?\". No suma los estimados de órdenes de compra. Informa además la deuda oficial (la misma de cuenta_corriente_proveedor): para \"¿cuánto le debemos a X?\" usá cuenta_corriente_proveedor.",
   esquema: { type: "object", properties: { dias: { type: "integer" }, proveedor: { type: "string" }, ...P_LIMITE } },
   async ejecutar(ctx, p) {
     const dias = Math.max(1, Math.min(120, Number(p.dias) || 30))
@@ -625,7 +625,16 @@ const pagosProveedores: Herramienta = {
     const total = red(filas.reduce((s, f) => s + f.monto, 0))
     const lim = limite(p.limite, 30)
     // E-83: la deuda es una sola (cuenta corriente). El calendario dice CUÁNDO vence; no es otra deuda.
-    const deudaCC = await deudaSegunCuentaCorriente(ctx.db, provId)
+    // Si esa consulta falla por lo que sea, la herramienta contesta igual (sin la deuda, con aviso)
+    let deudaCC: Awaited<ReturnType<typeof deudaSegunCuentaCorriente>> | null = null
+    let avisoDeuda: string | null = null
+    try {
+      deudaCC = await deudaSegunCuentaCorriente(ctx.db, provId)
+      if (!deudaCC) avisoDeuda = "No disponible (falta aplicar la migración 20261119c)."
+    } catch (e) {
+      console.error("[jarvis] pagos_proveedores: deuda oficial", e)
+      avisoDeuda = "No se pudo calcular la deuda oficial en este momento. Los vencimientos de arriba sí están completos; para la deuda, probá cuenta_corriente_proveedor."
+    }
     const bloque = tabla(
       `Pagos a proveedores — atrasados y próximos ${dias} días${nombre ? ` (${nombre})` : ""}`,
       [
@@ -640,7 +649,7 @@ const pagosProveedores: Herramienta = {
       datos: {
         total, atrasado, proximos_7_dias: semana, cantidad: filas.length, filas: filas.slice(0, lim),
         que_es_el_total: `Suma de los vencimientos del calendario hasta el ${fecha(hasta)}. No es toda la deuda: puede haber deuda que vence después.`,
-        deuda_segun_cuenta_corriente: deudaCC ?? "No disponible (falta aplicar la migración 20261119c).",
+        deuda_oficial: deudaCC ?? avisoDeuda,
         // Aparte, para ver lo que viene: NO es deuda todavía y no está sumado en los totales de arriba
         estimado_ordenes_de_compra: totalEstimadoOC > 0 ? {
           monto: totalEstimadoOC, cantidad: estimadosOC.length,

@@ -25,14 +25,24 @@ export function estadoDeError(e: unknown): number {
 }
 
 /**
- * ¿El servicio rechazó el pedido por plata o por cuota? 402 = sin crédito; 429 = cuota o
- * demasiados pedidos; y los mensajes típicos de facturación de Google y de Anthropic.
+ * ¿El servicio rechazó el pedido por PLATA? 402 = sin crédito, o un mensaje de facturación.
+ * Esto no se arregla solo ni reintentando: se avisa siempre.
+ */
+export function esFallaDeSaldo(e: unknown): boolean {
+  if (estadoDeError(e) === 402) return true
+  const msg = String((e as { message?: string } | null)?.message || "")
+  return /billing|credit balance|insufficient (funds|credit|balance)|payment required|prepayment|out of credits/i.test(msg)
+}
+
+/**
+ * ¿Lo rechazó por plata o por CUOTA / demasiados pedidos (429)? Un 429 puede ser pasajero o
+ * afectar solo a un modelo: por sí solo no es para alarmar. Se avisa si TAMBIÉN falla el
+ * respaldo (ver conRespaldoGemini) o si ya no queda otro intento.
  */
 export function esFallaDeSaldoOCuota(e: unknown): boolean {
-  const estado = estadoDeError(e)
-  if (estado === 402 || estado === 429) return true
+  if (esFallaDeSaldo(e) || estadoDeError(e) === 429) return true
   const msg = String((e as { message?: string } | null)?.message || "")
-  return /quota|billing|credit balance|insufficient|payment required|resource_exhausted|exceeded your current/i.test(msg)
+  return /quota|resource_exhausted|exceeded your current|rate limit/i.test(msg)
 }
 
 const CLAVE_AVISO: Record<ServicioIA, string> = { gemini: "ia_cuota:gemini", claude: "ia_cuota:claude" }
@@ -54,11 +64,14 @@ export function textoAvisoFallaIA(servicio: ServicioIA, veces: number, ultimoEst
 }
 
 /**
- * Anota la falla y deja el aviso. No lanza nunca. Si el error no es de saldo/cuota, no hace nada.
+ * Anota la falla y deja el aviso. No lanza nunca.
  * `origen`: dónde pasó, en palabras ("lectura de comprobante de compra", "cheque", …).
+ * `soloSaldo`: true = avisar solo si es por plata (402 / facturación); false = también por cuota
+ * (429). Quien llama pasa false únicamente cuando ya no queda otro intento (falló también el
+ * respaldo): un 429 del modelo principal que el respaldo resuelve no es una alerta.
  */
-export async function registrarFallaIA(servicio: ServicioIA, e: unknown, origen: string): Promise<void> {
-  if (!esFallaDeSaldoOCuota(e)) return
+export async function registrarFallaIA(servicio: ServicioIA, e: unknown, origen: string, soloSaldo = false): Promise<void> {
+  if (soloSaldo ? !esFallaDeSaldo(e) : !esFallaDeSaldoOCuota(e)) return
   try {
     const db = createAdminClient()
     const estado = estadoDeError(e) || null

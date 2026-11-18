@@ -187,6 +187,7 @@ Probado OK en pantalla: E-02 (sugerencia en bultos), E-30/E-40 (2 bultos × 24 �
 | E-99 | El vencimiento que nace al validar no tiene forma de pago si el proveedor no tiene acuerdo cargado. ~~Una OC finalizada queda sin acceso a la verificación.~~ **(hecho T1-A: botón Verificación en el listado y en el detalle)** ~~En Nueva OP dos vencimientos del mismo día e importe se ven idénticos (no muestra forma de pago).~~ **T1-D hecho:** la Nueva OP muestra en cada vencimiento la forma de pago, modalidad, validez del cheque, canal y observaciones. | T1-A / T1-D |
 | ~~E-100~~ | Una leyenda como "sin valor fiscal" en la factura hace que el OCR la clasifique como Adquisición (negro) y no lea neto/IVA. Pedir confirmación del tipo cuando hay CUIT + CAE + letra. **Hecho (T2-B):** con CUIT + CAE + letra el tipo sale Factura A/B/C y la lectura lleva el aviso "CONFIRMÁ EL TIPO". | T2-B |
 | ~~E-101~~ | Gemini sin crédito el 17/11 (402): OCR caído sin que nadie se entere. Falta un vigía/alerta de saldo o de fallas de OCR. **Hecho (T2-B):** cada rechazo por saldo o cuota (402 / 429) se anota en `ia_fallas` y deja un aviso en la bandeja de Jarvis. | T2-B |
+| E-102 | Al validar el comprobante de una factura que ya estaba anotada a mano en el calendario, la validación crea OTRO vencimiento (`20261117u`, donde inserta los vencimientos del comprobante) y el anotado a mano sigue pendiente: la misma deuda queda dos veces en el calendario. Falta que la validación ofrezca enlazar el vencimiento a mano existente en vez de duplicarlo. Mientras tanto, Jarvis y el reporte de deuda no cuentan el anotado a mano si repite un comprobante (mismo número, o mismo importe ± $1 y fecha ± 5 días); el calendario y "Pagos de la semana" sí lo muestran dos veces. | T2 |
 
 Datos de prueba que quedaron: OC-000011, FA 0003-00045678 (validada), 2 NC esperadas, **vencimiento HORNAL $218.969,34 al 17/12/2026 (de prueba, en el calendario real)**, stock 190039 = 178 (debería ser 228).
 
@@ -533,7 +534,13 @@ La app (`mobile/apps/deposito`, más una línea en `@gm/core`) y, para los docum
 **Reglas que aplican todas las consultas**
 - Comprado = comprobantes de compra **validados**. Sin remitos, sin notas esperadas, sin estimados ni provisiones de órdenes. Las notas de crédito y las reversas restan.
 - "En blanco" = con factura; "en negro" = Adquisición y Reversa.
-- **Deuda con un proveedor = saldo de la cuenta corriente + vencimientos cargados a mano que no tienen comprobante.** Lo comprometido por órdenes de compra no es deuda y va aparte. Motivo de sumar lo anotado a mano: los vencimientos reales de Juan (cargados antes del circuito nuevo) no tienen movimiento en la cuenta corriente; sin sumarlos, Jarvis diría "no le debemos nada" a un proveedor que tiene pagos anotados en el calendario. Un vencimiento que SÍ viene de un comprobante no se suma dos veces.
+- **Deuda con un proveedor = lo que el calendario de pagos tiene pendiente** (revisión del 19/11). Marcar un vencimiento como pagado desde el calendario no baja la cuenta corriente (no genera imputación): con los datos reales, 62 facturas de marzo-abril cargadas desde Gmail por $192,5 M tenían todos sus vencimientos pagados y la cuenta corriente las seguía dando como deuda (más 3 con el vencimiento cancelado, $3,2 M). Entonces:
+  - un comprobante de la cuenta corriente cuenta como deuda solo por sus vencimientos que siguen pendientes (pagado o cancelado = saldado), cada cuota con su propia fecha para la antigüedad;
+  - si un comprobante no tiene ningún vencimiento, vale su saldo de cuenta corriente;
+  - se suman los vencimientos cargados a mano sin comprobante, salvo los que repiten un comprobante que ya cuenta (E-102);
+  - los créditos a favor sin aplicar (notas de crédito, pagos a cuenta) se informan aparte y NO se restan: se descuentan al armar la orden de pago;
+  - lo comprometido por órdenes de compra no es deuda y va aparte;
+  - el saldo contable de la cuenta corriente se informa como dato, aclarando que no es la deuda.
 
 **Herramientas nuevas de Jarvis** (`lib/jarvis/herramientas-compras.ts`; todas de solo lectura, cada una devuelve `fuente`)
 
@@ -542,7 +549,7 @@ La app (`mobile/apps/deposito`, más una línea en `@gm/core`) y, para los docum
 | `compras` | Cuánto se compró en un período, con y sin factura; por proveedor, mes, canal o artículo | admin y administrativo |
 | `ultima_compra` | Última compra de un artículo o a un proveedor: fecha, comprobante, orden, cantidad, lista, descuentos, costo neto por unidad | admin y administrativo |
 | `ficha_proveedor` | Acuerdo de pago con y sin factura, CBU / alias / titular, acepta cheques o e-cheq, exento, tipo de descuento; y con qué medios se le pagó de verdad (esto último solo admin) | admin y administrativo |
-| `cuenta_corriente_proveedor` | LA deuda: saldo, comprobantes abiertos, créditos, anotado a mano, comprometido aparte | admin y administrativo |
+| `cuenta_corriente_proveedor` | LA deuda: cuotas pendientes de cada comprobante y anotado a mano; aparte, créditos a favor y comprometido | admin y administrativo |
 | `retenciones_proveedor` | Certificados de retención por período | **solo admin** |
 | `notas_esperadas` | NC / ND esperadas y si ya llegó la real; busca por palabras del artículo o del motivo | admin y administrativo |
 | `ordenes_compra_pendientes` | Qué falta recibir, desde cuándo, estado del envío, artículos que faltan | admin y administrativo |
@@ -556,20 +563,21 @@ La app (`mobile/apps/deposito`, más una línea en `@gm/core`) y, para los docum
 2. "¿Cómo le pagamos a Hornal?" → `ficha_proveedor`: acuerdo con y sin factura, CBU, si acepta cheques. Con usuario admin agrega cómo se le pagó de verdad; con administrativo aclara que eso solo lo ve un administrador.
 3. "¿Cuánto compramos en blanco en el último año? ¿Cuánto en negro?" → `compras` con período `ultimos_12_meses`: los dos totales en una sola llamada. Comparar contra el reporte "Compras por proveedor y mes" con las mismas fechas: los totales tienen que coincidir.
 4. "De Colgate devolvimos 12 cremas dentales hace unos meses, ¿me buscás si está hecha la nota de crédito?" → `notas_esperadas` con proveedor Colgate y buscar "cremas dentales": dice si llegó (número y fecha) o si se espera (desde cuándo, por cuánto). Si no hay nada anotado, lo dice.
-5. "¿Cuánto le debemos a Hornal?" → `cuenta_corriente_proveedor`: tiene que dar el mismo saldo que la pantalla Proveedores → cuenta corriente, más lo anotado a mano si lo hubiera, y lo comprometido aparte.
+5. "¿Cuánto le debemos a Colgate?" → `cuenta_corriente_proveedor`: tiene que dar lo que el calendario tiene pendiente de ese proveedor (sin estimados y sin los anotados a mano repetidos), no el saldo de la pantalla de cuenta corriente, que incluye facturas ya marcadas pagadas. Control en la base: `select deuda_total, deuda_abierta, vencimientos_a_mano, saldo_cc from jarvis_cc_proveedores((select id from proveedores where nombre ilike '%colgate%' limit 1));` — `deuda_total` ≈ $25,9 M.
 6. "¿Qué estamos esperando que llegue?", "¿qué falta de la OC-000012?" → `ordenes_compra_pendientes`.
 7. "¿Qué hay que pagar esta semana? ¿Alcanza el banco?" (admin) → `plan_de_pagos`: mismos números que Finanzas → Pagos de la semana.
 8. Con usuario administrativo: "¿cuánto le retuvimos a X?" → tiene que contestar que es solo para administradores.
 
 **Vigías nuevos** (`lib/jarvis/vigias-compras.ts`, corren con la revisión diaria): nota de crédito esperada sin llegar hace más de 30 días; orden enviada sin recibir pasada la fecha estimada; factura validada con diferencia de precio sin resolver (usa la misma cuenta que la pantalla de verificación, hasta 25 órdenes con facturas de los últimos 90 días); documento de recepción sin leer hace más de un día; y falla de la IA por saldo o cuota (E-101).
 
-**E-101:** `lib/ai/fallas-ia.ts`. Un error 402 o 429 de Gemini (o un mensaje de facturación / cuota) se anota en `ia_fallas` y deja al instante un aviso de alerta en la bandeja de Jarvis; el vigía lo mantiene mientras haya fallas en las últimas 24 horas y lo cierra solo. Está enganchado en la lectura de comprobantes de compra (`lib/services/ocr.ts`) y en todo lo que usa `conRespaldoGemini` (cheques, extractos, legajo). Las lecturas que llaman a Gemini directo (adjuntos de mails, gasto del chofer) todavía no avisan.
+**E-101:** `lib/ai/fallas-ia.ts`. Un error de Gemini por falta de crédito (402 o mensaje de facturación) se anota en `ia_fallas` y deja al instante un aviso de alerta en la bandeja de Jarvis; un 429 (cuota o demasiados pedidos) solo si no hay respaldo o si el modelo de respaldo también falla (un 429 pasajero que el respaldo resuelve no alarma); el vigía lo mantiene mientras haya fallas en las últimas 24 horas y lo cierra solo. Está enganchado en la lectura de comprobantes de compra (`lib/services/ocr.ts`) y en todo lo que usa `conRespaldoGemini` (cheques, extractos, legajo). Las lecturas que llaman a Gemini directo (adjuntos de mails, gasto del chofer) todavía no avisan.
 
 **E-100:** `lib/services/ocr.ts`. La lectura pide además CUIT del emisor, CAE y letra. Con los tres, `inferirTipoComprobante` devuelve FA / FB / FC aunque haya una leyenda "sin valor fiscal" o no se hayan leído impuestos, y la lectura agrega el aviso "CONFIRMÁ EL TIPO…", que ya se muestra junto al documento. No se tocó la pantalla de verificación: la confirmación es ese aviso, no un bloqueo.
 
 **Reportes (E-81):** Playroom → "Compras y proveedores" (`components/playroom/reportes/ReportesCompras.tsx`, `GET /api/playroom/compras`): compras por proveedor y mes, evolución del costo de un artículo, antigüedad de la deuda, retenciones por período (solo admin), órdenes pendientes de recibir, cumplimiento del proveedor y notas esperadas por antigüedad. Exportan a CSV para Excel, como los demás informes. `/api/reportes/iva`: el crédito fiscal sale de `reporte_iva_compras`.
 
 **Límites conocidos**
+- La regla de deuda se probó en la base local con casos armados (factura de Gmail con vencimiento pagado, cuotas, cancelado, anotado a mano repetido); **no pude verificar contra la base real que Colgate dé ≈ $25,9 M** (no tengo la clave de la conexión de solo lectura): correr el control del punto 5 después de aplicar.
 - No se probó contra la base real ni con Jarvis en vivo: las consultas se probaron en una base local con datos armados (compras, deuda, notas, órdenes, diferencias, IVA) y el código pasa el typecheck.
 - "Cumplimiento" y "diferencias" cuentan lo ya RESUELTO en la verificación; lo que nadie resolvió lo ve el vigía de diferencias de precio, no el reporte.
 - La evolución del costo mezcla compras validadas con el historial de precios de compra; los cambios de lista hechos desde "Listas de proveedores" no figuran si esa pantalla no los anota en el historial.
