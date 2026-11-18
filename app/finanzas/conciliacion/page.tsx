@@ -198,6 +198,10 @@ export default function ConciliacionPage() {
                 ))}
               </SelectContent>
             </Select>
+            {/* Tanda 2-A: los movimientos de Credicoop se traen por la API desde Bancos y caen acá como un extracto */}
+            <Button variant="outline" asChild>
+              <Link href="/finanzas/bancos"><Landmark className="h-4 w-4 mr-2" /> Traer de Credicoop</Link>
+            </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)} disabled={!cuentaId}>
               <Upload className="h-4 w-4 mr-2" /> Importar extracto
             </Button>

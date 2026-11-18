@@ -631,3 +631,72 @@ La app (`mobile/apps/deposito`, más una línea en `@gm/core`) y, para los docum
 - "Cumplimiento" y "diferencias" cuentan lo ya RESUELTO en la verificación; lo que nadie resolvió lo ve el vigía de diferencias de precio, no el reporte.
 - La evolución del costo mezcla compras validadas con el historial de precios de compra; los cambios de lista hechos desde "Listas de proveedores" no figuran si esa pantalla no los anota en el historial.
 - En `notas_esperadas`, una nota que llegó se reconoce porque conserva el motivo; una nota de crédito cargada suelta, sin haber estado esperada, no aparece ahí (sí en `compras`, restando).
+
+## Tanda 2-A — Bancos: Credicoop (19/11, rama `entrada-t2-bancos`)
+
+**Decisión de Juan (19/11, textual):** «emisión de echeqs, confirmación y realizar transferencias y pagos de VEPs y servicios siempre lo hacemos desde Credicoop» / «Siempre, desde el banco que sea vamos a tener que confirmar vía token.» Interbanking queda descartado.
+
+**Qué hace.** El sistema arma la operación y la manda a Credicoop por su API Empresas en la modalidad **"con firma"**: queda en Banca Internet Empresa "Enviada a la firma" y una persona la firma con su token. El sistema nunca usa el envío directo (las rutas y los permisos del envío directo no están ni escritos en el código). El pago no se da por hecho hasta que el banco dice que lo procesó.
+
+**Todavía no hay credenciales:** quedó todo listo para enchufar las de homologación. Sin credenciales, cada pantalla dice "Credicoop no está conectado" y no se manda nada.
+
+**Migración: `20261119d_bancos_operaciones.sql`** (no cambia datos: crea la tabla `bancos_operaciones` y agrega columnas vacías `cuentas_bancarias.api_banco` / `numero_cuenta_banco` y `cheques.echeq_id` / `cmc7`). No toca vencimientos, cuenta corriente, caja ni stock. Sin aplicarla, las pantallas avisan que falta y no se manda nada.
+
+### Variables de entorno (Vercel → Settings → Environment Variables)
+
+| Variable | Qué es |
+|---|---|
+| `CREDICOOP_CLIENT_ID` | Identificador de la conexión (lo da el banco) |
+| `CREDICOOP_CLAVE_PRIVADA` | Clave privada RSA en PEM con la que se firma el pedido de acceso. Se pega con los saltos de línea como `\n`, o entera en base64. **Nunca en la base ni en el repositorio.** |
+| `CREDICOOP_NUMERO_ADHERENTE` | Número de adherente de Banca Internet Empresa |
+| `CREDICOOP_URL` | URL del ambiente. Sin definir = homologación (`https://homoapibccl.bancocredicoop.coop`). La de producción la da el banco al salir a producción. |
+| `CREDICOOP_REALM` | Realm del ambiente. Sin definir = `homologacion`. El de producción lo da el banco. |
+| `CREDICOOP_FIRMANTES` | Opcional. Firmantes a proponer: `DNI:21123456,CUIT:20211234569` |
+| `CREDICOOP_SIMULADOR` | `1` = no se habla con el banco, contesta el simulador (para probar las pantallas sin credenciales). Lo hecho así queda marcado SIMULADOR. |
+
+Además, la cuenta bancaria de Credicoop tiene que tener cargado su **CBU de 22 dígitos** (Finanzas → Cuentas) y cada proveedor su **CUIT** y, para transferencias, su **CBU** (ficha del proveedor). Una cuenta se toma como de Credicoop si su banco dice "Credicoop" o si tiene `api_banco = 'credicoop'`.
+
+### Dónde está
+
+- **Órdenes de pago** → botón con el ícono de banco en cada orden que tiene una transferencia, un e-cheq propio o un e-cheq de un cliente. Abre la ventana con cada pago: a quién, CBU y CUIT, de qué cuenta, importe y fecha; lo que falta para poder mandarlo; el botón **"Mandar a Credicoop para firmar"** (pide confirmación mostrando banco, cuenta, beneficiario, CBU / CUIT, importe y fecha) y **"Actualizar estado"**. Solo admin.
+- **Finanzas → Bancos (Credicoop)**: estado de la conexión, VEP de ARCA pendientes para mandar a firmar, traer los movimientos de la cuenta, y el registro de las operaciones mandadas.
+- **Finanzas → Conciliación** → "Traer de Credicoop" lleva a Bancos; los movimientos traídos aparecen ahí como un extracto más.
+
+### Reglas
+
+- **La orden tiene que estar pendiente** para mandar un pago. Se arma con "Dejar pendiente", se manda a firmar, y cuando el banco dice que quedó hecho se confirma la orden (el tilde verde de siempre). Mientras haya un pago de la orden esperando la firma, en proceso o en duda, **la orden no se puede confirmar**.
+- **Un pago no sale dos veces.** Cada operación se guarda con su clave (`id_origen`) *antes* de salir hacia el banco, y hay un índice único: un solo envío vivo por medio de pago, por e-cheq a endosar y por VEP.
+- **Ante un corte, no se reenvía:** la operación queda "No se sabe si entró" y "Actualizar estado" le pregunta al banco por su clave. Si el banco no la tiene, queda rechazada y se puede volver a mandar; si la tiene, sigue su curso.
+- **Estados:** sin enviar → esperando la firma → (el banco la está procesando) → firmada y procesada / rechazada. "Vista en la cuenta" lo marca una persona al ver el movimiento. Un texto de estado del banco que el sistema no conoce nunca se toma como hecho.
+- **Transferencia:** siempre con fecha de hoy (el banco no acepta otra), concepto "Factura", referencia = número de la orden de pago.
+- **E-cheq propio:** cruzado y a la orden; con fecha de hoy es común y con fecha posterior, diferido.
+- **E-cheq de un cliente → proveedor:** endoso nominal al CUIT del proveedor. Si el cheque no tiene el identificador del banco, se busca entre los e-cheq recibidos por número e importe.
+- **VEP:** de a uno (el banco no admite más). El importe y los CUIT se toman de lo que informa el banco, no de la pantalla.
+- **Movimientos:** se cargan en la conciliación que ya existía (fuente "api_banco"); el sistema propone las coincidencias y una persona las confirma. Traer dos veces el mismo período no duplica.
+- **Tope del banco:** 50 pedidos por minuto. Al llegar, el sistema corta sin mandar.
+- **Nada se borra:** las operaciones bancarias son un registro (la tabla rechaza los borrados) y esta tanda no toca ningún vencimiento.
+
+### Cómo probar
+
+1. **Sin banco (simulador):** aplicar la migración, poner `CREDICOOP_SIMULADOR=1`, armar una orden de pago con transferencia desde la cuenta de Credicoop y "Dejar pendiente". En Órdenes de pago → botón del banco → "Mandar a Credicoop para firmar": queda "Esperando la firma". Probar confirmar la orden: no deja. "Actualizar estado" dos veces: el simulador la da por firmada a la segunda consulta. Confirmar la orden: ahora sí. En Bancos: traer VEP (hay dos de ejemplo), mandar uno; traer movimientos y ver la propuesta en Conciliación. Todo figura con el cartel SIMULADOR.
+2. **Homologación (cuando el banco dé las credenciales):** cargar `CREDICOOP_CLIENT_ID`, `CREDICOOP_CLAVE_PRIVADA` y `CREDICOOP_NUMERO_ADHERENTE`, quitar `CREDICOOP_SIMULADOR`. Bancos tiene que decir "Conectado al banco de prueba". Orden sugerido: (a) traer movimientos de la cuenta — prueba la autenticación sin mover nada; (b) una transferencia de importe mínimo a un CBU de prueba, verla "Enviada a la firma" en Banca Internet Empresa, firmarla con token y "Actualizar estado"; (c) mandar dos veces el mismo pago (tiene que frenarlo el sistema); (d) emitir un e-cheq diferido; (e) endosar un e-cheq recibido; (f) listar VEP y pagar uno.
+3. **Batería:** `cd mobile && npm test` — `credicoop.test.ts` (31 pruebas) corre el cliente real contra el simulador: formatos, firma RS256 verificada con la clave pública, token y su vencimiento, tope de 50 por minuto, firma y rechazo, duplicado, corte de comunicación, e-cheq, endoso, VEP, movimientos y traducción de errores.
+
+### Dudas para Credicoop
+
+1. **Pago de servicios que no son de ARCA** (luz, gas, impuestos provinciales, otros): la API solo documenta VEP. ¿Hay una API de pago de servicios, o se hacen únicamente desde Banca Internet Empresa?
+2. **Anular un e-cheq emitido:** la gestión de e-cheq documenta aceptar, endosar, depositar y poner en custodia; no anular ni pedir la devolución. ¿Se puede por API?
+3. **CUIT del ordenante en los movimientos:** el movimiento trae una descripción libre, sin CUIT ni nombre de quien transfirió. ¿Hay un campo o una consulta que lo dé? Sin eso, un cobro por transferencia se identifica solo por importe y fecha.
+4. **Estado de una gestión de e-cheq con firma (endoso, depósito):** no hay una consulta publicada para esas operaciones. Hoy el sistema mira el estado del cheque en el listado de recibidos (si dejó de estar ACTIVO, el endoso se hizo). ¿Existe la consulta por `idOrigen`?
+5. **"Enviada a proceso":** la página de transferir dice que es un estado pendiente (hubo un error en el envío y se reintenta) y la de consulta dice que es una transferencia ya procesada. El sistema lo toma como **no terminado**. ¿Cuál vale?
+6. **Formato del importe:** la tabla dice 13 enteros y 2 decimales y los ejemplos mandan `"100.0"`. El sistema manda siempre dos decimales (`"100.00"`).
+7. En producción: URL, realm y si la clave privada es la misma.
+
+### Sin resolver / a confirmar con Juan
+
+- **Orden de los pasos:** hoy hay que dejar la orden pendiente, mandar a firmar y confirmar después. Con "Pagar ahora" la orden queda pagada en el acto y el sistema ya no deja mandarla al banco. Si Juan prefiere el otro orden (confirmar primero y que el banco sea la ejecución), hay que decidir qué pasa si el banco la rechaza.
+- **VEP y vencimientos:** pagar un VEP no marca ningún vencimiento como pagado (la operación puede guardar el vencimiento relacionado, pero la pantalla todavía no lo pide). Queda para cuando se defina cómo se anotan los impuestos.
+- **Aceptar, depositar y poner en custodia** e-cheq recibidos: el cliente lo sabe hacer, no hay pantalla.
+- **Simulador y servidor:** el simulador guarda sus operaciones en la memoria del servidor; si el servidor se reinicia entre el envío y la consulta, la consulta dice que no conoce la operación. Es solo del simulador.
+- No se probó contra el banco (no hay credenciales) ni en el navegador.
+

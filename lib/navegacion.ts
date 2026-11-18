@@ -75,6 +75,7 @@ export const SECCIONES: Seccion[] = [
       { label: "Pendientes de revisar", href: "/caja/pendientes", roles: ["admin"] },
       { label: "Pagos de la semana", href: "/finanzas/pagos-semana", roles: ["admin"] },
       { label: "Cheques", href: "/finanzas/cheques", roles: ["admin"] },
+      { label: "Bancos (Credicoop)", href: "/finanzas/bancos", roles: ["admin"] },
       { label: "Conciliación", href: "/finanzas/conciliacion", roles: ["admin"] },
       { label: "Cierre de caja", href: "/finanzas/cierres", roles: ["admin"] },
       { label: "Cuentas", href: "/finanzas/cajas", roles: ["admin"] },

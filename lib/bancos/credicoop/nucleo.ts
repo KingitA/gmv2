@@ -397,12 +397,13 @@ export function armarGestionEcheq(e: DatosEmpresa, p: { idOrigen: string; cbuCue
 }
 
 /** Listado de e-cheq (recibidos o generados). El banco devuelve de a 20. */
-export function armarListaEcheqs(e: DatosEmpresa, p: { idOrigen: string; gestion: "RECIBIDOS" | "GENERADOS"; estado?: string; numeroCheque?: string; cuit?: string; pagina?: number }) {
+export function armarListaEcheqs(e: DatosEmpresa, p: { idOrigen: string; gestion: "RECIBIDOS" | "GENERADOS"; estado?: string; numeroCheque?: string; idCheque?: string | null; cuit?: string; pagina?: number }) {
   exigirEmpresa(e); exigirIdOrigen(p.idOrigen)
   return {
     idOrigen: p.idOrigen, numeroAdherente: e.numeroAdherente,
     filtro: {
       gestion: p.gestion, estado: (p.estado || "TODOS").toUpperCase(),
+      ...(p.idCheque ? { idCheque: String(p.idCheque) } : {}),
       ...(p.numeroCheque ? { numeroCheque: soloDigitos(p.numeroCheque) } : {}),
       ...(cuitDeOnce(p.cuit) ? { cuitCuilCdi: cuitDeOnce(p.cuit) } : {}),
       pagina: Math.max(1, Math.trunc(p.pagina ?? 1)), limite: 20,

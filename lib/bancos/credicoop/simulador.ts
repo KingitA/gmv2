@@ -157,7 +157,8 @@ export function crearSimuladorCredicoop(opciones: OpcionesSimulador = {}) {
         { chequeId: "JWV9J0JWAAM2QMD", numeroCheque: "00603430", cmc7completo: "19134335611012340603430010005", estado: endosados.has("JWV9J0JWAAM2QMD") ? "ACTIVO-PENDIENTE" : "ACTIVO", bancoCodigo: "191", bancoNombre: "BANCO CREDICOOP", caracter: "A LA ORDEN", fechaPago: { formatter: "yyyy-MM-dd'T'HH:mm:ss", value: "2026-12-10T00:00:00" }, monto: "250000.00", emisorCuit: "30712345678", emisorRazonSocial: "CLIENTE SIMULADO SA", moneda: "ARS" },
       ] : []
       const num = String(cuerpo?.filtro?.numeroCheque ?? "")
-      const filtrados = todos.filter((c) => !num || c.numeroCheque.endsWith(num.replace(/^0+/, "")) || c.numeroCheque === num)
+      const idPedido = String(cuerpo?.filtro?.idCheque ?? "")
+      const filtrados = todos.filter((c) => (!num || c.numeroCheque.endsWith(num.replace(/^0+/, "")) || c.numeroCheque === num) && (!idPedido || c.chequeId === idPedido))
       return json(200, { data: { numeroAdherente: cuerpo?.numeroAdherente, idOrigen: cuerpo?.idOrigen, echeqs: filtrados, totalCheques: filtrados.length } })
     }
     if (init.method === "POST" && ruta === RUTAS.listarVeps) {
