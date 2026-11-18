@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
-import { ErrorHttp, esQrOUrl, lecturaError, lecturaOk, useLector, useNoEnviados, useOnline, useRuntime } from "@gm/core"
+import { ErrorHttp, esQrOUrl, lecturaError, lecturaOk, useLector, useNoEnviados, useOnline, useOverlay, useRuntime } from "@gm/core"
+import { Hoja } from "@gm/core/ui"
 import { fecha, moneda, parseMonto } from "@gm/formato"
 import { aUnidadesBase, cant, cantidadConUnidad, textoCantidad, type UnidadConteo } from "@gm/deposito"
 import { DS } from "../../datasets"
+import { borrarBorradorBultos, faltaParaRegistrarBultos, guardarBorradorBultos, leerBorradorBultos } from "../../datos/borradorBultos"
 import { buscarPorCodigo, eansDe, padEan13 } from "../../datos/busqueda"
 import { useArticulos, useCatalogos, useEncolar, useRecepcion, useRecepciones, useRefrescarAlEntrar } from "../../datos/hooks"
-import type { LineaRecepcion, RecepcionVista } from "../../datos/overlay"
+import { lineaIncompleta, resumenCierre, textoFalta, unidadesFaltantes, type LineaRecepcion, type RecepcionVista } from "../../datos/overlay"
 import { BarraProgreso, C, Contadores, dejarAviso, DESCRIPCION, Marco, META, Rechazos, SinEnviar, TarjetaSwipe, TITULO_GRUPO, useAvisoEntrante, useTecladoAbierto, useToast, useVolver, Vacio } from "../../ui"
 import { FichaArticulo, useAbrirFicha, useFichaAbierta, type DatosFicha } from "../comunes/FichaArticulo"
 import { PanelBuscar } from "../comunes/Buscar"
@@ -23,7 +25,9 @@ const resumen = (r: RecepcionVista) => {
   const ok = r.lineas.filter((l) => l.estado_linea === "ok").length
   const faltantes = r.lineas.filter((l) => l.estado_linea === "faltante").length
   const pendientes = r.lineas.filter((l) => l.estado_linea === "pendiente").length
-  return { ok, faltantes, pendientes, total: r.lineas.length }
+  // Contadas con menos de lo pedido (E-92): están resueltas, pero NO completas
+  const incompletas = r.lineas.filter(lineaIncompleta).length
+  return { ok, faltantes, pendientes, incompletas, total: r.lineas.length }
 }
 
 // ─── /recibir — órdenes pendientes ───────────────────────────────────────────
@@ -52,7 +56,8 @@ export function Recepciones() {
           {ordenes.map((r) => {
             const o = r.orden
             const enProgreso = o.recepcion?.estado === "en_proceso" || r.lineas.some((l) => l.sinEnviar) || !!r.conformidad
-            const { ok } = resumen(r)
+            const res = resumen(r)
+            const ok = res.ok - res.incompletas
             const total = o.ordenes_compra_detalle?.length || 0
             const pct = total > 0 ? Math.round((ok / total) * 100) : 0
             return (
@@ -75,7 +80,7 @@ export function Recepciones() {
                     <div style={{ background: C.border, borderRadius: 999, height: 6, overflow: "hidden" }}>
                       <div style={{ height: "100%", background: C.green, borderRadius: 999, width: `${pct}%` }} />
                     </div>
-                    <div style={{ fontSize: 12, color: C.sub, marginTop: 4 }}>{ok}/{total} artículos recibidos</div>
+                    <div style={{ fontSize: 12, color: C.sub, marginTop: 4 }}>{ok}/{total} artículos completos{res.incompletas > 0 ? ` · ${res.incompletas} con menos de lo pedido` : ""}</div>
                   </div>
                 )}
                 <button onClick={() => navigate(`/recibir/${o.id}`)} style={{ width: "100%", background: C.green, color: "#fff", fontWeight: 700, fontSize: 15, padding: 14, borderRadius: 14, border: "none" }}>
@@ -157,13 +162,24 @@ function OrdenNoDisponible({ cargando, finalizada }: { cargando: boolean; finali
   )
 }
 
-/** Renglón de la recepción: mismo criterio que el picking (descripción en 2 líneas, toque = ficha). */
-function Linea({ l, accion, onAbrir }: { l: LineaRecepcion; accion: { fondo: string; icono: string; etiqueta: string; onConfirmar: () => void }; onAbrir?: () => void }) {
+/**
+ * Renglón de la recepción. Tocarlo abre la pantalla de CANTIDAD (lo que el operario viene a
+ * hacer); la ficha del artículo queda en el botón ⓘ de la derecha.
+ * Una línea contada con menos de lo pedido va en ÁMBAR ("1 de 2 bultos — faltan 36 u"): verde
+ * es solo lo que llegó completo (E-92).
+ */
+function Linea({ l, accion, onAbrir, onFicha }: { l: LineaRecepcion; accion: { fondo: string; icono: string; etiqueta: string; onConfirmar: () => void }; onAbrir?: () => void; onFicha?: () => void }) {
   const ok = l.estado_linea === "ok"
   const faltante = l.estado_linea === "faltante"
+  const incompleta = lineaIncompleta(l)
+  const color = incompleta ? C.orange : C.green
   return (
-    <TarjetaSwipe bg={ok ? C.greenL : faltante ? C.redL : C.white} borde={ok ? C.greenB : faltante ? C.redB : C.border} accion={accion} onAbrir={onAbrir}>
-      <div style={{ width: 10, height: 10, borderRadius: "50%", background: ok ? C.green : faltante ? C.red : "#fbbf24", flexShrink: 0 }} />
+    <TarjetaSwipe
+      bg={incompleta ? C.orangeL : ok ? C.greenL : faltante ? C.redL : C.white}
+      borde={incompleta ? C.orangeB : ok ? C.greenB : faltante ? C.redB : C.border}
+      accion={accion} onAbrir={onAbrir}
+    >
+      <div style={{ width: 10, height: 10, borderRadius: "50%", background: incompleta ? C.orange : ok ? C.green : faltante ? C.red : "#fbbf24", flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={DESCRIPCION}>
           {l.fuera_de_oc ? "⚠ " : ""}{l.articulo?.descripcion || l.articulo_id}{l.fuera_de_oc ? " (NO PEDIDO)" : ""}
@@ -174,7 +190,14 @@ function Linea({ l, accion, onAbrir }: { l: LineaRecepcion; accion: { fondo: str
         </div>
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
-        {ok ? (
+        {incompleta ? (
+          <>
+            <div style={{ color, fontWeight: 800, fontSize: 18, lineHeight: 1.15 }}>
+              {l.unidadConteo === l.unidadOC ? `${cant(l.cantidad_fisica)} de ${cantidadConUnidad(l.cantidad_oc, l.unidadOC)}` : `${cantidadConUnidad(l.cantidad_fisica, l.unidadConteo)} de ${cantidadConUnidad(l.cantidad_oc, l.unidadOC)}`}
+            </div>
+            <div style={{ color, fontSize: 13, fontWeight: 800 }}>faltan {cant(unidadesFaltantes(l))} u</div>
+          </>
+        ) : ok ? (
           <>
             <div style={{ color: C.green, fontWeight: 800, fontSize: 22, lineHeight: 1.1 }}>{cantidadConUnidad(l.cantidad_fisica, l.unidadConteo)}</div>
             {l.unidadConteo === "bulto" && <div style={{ color: l.sinUnidadesPorBulto ? C.red : C.green, fontSize: 12, fontWeight: 700 }}>{l.sinUnidadesPorBulto ? "⚠ sin u. por bulto" : `= ${cant(l.fisicaUnidades)} u`}</div>}
@@ -189,6 +212,15 @@ function Linea({ l, accion, onAbrir }: { l: LineaRecepcion; accion: { fondo: str
           </>
         )}
       </div>
+      {onFicha && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onFicha() }}
+          aria-label="Ver la ficha del artículo"
+          style={{ flexShrink: 0, width: 44, height: 44, borderRadius: 12, border: `1.5px solid ${C.border}`, background: C.white, color: C.sub, fontSize: 18, fontWeight: 800 }}
+        >
+          ⓘ
+        </button>
+      )}
     </TarjetaSwipe>
   )
 }
@@ -199,18 +231,77 @@ const respaldoDe = (r: RecepcionVista | null) => (articuloId: string): DatosFich
   return a ? { id: articuloId, descripcion: a.descripcion, sku: a.sku, unidades_por_bulto: a.unidades_por_bulto, ean13: a.ean13 } : undefined
 }
 
+/**
+ * Finalizar la entrega. Si falta algo de lo pedido (líneas marcadas faltante, o contadas con
+ * menos) NO finaliza de una: abre una hoja con qué llegó y qué falta, y el operario confirma.
+ * Antes finalizaba sin preguntar y la línea incompleta quedaba verde (E-92, E-93).
+ * `pedir(pasos)`: cuántas pantallas hay que volver después (1 desde la lista, 2 desde Buscar).
+ */
 function useFinalizarRecepcion(r: RecepcionVista | null, mostrar: Mostrar) {
   const encolar = useEncolar()
   const volver = useVolver()
-  return (pasos = 1) => {
-    if (!r) return
-    const pend = resumen(r).pendientes
-    if (pend > 0) { mostrar(`Faltan ${pend} artículos por escanear o marcar`, "err"); return }
+  const confirmar = useOverlay("finalizar")
+  const pasosRef = useRef(1)
+  const [enviando, setEnviando] = useState(false)
+  const cierre = useMemo(() => (r ? resumenCierre(r) : null), [r])
+
+  const enviar = (pasos: number) => {
+    if (!r || enviando) return
+    setEnviando(true)
     void encolar("recepcion.cerrar", { orden_compra_id: r.orden.id }, `Finalizar recepción ${r.orden.numero_orden} — ${r.orden.proveedores?.nombre ?? ""}`).then(() => {
-      dejarAviso("✅ Recepción finalizada")
+      dejarAviso(cierre?.hayFaltantes ? "✅ Entrega finalizada — la orden queda abierta por lo que falta" : "✅ Recepción finalizada")
       volver(pasos)
-    })
+    }).finally(() => setEnviando(false))
   }
+
+  const pedir = (pasos = 1) => {
+    if (!r || !cierre) return
+    if (cierre.pendientes > 0) { mostrar(`Faltan ${cierre.pendientes} artículos por escanear o marcar`, "err"); return }
+    if (!cierre.hayFaltantes) { enviar(pasos); return }
+    pasosRef.current = pasos
+    confirmar.abrir()
+  }
+
+  const llego = cierre ? [
+    cierre.completas > 0 ? `${cierre.completas} artículo${cierre.completas === 1 ? "" : "s"} completo${cierre.completas === 1 ? "" : "s"}` : null,
+    cierre.incompletas.length > 0 ? `${cierre.incompletas.length} en parte` : null,
+    cierre.fueraDeOC > 0 ? `${cierre.fueraDeOC} que no estaba${cierre.fueraDeOC === 1 ? "" : "n"} pedido${cierre.fueraDeOC === 1 ? "" : "s"}` : null,
+  ].filter(Boolean).join(" · ") || "nada" : ""
+
+  const hoja = (
+    <Hoja abierta={confirmar.abierto && !!cierre} onCerrar={confirmar.cerrar} titulo="¿Finalizar con faltantes?">
+      {cierre && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ background: C.greenL, border: `1.5px solid ${C.greenB}`, borderRadius: 14, padding: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: C.green, textTransform: "uppercase", letterSpacing: "0.08em" }}>Llegó</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginTop: 2 }}>{llego}</div>
+          </div>
+          <div style={{ background: C.orangeL, border: `1.5px solid ${C.orangeB}`, borderRadius: 14, padding: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: C.orange, textTransform: "uppercase", letterSpacing: "0.08em" }}>Falta</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6, maxHeight: "34vh", overflow: "auto" }}>
+              {[...cierre.incompletas, ...cierre.noLlegaron].map((x) => (
+                <div key={x.articulo_id} style={{ fontSize: 15, color: C.text, lineHeight: 1.3 }}>
+                  <b>{x.falta}</b> de {x.descripcion}
+                  <span style={{ color: C.sub, fontSize: 13 }}> — {x.llego === "nada" ? "no llegó nada" : `llegó ${x.llego}`}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ fontSize: 15, color: C.text, fontWeight: 600, lineHeight: 1.35 }}>
+            La orden queda abierta para recibir el resto. Si contaste mal algo, volvé y corregilo antes de finalizar.
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={confirmar.cerrar} disabled={enviando} style={{ flex: 1, background: C.white, color: C.text, fontWeight: 700, fontSize: 16, padding: "17px 0", borderRadius: 16, border: `1.5px solid ${C.border}` }}>Volver a contar</button>
+            {/* +1: la hoja también es una entrada del historial */}
+            <button onClick={() => enviar(pasosRef.current + 1)} disabled={enviando} style={{ flex: 1.3, background: C.orange, color: "#fff", fontWeight: 800, fontSize: 16, padding: "17px 0", borderRadius: 16, border: "none", opacity: enviando ? 0.6 : 1 }}>
+              {enviando ? "Finalizando…" : "Sí, finalizar así"}
+            </button>
+          </div>
+        </div>
+      )}
+    </Hoja>
+  )
+  return { pedir, hoja }
 }
 
 // ─── Control de bultos (compuerta previa al escaneo, igual que la web) ───────
@@ -218,23 +309,28 @@ function useFinalizarRecepcion(r: RecepcionVista | null, mostrar: Mostrar) {
 function ControlBultos({ r, mostrar }: { r: RecepcionVista; mostrar: Mostrar }) {
   const encolar = useEncolar()
   const { transportes } = useCatalogos()
-  const [transporte, setTransporte] = useState("")
-  const [declarados, setDeclarados] = useState("")
-  const [recibidos, setRecibidos] = useState("")
-  const [obs, setObs] = useState("")
+  const ordenId = r.orden.id
+  // Lo escrito se guarda en el equipo en cada tecla: salir con "atrás" (con el teclado abierto es
+  // lo más fácil de tocar sin querer) no lo pierde, y al volver está como se dejó.
+  const [borrador, setBorrador] = useState(() => leerBorradorBultos(ordenId))
+  const cambiar = (c: Partial<typeof borrador>) => setBorrador((p) => { const n = { ...p, ...c }; guardarBorradorBultos(ordenId, n); return n })
+  const { transporte, declarados, recibidos, obs } = borrador
+  const saltear = useOverlay("saltear-bultos")
+  const [guardando, setGuardando] = useState(false)
   const decl = Math.trunc(parseMonto(declarados) ?? 0)
   const recib = Math.trunc(parseMonto(recibidos) ?? 0)
-  const difieren = decl > 0 && recibidos !== "" && decl !== recib
+  const difieren = declarados !== "" && recibidos !== "" && decl !== recib
+  // "Bultos OK" queda deshabilitado hasta tener LOS DOS números (y la observación si no coinciden)
+  const falta = faltaParaRegistrarBultos(borrador)
 
   const guardar = (estado: "conforme" | "no_conforme" | "omitida") => {
-    if (estado !== "omitida") {
-      if (decl <= 0 || recib < 0) { mostrar("Cargá los bultos del remito y los contados", "err"); return }
-      if (estado === "no_conforme" && !obs.trim()) { mostrar("Si faltan bultos, la observación es obligatoria", "err"); return }
-    }
+    if (guardando) return
+    if (estado !== "omitida" && falta) { mostrar(falta, "err"); return }
+    setGuardando(true)
     void encolar(
       "recepcion.conformidad",
       {
-        orden_compra_id: r.orden.id,
+        orden_compra_id: ordenId,
         conformidad: {
           transporte_id: transporte || null,
           bultos_declarados: estado === "omitida" ? null : decl,
@@ -243,7 +339,10 @@ function ControlBultos({ r, mostrar }: { r: RecepcionVista; mostrar: Mostrar }) 
         },
       },
       `Recepción ${r.orden.numero_orden}: control de bultos (${estado.replace("_", " ")})`,
-    ).then(() => mostrar(estado === "omitida" ? "Control salteado (quedó registrado)" : "✓ Control de bultos registrado"))
+    ).then(() => {
+      borrarBorradorBultos(ordenId)
+      mostrar(estado === "omitida" ? "Control salteado (quedó registrado)" : "✓ Control de bultos registrado")
+    }).finally(() => setGuardando(false))
   }
 
   const campo = { width: "100%", background: C.bg, color: C.text, fontSize: 32, fontWeight: 800, textAlign: "center" as const, borderRadius: 12, padding: 12, border: `2px solid ${C.border}`, outline: "none", boxSizing: "border-box" as const }
@@ -257,7 +356,7 @@ function ControlBultos({ r, mostrar }: { r: RecepcionVista; mostrar: Mostrar }) 
       <div style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 20, padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
           <div style={{ color: C.sub, fontSize: 14, marginBottom: 6 }}>Transporte</div>
-          <select value={transporte} onChange={(e) => setTransporte(e.target.value)} style={{ width: "100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 12, padding: "14px 12px", fontSize: 16, color: C.text, fontWeight: 600 }}>
+          <select value={transporte} onChange={(e) => cambiar({ transporte: e.target.value })} style={{ width: "100%", background: C.bg, border: `1.5px solid ${C.border}`, borderRadius: 12, padding: "14px 12px", fontSize: 16, color: C.text, fontWeight: 600 }}>
             <option value="">Sin transporte / retiro propio</option>
             {transportes.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
           </select>
@@ -265,25 +364,46 @@ function ControlBultos({ r, mostrar }: { r: RecepcionVista; mostrar: Mostrar }) 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
             <div style={{ color: C.sub, fontSize: 14, marginBottom: 6 }}>Bultos según remito</div>
-            <input type="text" inputMode="numeric" value={declarados} onChange={(e) => setDeclarados(e.target.value.replace(/\D/g, ""))} style={campo} />
+            <input type="text" inputMode="numeric" value={declarados} onChange={(e) => cambiar({ declarados: e.target.value.replace(/\D/g, "").slice(0, 6) })} style={campo} />
           </div>
           <div>
             <div style={{ color: C.sub, fontSize: 14, marginBottom: 6 }}>Bultos contados</div>
-            <input type="text" inputMode="numeric" value={recibidos} onChange={(e) => setRecibidos(e.target.value.replace(/\D/g, ""))} style={{ ...campo, background: difieren ? C.redL : C.bg, color: difieren ? C.red : C.text, border: `2px solid ${difieren ? C.redB : C.border}` }} />
+            <input type="text" inputMode="numeric" value={recibidos} onChange={(e) => cambiar({ recibidos: e.target.value.replace(/\D/g, "").slice(0, 6) })} style={{ ...campo, background: difieren ? C.redL : C.bg, color: difieren ? C.red : C.text, border: `2px solid ${difieren ? C.redB : C.border}` }} />
           </div>
         </div>
         {difieren && (
           <div style={{ background: C.redL, border: `1.5px solid ${C.redB}`, borderRadius: 12, padding: 12 }}>
-            <div style={{ color: C.red, fontWeight: 700, fontSize: 14, marginBottom: 8 }}>⚠ Faltan {Math.abs(decl - recib)} bulto{Math.abs(decl - recib) !== 1 ? "s" : ""} — NO firmes conforme. Detallá qué pasó:</div>
-            <textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} placeholder="Ej: llegaron 18 de 20 bultos, faltan 2 cajas de..." style={{ width: "100%", background: C.white, border: `1.5px solid ${C.redB}`, borderRadius: 10, padding: 10, fontSize: 15, boxSizing: "border-box" }} />
+            <div style={{ color: C.red, fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
+              ⚠ {recib < decl ? `Faltan ${decl - recib}` : `Sobran ${recib - decl}`} bulto{Math.abs(decl - recib) !== 1 ? "s" : ""} — NO firmes conforme. Detallá qué pasó:
+            </div>
+            <textarea value={obs} onChange={(e) => cambiar({ obs: e.target.value.slice(0, 500) })} rows={2} placeholder="Ej: llegaron 18 de 20 bultos, faltan 2 cajas de..." style={{ width: "100%", background: C.white, border: `1.5px solid ${C.redB}`, borderRadius: 10, padding: 10, fontSize: 15, boxSizing: "border-box" }} />
           </div>
         )}
       </div>
-      <button onClick={() => guardar(difieren ? "no_conforme" : "conforme")} style={{ background: difieren ? C.orange : C.green, color: "#fff", fontWeight: 800, fontSize: 19, padding: 20, borderRadius: 20, border: "none" }}>
-        {difieren ? "⚠ Registrar con faltante de bultos" : "✓ Bultos OK — empezar a escanear"}
+      <button
+        onClick={() => guardar(difieren ? "no_conforme" : "conforme")}
+        disabled={!!falta || guardando}
+        style={{ background: falta ? "#e5e7eb" : difieren ? C.orange : C.green, color: falta ? C.light : "#fff", fontWeight: 800, fontSize: 19, padding: 20, borderRadius: 20, border: "none" }}
+      >
+        {difieren ? "⚠ Registrar con diferencia de bultos" : "✓ Bultos OK — empezar a escanear"}
       </button>
-      <button onClick={() => guardar("omitida")} style={{ background: C.white, color: C.sub, fontWeight: 600, padding: 14, borderRadius: 16, border: `1.5px solid ${C.border}`, fontSize: 15 }}>Saltear control (queda registrado)</button>
+      {falta && <div style={{ color: C.sub, fontSize: 14, textAlign: "center", fontWeight: 600, marginTop: -6 }}>{falta}</div>}
+      <button onClick={saltear.abrir} disabled={guardando} style={{ background: C.white, color: C.sub, fontWeight: 600, padding: 14, borderRadius: 16, border: `1.5px solid ${C.border}`, fontSize: 15 }}>Saltear control (queda registrado)</button>
       <div style={{ color: C.light, fontSize: 13, textAlign: "center" }}>Después sacale foto al remito firmado desde "Documentos"</div>
+
+      {/* Saltear es una decisión, no un botón que se toca sin querer: se confirma */}
+      <Hoja abierta={saltear.abierto} onCerrar={saltear.cerrar} titulo="¿Saltear el control de bultos?">
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ fontSize: 15, color: C.text, lineHeight: 1.4 }}>
+            Queda registrado que <b>no se contaron los bultos</b> de esta entrega: si después falta mercadería, no se le va a poder reclamar al transporte.
+            {(declarados !== "" || recibidos !== "") && <> Los números que escribiste no se guardan.</>}
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={saltear.cerrar} style={{ flex: 1, background: C.green, color: "#fff", fontWeight: 800, fontSize: 16, padding: "17px 0", borderRadius: 16, border: "none" }}>Volver a contar</button>
+            <button onClick={() => guardar("omitida")} disabled={guardando} style={{ flex: 1, background: C.white, color: C.red, fontWeight: 700, fontSize: 16, padding: "17px 0", borderRadius: 16, border: `1.5px solid ${C.redB}` }}>Sí, saltear</button>
+          </div>
+        </div>
+      </Hoja>
     </div>
   )
 }
@@ -311,7 +431,8 @@ export function Recepcion() {
 
   const s = resumen(r)
   const pendientes = r.lineas.filter((l) => l.estado_linea === "pendiente")
-  const recibidos = r.lineas.filter((l) => l.estado_linea === "ok")
+  const enParte = r.lineas.filter(lineaIncompleta)
+  const recibidos = r.lineas.filter((l) => l.estado_linea === "ok" && !lineaIncompleta(l))
   const aFaltante = (l: LineaRecepcion) => ({
     fondo: C.red, icono: "✕", etiqueta: "Faltante",
     onConfirmar: () => void contar(l.articulo_id, l.articulo?.descripcion ?? "artículo", 0).then(() => mostrar("Marcado como faltante")),
@@ -343,13 +464,14 @@ export function Recepcion() {
             )}
           </div>
         </div>
-        <BarraProgreso resueltos={s.ok + s.faltantes} total={s.total} pendientes={s.pendientes} ok={s.ok} faltantes={s.faltantes} />
+        <BarraProgreso resueltos={s.ok + s.faltantes} total={s.total} pendientes={s.pendientes} ok={s.ok - s.incompletas} faltantes={s.faltantes} />
+        {s.incompletas > 0 && <div style={{ color: C.orange, fontWeight: 700, fontSize: 13, marginTop: 3 }}>◐ {s.incompletas} con menos de lo pedido</div>}
       </div>
 
       {pendientes.length > 0 && s.ok + s.faltantes === 0 && (
         <div style={{ background: C.greenL, borderBottom: `1px solid ${C.greenB}`, padding: "5px 14px", display: "flex", gap: 6, alignItems: "center" }}>
           <span style={{ fontSize: 13 }}>👈</span>
-          <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>Swipeá para faltante · Escaneá para cantidad · Tocá para ver la ficha</span>
+          <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>Tocá o escaneá para cargar la cantidad · Swipeá para faltante · ⓘ ficha</span>
         </div>
       )}
 
@@ -357,25 +479,32 @@ export function Recepcion() {
         {pendientes.length > 0 && (
           <>
             <div style={TITULO_GRUPO}>Pendientes ({pendientes.length})</div>
-            {pendientes.map((l) => <Linea key={l.articulo_id} l={l} accion={aFaltante(l)} onAbrir={() => abrirFicha(l.articulo_id)} />)}
+            {pendientes.map((l) => <Linea key={l.articulo_id} l={l} accion={aFaltante(l)} onAbrir={() => abrirItem(l.articulo_id)} onFicha={() => abrirFicha(l.articulo_id)} />)}
+          </>
+        )}
+        {enParte.length > 0 && (
+          <>
+            <div style={{ ...TITULO_GRUPO, paddingTop: 8, color: C.orange }}>Llegó menos de lo pedido ({enParte.length})</div>
+            {enParte.map((l) => <Linea key={l.articulo_id} l={l} accion={aFaltante(l)} onAbrir={() => abrirItem(l.articulo_id)} onFicha={() => abrirFicha(l.articulo_id)} />)}
           </>
         )}
         {recibidos.length > 0 && (
           <>
-            <div style={{ ...TITULO_GRUPO, paddingTop: 8 }}>Recibidos ({recibidos.length})</div>
-            {recibidos.map((l) => <Linea key={l.articulo_id} l={l} accion={aFaltante(l)} onAbrir={() => abrirFicha(l.articulo_id)} />)}
+            <div style={{ ...TITULO_GRUPO, paddingTop: 8 }}>Recibidos completos ({recibidos.length})</div>
+            {recibidos.map((l) => <Linea key={l.articulo_id} l={l} accion={aFaltante(l)} onAbrir={() => abrirItem(l.articulo_id)} onFicha={() => abrirFicha(l.articulo_id)} />)}
           </>
         )}
         <div style={{ height: 16 }} />
       </div>
       <FichaArticulo respaldo={respaldoFicha} />
       {baja.hoja}
+      {finalizar.hoja}
 
       <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 12 }}>
         <button onClick={() => navigate(`/recibir/${r.orden.id}/buscar`)} style={{ flex: 2, background: C.white, color: C.text, fontWeight: 700, fontSize: 18, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
           <span style={{ fontSize: 20 }}>🔍</span> Buscar artículo
         </button>
-        <button onClick={() => finalizar(1)} style={{ flex: 1, background: s.pendientes === 0 ? "#15803d" : "#f3f4f6", color: s.pendientes === 0 ? "#fff" : C.light, fontWeight: 800, fontSize: 16, padding: "19px 0", borderRadius: 18, border: s.pendientes === 0 ? "none" : `1.5px solid ${C.border}` }}>✅ Finalizar</button>
+        <button onClick={() => finalizar.pedir(1)} style={{ flex: 1, background: s.pendientes === 0 ? "#15803d" : "#f3f4f6", color: s.pendientes === 0 ? "#fff" : C.light, fontWeight: 800, fontSize: 16, padding: "19px 0", borderRadius: 18, border: s.pendientes === 0 ? "none" : `1.5px solid ${C.border}` }}>✅ Finalizar</button>
       </div>
     </Marco>
   )
@@ -411,18 +540,20 @@ export function RecepcionBuscar() {
         decorar={(art) => {
           const l = r.lineas.find((x) => x.articulo_id === art.id)
           if (!l) return null
-          const ok = l.estado_linea === "ok"
-          return { bg: ok ? C.greenL : C.orangeL, borde: ok ? C.greenB : C.orangeB, leyenda: <span style={{ color: ok ? C.green : C.orange }}>OC: {textoCantidad(l.cantidad_oc, l.unidadOC, l.unidadesPorBulto)} · {l.estado_linea.toUpperCase()}</span> }
+          const ok = l.estado_linea === "ok" && !lineaIncompleta(l)
+          const estado = lineaIncompleta(l) ? `FALTAN ${textoFalta(l)}` : l.estado_linea.toUpperCase()
+          return { bg: ok ? C.greenL : C.orangeL, borde: ok ? C.greenB : C.orangeB, leyenda: <span style={{ color: ok ? C.green : C.orange }}>OC: {textoCantidad(l.cantidad_oc, l.unidadOC, l.unidadesPorBulto)} · {estado}</span> }
         }}
         onElegir={(art) => abrirItem(art.id, { replace: true })}
         onCodigo={(c) => { const a = resolverCodigo(c); if (a) abrirItem(a, { replace: true }) }}
         dadoDeBaja={baja}
       />
       {baja.hoja}
+      {finalizar.hoja}
       {!teclado && (
         <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 10 }}>
           <button onClick={() => volver()} style={{ flex: 1, background: C.bg, color: C.text, fontWeight: 700, fontSize: 16, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}` }}>📋 Lista</button>
-          <button onClick={() => finalizar(2)} style={{ flex: 1, background: s.pendientes === 0 ? C.green : "#e5e7eb", color: s.pendientes === 0 ? "#fff" : C.light, fontWeight: 800, fontSize: 16, padding: "19px 0", borderRadius: 18, border: "none" }}>✅ Finalizar</button>
+          <button onClick={() => finalizar.pedir(2)} style={{ flex: 1, background: s.pendientes === 0 ? C.green : "#e5e7eb", color: s.pendientes === 0 ? "#fff" : C.light, fontWeight: 800, fontSize: 16, padding: "19px 0", borderRadius: 18, border: "none" }}>✅ Finalizar</button>
         </div>
       )}
     </Marco>
@@ -535,11 +666,11 @@ export function RecepcionFaltantes() {
       <div style={{ padding: "16px 14px" }}>
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>Artículos faltantes ({faltantes.length})</div>
-          <div style={{ fontSize: 14, color: C.sub, marginTop: 4 }}>Swipeá hacia la izquierda para devolver a pendientes</div>
+          <div style={{ fontSize: 14, color: C.sub, marginTop: 4 }}>Tocá para cargar lo que llegó · Swipeá hacia la izquierda para devolver a pendientes</div>
         </div>
         {faltantes.length === 0 && <div style={{ textAlign: "center", padding: "40px 0", color: C.light, fontSize: 16 }}>No hay faltantes</div>}
         {faltantes.map((l) => (
-          <Linea key={l.articulo_id} l={l} onAbrir={() => abrirFicha(l.articulo_id)} accion={{ fondo: C.green, icono: "↩", etiqueta: "Pendiente", onConfirmar: () => void contar(l.articulo_id, l.articulo?.descripcion ?? "artículo", -1).then(() => mostrar("Devuelto a pendientes")) }} />
+          <Linea key={l.articulo_id} l={l} onAbrir={() => abrirItem(l.articulo_id)} onFicha={() => abrirFicha(l.articulo_id)} accion={{ fondo: C.green, icono: "↩", etiqueta: "Pendiente", onConfirmar: () => void contar(l.articulo_id, l.articulo?.descripcion ?? "artículo", -1).then(() => mostrar("Devuelto a pendientes")) }} />
         ))}
         <button onClick={() => volver()} style={{ width: "100%", background: C.white, color: C.text, fontWeight: 700, fontSize: 16, padding: 17, borderRadius: 18, border: `1.5px solid ${C.border}`, marginTop: 12 }}>← Volver a la lista</button>
       </div>

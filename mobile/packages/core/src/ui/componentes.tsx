@@ -2,8 +2,9 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useLocation, useNavigate } from "react-router"
 import { decidirAtras, indiceHistorial } from "../nav/atras"
-import { useContadoresOutbox, useMetaDataset, useOnline, useRuntime } from "../react/contexto"
+import { useContadoresOutbox, useMetaDataset, useOnline, useRuntime, useSesion } from "../react/contexto"
 import { fechaHoraCorta, hace } from "./formato"
+import { avisoErrorSync } from "./aviso-sync"
 
 // UI base de las 3 apps. Pensada para el NuStar 65-sp: 720×1600 @ xhdpi
 // (360×800 dp), dedo con guante, sol. Alto contraste, objetivos táctiles ≥ 44 px,
@@ -78,6 +79,8 @@ export function Frescura({ dataset, etiqueta = "Datos al", viejoTrasMin = 60, co
 }) {
   const meta = useMetaDataset(dataset)
   const { sync } = useRuntime()
+  const { estado: estadoSesion } = useSesion()
+  const online = useOnline()
   const [sinc, setSinc] = useState(false)
   // Re-evaluar cada minuto: la barra tiene que aparecer sola cuando el dato pasa a ser viejo
   const [, setTic] = useState(0)
@@ -92,7 +95,7 @@ export function Frescura({ dataset, etiqueta = "Datos al", viejoTrasMin = 60, co
     <div className={`flex items-center gap-2 px-3 text-xs ${compacto ? "py-0.5" : "py-1.5"} ${viejo ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-600"}`}>
       <span className="flex-1">
         {meta?.generadoAt ? `${etiqueta} ${fechaHoraCorta(meta.generadoAt)} (${hace(meta.syncedAt)})` : "Sin datos descargados todavía"}
-        {meta?.error ? " · último intento falló" : ""}
+        {avisoErrorSync(meta?.error, { sinSesion: estadoSesion === "anonimo", online })}
       </span>
       <button
         className="rounded px-2 py-1 font-semibold underline active:bg-black/10"
