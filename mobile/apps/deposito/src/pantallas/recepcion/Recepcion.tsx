@@ -8,7 +8,7 @@ import { blobABase64, comprimirFoto } from "@gm/cheques/foto"
 import { DS } from "../../datasets"
 import { borrarBorradorBultos, faltaParaRegistrarBultos, guardarBorradorBultos, leerBorradorBultos } from "../../datos/borradorBultos"
 import { buscarPorCodigo, eansDe, padEan13 } from "../../datos/busqueda"
-import { documentosEnCola, enviosDeDocumento, lecturaDeDocumento, LIMITE_BASE64_ENVIO, repartirEnEnvios, revisarArchivo, type DocumentoRecepcion, type HojaLocal } from "../../datos/documentos"
+import { documentosEnCola, enviosDeDocumento, lecturaDeDocumento, LIMITE_BASE64_ENVIO, repartirEnEnvios, revisarSeleccion, type DocumentoRecepcion, type HojaLocal } from "../../datos/documentos"
 import { useArticulos, useCatalogos, useEncolar, useRecepcion, useRecepciones, useRefrescarAlEntrar } from "../../datos/hooks"
 import { lineaIncompleta, resumenCierre, textoFalta, unidadesFaltantes, type LineaRecepcion, type RecepcionVista } from "../../datos/overlay"
 import { BarraProgreso, C, Contadores, dejarAviso, DESCRIPCION, Marco, META, Rechazos, SinEnviar, TarjetaSwipe, TITULO_GRUPO, useAvisoEntrante, useTecladoAbierto, useToast, useVolver, Vacio } from "../../ui"
@@ -807,37 +807,52 @@ export function RecepcionDocumentos() {
 
   if (!r) return <Marco titulo="Documentos">{toast}<OrdenNoDisponible cargando={cargando} /></Marco>
 
-  const agregarHoja = async (original: File) => {
-    if (ocupado) return
-    const revision = revisarArchivo(original)
-    if (!revision.ok) { mostrar(revision.motivo, "err"); return }
-    if (revision.esPdf && hojas.length > 0) { mostrar("Terminá de subir las fotos de este documento antes de elegir un PDF.", "err"); return }
-    if (!revision.esPdf && hojas.some((h) => h.mime === "application/pdf")) { mostrar("Este documento ya es un PDF: subilo y después sacá las fotos como otro documento.", "err"); return }
-    setOcupado(revision.esImagen ? "Achicando la foto…" : "Preparando el archivo…")
+  /** Deja un archivo listo como hoja (las fotos se achican). string = por qué no se pudo. */
+  const prepararHoja = async (original: File, esPdf: boolean, numero: number): Promise<HojaLocal | string> => {
+    // Las fotos se achican ANTES de guardarse: la cámara saca 3–6 MB
+    let blob: Blob = original
+    let nombre = original.name || "documento"
+    let mime = original.type || (esPdf ? "application/pdf" : "image/jpeg")
+    if (!esPdf) {
+      let c = await comprimirFoto(original, { maxLado: 2000, calidad: 0.78 })
+      // una hoja sola no puede pasar el tope de un envío: segundo intento más chico
+      if (c.blob.size * 1.37 > LIMITE_BASE64_ENVIO) c = await comprimirFoto(original, { maxLado: 1500, calidad: 0.6 })
+      blob = c.blob; nombre = c.nombre; mime = c.mime
+    }
+    const base64 = await blobABase64(blob)
+    if (base64.length > LIMITE_BASE64_ENVIO) return esPdf ? "El PDF pesa demasiado para enviarse desde el equipo. Sacale fotos a las hojas." : "La foto pesa demasiado. Sacala de nuevo."
+    return { id: uuidv4(), nombre: esPdf ? nombre : `hoja-${numero}.jpg`, mime, base64 }
+  }
+
+  /**
+   * Suma al documento lo que se eligió: una foto de la cámara, o VARIOS archivos de una vez (las
+   * 2 o 3 fotos de una factura que llegó por WhatsApp). Todo va al mismo documento, en ese orden.
+   */
+  const agregarArchivos = async (archivos: File[]) => {
+    if (ocupado || archivos.length === 0) return
+    const seleccion = revisarSeleccion(archivos, hojas)
+    const problemas = [...seleccion.avisos]
+    const nuevas: HojaLocal[] = []
     try {
-      // Las fotos se achican ANTES de guardarse: la cámara saca 3–6 MB
-      let blob: Blob = original
-      let nombre = original.name || "documento"
-      let mime = original.type || (revision.esPdf ? "application/pdf" : "image/jpeg")
-      if (revision.esImagen) {
-        let c = await comprimirFoto(original, { maxLado: 2000, calidad: 0.78 })
-        // una hoja sola no puede pasar el tope de un envío: segundo intento más chico
-        if (c.blob.size * 1.37 > LIMITE_BASE64_ENVIO) c = await comprimirFoto(original, { maxLado: 1500, calidad: 0.6 })
-        blob = c.blob; nombre = c.nombre; mime = c.mime
+      for (let i = 0; i < seleccion.aceptados.length; i++) {
+        const a = seleccion.aceptados[i]
+        setOcupado(a.esPdf ? "Preparando el archivo…" : seleccion.aceptados.length > 1 ? `Achicando la foto ${i + 1} de ${seleccion.aceptados.length}…` : "Achicando la foto…")
+        try {
+          const hoja = await prepararHoja(a.archivo, a.esPdf, hojas.length + nuevas.length + 1)
+          if (typeof hoja === "string") problemas.push(hoja)
+          else nuevas.push(hoja)
+        } catch {
+          problemas.push(seleccion.aceptados.length > 1 ? `No se pudo preparar ${a.archivo.name || "un archivo"}.` : "No se pudo preparar el archivo. Probá de nuevo.")
+        }
       }
-      const base64 = await blobABase64(blob)
-      if (base64.length > LIMITE_BASE64_ENVIO) {
-        mostrar(revision.esPdf ? "El PDF pesa demasiado para enviarse desde el equipo. Sacale fotos a las hojas." : "La foto pesa demasiado. Sacala de nuevo.", "err")
-        return
-      }
-      setHojas((p) => [...p, { id: uuidv4(), nombre: revision.esPdf ? nombre : `hoja-${p.length + 1}.jpg`, mime, base64 }])
-    } catch {
-      mostrar("No se pudo preparar el archivo. Probá de nuevo.", "err")
+      if (nuevas.length > 0) setHojas((p) => [...p, ...nuevas])
+      if (problemas.length > 0) mostrar(problemas.join(" "), "err")
+      else if (nuevas.length > 1) mostrar(`Se sumaron ${nuevas.length} hojas al documento`)
     } finally {
       setOcupado(null)
     }
   }
-  const elegido = (e: ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void agregarHoja(f) }
+  const elegido = (e: ChangeEvent<HTMLInputElement>) => { const lista = Array.from(e.target.files ?? []); e.target.value = ""; void agregarArchivos(lista) }
 
   /** Guarda el documento armado en la cola del equipo: con o sin señal, sube solo. */
   const subirDocumento = async () => {
@@ -891,7 +906,8 @@ export function RecepcionDocumentos() {
           </div>
         )}
         <input ref={camaraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={elegido} />
-        <input ref={archivoRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={elegido} />
+        {/* multiple: el selector de Android deja marcar varias fotos de una vez */}
+        <input ref={archivoRef} type="file" accept="application/pdf,image/*" multiple style={{ display: "none" }} onChange={elegido} />
 
         {/* ── Documento nuevo ── */}
         <div style={{ background: C.white, border: `1.5px solid ${hojas.length > 0 ? C.greenB : C.border}`, borderRadius: 18, padding: 14, marginBottom: 14 }}>
@@ -908,7 +924,7 @@ export function RecepcionDocumentos() {
                 <button onClick={() => camaraRef.current?.click()} disabled={!!ocupado} style={{ ...boton, flex: 1.3, background: C.green, color: "#fff" }}>📷 Sacar foto</button>
                 <button onClick={() => archivoRef.current?.click()} disabled={!!ocupado} style={{ ...boton, flex: 1, background: C.white, color: C.text, border: `1.5px solid ${C.border}` }}>📄 PDF o archivo</button>
               </div>
-              <div style={{ color: C.sub, fontSize: 13, marginTop: 8, lineHeight: 1.35 }}>Si tiene varias hojas, sacalas todas antes de subir: van como <b>un solo comprobante</b>.</div>
+              <div style={{ color: C.sub, fontSize: 13, marginTop: 8, lineHeight: 1.35 }}>Si tiene varias hojas, sacalas todas antes de subir: van como <b>un solo comprobante</b>. Desde “PDF o archivo” podés marcar varias fotos juntas (las que llegaron por WhatsApp).</div>
             </>
           ) : (
             <>
@@ -921,10 +937,13 @@ export function RecepcionDocumentos() {
                   </div>
                 ))}
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                {!esPdfBorrador && <button onClick={() => camaraRef.current?.click()} disabled={!!ocupado} style={{ ...boton, flex: 1, background: C.white, color: C.text, border: `1.5px solid ${C.border}` }}>📷 Otra hoja</button>}
-                <button onClick={() => void subirDocumento()} disabled={!!ocupado} style={{ ...boton, flex: 1.4, background: C.green, color: "#fff" }}>⬆ Subir ({hojas.length} hoja{hojas.length === 1 ? "" : "s"})</button>
-              </div>
+              {!esPdfBorrador && (
+                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                  <button onClick={() => camaraRef.current?.click()} disabled={!!ocupado} style={{ ...boton, flex: 1, background: C.white, color: C.text, border: `1.5px solid ${C.border}` }}>📷 Otra hoja</button>
+                  <button onClick={() => archivoRef.current?.click()} disabled={!!ocupado} style={{ ...boton, flex: 1, background: C.white, color: C.text, border: `1.5px solid ${C.border}` }}>🖼️ Otra hoja desde archivo</button>
+                </div>
+              )}
+              <button onClick={() => void subirDocumento()} disabled={!!ocupado} style={{ ...boton, width: "100%", background: C.green, color: "#fff" }}>⬆ Subir ({hojas.length} hoja{hojas.length === 1 ? "" : "s"})</button>
               <div style={{ color: C.orange, fontSize: 13, fontWeight: 700, marginTop: 8 }}>Todavía no se guardó: tocá “Subir” antes de salir de esta pantalla.</div>
             </>
           )}
