@@ -94,7 +94,8 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
             previa.push("Cuenta corriente del proveedor: sin cambios (se paga lo facturado).")
         } else {
             previa.push(`Queda una nota de crédito ESPERADA del proveedor por ${pesos(p)}${destinoPrecio === "descuento_fuera_factura" ? ", por descuento que llega fuera de la factura" : ""}.`)
-            previa.push("Cuenta corriente del proveedor: no cambia hasta que llegue la nota de crédito. Costo del artículo: no cambia.")
+            previa.push("Cuenta corriente del proveedor: no cambia hasta que llegue la nota de crédito.")
+            previa.push(dif.oc ? `Costo del artículo: queda al precio de la orden (${moneda(dif.oc.neto_unidad)} neto por unidad), no al facturado: la diferencia se reclama.` : "Costo del artículo: no cambia.")
         }
     }
     if ((conCantidad || noPedido) && destinoCantidad) {

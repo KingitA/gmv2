@@ -5,7 +5,7 @@ import { conversionesDeRecepcion } from '@/lib/deposito/recepciones';
 import { aUnidadesBase, unidadesPorBultoDe } from '@/lib/deposito/unidades';
 import { calcularDiferencia, combinarLineasOC, cuentaSobrante, reclamablePorDevolucion, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
 import { TIPOS_CON_PRECIOS } from '@/lib/compras/finalizar-oc';
-import { registrarCostoEnHistorial } from '@/lib/compras/costo-y-kardex';
+import { aplicarCostoDeFactura, registrarCostoEnHistorial } from '@/lib/compras/costo-y-kardex';
 import { tipoDescuentoProveedor } from '@/lib/compras/tipo-descuento-proveedor';
 import type { TipoDescuento } from '@/lib/compras/diferencias';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
@@ -362,6 +362,26 @@ export async function POST(
                     if (!anotado) avisoHistorial = ' ATENCIÓN: el costo del artículo cambió pero no se pudo anotar en el historial de costos; avisá a sistemas.';
                 }
 
+                // Costo del artículo según lo resuelto, si la factura YA está validada: reclamada al
+                // proveedor ⇒ precio de la orden; aceptada ⇒ precio facturado (lib/compras/costo-y-kardex.ts).
+                // Si todavía no se validó, lo deja bien la validación. No frena la resolución.
+                let avisoCosto = '';
+                if (!r.ya_resuelta && tipo === 'precio' && rec.ocId && item.articulo_id) {
+                    try {
+                        const { data: validados } = await supabase
+                            .from('comprobantes_compra')
+                            .select('*')
+                            .eq('orden_compra_id', rec.ocId)
+                            .in('estado', ['validado', 'cerrado'])
+                            .in('tipo_comprobante', ['FA', 'FB', 'FC', 'Adquisicion', 'ADQ'])
+                            .order('fecha_comprobante', { ascending: true });
+                        for (const comp of validados || []) await aplicarCostoDeFactura(supabase, comp, rec.ocId, [item.articulo_id]);
+                    } catch (e: any) {
+                        console.error('[cerrar] costo según la resolución:', e?.message || e);
+                        avisoCosto = ' ATENCIÓN: la diferencia quedó resuelta pero no se pudo acomodar el costo del artículo; avisá a sistemas.';
+                    }
+                }
+
                 // Kardex de la devolución: solo si de verdad se devolvió mercadería que había entrado
                 let avisoKardex = '';
                 if (!r.ya_resuelta && Number(r.unidades_devueltas) > 0) {
@@ -403,7 +423,7 @@ export async function POST(
                     : destino === 'bonificado'
                         ? `La mercadería de más quedó recibida sin cargo: no se paga nada más${costo && (costo.ultimo_costo ?? 0) > 0 ? ` y el último costo del artículo pasó a ${moneda(costo.ultimo_costo)} por unidad` : ''}. El precio de lista no se tocó.`
                     : destino === 'proveedor' || destino === 'descuento_fuera_factura'
-                        ? `Quedó una nota de crédito esperada por ${moneda(p.total)} (${moneda(p.neto)} neto + ${moneda(p.iva)} de IVA).`
+                        ? `Quedó una nota de crédito esperada por ${moneda(p.total)} (${moneda(p.neto)} neto + ${moneda(p.iva)} de IVA).${tipo === 'precio' && dif.oc ? ` El costo del artículo queda al precio de la orden (${moneda(dif.oc.neto_unidad)} por unidad).` : ''}`
                         : destino === 'transporte'
                             ? `Se cargaron ${moneda(p.total)} a la cuenta del transporte.`
                             : tipo === 'precio'
@@ -412,7 +432,7 @@ export async function POST(
                                     : 'Se tomó el precio facturado como costo del artículo.')
                                 : 'La diferencia quedó asumida por la empresa.';
                 const devueltas = !r.ya_resuelta && Number(r.unidades_devueltas) > 0 ? ` Salieron ${Number(r.unidades_devueltas)} unidades del stock (mercadería devuelta).` : "";
-                results.push({ item_id, tipo, destino, accion: decision.accion, success: true, ...r, unidades: p.unidades, mensaje: mensaje + devueltas + avisoKardex + avisoHistorial });
+                results.push({ item_id, tipo, destino, accion: decision.accion, success: true, ...r, unidades: p.unidades, mensaje: mensaje + devueltas + avisoKardex + avisoHistorial + avisoCosto });
             } catch (e: any) {
                 if (e instanceof Rechazo) results.push({ item_id, tipo, destino, accion: decision.accion, error: e.message, codigo: e.codigo });
                 else {
