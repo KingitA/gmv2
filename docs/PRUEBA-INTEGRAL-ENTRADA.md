@@ -349,6 +349,13 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 6. **Corregir y borrar un renglón** de un comprobante sin validar (botón "Ver los renglones"): acomoda lo documentado de la recepción y queda anotado quién, cuándo, antes y después en `comprobantes_compra_cambios` (migración `20261118a_comprobantes_compra_cambios.sql`, independiente; sin ella se hace igual y queda en el registro del servidor).
 7. **Borrar un comprobante** se lleva también su archivo (foto o PDF): ya no queda suelto en la lista de la verificación.
 
+### Prueba en producción de punta a punta (18/11, OC-000012) — segunda parte, misma rama
+
+8. **Costo con reclamo al proveedor.** Si la diferencia de precio se reclama (nota de crédito esperada), el último costo del artículo y el kardex de la compra quedan al precio de la ORDEN; si la empresa la acepta, al facturado. Vale en los dos órdenes: resolver y después validar, o validar y después resolver (al resolver se recalcula el costo de ese artículo con las facturas ya validadas de la orden). La vista previa de la ventana dice lo mismo que pasa. `lib/compras/costo-y-kardex.ts`.
+9. **La provisión baja por lo facturado**, igual que el vencimiento estimado: un comprobante por una parte de la orden ya no se lleva la provisión entera del canal. Migración `20261118c_provision_baja_por_lo_facturado.sql` (va después de la u). El procesador de mails hace lo mismo: si la factura es por menos que la provisión, la provisión queda por el resto y la deuda entra como movimiento propio.
+10. **Pestaña que se cuelga en la verificación.** No se pudo medir con el navegador desde la sesión de trabajo: la causa NO está confirmada. Se corrigió lo que la pantalla hacía de más en cada refresco: (a) el enlace firmado de la foto cambia en cada carga y el visor volvía a descargar y dibujar la imagen cada vez (ahora conserva el enlace mientras sea el mismo documento); (b) "Revisar matches" volvía a pedir los renglones de todos los comprobantes cada vez que la pantalla se dibujaba (al abrir un cartel, por ejemplo) porque recibía una lista nueva en cada dibujado. Si vuelve a pasar, hace falta el perfil del navegador.
+11. **Nombre del proveedor en lugar de la sigla** en la cuenta corriente (la sigla va chica al lado) y en la lista de órdenes de pago.
+
 ### Orden de las migraciones de la Tanda 1
 
 Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `20261116c`, `20261116p`, `20261116q`, `20261117a_remito_no_se_valida`, `20261117a_op_ganancias_bases_neto`.
@@ -362,7 +369,10 @@ Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `2
 | 5 | `20261117n_oc_guardar.sql` | conviene después de la m (lee columnas del proveedor que agrega la m) |
 | 6 | `20261117p_ordenes_pago_t1d.sql` | `20261116p` y `20261116q` (corta si faltan) |
 | 7 | `20261117r_retencion_transporte_minimo.sql` | independiente |
-| 8 | `20261117u_cableado_oc_validar.sql` | **la d, la n y la p** (corta con mensaje si falta alguna). Va última. Sin ella el servidor no valida comprobantes de una orden de compra (avisa que falta). |
+| 8 | `20261117u_cableado_oc_validar.sql` | **la d, la n y la p** (corta con mensaje si falta alguna). Sin ella el servidor no valida comprobantes de una orden de compra (avisa que falta). |
+| 9 | `20261118a_comprobantes_compra_cambios.sql` | independiente (registro de renglones tocados a mano) |
+| 10 | `20261118b_oc_estimados_sin_borrar.sql` | la n |
+| 11 | `20261118c_provision_baja_por_lo_facturado.sql` | **la u** (corta con mensaje si falta). Reemplaza la función de validar. |
 
 Aparte, una sola vez y a mano: `scripts/entrada-limpieza-kardex-en-camino.sql`.
 
