@@ -420,3 +420,22 @@ Juan va a renovar todos los datos de los proveedores con el Excel. Fichas de pro
 - **Plantilla anterior** (`docs/entrada/proveedores-para-completar.xlsx`): se acepta. Las columnas que no trae se ignoran (esos datos no se modifican) y la vista previa las nombra.
 - **Vista previa**: resumen arriba (con cambios / sin cambios / con errores / códigos que no existen) y, proveedor por proveedor, cada campo que cambia "antes → después". Lo vacío no pisa nada; una fila con error no se importa.
 - Lo que el Excel no puede expresar y por eso sale vacío (no se toca): proveedor "no inscripto" en Ganancias, régimen de servicios, y un CUIT que hoy está guardado con error.
+
+### Los estimados de una orden se cancelan, no se borran (18/11, rama `entrada-t1-estimados`)
+
+**Qué pasó en producción:** validar FA 0003-00045711 de la OC-000012 daba "vencimientos_historial es un historial: no se modifica ni se borra". Cada alta y cada cambio de un vencimiento escribe en `vencimientos_historial` (auditoría de `20261105`), que es inmutable y cuelga del vencimiento con `ON DELETE CASCADE`: **ningún vencimiento se puede borrar**. Las funciones de la orden de compra borraban los estimados, así que fallaban siempre validar, finalizar, cancelar y editar una orden.
+
+**Arreglo — migración `20261118b_oc_estimados_sin_borrar.sql`** (no toca datos, re-ejecutable, requiere la `20261117n` ya aplicada; no toca la historia ni su disparador):
+
+- Los estimados que se reemplazan, se recalculan o quedan sin efecto pasan a `estado = 'cancelado'`, con el motivo al final de `observaciones` ("reemplazado por el vencimiento real de la factura …", "orden … cancelada", "orden … editada: se recalculó el estimado") y el monto sin tocar.
+- Al editar una orden se cancelan los estimados viejos y se insertan los nuevos.
+- Factura por una parte del total: el estimado cubierto en parte baja su monto con un UPDATE (la historia lo registra).
+- Función nueva `oc_vencimientos_estimados_cancelar(orden, canal, motivo, usuario)`; `oc_vencimientos_estimados_borrar` conserva el nombre y ahora cancela. Las firmas de `oc_vencimiento_estimado_reemplazar` y `oc_vencimientos_estimados_sincronizar` no cambian: `comprobante_compra_validar`, `oc_cerrar_estimados`, `oc_guardar` y `oc_cancelar` siguen llamando igual.
+- El mismo texto quedó en `20261117n_oc_guardar.sql`, para que volver a correrla no reinstale las versiones que borraban.
+- `app/api/comprobantes-compra/[id]/validar/route.ts`: al deshacer una validación a medias (camino sin la función SQL) ya no intenta borrar el vencimiento recién creado: lo cancela.
+
+**Regla para todo lo que venga:** un vencimiento nunca se borra; se cancela (`estado = 'cancelado'`). No hay otro `DELETE FROM vencimientos` en las migraciones (se revisaron todas, incluidas `20261117p` y `20261117u`); el botón Eliminar del calendario ya cancelaba.
+
+**Quién lee estimados** (revisado: ninguno muestra los cancelados): calendario (descarta `cancelado`), Nueva OP y panel de Finanzas (`estado=pendiente`), pagos de la semana, Jarvis, indicadores de Playroom y proyección de retenciones (`estado = 'pendiente'`), verificación (`pendiente` / `vencido`), detalle de la orden (distinto de `cancelado`). En la lista de vencimientos, con el filtro "Cancelado", se ven con su motivo.
+
+Probado en una base local con el historial y su inmutabilidad creados igual que en producción, encima de la `20261117n` que está hoy en main: editar, validar en partes, finalizar y cancelar funcionan; no se borra ninguna fila y la historia registra cada cancelación.
