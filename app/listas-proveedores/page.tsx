@@ -56,7 +56,8 @@ export default function ListasProveedoresPage() {
     }
 
     const handleImportar = async () => {
-        if (!file || !fechaVigencia) { toast({ variant: 'destructive', title: 'Archivo y fecha de vigencia son requeridos' }); return }
+        if (!file || !fechaVigencia) { toast({ variant: 'destructive', title: 'Falta el archivo o la fecha desde la que rige la lista' }); return }
+        if (!proveedorId) { toast({ variant: 'destructive', title: 'Elegí el proveedor de la lista' }); return }
         setImportando(true)
         try {
             const formData = new FormData()
@@ -71,7 +72,10 @@ export default function ListasProveedoresPage() {
             const data = await res.json()
             if (!res.ok) throw new Error(data.error)
 
-            toast({ title: 'Lista importada', description: `${data.stats.matched} artículos matcheados, ${data.stats.sin_match} sin match` })
+            toast({
+                title: 'Lista cargada (todavía no cambió ningún precio)',
+                description: `${data.stats.matched} artículos encontrados, ${data.stats.revisar || 0} por revisar, ${data.stats.sin_match} sin artículo.${(data.avisos || []).length ? ' ' + data.avisos.join(' ') : ''} Abrila para ver la vista previa y aplicarla.`,
+            })
             setShowImportar(false)
             setFile(null)
             setNombre('')
@@ -90,6 +94,7 @@ export default function ListasProveedoresPage() {
     const estadoColor: Record<string, string> = {
         borrador: 'bg-gray-100 text-gray-800',
         pendiente: 'bg-blue-100 text-blue-800',
+        programada: 'bg-violet-100 text-violet-800',
         aplicada: 'bg-green-100 text-green-800',
         vencida: 'bg-red-100 text-red-800',
     }
@@ -109,6 +114,7 @@ export default function ListasProveedoresPage() {
                     <SelectContent>
                         <SelectItem value="">Todos</SelectItem>
                         <SelectItem value="pendiente">Pendiente</SelectItem>
+                        <SelectItem value="programada">Programada</SelectItem>
                         <SelectItem value="aplicada">Aplicada</SelectItem>
                         <SelectItem value="vencida">Vencida</SelectItem>
                     </SelectContent>

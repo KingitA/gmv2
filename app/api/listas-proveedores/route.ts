@@ -12,6 +12,9 @@ export async function GET(request: NextRequest) {
     const estado = searchParams.get('estado');
 
     const supabase = createAdminClient();
+    // Las listas programadas cuya vigencia ya llegó se aplican solas (pg_cron, cada 15 minutos). Por si
+    // el programador no está, también se intenta al abrir esta pantalla. Si falta la función, no pasa nada.
+    await supabase.rpc('listas_proveedores_aplicar_programadas').then(() => null, () => null);
     let query = supabase
         .from('listas_proveedores')
         .select(`*, proveedor:proveedores(nombre, razon_social)`)

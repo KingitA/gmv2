@@ -1,9 +1,16 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { nowArgentina } from '@/lib/utils';
-import { fetchAllRows } from '@/lib/supabase/fetch-all';
+import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
+import { vistaPreviaLista } from '@/lib/compras/listas-servidor';
 
+// POST /api/listas-proveedores/[id]/aplicar   { aplicar_hoy?: boolean }
+// Aplica una lista de precios de proveedor (E-20). Todo lo hace la función SQL
+// lista_proveedor_aplicar (migración 20261119a), en una transacción:
+//   · vigencia futura → la lista queda PROGRAMADA y se aplica sola ese día (salvo `aplicar_hoy`);
+//   · si no, actualiza el costo de cada artículo, deja el historial y marca cada renglón;
+//   · un renglón que falla queda con su motivo y la lista NO pasa a "aplicada".
+// No toca precios de venta: se avisa cuáles quedan desactualizados.
 export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -13,74 +20,40 @@ export async function POST(
 
     try {
         const { id: lista_id } = await params;
+        const body = await request.json().catch(() => ({}));
         const supabase = createAdminClient();
 
-        const { data: lista } = await supabase
-            .from('listas_proveedores')
-            .select('*')
-            .eq('id', lista_id)
-            .single();
+        // Antes de aplicar: qué precios de venta van a quedar desactualizados (después ya no se puede saber)
+        const antes = await vistaPreviaLista(supabase, lista_id);
+        if (!antes) return NextResponse.json({ error: 'La lista no existe (puede que la hayan eliminado).' }, { status: 404 });
+        const venta = antes.items
+            .filter((i) => i.estado_item === 'pendiente' && i.articulo && i.venta && Object.keys(i.cambio?.cambios || {}).length > 0)
+            .map((i) => ({ articulo_id: i.articulo!.id, sku: i.articulo!.sku, descripcion: i.articulo!.descripcion, ...i.venta! }));
 
-        if (!lista) return NextResponse.json({ error: 'Lista not found' }, { status: 404 });
-
-        const items = await fetchAllRows(() => supabase
-            .from('listas_proveedores_items')
-            .select(`*, articulo:articulos(precio_compra)`)
-            .eq('lista_id', lista_id)
-            .eq('estado_item', 'pendiente'));
-
-        const aplicados = [];
-        const errors = [];
-
-        for (const item of items) {
-            if (!item.articulo_id) continue;
-
-            const articuloActual = Array.isArray(item.articulo) ? item.articulo[0] : item.articulo;
-            const precioAnterior = articuloActual?.precio_compra || 0;
-
-            // Save to historial
-            try {
-                await supabase.from('precios_compra_historial').insert({
-                    articulo_id: item.articulo_id,
-                    proveedor_id: lista.proveedor_id,
-                    precio_anterior: precioAnterior,
-                    precio_nuevo: item.precio_compra,
-                    descuento1: item.descuento1,
-                    descuento2: item.descuento2,
-                    descuento3: item.descuento3,
-                    descuento4: item.descuento4,
-                    lista_proveedores_id: lista_id,
-                    fecha_vigencia: lista.fecha_vigencia,
-                    aplicado_en: nowArgentina(),
-                    aplicado_por: auth.user.id,
-                });
-            } catch (e: any) { console.warn('[Aplicar Lista] historial insert skipped:', e.message); }
-
-            // Update articulo
-            const updateData: any = { actualizado_por: auth.user.id };
-            if (item.precio_compra) updateData.precio_compra = item.precio_compra;
-            if (item.descuento1 !== null) updateData.descuento1 = item.descuento1;
-            if (item.descuento2 !== null) updateData.descuento2 = item.descuento2;
-            if (item.descuento3 !== null) updateData.descuento3 = item.descuento3;
-            if (item.descuento4 !== null) updateData.descuento4 = item.descuento4;
-
-            const { error } = await supabase.from('articulos').update(updateData).eq('id', item.articulo_id);
-            if (error) {
-                errors.push({ item_id: item.id, error: error.message });
-            } else {
-                // Mark item as applied
-                await supabase.from('listas_proveedores_items').update({ estado_item: 'aplicado' }).eq('id', item.id);
-                aplicados.push(item.id);
+        const rpc = await supabase.rpc('lista_proveedor_aplicar', {
+            p_lista_id: lista_id, p_usuario_id: auth.user.id, p_forzar_hoy: body?.aplicar_hoy === true,
+        });
+        if (rpc.error) {
+            if (faltaLaFuncion(rpc.error, 'lista_proveedor_aplicar')) {
+                return NextResponse.json({ error: 'Todavía no se pueden aplicar listas: falta aplicar una actualización del sistema (migración 20261119a). No se cambió ningún precio.', codigo: 'falta_migracion' }, { status: 409 });
             }
+            if (rpc.error.code === 'P0001' || rpc.error.code === 'P0002') return NextResponse.json({ error: rpc.error.message, codigo: rpc.error.details }, { status: 409 });
+            throw rpc.error;
         }
+        const r: any = rpc.data || {};
+        const errores: any[] = Array.isArray(r.errores) ? r.errores : [];
+        const programada = r.programada === true;
 
-        // Mark lista as applied
-        await supabase.from('listas_proveedores').update({ estado: 'aplicada' }).eq('id', lista_id);
-
-        return NextResponse.json({ success: true, aplicados: aplicados.length, errors });
-
+        return NextResponse.json({
+            success: true,
+            ...r,
+            errores,
+            // Solo si de verdad cambió el costo (una lista programada todavía no cambió nada)
+            precios_venta: programada ? [] : venta,
+            precios_venta_desactualizados: programada ? 0 : venta.filter((v) => v.tipo === 'desactualizado').length,
+        });
     } catch (error: any) {
         console.error('[Aplicar Lista] Error:', error);
-        return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+        return NextResponse.json({ error: `No se pudo aplicar la lista y no se cambió ningún precio. Detalle para sistemas: ${error.message || error}` }, { status: 500 });
     }
 }
