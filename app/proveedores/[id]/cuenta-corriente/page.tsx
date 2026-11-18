@@ -55,7 +55,8 @@ export default function CuentaCorrienteProveedorPage() {
     const [nc, setNc] = useState<{ tipo: string; numero: string; fecha: string; total: number | null; total_neto: number | null }>({ tipo: "NC", numero: "", fecha: "", total: null, total_neto: null })
     const [ncSaving, setNcSaving] = useState(false)
 
-    const provNombre = proveedor?.sigla || proveedor?.nombre || ""
+    // Nombre completo del proveedor (la sigla sola no dice quién es); la sigla va al lado
+    const provNombre = proveedor?.nombre || proveedor?.sigla || ""
 
     async function cargar() {
         setLoading(true)
