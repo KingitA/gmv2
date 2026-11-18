@@ -65,10 +65,11 @@ export function olvidarAjustes() {
 
 /**
  * Precio por millón de tokens (USD). Fuente: precios públicos de Anthropic al
- * 06/10/2026. Si aparece un modelo que no está acá, se cobra como el más caro
+ * 03/11/2026. Si aparece un modelo que no está acá, se cobra como el más caro
  * conocido (mejor sobreestimar el gasto que subestimarlo).
  */
 const PRECIOS: Record<string, { entrada: number; salida: number }> = {
+  "claude-fable-5-2": { entrada: 8, salida: 40 },
   "claude-fable-5-1": { entrada: 10, salida: 50 },
   "claude-opus-5-5": { entrada: 4, salida: 20 },
   "claude-opus-5": { entrada: 5, salida: 25 },

@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk"
+import { MODELO_CLAUDE, ESFUERZO_SIMPLE } from "@/lib/ai/modelos-claude"
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
@@ -85,9 +86,11 @@ export async function POST(request: Request) {
     const base64 = Buffer.from(await image.arrayBuffer()).toString("base64")
 
     const response = await getAnthropic().messages.create({
-      model: "claude-opus-4-8",
-      max_tokens: 1024,
+      model: MODELO_CLAUDE.vision,
+      // antes 1024: el modelo actual piensa dentro del tope. Esfuerzo bajo: el vendedor espera con el teléfono en la mano.
+      max_tokens: 8000,
       output_config: {
+        effort: ESFUERZO_SIMPLE,
         format: {
           type: "json_schema",
           schema: {
@@ -222,9 +225,10 @@ Los términos de búsqueda deben parecerse a descripciones de catálogo mayorist
           .join("\n")
 
         const rerank = await getAnthropic().messages.create({
-          model: "claude-opus-4-8",
-          max_tokens: 512,
+          model: MODELO_CLAUDE.vision,
+          max_tokens: 4096, // antes 512 (ver nota en lib/ai/modelos-claude.ts)
           output_config: {
+            effort: ESFUERZO_SIMPLE,
             format: {
               type: "json_schema",
               schema: {

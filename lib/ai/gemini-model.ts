@@ -7,14 +7,30 @@
  * pedidos, lectura de adjuntos y facturas de proveedor a la vez. Ahora se cambia
  * acá (o por env GEMINI_MODEL, sin deploy).
  *
- * Default `gemini-2.5-flash`: es el que ya usa el OCR de cheques en producción
- * (lib/services/ocr.ts) y está verificado funcionando. El mensaje de baja de
- * Google recomendaba `gemini-3.6-flash`; para probarlo alcanza con la env.
+ * Principal `gemini-3.8-flash` (E-82, 18/11/2026). Según la documentación oficial de Google
+ * (páginas "Models" y "Deprecations" de la API de Gemini, leídas el 18/11/2026):
+ *   - `gemini-3.8-flash` es el Flash estable más nuevo (publicado el 02/09/2026), sin fecha de baja.
+ *   - `gemini-2.5-flash` (el que se usaba) está DEPRECADO: desde el 01/12/2026 Google manda sus
+ *     pedidos a `gemini-3.5-flash-lite`, un modelo más chico. Sin este cambio, la lectura de
+ *     facturas, remitos y cheques pasaba sola a un modelo peor, sin ningún aviso.
+ *   - `gemini-3.6-flash` también es estable y sin fecha de baja.
+ *
+ * Respaldo `gemini-3.6-flash` (estable, sin fecha de baja): `gemini-2.5-flash` está deprecado y desde el 01/12/2026 Google
+ * lo redirige a un modelo "lite", peor para leer comprobantes.
+ * principal falla (dado de baja, cuota, caído). OJO: desde el 01/12/2026 ese nombre responde
+ * con el modelo "lite"; a partir de ahí conviene poner GEMINI_MODEL_FALLBACK=gemini-3.6-flash.
+ *
+ * NO se pudo probar en vivo al hacer el cambio (sin clave en el equipo de desarrollo): si el
+ * OCR empieza a avisar "se leyó con el modelo de respaldo", el principal no está respondiendo
+ * → poner GEMINI_MODEL=gemini-2.5-flash en Vercel (sin deploy de código) y avisar a sistemas.
+ *
+ * Estos modelos PIENSAN antes de contestar y ese pensamiento cuenta dentro de maxOutputTokens:
+ * no usar topes chicos (64, 128) aunque la respuesta sea un JSON de una línea.
  */
-export const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash"
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash"
 
-/** Alias estable de Google: siempre apunta al Flash vigente. Se usa si el principal falla. */
-export const GEMINI_MODEL_FALLBACK = process.env.GEMINI_MODEL_FALLBACK || "gemini-flash-latest"
+/** Se usa UNA vez si el principal falla (ver arriba por qué es este). */
+export const GEMINI_MODEL_FALLBACK = process.env.GEMINI_MODEL_FALLBACK || "gemini-3.6-flash"
 
 /**
  * ¿El error es del MODELO o del servicio (dado de baja, cuota, caído) y vale la pena
