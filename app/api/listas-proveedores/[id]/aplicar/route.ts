@@ -4,13 +4,22 @@ import { requireAuth } from '@/lib/auth';
 import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 import { vistaPreviaLista } from '@/lib/compras/listas-servidor';
 
-// POST /api/listas-proveedores/[id]/aplicar   { aplicar_hoy?: boolean }
+/** Renglones por llamada: la pantalla llama de nuevo mientras `quedan` > 0 y muestra el avance. */
+const LOTE = 200;
+
+// POST /api/listas-proveedores/[id]/aplicar   { aplicar_hoy?: boolean, primera?: boolean }
 // Aplica una lista de precios de proveedor (E-20). Todo lo hace la función SQL
-// lista_proveedor_aplicar (migración 20261119a), en una transacción:
+// lista_proveedor_aplicar (migración 20261119a), en una transacción por llamada:
 //   · vigencia futura → la lista queda PROGRAMADA y se aplica sola ese día (salvo `aplicar_hoy`);
-//   · si no, actualiza el costo de cada artículo, deja el historial y marca cada renglón;
+//   · si no, procesa hasta 200 renglones: lleva el precio a unidad, frena lo que supera el tope de
+//     cambio o tiene una lista posterior aplicada, actualiza el costo, deja el historial y marca
+//     cada renglón. Devuelve `quedan`: mientras sea mayor a 0, la pantalla vuelve a llamar;
 //   · un renglón que falla queda con su motivo y la lista NO pasa a "aplicada".
-// No toca precios de venta: se avisa cuáles quedan desactualizados.
+// No toca precios de venta: en la PRIMERA llamada (`primera: true`) devuelve cuáles quedan desactualizados.
+//
+// SIN la migración 20261119a esta ruta NO aplica nada (contesta 409 "falta migración"): la forma
+// anterior de aplicar ignoraba la vigencia, escondía los errores y escribía el precio por bulto
+// como precio por unidad.
 export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -23,37 +32,43 @@ export async function POST(
         const body = await request.json().catch(() => ({}));
         const supabase = createAdminClient();
 
-        // Antes de aplicar: qué precios de venta van a quedar desactualizados (después ya no se puede saber)
-        const antes = await vistaPreviaLista(supabase, lista_id);
-        if (!antes) return NextResponse.json({ error: 'La lista no existe (puede que la hayan eliminado).' }, { status: 404 });
-        const venta = antes.items
-            .filter((i) => i.estado_item === 'pendiente' && i.articulo && i.venta && Object.keys(i.cambio?.cambios || {}).length > 0)
-            .map((i) => ({ articulo_id: i.articulo!.id, sku: i.articulo!.sku, descripcion: i.articulo!.descripcion, ...i.venta! }));
+        // Antes de aplicar (solo en la primera llamada): qué precios de venta van a quedar
+        // desactualizados. Después de aplicar ya no se puede saber.
+        let venta: any[] = [];
+        if (body?.primera !== false) {
+            const antes = await vistaPreviaLista(supabase, lista_id, { todos: true, filtro: 'cambian' });
+            if (!antes) return NextResponse.json({ error: 'La lista no existe (puede que la hayan eliminado).' }, { status: 404 });
+            venta = antes.items
+                .filter((i) => i.articulo && i.venta)
+                .map((i) => ({ articulo_id: i.articulo!.id, sku: i.articulo!.sku, descripcion: i.articulo!.descripcion, ...i.venta! }));
+        }
 
         const rpc = await supabase.rpc('lista_proveedor_aplicar', {
-            p_lista_id: lista_id, p_usuario_id: auth.user.id, p_forzar_hoy: body?.aplicar_hoy === true,
+            p_lista_id: lista_id, p_usuario_id: auth.user.id, p_forzar_hoy: body?.aplicar_hoy === true, p_limite: LOTE,
         });
         if (rpc.error) {
             if (faltaLaFuncion(rpc.error, 'lista_proveedor_aplicar')) {
-                return NextResponse.json({ error: 'Todavía no se pueden aplicar listas: falta aplicar una actualización del sistema (migración 20261119a). No se cambió ningún precio.', codigo: 'falta_migracion' }, { status: 409 });
+                return NextResponse.json({
+                    error: 'No se aplicó la lista y no cambió ningún precio: falta aplicar una actualización del sistema (migración 20261119a_listas_proveedores_aplicar.sql). Avisá a sistemas; la lista queda cargada, sin aplicar.',
+                    codigo: 'falta_migracion',
+                }, { status: 409 });
             }
             if (rpc.error.code === 'P0001' || rpc.error.code === 'P0002') return NextResponse.json({ error: rpc.error.message, codigo: rpc.error.details }, { status: 409 });
             throw rpc.error;
         }
         const r: any = rpc.data || {};
-        const errores: any[] = Array.isArray(r.errores) ? r.errores : [];
         const programada = r.programada === true;
 
         return NextResponse.json({
             success: true,
             ...r,
-            errores,
+            errores: Array.isArray(r.errores) ? r.errores : [],
+            quedan: Number(r.quedan || 0),
             // Solo si de verdad cambió el costo (una lista programada todavía no cambió nada)
             precios_venta: programada ? [] : venta,
-            precios_venta_desactualizados: programada ? 0 : venta.filter((v) => v.tipo === 'desactualizado').length,
         });
     } catch (error: any) {
         console.error('[Aplicar Lista] Error:', error);
-        return NextResponse.json({ error: `No se pudo aplicar la lista y no se cambió ningún precio. Detalle para sistemas: ${error.message || error}` }, { status: 500 });
+        return NextResponse.json({ error: `No se pudo aplicar la lista. Lo ya aplicado en llamadas anteriores queda aplicado; este tramo no cambió ningún precio. Detalle para sistemas: ${error.message || error}` }, { status: 500 });
     }
 }

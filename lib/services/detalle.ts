@@ -6,7 +6,7 @@ import { resolveFactorConversion } from '@/lib/services/conversion';
 // El OCR a veces devuelve el descuento como MONTO en pesos en vez de %.
 // Las columnas descuentoN son numeric(5,2): un monto grande revienta el insert.
 // Heurística: >100 no es un porcentaje → convertirlo a % sobre precio × cantidad.
-function normalizarDescuentoPct(descuento: any, precioUnitario: any, cantidad: any): number {
+export function normalizarDescuentoPct(descuento: any, precioUnitario: any, cantidad: any): number {
     const d = Number(descuento || 0);
     if (d <= 0) return 0;
     if (d <= 100) return Math.round(d * 100) / 100;

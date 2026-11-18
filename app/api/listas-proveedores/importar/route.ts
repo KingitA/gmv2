@@ -4,7 +4,8 @@ import { requireAuth } from '@/lib/auth';
 import * as XLSX from 'xlsx';
 import { processWithGemini } from '@/lib/services/ocr';
 import { parseFecha } from '@/lib/formato';
-import { filasDeListaExcel, type FilaLista } from '@/lib/compras/lista-proveedor';
+import { descuentosDeLectura, filasDeListaExcel, precioPorEnTitulos, type FilaLista, type PrecioPor } from '@/lib/compras/lista-proveedor';
+import { normalizarDescuentoPct } from '@/lib/services/detalle';
 import { crearListaProveedor } from '@/lib/compras/listas-servidor';
 
 // POST /api/listas-proveedores/importar   (formulario: file, proveedor_id, nombre, fecha_vigencia, fecha_fin, observaciones)
@@ -25,6 +26,10 @@ export async function POST(request: NextRequest) {
         const fecha_vigencia = parseFecha(formData.get('fecha_vigencia') as string);
         const fecha_fin = parseFecha((formData.get('fecha_fin') as string) || '');
         const observaciones = (formData.get('observaciones') as string) || null;
+        // En qué viene el precio: lo que eligió quien carga; si no dijo nada, lo que digan los títulos
+        // del archivo; si no, lo guardado para ese proveedor; si no, por unidad.
+        const precioPorElegido = formData.get('precio_por') as string | null;
+        let precioPor: PrecioPor | null = precioPorElegido === 'bulto' ? 'bulto' : precioPorElegido === 'unidad' ? 'unidad' : null;
 
         if (!file) return NextResponse.json({ error: 'Falta el archivo de la lista.' }, { status: 400 });
         if (!fecha_vigencia) return NextResponse.json({ error: 'Falta la fecha desde la que rige la lista.' }, { status: 400 });
@@ -44,7 +49,12 @@ export async function POST(request: NextRequest) {
         if (esPlanilla) {
             const libro = XLSX.read(await file.arrayBuffer(), { type: 'array' });
             const hoja = libro.Sheets[libro.SheetNames[0]];
-            items = filasDeListaExcel(XLSX.utils.sheet_to_json(hoja, { header: 1, blankrows: false, defval: '' }) as unknown[][]);
+            const filasHoja = XLSX.utils.sheet_to_json(hoja, { header: 1, blankrows: false, defval: '' }) as unknown[][];
+            items = filasDeListaExcel(filasHoja);
+            if (!precioPor) {
+                precioPor = precioPorEnTitulos(filasHoja);
+                if (precioPor === 'bulto') avisos.push('Los títulos del archivo dicen que el precio es POR BULTO: se va a dividir por las unidades por bulto de cada artículo. Si no es así, cambialo en la vista previa.');
+            }
             if (libro.SheetNames.length > 1) avisos.push(`El archivo tiene ${libro.SheetNames.length} hojas: se leyó solo la primera ("${libro.SheetNames[0]}").`);
         } else if (esImagen || esPdf) {
             const r = await processWithGemini(file, { proveedorNombre: prov.nombre, tipoDocumento: 'Lista de Precios' });
@@ -53,9 +63,13 @@ export async function POST(request: NextRequest) {
                 codigo: it.codigo ? String(it.codigo).trim() : null,
                 descripcion: it.descripcion ? String(it.descripcion).trim() : null,
                 precio_compra: it.precio_unitario != null && Number(it.precio_unitario) > 0 ? Number(it.precio_unitario) : null,
-                // la lectura devuelve UN descuento por renglón (el equivalente): va como descuento 1. Vacío = no tocar.
-                descuento1: it.descuento != null && it.descuento !== '' ? Number(it.descuento) : null,
-                descuento2: null, descuento3: null, descuento4: null,
+                // La lectura devuelve UN descuento por renglón, el equivalente de todos: es el descuento
+                // COMPLETO, así que va en el 1 y los otros tres en 0 explícito (si quedaran "sin tocar", un
+                // artículo con 10 + 5 que ahora viene con 14,5 quedaría con 14,5 + 5). Sin descuento leído: no se toca.
+                ...(() => {
+                    const d = descuentosDeLectura(it.descuento != null && it.descuento !== '' ? normalizarDescuentoPct(it.descuento, it.precio_unitario, it.cantidad) : null);
+                    return { descuento1: d[0], descuento2: d[1], descuento3: d[2], descuento4: d[3] };
+                })(),
             }));
             avisos.push(...(r.avisos || []));
             avisos.push('La lista se leyó de una foto o un PDF: controlá los precios contra el archivo antes de aplicarla.');
@@ -75,12 +89,15 @@ export async function POST(request: NextRequest) {
         // 3. Lista + renglones (misma función que usan las listas que llegan por mail)
         const r = await crearListaProveedor(supabase, {
             proveedor_id, nombre: nombre || `Lista ${prov.nombre} ${fecha_vigencia}`, fecha_vigencia, fecha_fin, observaciones,
-            storage_path: uploadError ? null : storagePath, origen: 'manual', creado_por: auth.user.id, items,
+            storage_path: uploadError ? null : storagePath,
+            archivos: uploadError ? null : [{ nombre: nombreArchivo, ruta: storagePath }],
+            origen: 'manual', creado_por: auth.user.id, items, precio_por: precioPor,
         });
 
         return NextResponse.json({
             success: true,
             lista_id: r.lista_id,
+            precio_por: r.precio_por,
             stats: { total: r.stats.total, matched: r.stats.pendientes, revisar: r.stats.revisar, sin_match: r.stats.sin_articulo },
             avisos,
         });

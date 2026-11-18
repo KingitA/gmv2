@@ -15,9 +15,21 @@
  * Archivo PURO. Tests: mobile/packages/core/test/entrada-listas.test.ts
  */
 import { netoCompra } from "./neto-compra"
-import { parseMonto } from "../formato"
+import { numero, parseMonto } from "../formato"
 
 export const UMBRAL_ALERTA_PCT = 15
+/**
+ * Tope de cambio: una suba o baja del costo neto mayor a esto NO se aplica sola. Hay que
+ * confirmarla renglón por renglón (casi siempre es un error del archivo: un precio por bulto
+ * tomado como precio por unidad, una coma corrida). Se puede cambiar en cada lista.
+ */
+export const TOPE_CAMBIO_PCT = 50
+
+/** En qué viene el precio de la lista: por unidad, o por bulto / caja (se divide por las unidades por bulto). */
+export type PrecioPor = "unidad" | "bulto"
+export function precioPorDe(v: unknown): PrecioPor {
+  return v === "bulto" ? "bulto" : "unidad"
+}
 
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0)
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
@@ -63,14 +75,38 @@ export interface CambioLista {
   alerta: "suba" | "baja" | null
   /** El renglón no trae nada para aplicar (ni precio ni descuentos) */
   vacio: boolean
+  /** Por cuánto se dividió el precio del archivo para llevarlo a UNIDAD (unidades por bulto, o 1) */
+  factor: number
+  /**
+   * No se aplica sin que alguien lo confirme: cambia más que el tope, o la lista viene por bulto y
+   * el artículo no tiene unidades por bulto (no se puede saber el precio por unidad). null = se aplica.
+   */
+  frena: string | null
+}
+
+export interface OpcionesCambio {
+  /** En qué viene el precio del archivo. Sin dato: por unidad. */
+  precio_por?: PrecioPor | null
+  /** Unidades por bulto del artículo */
+  unidades_por_bulto?: number | null
+  /** Tope de cambio en %; 0 o vacío = el de siempre (50 %) */
+  tope_pct?: number | null
+  /** Alguien ya confirmó este renglón: se aplica aunque supere el tope */
+  confirmado?: boolean | null
 }
 
 /** Qué le pasa a un artículo si se aplica este renglón de la lista. */
-export function cambioDeItem(item: ItemLista, art: ArticuloCosto | null | undefined, tipoDescuento?: unknown, umbralPct: number = UMBRAL_ALERTA_PCT): CambioLista {
+export function cambioDeItem(item: ItemLista, art: ArticuloCosto | null | undefined, tipoDescuento?: unknown, umbralPct: number = UMBRAL_ALERTA_PCT, op: OpcionesCambio = {}): CambioLista {
   const dActual = [art?.descuento1, art?.descuento2, art?.descuento3, art?.descuento4].map(num)
   const pActual = num(art?.precio_compra)
+  // El costo del artículo es SIEMPRE por unidad. Si la lista viene por bulto, el precio del archivo
+  // se divide por las unidades por bulto del artículo (una caja de 12 a $12.000 = $1.000 por unidad).
+  const porBulto = precioPorDe(op.precio_por) === "bulto"
+  const upb = num(op.unidades_por_bulto)
+  const factor = porBulto && upb > 1 ? upb : 1
+  const traePrecio = item.precio_compra != null && num(item.precio_compra) > 0
   // precio: vacío o 0 = no tocar (un precio de compra 0 no es un precio)
-  const pNuevo = item.precio_compra != null && num(item.precio_compra) > 0 ? r4(num(item.precio_compra)) : pActual
+  const pNuevo = traePrecio ? r4(num(item.precio_compra) / factor) : pActual
   const dItem = [item.descuento1, item.descuento2, item.descuento3, item.descuento4]
   // descuento: null = no tocar; 0 = pasa a 0
   const dNuevo = dItem.map((d, i) => (d === null || d === undefined ? dActual[i]! : r4(num(d))))
@@ -83,13 +119,21 @@ export function cambioDeItem(item: ItemLista, art: ArticuloCosto | null | undefi
   const netoNuevo = netoCompra(pNuevo, dNuevo, tipoDescuento)
   const variacion = netoActual > 0 ? r2(((netoNuevo - netoActual) / netoActual) * 100) : null
   const umbral = umbralPct > 0 ? umbralPct : UMBRAL_ALERTA_PCT
+  const tope = num(op.tope_pct) > 0 ? num(op.tope_pct) : TOPE_CAMBIO_PCT
+  let frena: string | null = null
+  if (traePrecio && porBulto && !(upb > 1)) frena = "La lista viene por bulto y el artículo no tiene unidades por bulto cargadas: no se puede saber el precio por unidad."
+  else if (!op.confirmado && variacion !== null && Math.abs(variacion) > tope) {
+    frena = `El costo ${variacion > 0 ? "sube" : "baja"} ${numero(Math.abs(variacion), 0, 1)} %: supera el tope de ${numero(tope, 0, 1)} %. No se aplica sin confirmarlo.`
+  }
   return {
     actual: { precio: pActual, descuentos: dActual, neto: r4(netoActual) },
     nuevo: { precio: pNuevo, descuentos: dNuevo, neto: r4(netoNuevo) },
     cambios,
     variacion_pct: variacion,
     alerta: variacion === null ? null : variacion > umbral ? "suba" : variacion < -umbral ? "baja" : null,
-    vacio: !(item.precio_compra != null && num(item.precio_compra) > 0) && dItem.every((d) => d === null || d === undefined),
+    vacio: !traePrecio && dItem.every((d) => d === null || d === undefined),
+    factor,
+    frena,
   }
 }
 
@@ -191,4 +235,34 @@ export function filasDeListaExcel(rows: unknown[][]): FilaLista[] {
 export function esVigenciaFutura(fechaVigencia: string | null | undefined, hoy: string): boolean {
   const f = String(fechaVigencia || "").slice(0, 10)
   return /^\d{4}-\d{2}-\d{2}$/.test(f) && f > hoy
+}
+
+/**
+ * ¿Los títulos de la planilla dicen en qué viene el precio? "Precio x bulto", "precio caja",
+ * "costo pack" → bulto; "precio unitario", "precio x unidad" → unidad; si no dice, null (se
+ * pregunta, con el valor por defecto del proveedor).
+ */
+export function precioPorEnTitulos(rows: unknown[][]): PrecioPor | null {
+  const norm = (c: unknown) => String(c ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+  for (let i = 0; i < Math.min(rows?.length || 0, 25); i++) {
+    for (const celda of rows[i] || []) {
+      const h = norm(celda)
+      if (!(h.includes("precio") || h.includes("costo") || h.includes("lista") || h.includes("importe"))) continue
+      if (/\b(bulto|bultos|caja|cajas|pack|display|fardo)\b/.test(h)) return "bulto"
+      if (/\b(unit|unitario|unidad|unidades|un|c\/u|cu)\b/.test(h)) return "unidad"
+    }
+  }
+  return null
+}
+
+/**
+ * Descuentos de un renglón leído de una foto o un PDF: la lectura da UN descuento por renglón (el
+ * equivalente de todos los que traiga). Ese ES el descuento completo del renglón: va en el
+ * descuento 1 y los demás quedan en 0 explícito. Si se dejaran "sin tocar", un artículo con 10 + 5
+ * que ahora viene con 14,5 quedaría con 14,5 + 5. Sin descuento leído: no se toca ninguno.
+ */
+export function descuentosDeLectura(descuentoUnico: number | null | undefined): [number | null, number | null, number | null, number | null] {
+  if (descuentoUnico === null || descuentoUnico === undefined || !Number.isFinite(Number(descuentoUnico))) return [null, null, null, null]
+  const d = Math.min(100, Math.max(0, Number(descuentoUnico)))
+  return [r4(d), 0, 0, 0]
 }

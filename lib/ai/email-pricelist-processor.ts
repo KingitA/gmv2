@@ -17,6 +17,8 @@ export interface PriceChangeProcessingResult {
     processed: boolean
     importCreated: boolean
     importId?: string
+    /** La lista quedó en Listas de proveedores (mismo circuito que las que carga la oficina) */
+    listaProveedorId?: string
     proveedorFound: boolean
     proveedorId?: string
     proveedorName?: string
@@ -103,8 +105,14 @@ export async function processEmailAsPriceChange(
     const linkedItems: LinkedPriceItem[] = []
     let attachmentSaved = false
     let attachmentFilenames: string[] = []
-    /** Ruta del adjunto guardado (bucket "attachments"), para el enlace desde la lista */
-    let rutaAdjunto: string | null = null
+    /** Adjuntos guardados (bucket "attachments"), TODOS: para los enlaces desde la lista */
+    const adjuntosGuardados: Array<{ nombre: string; ruta: string }> = []
+    const guardarAdjunto = async (nombre: string, buffer: Buffer, mimeType: string) => {
+        const ruta = `price-lists/${proveedorId || 'unknown'}/${fechaHoy}_${nombre}`
+        const { error } = await db.storage.from('attachments').upload(ruta, buffer, { contentType: mimeType, upsert: true })
+        if (error) { console.log(`[PriceListProcessor] Storage upload skipped: ${error.message}`); return }
+        if (!adjuntosGuardados.some((a) => a.ruta === ruta)) adjuntosGuardados.push({ nombre, ruta: `attachments:${ruta}` })
+    }
 
     // Find XLSX attachments (either pre-downloaded or from email)
     const xlsxAttachments = preDownloadedAttachments?.filter(att =>
@@ -210,6 +218,7 @@ export async function processEmailAsPriceChange(
 
                 attachmentFilenames.push(att.filename)
                 attachmentSaved = true
+                await guardarAdjunto(att.filename, att.rawBuffer, att.mimeType).catch(() => null)
             } catch (err) {
                 console.error(`[PriceListProcessor] Error analyzing ${att.filename}:`, err)
             }
@@ -281,14 +290,7 @@ export async function processEmailAsPriceChange(
                 })
 
                 // Upload to storage
-                const storagePath = `price-lists/${proveedorId || 'unknown'}/${fechaHoy}_${att.filename}`
-                rutaAdjunto = storagePath
-                await db.storage.from('attachments').upload(storagePath, buffer, {
-                    contentType: att.mimeType,
-                    upsert: true,
-                }).catch(() => {
-                    console.log(`[PriceListProcessor] Storage upload skipped`)
-                })
+                await guardarAdjunto(att.filename, buffer, att.mimeType).catch(() => null)
 
                 attachmentSaved = true
                 attachmentFilenames.push(att.filename)
@@ -312,7 +314,8 @@ export async function processEmailAsPriceChange(
                 nombre: `${proveedorName || emailData.fromName || 'Proveedor'} — por mail${attachmentFilenames.length ? ` (${attachmentFilenames[0]})` : ''}`.slice(0, 200),
                 fecha_vigencia: fechaVigencia || fechaHoy,
                 observaciones: `Llegó por mail de ${emailData.from}. Asunto: ${emailData.subject || '(sin asunto)'}${fechaVigencia ? '' : '. El mail no decía desde cuándo rige: se tomó la fecha en que llegó.'}`.slice(0, 1000),
-                storage_path: rutaAdjunto ? `attachments:${rutaAdjunto}` : null,
+                storage_path: adjuntosGuardados[0]?.ruta || null,
+                archivos: adjuntosGuardados,
                 origen: 'mail',
                 email_id: savedEmailId || null,
                 items: linkedItems.map((li) => ({
@@ -331,6 +334,7 @@ export async function processEmailAsPriceChange(
                 processed: true,
                 importCreated: true,
                 importId: r.lista_id,
+                listaProveedorId: r.lista_id,
                 proveedorFound: !!proveedorId,
                 proveedorId: proveedorId || undefined,
                 proveedorName: proveedorName || undefined,

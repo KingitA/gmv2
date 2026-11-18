@@ -393,6 +393,16 @@ Sin migración: la cuenta está en `lib/compras/diferencias.ts` (`faltante_de`, 
 - El mail no trae los descuentos por separado: una lista por mail solo cambia el precio de lista.
 - El enlace "revisar en Artículos" lleva a la pantalla de artículos; hay que buscar el SKU.
 
+### Arreglos de la revisión de `entrada-t2-listas` (19/11)
+
+- **A. Precio por bulto o por unidad.** El costo del artículo es siempre por unidad. Cada lista dice en qué viene su precio (`listas_proveedores.precio_por`): lo que elige quien carga, o lo que dicen los títulos del archivo ("precio x bulto", "costo caja"), o lo guardado para ese proveedor (`proveedores.lista_precio_por`), o por unidad. Se cambia en la vista previa y queda guardado para el proveedor. Por bulto, el precio se divide por las unidades por bulto del artículo; si el artículo no las tiene, el renglón queda por revisar. **Tope de cambio** (50 %, se cambia en cada lista): una suba o baja mayor NO se aplica sin confirmar ese renglón ("Aplicar igual"). Una lista programada pasa por los mismos controles el día que se aplica: lo que supera el tope queda por revisar y la lista vuelve a pendiente.
+- **B. Descuento único de foto / PDF:** va en el descuento 1 y los otros tres en 0 explícito (con `normalizarDescuentoPct`).
+- **C. Lista anterior no pisa una posterior:** si ya hay una lista aplicada del mismo proveedor con vigencia posterior para ese artículo, el renglón no se aplica y se avisa cuál es.
+- **D. De a 200:** aplicar procesa 200 renglones por llamada con el avance a la vista; la vista previa trae 200 renglones por vez, ya filtrados en el servidor.
+- **E.** Si los renglones no se pueden guardar, la lista recién creada se borra (no queda vacía). Los descuentos de los renglones pasan a `numeric(7,4)`.
+- **F. Mail:** el evento de agenda dice "ir a Listas de precios" y trae el enlace a la lista; se guardan todos los adjuntos (antes solo el último, y en una de las dos ramas ninguno).
+- **Sin la migración `20261119a` no se aplica ninguna lista** (la pantalla dice que falta y no cambia ningún precio): la forma anterior ignoraba la vigencia, escondía errores y escribía el precio por bulto como precio por unidad.
+
 ### Cómo probarlo (Tanda 2-C)
 
 1. Aplicar `20261119a` y `20261119b` (en ese orden; la b necesita la `20261118e`).
@@ -423,7 +433,7 @@ Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `2
 | 10 | `20261118b_oc_estimados_sin_borrar.sql` | la n |
 | 11 | `20261118c_provision_baja_por_lo_facturado.sql` | **la u y la 18b** (corta con mensaje si falta alguna). Reemplaza la función de validar. |
 | 12 | `20261118e_recepcion_documentado_atomico.sql` | independiente (sumado atómico de lo documentado y provisorio con bloqueo) |
-| 13 | `20261119a_listas_proveedores_aplicar.sql` | independiente. **El código de la Tanda 2-C la necesita** para aplicar o programar una lista. |
+| 13 | `20261119a_listas_proveedores_aplicar.sql` | **la n** (usa `oc_neto_unitario`; corta con mensaje si falta). **El código de la Tanda 2-C la necesita** para aplicar o programar una lista. |
 | 14 | `20261119b_comprobante_detalle_cargar.sql` | **la 18e** (corta con mensaje si falta). Sin ella sigue el camino anterior. |
 
 Aparte, una sola vez y a mano: `scripts/entrada-limpieza-kardex-en-camino.sql`.

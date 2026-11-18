@@ -1,7 +1,7 @@
 // Tanda 2-C — listas de precios de proveedor (E-20, E-22): vista previa, descuento 0, alertas y
 // aviso de precio de venta.
 import { describe, expect, it } from "vitest"
-import { avisoPrecioVenta, cambioDeItem, esVigenciaFutura, filasDeListaExcel, precioBaseDesdeCosto, valorDeCelda } from "../../../../lib/compras/lista-proveedor"
+import { avisoPrecioVenta, cambioDeItem, descuentosDeLectura, esVigenciaFutura, filasDeListaExcel, precioBaseDesdeCosto, precioPorEnTitulos, TOPE_CAMBIO_PCT, valorDeCelda } from "../../../../lib/compras/lista-proveedor"
 
 describe("celdas del archivo: vacío no es cero", () => {
   it("vacío = no tocar (null); 0 = cero", () => {
@@ -115,5 +115,68 @@ describe("vigencia", () => {
     expect(esVigenciaFutura("2026-11-19", "2026-11-19")).toBe(false)
     expect(esVigenciaFutura("2026-11-01", "2026-11-19")).toBe(false)
     expect(esVigenciaFutura("", "2026-11-19")).toBe(false)
+  })
+})
+
+describe("precio por bulto o por unidad (revisión de la Tanda 2-C)", () => {
+  const art = { precio_compra: 1000, descuento1: 0, descuento2: 0, descuento3: 0, descuento4: 0 }
+  it("una caja de 12 a $12.000 es $1.000 por unidad: no cambia nada", () => {
+    const c = cambioDeItem({ precio_compra: 12000 }, art, "cascada", 15, { precio_por: "bulto", unidades_por_bulto: 12 })
+    expect(c.factor).toBe(12)
+    expect(c.nuevo.precio).toBe(1000)
+    expect(c.cambios).toEqual({})
+    expect(c.frena).toBeNull()
+  })
+  it("si se tomara como precio por unidad sería +1.100 %: se frena", () => {
+    const c = cambioDeItem({ precio_compra: 12000 }, art)
+    expect(c.variacion_pct).toBe(1100)
+    expect(c.frena).toMatch(/sube 1\.100 %: supera el tope de 50 %/)
+  })
+  it("lista por bulto y artículo sin unidades por bulto: no se puede saber el precio por unidad", () => {
+    const c = cambioDeItem({ precio_compra: 12000 }, art, "cascada", 15, { precio_por: "bulto", unidades_por_bulto: 1 })
+    expect(c.frena).toMatch(/no tiene unidades por bulto/)
+  })
+  it("los títulos de la planilla dicen en qué viene el precio", () => {
+    expect(precioPorEnTitulos([["Código", "Descripción", "Precio x bulto"]])).toBe("bulto")
+    expect(precioPorEnTitulos([["Cod", "Detalle", "Costo caja"]])).toBe("bulto")
+    expect(precioPorEnTitulos([["Cod", "Detalle", "Precio unitario"]])).toBe("unidad")
+    expect(precioPorEnTitulos([["Cod", "Detalle", "Precio lista"]])).toBeNull()
+    expect(precioPorEnTitulos([["Cod", "Detalle", "Bultos", "Precio"]])).toBeNull() // "bultos" está en otra columna
+  })
+})
+
+describe("tope de cambio: no se aplica sin confirmar", () => {
+  const art = { precio_compra: 1000 }
+  it("el tope por defecto es 50 %", () => expect(TOPE_CAMBIO_PCT).toBe(50))
+  it("+60 % frena; confirmado, pasa", () => {
+    expect(cambioDeItem({ precio_compra: 1600 }, art).frena).toMatch(/sube 60 %/)
+    expect(cambioDeItem({ precio_compra: 1600 }, art, "cascada", 15, { confirmado: true }).frena).toBeNull()
+  })
+  it("una baja de más del tope también frena", () => {
+    expect(cambioDeItem({ precio_compra: 400 }, art).frena).toMatch(/baja 60 %/)
+  })
+  it("+40 % no frena (pero alerta); el tope se puede cambiar", () => {
+    const c = cambioDeItem({ precio_compra: 1400 }, art)
+    expect(c.frena).toBeNull()
+    expect(c.alerta).toBe("suba")
+    expect(cambioDeItem({ precio_compra: 1400 }, art, "cascada", 15, { tope_pct: 30 }).frena).toMatch(/tope de 30 %/)
+  })
+  it("artículo sin costo previo: no hay con qué comparar, no frena", () => {
+    expect(cambioDeItem({ precio_compra: 99999 }, { precio_compra: 0 }).frena).toBeNull()
+  })
+})
+
+describe("descuento único leído de una foto o un PDF", () => {
+  it("es el descuento completo: va en el 1 y los demás en 0 (no 'sin tocar')", () => {
+    expect(descuentosDeLectura(14.5)).toEqual([14.5, 0, 0, 0])
+    // un artículo que tenía 10 + 5 queda con 14,5 y nada más (antes quedaba 14,5 + 5)
+    const c = cambioDeItem({ precio_compra: 1000, descuento1: 14.5, descuento2: 0, descuento3: 0, descuento4: 0 }, { precio_compra: 1000, descuento1: 10, descuento2: 5 })
+    expect(c.nuevo.descuentos).toEqual([14.5, 0, 0, 0])
+    expect(c.variacion_pct).toBe(0)
+  })
+  it("0 es cero; sin descuento leído no se toca ninguno", () => {
+    expect(descuentosDeLectura(0)).toEqual([0, 0, 0, 0])
+    expect(descuentosDeLectura(null)).toEqual([null, null, null, null])
+    expect(descuentosDeLectura(undefined)).toEqual([null, null, null, null])
   })
 })
