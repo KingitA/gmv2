@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Campo, Campos, ConUnidad, FichaCabecera, FichaCuerpo, FichaEstado, FichaMeta, FichaPie, FichaSeccion } from '@/components/ficha/ficha'
 import type { DescuentoTipado } from '@/lib/pricing/calculator'
 import { cn } from '@/lib/utils'
+import { HistorialCosto } from './historial-costo'
 
 type Ff = Record<string, any>
 
@@ -211,6 +212,8 @@ export function FichaArticulo(p: Props) {
                     <Button type="button" variant="outline" onClick={p.onGestionarDescuentos}>Gestionar descuentos</Button>
                   </div>
                 )}
+                {/* Evolución del costo de compra: listas aplicadas y facturas validadas (Tanda 2-C) */}
+                {!esNuevo && fa?.id && <HistorialCosto articuloId={fa.id} />}
               </FichaSeccion>
 
               <FichaSeccion id="clas" titulo="Clasificación" icono={Layers}
