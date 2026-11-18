@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth'
 import { cuentaRenglon, factorDeUnidad, faltaEnRenglon, type UnidadRenglon } from '@/lib/compras/renglon-manual'
 import { tipoDescuentoProveedor } from '@/lib/compras/tipo-descuento-proveedor'
 import { netoCompra } from '@/lib/compras/neto-compra'
+import { sumarDocumentado } from '@/lib/compras/documentado'
 
 /**
  * Renglones de un comprobante de compra, a mano (prueba en producción del 18/11).
@@ -56,13 +57,9 @@ async function unidadesBaseDe(supabase: any, linea: any): Promise<number> {
   return num(linea.cantidad_facturada) * (factor > 1 ? factor : 1)
 }
 
-/** Suma (o resta) unidades a lo documentado de la línea de recepción. Lee el valor fresco justo antes de escribir. */
+/** Suma (o resta) unidades a lo documentado de la línea de recepción, en un solo paso en la base. */
 async function moverDocumentado(supabase: any, recepcionItemId: string | null, delta: number) {
-  if (!recepcionItemId || Math.abs(delta) < 0.0001) return
-  const { data: it } = await supabase.from('recepciones_items').select('id, cantidad_documentada').eq('id', recepcionItemId).maybeSingle()
-  if (!it) return
-  const nueva = Math.max(0, Math.round((num(it.cantidad_documentada) + delta) * 10000) / 10000)
-  await supabase.from('recepciones_items').update({ cantidad_documentada: nueva, ...(nueva === 0 ? { precio_documentado: 0 } : {}) }).eq('id', it.id)
+  await sumarDocumentado(supabase, recepcionItemId, delta)
 }
 
 /** Línea de recepción del artículo en la orden (preferir la fila real de la orden con recepción física). */
@@ -213,8 +210,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const { data: antes } = await supabase.from('comprobantes_compra_detalle').select('*').eq('id', body.linea_id).eq('comprobante_id', comprobanteId).maybeSingle()
     if (!antes) return NextResponse.json({ error: 'Ese renglón ya no existe.' }, { status: 404 })
 
+    // UN solo factor de bulto para lo que había y para lo nuevo: el que ya usó la línea de recepción
+    // (si el renglón estaba por bulto) y, si no hay, las unidades por bulto del artículo. Así la
+    // diferencia que se le suma a lo documentado es coherente, y el factor de la recepción no se toca.
     let upb: number | null = null
-    if (antes.articulo_id) {
+    if (antes.recepcion_item_id) {
+      const { data: it } = await supabase.from('recepciones_items').select('factor_conversion').eq('id', antes.recepcion_item_id).maybeSingle()
+      if (num(it?.factor_conversion) > 1) upb = num(it?.factor_conversion)
+    }
+    if (!upb && antes.articulo_id) {
       const { data: art } = await supabase.from('articulos').select('unidades_por_bulto').eq('id', antes.articulo_id).maybeSingle()
       upb = num(art?.unidades_por_bulto) || null
     }
@@ -225,7 +229,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const tipoDescuento = await tipoDescuentoProveedor(supabase, comp.proveedor)
     const cuenta = cuentaRenglon({ ...r, unidad }, upb, tipoDescuento)
 
-    const unidadesAntes = antes.articulo_id ? await unidadesBaseDe(supabase, antes) : 0
+    const unidadesAntes = antes.articulo_id ? num(antes.cantidad_facturada) * factorDeUnidad(antes.tipo_cantidad, upb) : 0
     const cambios = {
       cantidad_facturada: r.cantidad,
       precio_unitario: r.precio_unitario,
@@ -238,7 +242,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     if (antes.articulo_id && antes.recepcion_item_id) {
       await moverDocumentado(supabase, antes.recepcion_item_id, cuenta.unidades - unidadesAntes)
-      if (unidad === 'bulto') await supabase.from('recepciones_items').update({ factor_conversion: factorDeUnidad(unidad, upb) }).eq('id', antes.recepcion_item_id)
     }
     await anotar(supabase, {
       comprobante_id: comprobanteId, detalle_id: antes.id, accion: 'editar',

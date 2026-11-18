@@ -3,6 +3,7 @@
 // Processes supplier invoices from emails
 // =====================================================
 
+import { sumarDocumentado } from '@/lib/compras/documentado'
 import { acuerdoDeProveedorConLegado, acuerdoDelCanal, diasDePago, formaPagoVencimiento, modalidadVencimiento, normalizarAcuerdo } from '@/lib/compras/acuerdo-pago'
 import { downloadAttachment, type ParsedEmail } from './gmail'
 import { analyzeXlsxInvoice } from './claude-xlsx-analyzer'
@@ -985,7 +986,8 @@ async function runArticleLevelOCR(
                 ...item
             }
 
-            const matchResult = await engine.resolveItem(rawItem, proveedorId)
+            // contexto de compra: primero los artículos de la orden (las líneas de esta recepción), después el proveedor
+            const matchResult = await engine.resolveItem(rawItem, proveedorId, { ordenArticuloIds: (currentItems as any[]).filter((ci) => !ci.fuera_de_oc && ci.articulo_id).map((ci) => ci.articulo_id) })
 
             if (matchResult.status === 'matched' && matchResult.bestCandidate?.sku_id) {
                 const articuloId = matchResult.bestCandidate.sku_id
@@ -1007,18 +1009,19 @@ async function runArticleLevelOCR(
                     const cantidadBase = (item.cantidad || 0) * conversion.factor
 
                     // Update recepciones_items (same as processOCRData does)
-                    await db.from('recepciones_items').update({
-                        cantidad_documentada: Number(matchedItem.cantidad_documentada || 0) + cantidadBase,
+                    // la suma la hace la base en un solo paso (lib/compras/documentado.ts): un mail y una
+                    // foto de la misma orden procesados a la vez suman los dos
+                    const quedo = await sumarDocumentado(db, matchedItem.id, cantidadBase, {
                         precio_documentado: item.precio_unitario || 0,
                         precio_real: item.precio_unitario || matchedItem.precio_oc || 0,
                         cantidad_base: cantidadBase,
                         factor_conversion: conversion.factor,
                         conversion_source: conversion.source,
-                        requires_review: conversion.requiresReview
-                    }).eq('id', matchedItem.id)
+                        requires_review: conversion.requiresReview,
+                    })
 
                     // Update local copy for accumulation
-                    matchedItem.cantidad_documentada = Number(matchedItem.cantidad_documentada || 0) + cantidadBase
+                    matchedItem.cantidad_documentada = quedo ?? Number(matchedItem.cantidad_documentada || 0) + cantidadBase
 
                     // Also save to comprobantes_compra_detalle for per-comprobante view
                     if (comprobanteId) {

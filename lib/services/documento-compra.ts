@@ -19,6 +19,7 @@ import { inferirTipoComprobante, type ParseResult } from '@/lib/services/ocr';
 import { matchAndCreateDetalle } from '@/lib/services/detalle';
 import { esNumeroProvisorio, formatearNumeroComprobante, normalizarNumeroComprobante, tiposCompatibles } from '@/lib/services/numero-comprobante';
 import { fechaISO } from '@/lib/formato';
+import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 
 export { esNumeroProvisorio, normalizarNumeroComprobante, tiposCompatibles };
 
@@ -147,8 +148,38 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
     let sumado = false;
     let otroProvisorio = false;
 
-    // Sin número: ¿ya hay un comprobante provisorio abierto de esta orden y este tipo?
+    // Sin número: el provisorio de la orden lo decide la base CON LA ORDEN BLOQUEADA (migración
+    // 20261118e): dos hojas leídas a la vez ya no crean dos provisorios. Sin la migración sigue el
+    // camino de abajo.
+    let resueltoEnBase = false;
     if (!numero) {
+        const rpc = await supabase.rpc('comprobante_provisorio_obtener', {
+            p_orden_id: p.orden_compra_id, p_proveedor_id: p.proveedor_id, p_tipo: tipoComp,
+            p_datos: {
+                ...totales,
+                numero_provisorio: `PENDIENTE-${Date.now()}`,
+                fecha_comprobante: meta?.fecha || todayArgentina(),
+                fecha_leida: meta?.fecha || null,
+                foto_url: p.foto_url || null,
+                descuento_fuera_factura: Number(meta?.descuento_global || 0),
+            },
+        });
+        if (!rpc.error && rpc.data?.id) {
+            const { data: comp } = await supabase.from('comprobantes_compra').select('*').eq('id', rpc.data.id).maybeSingle();
+            if (comp) {
+                comprobante = comp;
+                sumado = !!rpc.data.sumado;
+                otroProvisorio = !!rpc.data.otro_provisorio;
+                resueltoEnBase = true;
+            }
+        } else if (rpc.error && !faltaLaFuncion(rpc.error, 'comprobante_provisorio_obtener')) {
+            console.error('[documento-compra] provisorio:', rpc.error.message);
+            return { comprobante: null, sumado_a_provisorio: false, error: rpc.error.message, vinculados: [] };
+        }
+    }
+
+    // Sin número (y sin la migración): ¿ya hay un comprobante provisorio abierto de esta orden y este tipo?
+    if (!numero && !resueltoEnBase) {
         const { data: abiertos } = await supabase
             .from('comprobantes_compra')
             .select('*')
