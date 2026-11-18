@@ -11,6 +11,7 @@
  *
  * Archivo PURO. Tests: mobile/packages/core/test/entrada-ocr-match.test.ts
  */
+import { moneda } from "../formato"
 
 /** Trozo balanceado que empieza en `desde` (un "[" o un "{"), respetando las comillas. null si no cierra. */
 function trozoBalanceado(texto: string, desde: number): string | null {
@@ -72,9 +73,15 @@ export interface RenglonesLeidos {
  * Los renglones de una lectura: los del JSON interpretado MÁS los de cualquier otra lista que
  * traiga el texto. Nunca devuelve menos renglones que `itemsInterpretados`.
  */
-export function renglonesDeLectura(texto: string, itemsInterpretados: any[] | null | undefined): RenglonesLeidos {
+export function renglonesDeLectura(texto: string, itemsInterpretados: any[] | null | undefined, interpretado?: any): RenglonesLeidos {
   const base: any[] = Array.isArray(itemsInterpretados) ? itemsInterpretados.filter((x) => x && typeof x === "object") : []
   const avisos: string[] = []
+  // Renglones que la IA puso en OTRA lista del JSON (con otro nombre, o adentro del encabezado)
+  const sueltos = renglonesSueltos(interpretado, base)
+  if (sueltos.length > 0) {
+    base.push(...sueltos)
+    avisos.push(`La lectura automática traía ${sueltos.length} renglón(es) fuera de la lista principal: se agregaron. Controlá que estén todos y que no sobre ninguno.`)
+  }
   const listas = listasDeRenglones(texto || "")
   const items = [...base]
   if (listas.length > 1 || (listas.length === 1 && listas[0]!.length > base.length)) {
@@ -101,4 +108,62 @@ export function renglonesDeLectura(texto: string, itemsInterpretados: any[] | nu
     avisos.push(`La lectura automática menciona ${mencionados} renglones y se cargaron ${items.length}: comparalo con el papel y agregá a mano el que falte (botón +).`)
   }
   return { items, avisos }
+}
+
+/** Un objeto con forma de renglón: descripción (o código) y alguna cantidad o importe. */
+function pareceRenglon(x: any): boolean {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return false
+  const tieneTexto = typeof x.descripcion === "string" && x.descripcion.trim() !== ""
+  const tieneNumero = [x.cantidad, x.precio_unitario, x.total_linea].some((v) => v !== null && v !== undefined && v !== "")
+  return tieneTexto && tieneNumero
+}
+
+/** Renglones que están en cualquier lista del JSON que no sea la principal y que la principal no trae. */
+export function renglonesSueltos(interpretado: any, principal: any[]): any[] {
+  if (!interpretado || typeof interpretado !== "object") return []
+  const cuenta = new Map<string, number>()
+  for (const it of principal) cuenta.set(claveRenglon(it), (cuenta.get(claveRenglon(it)) || 0) + 1)
+  const encontrados: any[] = []
+  const recorrer = (nodo: any, esPrincipal: boolean) => {
+    if (Array.isArray(nodo)) {
+      for (const x of nodo) {
+        if (!esPrincipal && pareceRenglon(x)) {
+          const k = claveRenglon(x)
+          const quedan = cuenta.get(k) || 0
+          if (quedan > 0) cuenta.set(k, quedan - 1)
+          else encontrados.push(x)
+        }
+        if (x && typeof x === "object") recorrer(x, false)
+      }
+    } else if (nodo && typeof nodo === "object") {
+      for (const [clave, valor] of Object.entries(nodo)) recorrer(valor, nodo === interpretado && clave === "items")
+    }
+  }
+  recorrer(interpretado, false)
+  return encontrados
+}
+
+/**
+ * ¿Los renglones leídos suman lo que dice el comprobante? Si la suma de los importes de renglón
+ * queda lejos del subtotal (o del total, cuando no hay subtotal), probablemente falte un renglón
+ * o sobre uno: se avisa al cargar, sin esperar a que lo frene la validación.
+ */
+export function avisoRenglonesContraTotal(items: any[], comprobante: any): string | null {
+  const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0)
+  const suma = Math.round(items.reduce((s, it) => s + n(it?.total_linea), 0) * 100) / 100
+  if (!(suma > 0) || items.some((it) => !(n(it?.total_linea) > 0))) return null
+  const neto = n(comprobante?.subtotal_neto)
+  const total = n(comprobante?.total_factura)
+  if (neto > 0) {
+    const descuento = n(comprobante?.descuento_global)
+    const conDescuento = descuento > 0 && descuento <= 100 ? Math.round(suma * (1 - descuento / 100) * 100) / 100 : suma
+    if (Math.abs(suma - neto) >= 1 && Math.abs(conDescuento - neto) >= 1) {
+      return `Los renglones leídos suman ${moneda(suma)} y el comprobante dice ${moneda(neto)} de neto: puede faltar un renglón o sobrar uno. Comparalo con el papel.`
+    }
+    return null
+  }
+  if (total > 0 && suma > total + 1) {
+    return `Los renglones leídos suman ${moneda(suma)} y el comprobante dice ${moneda(total)} en total: puede sobrar un renglón. Comparalo con el papel.`
+  }
+  return null
 }

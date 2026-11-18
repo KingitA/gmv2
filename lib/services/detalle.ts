@@ -206,7 +206,11 @@ export async function matchAndCreateDetalle(supabase: any, params: {
         }
 
         if (recItem) {
-            // Acumular (no pisar): puede haber varios documentos por recepción.
+            // Acumular (no pisar): puede haber varios documentos por recepción. Se lee el valor
+            // fresco justo antes de sumar: otro documento de la misma orden puede haber sumado
+            // lo suyo mientras este se leía.
+            const { data: fresco } = await supabase.from('recepciones_items').select('cantidad_documentada').eq('id', recItem.id).maybeSingle();
+            if (fresco) recItem.cantidad_documentada = fresco.cantidad_documentada;
             await supabase
                 .from('recepciones_items')
                 .update({
