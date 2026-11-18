@@ -591,7 +591,7 @@ const pagosProveedores: Herramienta = {
     // Con pago parcial por orden de pago, "monto" es LO QUE FALTA; el total del vencimiento
     // queda en monto_original y lo ya pagado en monto_pagado (migración 20261117p_ordenes_pago_t1d.sql). Si esas
     // columnas todavía no existen, se sigue leyendo como antes.
-    const colsVenc = "id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)"
+    const colsVenc = "id, fecha_vencimiento, monto, concepto, tipo, es_estimado, referencia_tipo, proveedores(nombre)"
     const traerVenc = (cols: string) => fetchAllRows<any>(() => {
       let q = ctx.db.from("vencimientos").select(cols)
         .eq("estado", "pendiente").lte("fecha_vencimiento", hasta)
@@ -600,6 +600,12 @@ const pagosProveedores: Herramienta = {
     }, "id")
     let data: any[]
     try { data = await traerVenc(`${colsVenc}, monto_original, monto_pagado`) } catch (e) { if (!faltaEnLaBase(e)) throw e; data = await traerVenc(colsVenc) }
+    // Los ESTIMADOS de órdenes de compra (mercadería pedida, todavía sin factura) no son deuda:
+    // no entran en "a pagar", "atrasado" ni "próximos 7 días". Se informan aparte.
+    const esEstimadoOC = (v: any) => v.es_estimado === true && v.referencia_tipo === "orden_compra"
+    const estimadosOC = data.filter(esEstimadoOC)
+    data = data.filter((v) => !esEstimadoOC(v))
+    const totalEstimadoOC = red(estimadosOC.reduce((s, v) => s + n0(v.monto), 0))
     data.sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)))
     const filas = data.map((v: any) => ({
       fecha: fechaSola(v.fecha_vencimiento), proveedor: v.proveedores?.nombre ?? "—", concepto: v.concepto ?? v.tipo ?? null,
@@ -623,7 +629,15 @@ const pagosProveedores: Herramienta = {
     )
     return {
       consultado: `Vencimientos a proveedores hasta el ${hasta.slice(8, 10)}/${hasta.slice(5, 7)}${nombre ? ` de ${nombre}` : ""}`,
-      datos: { total, atrasado, proximos_7_dias: semana, cantidad: filas.length, filas: filas.slice(0, lim) },
+      datos: {
+        total, atrasado, proximos_7_dias: semana, cantidad: filas.length, filas: filas.slice(0, lim),
+        // Aparte, para ver lo que viene: NO es deuda todavía y no está sumado en los totales de arriba
+        estimado_ordenes_de_compra: totalEstimadoOC > 0 ? {
+          monto: totalEstimadoOC, cantidad: estimadosOC.length,
+          aclaracion: "Mercadería pedida que todavía no tiene factura. No es deuda; pasa a deuda cuando se valida la factura.",
+          filas: estimadosOC.slice(0, lim).map((v: any) => ({ fecha: fechaSola(v.fecha_vencimiento), proveedor: v.proveedores?.nombre ?? "—", concepto: v.concepto ?? null, monto: red(n0(v.monto)) })),
+        } : null,
+      },
       bloques: [{ ...bloque, recalcular: { herramienta: "pagos_proveedores", parametros: { ...p } } }],
     }
   },

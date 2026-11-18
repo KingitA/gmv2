@@ -52,6 +52,10 @@ interface Vencimiento {
 
 /** Estimado de una orden de compra: se ve distinto (rayado, atenuado) y dice "Estimado OC-…". */
 const esEstimadoOC = (v: { es_estimado?: boolean | null; referencia_tipo?: string | null }) => v.es_estimado === true && v.referencia_tipo === "orden_compra"
+/** Lo que hay que pagar de un vencimiento. Un estimado de orden de compra todavía NO es deuda:
+ *  no suma a "sale", a la selección, a los atrasados ni al mes. Se informa aparte. */
+const aPagar = (v: { monto: number; es_estimado?: boolean | null; referencia_tipo?: string | null }) => (esEstimadoOC(v) ? 0 : Number(v.monto))
+const sumaEstimados = (lista: Vencimiento[]) => lista.filter(esEstimadoOC).reduce((a, v) => a + Number(v.monto), 0)
 
 interface ChequeCartera {
     id: string
@@ -302,8 +306,8 @@ export function CalendarioPagos({
         () => vencimientos.filter((v) => seleccion.has(v.id)),
         [vencimientos, seleccion]
     )
-    const totalSeleccion = seleccionados.reduce((a, v) => a + Number(v.monto), 0)
-    const totalVisible = visibles.reduce((a, v) => a + Number(v.monto), 0)
+    const totalSeleccion = seleccionados.reduce((a, v) => a + aPagar(v), 0)
+    const totalVisible = visibles.reduce((a, v) => a + aPagar(v), 0)
 
     const breakdownSeleccion = useMemo(() => {
         const m: Record<string, number> = {}
@@ -328,6 +332,11 @@ export function CalendarioPagos({
         })
 
     async function marcarPagados(ids: string[], vencCheque?: Vencimiento) {
+        // Un estimado de orden de compra no se paga ni se marca pagado: todavía no hay factura
+        if (vencimientos.some((v) => ids.includes(v.id) && esEstimadoOC(v))) {
+            toast.error("Lo elegido incluye un ESTIMADO de una orden de compra: todavía no hay factura, no se marca como pagado. Sacalo de la selección.")
+            return
+        }
         if (!ids.length) return
         // Circuito único (S5): los pagos a PROVEEDORES van por Orden de Pago
         // (CC + kardex + retención + certificado). El atajo queda solo para
@@ -499,7 +508,7 @@ export function CalendarioPagos({
                                             const pagados = saldadosPorFecha[key] || []
                                             const chqs = chequesPorFecha[key] || []
                                             const emits = emitidosPorFecha[key] || []
-                                            const dsum = pagos.reduce((a, p) => a + Number(p.monto), 0)
+                                            const dsum = pagos.reduce((a, p) => a + aPagar(p), 0)
                                             const chqSum = chqs.reduce((a, c) => a + Number(c.monto), 0)
                                             const emitSum = emits.reduce((a, c) => a + Number(c.monto), 0)
                                             const expandido = diasExpandidos.has(key)
@@ -775,7 +784,11 @@ export function CalendarioPagos({
                                     Semana del {Number(diasSemana[0].slice(8))}/{Number(diasSemana[0].slice(5, 7))} al {Number(diasSemana[6].slice(8))}/{Number(diasSemana[6].slice(5, 7))}
                                 </span>
                                 <span className="font-mono text-xs font-medium text-muted-foreground">
-                                    ▼ sale {formatCurrency(visibles.filter((v) => v.fecha_vencimiento >= diasSemana[0] && v.fecha_vencimiento <= diasSemana[6]).reduce((a, v) => a + Number(v.monto), 0))}
+                                    ▼ sale {formatCurrency(visibles.filter((v) => v.fecha_vencimiento >= diasSemana[0] && v.fecha_vencimiento <= diasSemana[6]).reduce((a, v) => a + aPagar(v), 0))}
+                                    {(() => {
+                                        const est = sumaEstimados(visibles.filter((v) => v.fecha_vencimiento >= diasSemana[0] && v.fecha_vencimiento <= diasSemana[6]))
+                                        return est > 0 ? <span className="ml-2 font-sans font-normal" title="Mercadería pedida, todavía sin factura: no es deuda"> · Estimado de órdenes de compra: {formatCurrency(est)}</span> : null
+                                    })()}
                                 </span>
                                 <Button variant="outline" size="icon" className="h-8 w-8" aria-label="Semana anterior" onClick={() => url.set({ dia: sumarDias(semanaDe, -7) }, "replace")}><ChevronLeft className="h-4 w-4" /></Button>
                                 <Button variant="outline" size="sm" className="h-8" onClick={() => url.set({ dia: null }, "replace")}>Hoy</Button>
@@ -803,7 +816,8 @@ export function CalendarioPagos({
                         meses.map(({ y, m }) => {
                             const mtot = visibles
                                 .filter((v) => v.fecha_vencimiento.startsWith(`${y}-${String(m + 1).padStart(2, "0")}`))
-                                .reduce((a, v) => a + Number(v.monto), 0)
+                                .reduce((a, v) => a + aPagar(v), 0)
+                            const mest = sumaEstimados(visibles.filter((v) => v.fecha_vencimiento.startsWith(`${y}-${String(m + 1).padStart(2, "0")}`)))
                             const min = showCheques && verCheques
                                 ? cheques
                                     .filter((c) => c.fecha_vencimiento.startsWith(`${y}-${String(m + 1).padStart(2, "0")}`))
@@ -838,7 +852,7 @@ export function CalendarioPagos({
                                             <span className="text-xs font-semibold text-emerald-600">▲ entra {formatCurrency(min)}</span>
                                         )}
                                         <span className="ml-auto font-mono text-xs font-medium text-muted-foreground">
-                                            ▼ sale {formatCurrency(mtot)}
+                                            ▼ sale {formatCurrency(mtot)}{mest > 0 ? ` · Estimado de órdenes de compra: ${formatCurrency(mest)}` : ""}
                                         </span>
                                     </h2>
                                     {!plegado && (<>
@@ -919,7 +933,7 @@ export function CalendarioPagos({
                 <div className="lg:sticky lg:top-20 space-y-3">
                     {lateral === "atrasados" && (() => {
                         const hoy = hoyISO()
-                        const atrasados = visibles.filter((v) => v.fecha_vencimiento < hoy).sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))
+                        const atrasados = visibles.filter((v) => v.fecha_vencimiento < hoy && !esEstimadoOC(v)).sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))
                         const total = atrasados.reduce((a, v) => a + Number(v.monto), 0)
                         return (
                             <div className="rounded-2xl border border-neutro-200 bg-white shadow-sm">

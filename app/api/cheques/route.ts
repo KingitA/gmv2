@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { chequesReservados } from "@/lib/cheques/reserva"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
@@ -45,9 +46,18 @@ export async function GET(request: NextRequest) {
     const cuentas = new Map((cuentasRes.data || []).map((c: any) => [c.id, c.nombre]))
     const proveedores = new Map((proveedoresRes.data || []).map((p: any) => [p.id, p.nombre]))
 
+    // E-66: cheques en cartera reservados por una orden de pago pendiente
+    let reservados = new Map<string, string>()
+    try {
+      reservados = await chequesReservados((cheques || []).filter((c: any) => c.estado === "EN_CARTERA").map((c: any) => c.id))
+    } catch (e) {
+      console.warn("[cheques] no se pudieron leer las reservas:", e)
+    }
+
     return NextResponse.json({
       cheques: (cheques || []).map((c) => ({
         ...c,
+        reservado_op: reservados.get(c.id) ?? null,
         cliente_nombre: c.cliente_origen_id ? clientes.get(c.cliente_origen_id) ?? null : null,
         cuenta_deposito_nombre: c.cuenta_banco_id ? cuentas.get(c.cuenta_banco_id) ?? null : null,
         proveedor_nombre: c.proveedor_destino_id ? proveedores.get(c.proveedor_destino_id) ?? null : null,

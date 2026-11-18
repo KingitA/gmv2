@@ -23,7 +23,7 @@ const numero = (v: unknown) => {
 }
 
 export async function GET() {
-  const auth = await requirePermiso('ordenes_pago')
+  const auth = await requirePermiso('retencion_regimenes')
   if (auth.error) return auth.error
   const supabase = createAdminClient()
   const { data, error } = await supabase.from('retencion_regimenes').select('*')
@@ -40,7 +40,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const auth = await requirePermiso('ordenes_pago')
+  const auth = await requirePermiso('retencion_regimenes')
   if (auth.error) return auth.error
   let body: any
   try { body = await request.json() } catch { return NextResponse.json({ error: 'Pedido inválido' }, { status: 400 }) }

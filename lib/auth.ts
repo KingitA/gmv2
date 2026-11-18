@@ -107,6 +107,8 @@ export const PERMISOS = {
   ordenes_pago: ["admin"],
   /** Órdenes de pago: confirmar (sale la plata), anular y eliminar — mueve plata: solo admin, como Caja */
   ordenes_pago_confirmar: ["admin"],
+  /** Alícuotas y mínimos de retención de Ganancias (Ajustes → Retención de Ganancias): ver y cambiar, solo admin */
+  retencion_regimenes: ["admin"],
   /** Reportes de Playroom (ventas, comisiones, cuentas corrientes, fiscal, depósito) — los mismos roles que usan Jarvis */
   reportes_playroom: ["admin", "administrativo"],
 } as const satisfies Record<string, readonly string[]>

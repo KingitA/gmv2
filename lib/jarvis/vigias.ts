@@ -132,8 +132,9 @@ const sinStock: Vigia = async (db, _hoy, r) => {
 
 /** Pagos a proveedores de la semana y atrasados. */
 const pagosSemana: Vigia = async (db, hoy) => {
-  const { data } = await db.from("vencimientos").select("monto, fecha_vencimiento").eq("estado", "pendiente").lte("fecha_vencimiento", sumarDiasISO(hoy, 7))
-  const vs = (data ?? []) as Fila[]
+  const { data } = await db.from("vencimientos").select("monto, fecha_vencimiento, es_estimado, referencia_tipo").eq("estado", "pendiente").lte("fecha_vencimiento", sumarDiasISO(hoy, 7))
+  // Los estimados de órdenes de compra (mercadería pedida sin factura) no son deuda: no cuentan
+  const vs = ((data ?? []) as Fila[]).filter((v: any) => !(v.es_estimado === true && v.referencia_tipo === "orden_compra"))
   const atrasado = vs.filter((v) => String(v.fecha_vencimiento) < hoy).reduce((s, v) => s + n0(v.monto), 0)
   const semana = vs.filter((v) => String(v.fecha_vencimiento) >= hoy).reduce((s, v) => s + n0(v.monto), 0)
   if (atrasado <= 0 && semana <= 0) return []
