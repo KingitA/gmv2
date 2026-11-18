@@ -33,7 +33,8 @@ function getOAuth2Client() {
 
 /**
  * Genera la URL de autorización de Google OAuth
- * @param userId - ID del usuario del sistema que está conectando Gmail
+ * @param userId - lo que viaja en "state" y vuelve en el callback: quién conecta y a dónde
+ *                 volver (lib/ai/gmail-vuelta.ts → armarEstado). Antes era solo el id del usuario.
  */
 export function getAuthUrl(userId: string): string {
     const oauth2Client = getOAuth2Client()
@@ -115,16 +116,27 @@ export async function exchangeCodeForTokens(code: string, userId: string): Promi
  * Usa .limit(1) en vez de .single() para manejar duplicados
  * (tokens huérfanos sin user_id que coexisten con tokens vinculados).
  */
+/**
+ * De varias filas de google_tokens del MISMO mail (la conectó más de un usuario, o quedó una
+ * fila vieja), la que vale es la que se tocó por última vez: una conexión nueva o un acceso
+ * renovado actualizan updated_at; una conexión vencida o revocada deja de actualizarse.
+ * Desempate: la que tiene usuario, y después el acceso que vence más tarde.
+ */
+function masRecientePrimero(a: any, b: any): number {
+    const t = (x: any) => { const n = Date.parse(String(x?.updated_at ?? '')); return Number.isFinite(n) ? n : 0 }
+    return (t(b) - t(a))
+        || (Number(!!b?.user_id) - Number(!!a?.user_id))
+        || (Number(b?.expiry_date ?? 0) - Number(a?.expiry_date ?? 0))
+}
+
 async function getGmailClient(email: string): Promise<gmail_v1.Gmail> {
     const db = getSupabaseAdmin()
     const { data: rows, error } = await db
         .from('google_tokens')
         .select('*')
         .eq('email', email)
-        .order('user_id', { ascending: false, nullsFirst: false })
-        .limit(1)
 
-    const tokenData = rows?.[0]
+    const tokenData = [...(rows ?? [])].sort(masRecientePrimero)[0]
 
     if (error || !tokenData) {
         throw new Error(`No hay tokens de Google para ${email}. Conectá tu cuenta primero.`)
@@ -640,9 +652,10 @@ export async function estadoCuentaGmail(email: string): Promise<{ estado: Estado
     const { data, error } = await db
         .from('google_tokens')
         .select('*')
-        .order('user_id', { ascending: false, nullsFirst: false })
     if (error || !data) return { estado: 'no_conectada', cuenta: null }
-    const fila = (data as any[]).find((t) => String(t.email).toLowerCase() === buscada)
+    // Si el mismo mail está en más de una fila, se mira la más reciente: es la misma que usa
+    // el envío (getGmailClient), así el estado que se muestra es el de la conexión que se usa.
+    const fila = (data as any[]).filter((t) => String(t.email).toLowerCase() === buscada).sort(masRecientePrimero)[0]
     if (!fila) return { estado: 'no_conectada', cuenta: null }
     const cuenta = String(fila.email)
 

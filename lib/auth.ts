@@ -109,6 +109,8 @@ export const PERMISOS = {
   ordenes_pago_confirmar: ["admin"],
   /** Alícuotas y mínimos de retención de Ganancias (Ajustes → Retención de Ganancias): ver y cambiar, solo admin */
   retencion_regimenes: ["admin"],
+  /** Conectar (o volver a conectar) una cuenta de Gmail al sistema: el sistema lee y procesa el correo de TODAS las cuentas conectadas, y manda las órdenes de compra desde una de ellas — solo admin */
+  conectar_gmail: ["admin"],
   /** Reportes de Playroom (ventas, comisiones, cuentas corrientes, fiscal, depósito) — los mismos roles que usan Jarvis */
   reportes_playroom: ["admin", "administrativo"],
   /** /admin/equipos: equipos de las apps, versión instalada y última publicada — solo admin (17/11/2026) */

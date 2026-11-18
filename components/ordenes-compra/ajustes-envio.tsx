@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { fechaHora } from "@/lib/formato"
-import { ConectarGmail, TEXTO_ESTADO_CUENTA, type EstadoCuentaGmail } from "./conectar-gmail"
+import { ConectarGmail, TEXTO_ESTADO_CUENTA, URL_CONECTAR_GMAIL, type EstadoCuentaGmail } from "./conectar-gmail"
 
 /** Resultado de volver de Google (parámetros ?gmail_connected= / ?gmail_error= de la pantalla) */
 export interface VueltaDeGoogle { conectada?: string | null; error?: string | null }
@@ -21,6 +21,9 @@ const ERROR_GOOGLE: Record<string, string> = {
   access_denied: "No se aceptaron los permisos en Google (o se canceló). Sin aceptarlos no se puede enviar.",
   no_code: "Google no devolvió la autorización. Probá de nuevo.",
   no_user: "Se perdió la sesión del sistema durante la conexión. Entrá de nuevo y repetí.",
+  solo_admin: "Solo un administrador puede conectar una cuenta de Gmail. Pedile a un administrador que la conecte.",
+  sin_sesion: "Se cerró la sesión del sistema mientras estabas en Google. Entrá de nuevo y volvé a tocar “Conectar Gmail”.",
+  otro_usuario: "La conexión la pidió otro usuario del sistema en este navegador. Volvé a tocar “Conectar Gmail”.",
   token_exchange_failed: "Google aceptó, pero el sistema no pudo guardar la conexión. Probá de nuevo; si sigue, avisá a sistemas.",
 }
 
@@ -136,7 +139,7 @@ export function AjustesEnvioOrdenes({ onCambio, vuelta }: { onCambio?: () => voi
                 {estado === "conectada" && a.admin && (
                   <div className="mt-1 text-xs text-muted-foreground">
                     ¿Hay que conectarla de nuevo? Entrá antes a Gmail con {a.cuenta_envio} en este navegador y{" "}
-                    <a href="/api/auth/google" className="font-medium text-primary underline">volvé a conectar Gmail</a>.
+                    <a href={URL_CONECTAR_GMAIL} className="font-medium text-primary underline">volvé a conectar Gmail</a>.
                   </div>
                 )}
                 {a.actualizado_at && <div className="mt-1 text-xs text-muted-foreground">Último cambio: {fechaHora(a.actualizado_at)}{a.actualizado_por ? ` por ${a.actualizado_por}` : ""}.</div>}
