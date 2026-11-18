@@ -8,6 +8,7 @@ import { getSupabaseAdmin } from './supabase-admin'
 import { processOrder, processOrderText, processOrderTextMulti, type ParseResult } from '@/lib/actions/ai-order-import'
 import { GEMINI_MODEL } from './gemini-model'
 import Anthropic from '@anthropic-ai/sdk'
+import { MODELO_CLAUDE, ESFUERZO_SIMPLE, TOPE_RESPUESTA_CORTA, textoDeRespuesta } from './modelos-claude'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { hoyISO } from '@/lib/formato'
 
@@ -511,12 +512,15 @@ Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificar
 
                     const client = getAnthropicClient()
                     const response = await client.messages.create({
-                        model: 'claude-sonnet-4-6',
-                        max_tokens: 100,
+                        model: MODELO_CLAUDE.extraccion,
+                        // antes 100: el modelo actual piensa dentro del tope; con 100 la respuesta llegaba vacía
+                        max_tokens: TOPE_RESPUESTA_CORTA,
+                        output_config: { effort: ESFUERZO_SIMPLE },
                         messages: [{ role: 'user', content: prompt }],
                     })
 
-                    const aiResponse = (response.content[0] as any).text?.trim() || ''
+                    // La respuesta puede empezar con un bloque de pensamiento: se lee el texto, no content[0]
+                    const aiResponse = textoDeRespuesta(response).trim()
                     console.log(`[EmailOrderProcessor] 🧠 Claude identified client: "${aiResponse}"`)
 
                     // Validate the response is a valid UUID from our list
@@ -554,7 +558,7 @@ Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificar
                 const geminiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ''
                 if (geminiKey) {
                     const genAI = new GoogleGenerativeAI(geminiKey)
-                    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { temperature: 0.1, responseMimeType: 'application/json', maxOutputTokens: 64 } })
+                    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { temperature: 0.1, responseMimeType: 'application/json', maxOutputTokens: 2048 } }) // antes 64: el modelo piensa dentro del tope (lib/ai/gemini-model.ts)
                     const prompt = `Analizá si el viajante está pidiendo una forma de facturación ESPECÍFICA para este pedido.
 Mensaje: "${fullTextContext}"
 

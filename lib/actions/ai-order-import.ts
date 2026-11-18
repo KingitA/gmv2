@@ -3,6 +3,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai"
 import { GEMINI_MODEL, GEMINI_MODEL_FALLBACK } from "@/lib/ai/gemini-model"
 import Anthropic from "@anthropic-ai/sdk"
+import { MODELO_CLAUDE, ESFUERZO_SIMPLE, seNego, textoDeRespuesta } from "@/lib/ai/modelos-claude"
 import { searchProductsByVector } from "./embeddings"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { sanitizarOr } from "@/lib/search/hybrid"
@@ -348,9 +349,12 @@ ${text}`
 
 /**
  * Llama a Claude y, si la respuesta se corta por límite de tokens
- * (stop_reason === "max_tokens"), continúa la extracción desde donde quedó
- * usando prefill (soportado en Haiku 4.5) hasta que termine completa.
- * Concatena los pedazos en un único JSON.
+ * (stop_reason === "max_tokens"), continúa la extracción desde donde quedó hasta que
+ * termine completa. Concatena los pedazos en un único JSON.
+ *
+ * Cómo continúa (E-82): el modelo actual NO acepta que el último mensaje sea del asistente
+ * (el "prefill" que se usaba con Haiku 4.5 devuelve error 400). Ahora lo ya escrito va como
+ * turno del asistente y después un mensaje del usuario pide seguir exactamente desde ahí.
  *
  * Garantía dura: o devuelve la respuesta COMPLETA, o lanza un error explícito.
  * Nunca devuelve un pedido cortado en silencio.
@@ -362,10 +366,12 @@ async function extraerJSONConContinuacion(
     system: string,
     contexto: string,
 ): Promise<string> {
-    // Prefill: el partial vuelve como turno del assistant y el modelo lo continúa.
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [
         { role: "user", content: prompt },
     ]
+    const CONTINUAR = "Tu respuesta anterior se cortó por el límite de longitud. Seguí EXACTAMENTE desde el último carácter que escribiste: " +
+        "no repitas nada de lo anterior, no vuelvas a empezar el JSON, no agregues explicaciones ni bloques de código. " +
+        "Lo que escribas se va a pegar a continuación de lo anterior, tal cual."
     let acumulado = ""
 
     for (let intento = 0; intento <= MAX_CONTINUACIONES; intento++) {
@@ -373,17 +379,25 @@ async function extraerJSONConContinuacion(
         // no-streaming (riesgo de superar 10 min). finalMessage() junta el
         // mensaje completo y nos da stop_reason igual que create().
         const stream = anthropic.messages.stream({
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: 64000, // tope real de Haiku 4.5; entra un pedido de ~500 ítems de una
-            temperature: 0.1,
+            model: MODELO_CLAUDE.liviano,
+            max_tokens: 64000, // entra un pedido de ~500 ítems de una (el modelo llega a 128.000)
+            // sin temperature: los modelos actuales no la aceptan (error 400)
+            output_config: { effort: ESFUERZO_SIMPLE },
             system,
             messages: acumulado
-                ? [...messages, { role: "assistant", content: acumulado }]
+                ? [...messages, { role: "assistant", content: acumulado }, { role: "user", content: CONTINUAR }]
                 : messages,
         })
         const msg = await stream.finalMessage()
 
-        const trozo = (msg.content[0] as { type: string; text: string })?.text ?? ""
+        if (seNego(msg)) {
+            throw new Error(`La IA no pudo procesar el ${contexto} (se negó a contestar). No se importó nada: cargalo a mano o probá de nuevo.`)
+        }
+        // La respuesta puede empezar con un bloque de pensamiento: se lee el texto, no content[0]
+        const trozo = textoDeRespuesta(msg)
+        if (!trozo && msg.stop_reason === "max_tokens") {
+            throw new Error(`La IA no llegó a escribir el ${contexto} (se quedó sin espacio antes de empezar). No se importó nada: dividilo en dos y volvé a importarlo.`)
+        }
         acumulado += trozo
 
         if (msg.stop_reason !== "max_tokens") {
@@ -658,7 +672,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                                     const genAI = new GoogleGenerativeAI(geminiKey)
                                     const model = genAI.getGenerativeModel({
                                         model: GEMINI_MODEL,
-                                        generationConfig: { temperature: 0.1, responseMimeType: "application/json", maxOutputTokens: 64 }
+                                        generationConfig: { temperature: 0.1, responseMimeType: "application/json", maxOutputTokens: 2048 } // antes 64: el modelo piensa dentro del tope (lib/ai/gemini-model.ts)
                                     })
                                     const candidateList = filteredCandidates.map((c: any, i: number) =>
                                         `${i + 1}. SKU:${c.sku || c.codigo_interno} - ${c.descripcion}`
@@ -702,7 +716,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                             const genAI = new GoogleGenerativeAI(geminiKey)
                             const model = genAI.getGenerativeModel({
                                 model: GEMINI_MODEL,
-                                generationConfig: { temperature: 0.1, responseMimeType: "application/json", maxOutputTokens: 128 }
+                                generationConfig: { temperature: 0.1, responseMimeType: "application/json", maxOutputTokens: 2048 } // antes 128: el modelo piensa dentro del tope (lib/ai/gemini-model.ts)
                             })
                             const prompt = `Extraé los atributos clave del artículo comercial: "${originalTextForFrontend}".
 Incluí proveedor, tipo de artículo, marca, color, fracciones, unidades por paquete, si tiene.

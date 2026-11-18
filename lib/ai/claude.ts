@@ -3,6 +3,7 @@
 // =====================================================
 
 import Anthropic from '@anthropic-ai/sdk'
+import { MODELO_CLAUDE, ESFUERZO_SIMPLE, TOPE_RESPUESTA_CORTA } from './modelos-claude'
 import {
     SYSTEM_PROMPT_CLASSIFIER,
     SYSTEM_PROMPT_CHAT,
@@ -31,7 +32,8 @@ function getClient(): Anthropic {
     return anthropicClient
 }
 
-const MODEL = 'claude-sonnet-4-6'
+// El modelo se nombra en un solo lugar: lib/ai/modelos-claude.ts (E-82)
+const MODEL = MODELO_CLAUDE.extraccion
 
 /**
  * Clasifica un mensaje (email, chat, WhatsApp) determinando su tipo,
@@ -68,7 +70,8 @@ export async function classifyMessage(
 
     const response = await client.messages.create({
         model: MODEL,
-        max_tokens: 1024,
+        max_tokens: TOPE_RESPUESTA_CORTA, // el modelo piensa antes de contestar y eso cuenta en el tope
+        output_config: { effort: ESFUERZO_SIMPLE },
         system: SYSTEM_PROMPT_CLASSIFIER,
         messages: [
             {
@@ -153,7 +156,8 @@ export async function classifyAndExtract(
 
     const response = await client.messages.create({
         model: MODEL,
-        max_tokens: 4096,
+        max_tokens: 16000, // antes 4096: ahora el pensamiento cuenta en el tope y el JSON de un mail largo no puede cortarse
+        output_config: { effort: ESFUERZO_SIMPLE },
         system: SYSTEM_PROMPT_UNIFIED_CLASSIFIER,
         messages: [
             {
@@ -220,7 +224,8 @@ export async function chat(
 
     const response = await client.messages.create({
         model: MODEL,
-        max_tokens: 2048,
+        max_tokens: 8000, // antes 2048: deja lugar para pensar
+        output_config: { effort: ESFUERZO_SIMPLE },
         system: systemPrompt,
         messages: anthropicMessages,
     })
@@ -254,7 +259,8 @@ export async function summarizeEmail(
 
     const response = await client.messages.create({
         model: MODEL,
-        max_tokens: 256,
+        max_tokens: TOPE_RESPUESTA_CORTA, // antes 256: con ese tope el modelo nuevo puede gastarlo pensando y no escribir el resumen
+        output_config: { effort: ESFUERZO_SIMPLE },
         system: SYSTEM_PROMPT_EMAIL_SUMMARY,
         messages: [
             {
