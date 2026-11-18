@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.5.5 (versionCode 19) — 2026-11-18
+
+- Documentos de la recepcion: varias hojas en un solo comprobante, funciona sin senal (queda en la cola y sube solo) y muestra lo que leyo el sistema
+
 ## v0.5.4 (versionCode 18) — 2026-11-18
 
 - Recepcion: faltantes en ambar y confirmacion al finalizar; tocar un renglon abre la cantidad; control de bultos no pierde lo cargado; fotos comprimidas, PDF y lo que leyo el sistema; aviso de sesion vencida
