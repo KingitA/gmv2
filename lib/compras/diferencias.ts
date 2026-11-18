@@ -59,6 +59,26 @@ export interface LineaFactura {
   precio_unitario: number
   descuentos: number[]
   iva_porcentaje: number
+  /** Comprobante del renglón (para saber a cuál corresponde un faltante cuando hay más de uno) */
+  comprobante_id?: string | null
+  /** "FA 0003-00045711" */
+  comprobante?: string | null
+  /** El comprobante es una adquisición (sin factura, sin IVA) */
+  sin_factura?: boolean
+}
+
+/**
+ * Un faltante cuando lo facturado del artículo está repartido entre comprobantes distintos (una
+ * factura con IVA y una adquisición sin factura, por ejemplo): a cuál corresponde lo que faltó.
+ * Cada opción es "si lo que faltó es de ESTE comprobante": su importe con SU IVA.
+ */
+export interface OpcionFaltante extends Importe {
+  comprobante_id: string
+  comprobante: string
+  sin_factura: boolean
+  iva_porcentaje: number
+  /** Unidades con cargo del artículo en ese comprobante */
+  facturadas: number
 }
 
 export interface Importe {
@@ -89,7 +109,14 @@ export interface DiferenciaLinea {
    * Facturado ≠ recibido. faltante = nos facturaron de más (reclamable); sobrante = llegó más de
    * lo facturado. null = coinciden, o todavía no hay factura.
    */
-  cantidad: ({ unidades: number; tipo: "faltante" | "sobrante" } & Importe) | null
+  cantidad: ({
+    unidades: number; tipo: "faltante" | "sobrante"
+    /** Faltante con el artículo facturado en más de un comprobante: a cuál se le atribuyó (el elegido, o por defecto el sin factura) */
+    comprobante_id?: string | null
+    comprobante?: string | null
+    /** Las alternativas, para que la ventana pregunte. Solo si cambia el importe según cuál sea. */
+    opciones?: OpcionFaltante[]
+  } & Importe) | null
   /**
    * Unidades de la orden que no llegaron ni se facturaron (el proveedor no las mandó). No es
    * plata: es mercadería que falta recibir. Sigue abierta hasta que llegue el resto o se dé la
@@ -121,6 +148,8 @@ export function calcularDiferencia(p: {
   recibido_unidades: number
   /** Cómo aplica los descuentos el proveedor (su ficha). Sin dato: en cascada. */
   tipo_descuento?: TipoDescuento | null
+  /** Faltante: comprobante al que corresponde lo que faltó (lo elige quien resuelve). Sin dato: el sin factura primero. */
+  faltante_de?: string | null
 }): DiferenciaLinea {
   const tipo = p.tipo_descuento
   const oc = p.oc
@@ -190,12 +219,70 @@ export function calcularDiferencia(p: {
         tipo: dif > 0 ? "faltante" : "sobrante",
         ...importe(Math.abs(dif) * factura.neto_unidad, factura.iva_porcentaje),
       }
+      // FALTANTE con el artículo facturado en más de un comprobante (factura con IVA + adquisición
+      // sin factura): lo que faltó es de UNO de ellos, con su precio y SU IVA. Antes se tomaba el
+      // IVA del primer renglón: un faltante de la adquisición salía con 21 % de IVA de más.
+      if (dif > 0) {
+        const grupos = gruposPorComprobante(lineas, tipo)
+        const distintos = new Set(grupos.map((g) => `${g.iva_porcentaje}|${r4(g.neto_unidad)}`)).size > 1
+        if (grupos.length > 1 && distintos) {
+          const faltan = r4(Math.abs(dif))
+          // Por defecto, el sin factura primero; si quien resuelve eligió uno, ese primero
+          const porDefecto = [...grupos.filter((g) => g.sin_factura), ...grupos.filter((g) => !g.sin_factura)]
+          const cuenta = (primero: string) => repartirFaltante(faltan, [...porDefecto.filter((g) => g.comprobante_id === primero), ...porDefecto.filter((g) => g.comprobante_id !== primero)])
+          const elegido = porDefecto.find((g) => g.comprobante_id === p.faltante_de) ?? porDefecto[0]!
+          cantidad = {
+            unidades: faltan, tipo: "faltante", ...cuenta(elegido.comprobante_id),
+            comprobante_id: elegido.comprobante_id, comprobante: elegido.comprobante,
+            opciones: porDefecto.map((g) => ({
+              comprobante_id: g.comprobante_id, comprobante: g.comprobante, sin_factura: g.sin_factura,
+              iva_porcentaje: g.iva_porcentaje, facturadas: r4(g.unidades), ...cuenta(g.comprobante_id),
+            })),
+          }
+        }
+      }
     }
   }
 
   const pendiente_oc = oc ? r4(Math.max(0, oc.unidades - Math.max(recibido, factura?.unidades ?? 0))) : 0
 
   return { oc, recibido_unidades: recibido, factura, precio, cantidad, pendiente_oc: pendiente_oc > TOLERANCIA_CANTIDAD ? pendiente_oc : 0 }
+}
+
+interface GrupoComprobante { comprobante_id: string; comprobante: string; sin_factura: boolean; unidades: number; neto_unidad: number; iva_porcentaje: number }
+
+/** Lo facturado CON cargo del artículo, comprobante por comprobante (solo renglones que dicen de qué comprobante son). */
+function gruposPorComprobante(lineas: LineaFactura[], tipo: TipoDescuento | null | undefined): GrupoComprobante[] {
+  const grupos = new Map<string, GrupoComprobante & { neto_total: number }>()
+  for (const l of lineas) {
+    if (!l.comprobante_id) return [] // sin saber de qué comprobante es cada renglón no se puede repartir
+    const f = num(l.factor) || 1
+    const u = num(l.cantidad_facturada) * f
+    const neto = netoCompra(l.precio_unitario, l.descuentos, tipo)
+    if (!(neto > 0) || !(u > 0)) continue
+    const g = grupos.get(l.comprobante_id) ?? { comprobante_id: l.comprobante_id, comprobante: l.comprobante || "comprobante", sin_factura: !!l.sin_factura, unidades: 0, neto_unidad: 0, iva_porcentaje: num(l.iva_porcentaje), neto_total: 0 }
+    g.unidades += u
+    g.neto_total += u * (neto / f)
+    g.neto_unidad = g.neto_total / g.unidades
+    grupos.set(l.comprobante_id, g)
+  }
+  return [...grupos.values()].map(({ neto_total: _n, ...g }) => g)
+}
+
+/** Reparte las unidades que faltan entre los comprobantes, en ese orden; cada parte con su precio y su IVA. */
+function repartirFaltante(faltan: number, orden: GrupoComprobante[]): Importe {
+  let resto = faltan
+  let neto = 0, iva = 0
+  for (const [i, g] of orden.entries()) {
+    if (resto <= 0.0001) break
+    // el último se lleva lo que quede (no debería sobrar: el faltante nunca supera lo facturado)
+    const toma = i === orden.length - 1 ? resto : Math.min(resto, g.unidades)
+    const parte = importe(toma * g.neto_unidad, g.iva_porcentaje)
+    neto += parte.neto
+    iva += parte.iva
+    resto -= toma
+  }
+  return { neto: r2(neto), iva: r2(iva), total: r2(neto + iva) }
 }
 
 /**

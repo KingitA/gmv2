@@ -19,7 +19,7 @@
 
 import { totalesOC } from "./oc-totales"
 import { calcularDiferencia, combinarLineasOC, netoCompra, type DiferenciaLinea, type LineaFactura, type TipoDescuento } from "./diferencias"
-import { esComprobanteConPrecios, esRemito } from "./finalizar-oc"
+import { esAdquisicion, esComprobanteConPrecios, esRemito } from "./finalizar-oc"
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0)
@@ -179,7 +179,7 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
       pc.unidades += unidades
       if (!pc.neto_unidad && neto > 0) pc.neto_unidad = r2(neto)
       if (esComprobanteConPrecios(c.tipo_comprobante)) {
-        lineasFactura.push({ cantidad_facturada: num(l.cantidad_facturada), factor: f, precio_unitario: num(l.precio_unitario), descuentos: descuentos(l), iva_porcentaje: num(l.iva_porcentaje ?? 21) })
+        lineasFactura.push({ cantidad_facturada: num(l.cantidad_facturada), factor: f, precio_unitario: num(l.precio_unitario), descuentos: descuentos(l), iva_porcentaje: num(l.iva_porcentaje ?? 21), comprobante_id: c.id, comprobante: `${c.tipo_comprobante} ${c.numero_comprobante}`, sin_factura: esAdquisicion(c.tipo_comprobante) })
       }
     }
 

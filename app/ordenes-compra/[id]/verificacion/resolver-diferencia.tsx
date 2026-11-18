@@ -65,6 +65,11 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
             : recepcion.conformidad_transporte === "conforme"
                 ? { ok: true, texto: `El depósito firmó CONFORME los bultos (${recepcion.bultos_recibidos ?? "?"} de ${recepcion.bultos_declarados ?? "?"}): va a ser difícil reclamarle al transporte.` }
                 : { ok: true, texto: "El depósito salteó el control de bultos: no hay constancia contra el remito del transporte." }
+    // Faltante con el artículo facturado en más de un comprobante (factura con IVA + adquisición sin
+    // factura): a cuál corresponde lo que faltó. Por defecto el sin factura (viene primero).
+    const opcionesFaltante = (!sobrante && dif.cantidad?.opciones) || []
+    const [faltanteDe, setFaltanteDe] = useState<string>(opcionesFaltante[0]?.comprobante_id || "")
+    const faltanteImp: Importe | null = dif.cantidad ? (opcionesFaltante.find((o) => o.comprobante_id === faltanteDe) ?? dif.cantidad) : null
     const [rechazo, setRechazo] = useState<number | null>(null) // unidades que entraron y se devuelven, además del faltante
     const [descripcion, setDescripcion] = useState("")
     const [guardando, setGuardando] = useState(false)
@@ -109,10 +114,10 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
             previa.push(noPedido ? "El artículo queda aceptado como recibido (no estaba en la orden)." : sobrante ? "El sobrante queda aceptado: la mercadería se queda en el stock." : "La empresa asume el faltante: no se reclama nada.")
             previa.push("Stock y cuenta corriente: sin cambios.")
         } else if (destinoCantidad === "transporte") {
-            previa.push(`Se le cargan ${pesos(dif.cantidad!)} al transporte en su cuenta corriente.`)
+            previa.push(`Se le cargan ${pesos(faltanteImp!)} al transporte en su cuenta corriente.`)
             previa.push("Stock: sin cambios (solo entró lo que se contó).")
         } else if (destinoCantidad === "proveedor") {
-            const imp = reclamoDevolucion && devolver > 0 ? reclamoDevolucion : dif.cantidad!
+            const imp = reclamoDevolucion && devolver > 0 ? reclamoDevolucion : faltanteImp!
             previa.push(`Queda una nota de crédito ESPERADA del proveedor por ${pesos(imp)}.`)
             previa.push(devolver > 0
                 ? `Stock: BAJA ${cant(devolver)} u (mercadería que entró y se devuelve). El faltante no toca el stock.`
@@ -169,6 +174,7 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
                     bultos: destinoCantidad === "transporte" && recepcion?.conformidad_transporte === "no_conforme"
                         ? { declarados: recepcion.bultos_declarados, recibidos: recepcion.bultos_recibidos, observaciones: recepcion.conformidad_observaciones } : undefined,
                     devolver_unidades: devolver > 0 ? devolver : undefined,
+                    faltante_comprobante_id: opcionesFaltante.length > 0 && faltanteDe ? faltanteDe : undefined,
                     descripcion: descripcion || undefined,
                 })
             }
@@ -244,7 +250,20 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
 
                     {conCantidad && !sobrante && (
                         <div className="space-y-2">
-                            <Label>FALTANTE: se facturaron {cant(dif.cantidad!.unidades)} u que no llegaron = <strong>{pesos(dif.cantidad!)}</strong></Label>
+                            <Label>FALTANTE: se facturaron {cant(dif.cantidad!.unidades)} u que no llegaron = <strong>{pesos(faltanteImp!)}</strong></Label>
+                            {opcionesFaltante.length > 0 && (
+                                <div className="border-2 border-amber-300 bg-amber-50 rounded-lg p-3 space-y-2">
+                                    <p className="text-sm font-semibold text-amber-900">Este artículo está en más de un comprobante. ¿A cuál corresponde lo que faltó?</p>
+                                    <p className="text-xs text-amber-900">Cambia el importe: lo que es de una adquisición (sin factura) no lleva IVA.</p>
+                                    <div className="grid gap-2">
+                                        {opcionesFaltante.map((o) => (
+                                            <Opcion key={o.comprobante_id} activa={faltanteDe === o.comprobante_id} onClick={() => setFaltanteDe(o.comprobante_id)}
+                                                titulo={`${o.comprobante}${o.sin_factura ? " — sin factura" : ""} (trae ${cant(o.facturadas)} u)`}
+                                                detalle={`Lo que faltó vale ${moneda(o.total)}: ${moneda(o.neto)} neto ${o.iva > 0 ? `+ ${moneda(o.iva)} de IVA` : "sin IVA"}.`} />
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                             <div className="grid gap-2">
                                 <Opcion activa={destinoCantidad === "proveedor"} onClick={() => setDestinoCantidad("proveedor")}
                                     titulo="Reclamar al proveedor" detalle="Nota de crédito esperada por lo facturado y no recibido. No toca el stock." />
