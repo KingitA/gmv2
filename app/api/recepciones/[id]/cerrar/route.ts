@@ -51,7 +51,7 @@ class Rechazo extends Error {
 }
 
 /** Lo pedido, lo recibido y lo facturado de la línea, con la cuenta hecha. */
-async function contexto(supabase: any, item: any, ocId: string | null, tipoDto: TipoDescuento): Promise<{ dif: DiferenciaLinea; hermanas: any[]; descuentoAlPie: boolean }> {
+async function contexto(supabase: any, item: any, ocId: string | null, tipoDto: TipoDescuento, faltanteDe?: string | null): Promise<{ dif: DiferenciaLinea; hermanas: any[]; descuentoAlPie: boolean }> {
     const articuloId = item.articulo_id;
     const { data: art } = await supabase.from('articulos').select('unidades_por_bulto').eq('id', articuloId).maybeSingle();
     const upb = unidadesPorBultoDe(art?.unidades_por_bulto);
@@ -102,7 +102,7 @@ async function contexto(supabase: any, item: any, ocId: string | null, tipoDto: 
         // Lo facturado: renglones del artículo en los comprobantes CON precios de la orden
         const { data: comps, error: compErr } = await supabase
             .from('comprobantes_compra')
-            .select('id, tipo_comprobante, descuento_fuera_factura')
+            .select('id, tipo_comprobante, numero_comprobante, descuento_fuera_factura')
             .eq('orden_compra_id', ocId)
             .neq('estado', 'esperada')
             .in('tipo_comprobante', TIPOS_CON_PRECIOS);
@@ -112,7 +112,7 @@ async function contexto(supabase: any, item: any, ocId: string | null, tipoDto: 
         if (compIds.length > 0) {
             const { data: det, error: detErr } = await supabase
                 .from('comprobantes_compra_detalle')
-                .select('cantidad_facturada, precio_unitario, descuento1, descuento2, descuento3, descuento4, tipo_cantidad, recepcion_item_id, iva_porcentaje')
+                .select('comprobante_id, cantidad_facturada, precio_unitario, descuento1, descuento2, descuento3, descuento4, tipo_cantidad, recepcion_item_id, iva_porcentaje')
                 .in('comprobante_id', compIds)
                 .eq('articulo_id', articuloId);
             if (detErr) throw detErr;
@@ -124,6 +124,10 @@ async function contexto(supabase: any, item: any, ocId: string | null, tipoDto: 
                     precio_unitario: Number(l.precio_unitario || 0),
                     descuentos: [l.descuento1, l.descuento2, l.descuento3, l.descuento4].map((x: any) => Number(x) || 0),
                     iva_porcentaje: Number(l.iva_porcentaje ?? 21),
+                    // de qué comprobante es el renglón: un faltante se atribuye a uno, con su IVA
+                    comprobante_id: l.comprobante_id,
+                    comprobante: (() => { const cc: any = (comps || []).find((x: any) => x.id === l.comprobante_id); return cc ? `${cc.tipo_comprobante} ${cc.numero_comprobante}` : null; })(),
+                    sin_factura: ['Adquisicion', 'ADQ'].includes(((comps || []).find((x: any) => x.id === l.comprobante_id) as any)?.tipo_comprobante),
                 });
             }
         }
@@ -132,7 +136,7 @@ async function contexto(supabase: any, item: any, ocId: string | null, tipoDto: 
         recibido = item.cantidad_fisica_base != null ? Number(item.cantidad_fisica_base) : aUnidadesBase(item.cantidad_fisica, porItem.get(item.id)?.factorConteo ?? 1);
     }
 
-    return { dif: calcularDiferencia({ oc, factura: lineasFactura, recibido_unidades: recibido, tipo_descuento: tipoDto }), hermanas, descuentoAlPie };
+    return { dif: calcularDiferencia({ oc, factura: lineasFactura, recibido_unidades: recibido, tipo_descuento: tipoDto, faltante_de: faltanteDe }), hermanas, descuentoAlPie };
 }
 
 /** Qué se va a hacer, con los importes ya calculados. Lanza Rechazo si no corresponde. */
@@ -224,7 +228,9 @@ function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destin
     if (destino === 'empresa') return { ...base, unidades: c.unidades, neto: c.neto, iva: c.iva, total: c.total, origen_nc: null };
     return { ...base, unidades: c.unidades, neto: c.neto, iva: c.iva, total: c.total,
         origen_nc: devolver > 0 ? 'devolucion' : 'faltante',
-        descripcion: base.descripcion || `Faltante ${sku}: ${c.unidades} u facturadas y no recibidas` };
+        // a qué comprobante corresponde lo que faltó (cuando el artículo está en más de uno)
+        comprobante_asociado_id: c.comprobante_id || null,
+        descripcion: base.descripcion || `Faltante ${sku}: ${c.unidades} u facturadas y no recibidas${c.comprobante ? ` (de ${c.comprobante})` : ''}` };
 }
 
 /**
@@ -328,7 +334,7 @@ export async function POST(
                 const articuloInfo = Array.isArray(item.articulo) ? item.articulo[0] : item.articulo;
 
                 // La cuenta la hace el servidor: lo que mande el navegador como cantidad o precio no se usa
-                const { dif, hermanas, descuentoAlPie } = await contexto(supabase, item, rec.ocId, tipoDto);
+                const { dif, hermanas, descuentoAlPie } = await contexto(supabase, item, rec.ocId, tipoDto, tipo === 'cantidad' ? (decision.faltante_comprobante_id || null) : null);
                 const p: any = plan(dif, tipo, destino, decision, articuloInfo?.sku || '', descuentoAlPie);
                 if (destino === 'transporte' && rec.bultos) {
                     p.descripcion = `${p.descripcion || 'Faltante de mercadería'}. ${rec.bultos}`;
@@ -360,6 +366,16 @@ export async function POST(
                         ultimo_costo: (costo.ultimo_costo ?? 0) > 0 ? costo.ultimo_costo : null, origen: 'diferencia_precio', orden_compra_id: rec.ocId, usuario_id: auth.user.id,
                     });
                     if (!anotado) avisoHistorial = ' ATENCIÓN: el costo del artículo cambió pero no se pudo anotar en el historial de costos; avisá a sistemas.';
+                }
+
+                // Faltante de un artículo facturado en más de un comprobante: la nota de crédito esperada
+                // queda asociada al comprobante al que corresponde lo que faltó (la función la asocia al
+                // último de la orden). Solo cambia a qué comprobante apunta una nota todavía "esperada".
+                if (!r.ya_resuelta && tipo === 'cantidad' && r.nc_esperada_id && p.comprobante_asociado_id) {
+                    const { error: asocErr } = await supabase.from('comprobantes_compra')
+                        .update({ comprobante_asociado_id: p.comprobante_asociado_id })
+                        .eq('id', r.nc_esperada_id).eq('estado', 'esperada');
+                    if (asocErr) console.error('[cerrar] asociar la nota esperada al comprobante:', asocErr.message);
                 }
 
                 // Costo del artículo según lo resuelto, si la factura YA está validada: reclamada al

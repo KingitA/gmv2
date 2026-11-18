@@ -199,3 +199,48 @@ describe("descuentos del proveedor: en cascada o sobre precio de lista (decisió
     expect(calcularDiferencia(base).oc!.neto_unidad).toBe(855)
   })
 })
+
+describe("faltante con el artículo facturado en una factura Y en una adquisición (prueba 18/11, OC-000013)", () => {
+  // aluminio: 36 u en la FA (con IVA) + 36 u en la adquisición (sin factura), a $608,968 neto; llegaron 36
+  const lineas = [
+    { cantidad_facturada: 36, factor: 1, precio_unitario: 761.21, descuentos: [20], iva_porcentaje: 21, comprobante_id: "fa", comprobante: "FA 0003-00045712", sin_factura: false },
+    { cantidad_facturada: 36, factor: 1, precio_unitario: 761.21, descuentos: [20], iva_porcentaje: 0, comprobante_id: "adq", comprobante: "Adquisicion 0001-00008822", sin_factura: true },
+  ]
+  const base = { oc: { cantidad_pedida: 72, factor: 1, precio_unitario: 761.21, descuentos: [20] }, factura: lineas, recibido_unidades: 36 }
+  it("por defecto es de la adquisición: $21.922,85 SIN IVA (antes salía con $4.603,80 de IVA)", () => {
+    const d = calcularDiferencia(base)
+    expect(d.cantidad).toMatchObject({ tipo: "faltante", unidades: 36, neto: 21922.85, iva: 0, total: 21922.85, comprobante_id: "adq" })
+  })
+  it("ofrece las dos opciones, el sin factura primero, cada una con su IVA", () => {
+    const o = calcularDiferencia(base).cantidad!.opciones!
+    expect(o.map((x) => x.comprobante_id)).toEqual(["adq", "fa"])
+    expect(o[0]).toMatchObject({ sin_factura: true, iva_porcentaje: 0, facturadas: 36, total: 21922.85 })
+    expect(o[1]).toMatchObject({ sin_factura: false, iva_porcentaje: 21, neto: 21922.85, iva: 4603.8, total: 26526.65 })
+  })
+  it("si quien resuelve dice que es de la factura: con IVA", () => {
+    const d = calcularDiferencia({ ...base, faltante_de: "fa" })
+    expect(d.cantidad).toMatchObject({ neto: 21922.85, iva: 4603.8, total: 26526.65, comprobante_id: "fa" })
+  })
+  it("faltan más unidades de las que trae el elegido: el resto sale del otro, con su IVA", () => {
+    const d = calcularDiferencia({ ...base, recibido_unidades: 22 }) // faltan 50: 36 de la adquisición + 14 de la factura
+    expect(d.cantidad!.unidades).toBe(50)
+    expect(d.cantidad!.neto).toBe(30448.4) // 21.922,85 + 8.525,55
+    expect(d.cantidad!.iva).toBe(1790.37)  // solo las 14 de la factura
+  })
+  it("un solo comprobante, o dos iguales (mismo precio y mismo IVA): no hay nada que preguntar", () => {
+    expect(calcularDiferencia({ ...base, factura: [lineas[0]!], recibido_unidades: 20 }).cantidad!.opciones).toBeUndefined()
+    const dos = [lineas[0]!, { ...lineas[0]!, comprobante_id: "fa2", comprobante: "FA 2" }]
+    expect(calcularDiferencia({ ...base, factura: dos }).cantidad!.opciones).toBeUndefined()
+  })
+  it("renglones sin comprobante (cuenta vieja): como antes", () => {
+    const sin = lineas.map(({ comprobante_id: _c, ...l }) => l)
+    const d = calcularDiferencia({ ...base, factura: sin })
+    expect(d.cantidad!.opciones).toBeUndefined()
+    expect(d.cantidad!.neto).toBe(21922.85)
+  })
+  it("el sobrante no cambia", () => {
+    const d = calcularDiferencia({ ...base, recibido_unidades: 80 })
+    expect(d.cantidad).toMatchObject({ tipo: "sobrante", unidades: 8 })
+    expect(d.cantidad!.opciones).toBeUndefined()
+  })
+})

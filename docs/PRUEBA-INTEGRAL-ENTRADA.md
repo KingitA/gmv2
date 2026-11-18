@@ -363,6 +363,17 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 3. **Matching:** "el código es el SKU" corre solo en compras y después de la equivalencia aprendida del proveedor. Un código de barras que cae en un artículo de otro proveedor queda sugerido y marcado, nunca asignado solo.
 4. El mail y la recepción sin orden pasan el contexto de compra. Al corregir un renglón se usa un solo factor de bulto para lo de antes y lo nuevo, sin pisar el factor de la recepción.
 
+### Faltante de un artículo facturado en dos comprobantes (18/11, OC-000013) — rama `entrada-t1-faltante-canal`
+
+El aluminio se facturó 36 u en la factura (con IVA) y 36 u en la adquisición (sin factura), y llegaron 36. La nota de crédito esperada salió por $26.526,65 ($21.922,85 + $4.603,80 de IVA): se tomaba el IVA del primer renglón del artículo, como si lo que faltó fuera de la factura.
+
+Ahora, cuando lo facturado del artículo está en más de un comprobante y el importe cambia según cuál sea (otro IVA u otro precio):
+- la ventana pregunta **a qué comprobante corresponde lo que faltó**, con el importe y el IVA de cada opción a la vista. Por defecto, el sin factura (adquisición) primero;
+- el importe del reclamo (o del cargo al transporte) usa el precio y el IVA de ese comprobante. Si faltan más unidades de las que trae el elegido, el resto sale del otro con su IVA;
+- la nota de crédito esperada queda **asociada a ese comprobante** y la descripción lo dice.
+
+Sin migración: la cuenta está en `lib/compras/diferencias.ts` (`faltante_de`, `cantidad.opciones`); la asociación de la nota esperada la corrige el servidor después de crearla. No cambia la devolución de mercadería que entró ni la diferencia de precio, que siguen usando el promedio del artículo.
+
 ### Orden de las migraciones de la Tanda 1
 
 Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `20261116c`, `20261116p`, `20261116q`, `20261117a_remito_no_se_valida`, `20261117a_op_ganancias_bases_neto`.
