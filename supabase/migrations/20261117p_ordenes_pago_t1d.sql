@@ -401,10 +401,19 @@ END;
 $function$;
 
 -- Vencimientos de un comprobante: siguen el saldo de la cuenta corriente.
--- p_marcar_pagado = true (al confirmar): saldo 0 ⇒ pagado; si no, pendiente por el saldo.
--- p_marcar_pagado = false (al anular): actualiza lo pendiente y, si el comprobante volvió a
---   tener saldo, REABRE los vencimientos que una orden de pago había dejado pagados.
---   (Los marcados pagados a mano desde el calendario, sin orden, no se tocan.)
+-- Un comprobante puede tener VARIAS CUOTAS (acuerdo 30/60/90): todas cuelgan del mismo
+-- movimiento. El saldo que le queda al movimiento se reparte entre sus cuotas DE ATRÁS PARA
+-- ADELANTE: lo que falta pagar es siempre lo de las cuotas más lejanas, o sea que la cuota
+-- más próxima se cancela primero. Con 300 en 3 cuotas de 100:
+--     saldo 200 ⇒ cuota 1 pagada, 2 y 3 pendientes por 100
+--     saldo  50 ⇒ cuotas 1 y 2 pagadas, 3 pendiente por 50 (de 100)
+--     saldo   0 ⇒ las tres pagadas
+-- Al anular una orden el saldo sube y la misma cuenta reabre las cuotas en el orden inverso
+-- (la última pagada es la primera que vuelve a pendiente).
+-- p_marcar_pagado = true (al confirmar): la cuota que se cancela queda pagada por p_op_id.
+-- p_marcar_pagado = false (al anular p_op_id): la cuota que sigue cancelada queda a nombre de
+--   otra orden confirmada que pagó ese comprobante.
+-- Los vencimientos marcados pagados a mano desde el calendario (sin orden) no se tocan.
 CREATE OR REPLACE FUNCTION public.op_vencimientos_sincronizar_movimiento(p_movimiento_id uuid, p_op_id uuid, p_marcar_pagado boolean)
 RETURNS void
 LANGUAGE plpgsql
@@ -413,33 +422,63 @@ SET search_path TO 'public'
 AS $function$
 DECLARE
   v_cc    record;
-  v_saldo numeric;
+  v_resto numeric;
   v       record;
   v_total numeric;
+  v_pend  numeric;
+  v_op    uuid;
+  v_a_mano numeric;
 BEGIN
   SELECT id, monto, referencia_tipo, referencia_id INTO v_cc FROM cuenta_corriente_proveedores WHERE id = p_movimiento_id;
   IF NOT FOUND THEN RETURN; END IF;
-  v_saldo := cc_proveedor_saldo_movimiento(p_movimiento_id);
+  -- Lo que falta pagar de las cuotas que maneja el sistema = saldo del movimiento menos lo que
+  -- se marcó pagado A MANO desde el calendario (esa marca no baja la cuenta corriente, y si no
+  -- se descontara, un pago con orden no se vería reflejado en ninguna cuota).
+  SELECT COALESCE(sum(GREATEST(0, COALESCE(ve.monto_original, ve.monto, 0) - COALESCE(ve.monto_pagado, 0))), 0) INTO v_a_mano
+    FROM vencimientos ve
+   WHERE ve.estado = 'pagado' AND ve.orden_pago_id IS NULL
+     AND NOT COALESCE(ve.es_estimado, false)
+     AND ( (ve.referencia_tipo = 'cuenta_corriente' AND ve.referencia_id = p_movimiento_id)
+        OR (ve.referencia_tipo = 'comprobante_compra' AND v_cc.referencia_tipo = 'comprobante_compra' AND ve.referencia_id = v_cc.referencia_id) );
+  v_resto := GREATEST(0, round(cc_proveedor_saldo_movimiento(p_movimiento_id) - v_a_mano, 2));
+
+  -- A nombre de qué orden queda una cuota cancelada
+  IF p_marcar_pagado THEN
+    v_op := p_op_id;
+  ELSE
+    SELECT o.id INTO v_op
+      FROM ordenes_pago_imputaciones i
+      JOIN ordenes_pago o ON o.id = i.orden_pago_id
+     WHERE i.movimiento_cc_id = p_movimiento_id AND i.monto_imputado > 0
+       AND o.estado = 'pagada' AND o.id <> p_op_id
+     ORDER BY o.fecha_confirmacion DESC NULLS LAST, o.created_at DESC
+     LIMIT 1;
+  END IF;
 
   FOR v IN
     SELECT ve.* FROM vencimientos ve
-     WHERE (ve.estado = 'pendiente'
-            OR (NOT p_marcar_pagado AND ve.estado = 'pagado' AND ve.orden_pago_id IS NOT NULL))
+     WHERE (ve.estado = 'pendiente' OR (ve.estado = 'pagado' AND ve.orden_pago_id IS NOT NULL))
+       AND NOT COALESCE(ve.es_estimado, false)
        AND ( (ve.referencia_tipo = 'cuenta_corriente' AND ve.referencia_id = p_movimiento_id)
           OR (ve.referencia_tipo = 'comprobante_compra' AND v_cc.referencia_tipo = 'comprobante_compra' AND ve.referencia_id = v_cc.referencia_id)
           OR ve.id IN (SELECT i.vencimiento_id FROM ordenes_pago_imputaciones i
                         WHERE i.orden_pago_id = p_op_id AND i.movimiento_cc_id = p_movimiento_id AND i.vencimiento_id IS NOT NULL) )
+     ORDER BY ve.fecha_vencimiento DESC, ve.concepto DESC, ve.id DESC   -- de la cuota más lejana a la más próxima
        FOR UPDATE OF ve
   LOOP
-    v_total := COALESCE(v.monto_original, v.monto);
-    IF v_saldo <= 0.01 THEN
-      IF p_marcar_pagado AND v.estado = 'pendiente' THEN
+    v_total := COALESCE(v.monto_original, v.monto, 0);
+    v_pend  := LEAST(v_total, v_resto);       -- lo que le queda pendiente a ESTA cuota
+    v_resto := round(v_resto - v_pend, 2);
+
+    IF v_pend <= 0.01 THEN
+      -- Cuota cancelada
+      IF v.estado = 'pendiente' THEN
         UPDATE vencimientos
-           SET estado = 'pagado', orden_pago_id = p_op_id, monto = v_total, monto_pagado = v_total, updated_at = now()
+           SET estado = 'pagado', orden_pago_id = v_op, monto = v_total, monto_pagado = v_total, updated_at = now()
          WHERE id = v.id;
       END IF;
-    ELSIF v_saldo >= v_total - 0.01 THEN
-      -- Al comprobante no le queda nada pagado: pendiente por el importe completo
+    ELSIF v_pend >= v_total - 0.01 THEN
+      -- A esta cuota no le llegó ningún pago: pendiente por el importe completo
       UPDATE vencimientos
          SET estado = 'pendiente',
              orden_pago_id = CASE WHEN estado = 'pagado' THEN NULL ELSE orden_pago_id END,
@@ -447,11 +486,11 @@ BEGIN
        WHERE id = v.id
          AND (estado = 'pagado' OR monto_original IS NOT NULL OR COALESCE(monto_pagado, 0) <> 0);
     ELSE
-      -- Pago parcial del comprobante: pendiente por el saldo
+      -- Cuota pagada en parte: pendiente por lo que le falta
       UPDATE vencimientos
          SET estado = 'pendiente',
              orden_pago_id = CASE WHEN estado = 'pagado' THEN NULL ELSE orden_pago_id END,
-             monto_original = v_total, monto = v_saldo, monto_pagado = round(v_total - v_saldo, 2), updated_at = now()
+             monto_original = v_total, monto = v_pend, monto_pagado = round(v_total - v_pend, 2), updated_at = now()
        WHERE id = v.id;
     END IF;
   END LOOP;
@@ -780,6 +819,31 @@ BEGIN
                                   THEN COALESCE(NULLIF(v_item->>'cancela_vencimiento', '')::boolean, false) END
     );
   END LOOP;
+
+  -- v3 (cuotas): un comprobante con acuerdo en cuotas tiene varios vencimientos sobre el MISMO
+  -- movimiento de cuenta corriente. Elegir dos o tres cuotas (o el comprobante y una cuota) es
+  -- UNA sola imputación a ese movimiento por la suma: la cuenta corriente lleva una imputación
+  -- por (pago, comprobante), y op_vencimientos_sincronizar_movimiento reparte lo pagado entre
+  -- las cuotas, de la más próxima a la más lejana. Si quedó una sola cuota, conserva su
+  -- vencimiento (así no se puede poner la misma cuota en dos órdenes pendientes).
+  SELECT COALESCE(jsonb_agg(x.obj ORDER BY x.orden), '[]'::jsonb) INTO v_out
+  FROM (
+    SELECT min(t.ord) AS orden,
+           jsonb_build_object(
+             'movimiento_cc_id', t.e->>'movimiento_cc_id',
+             'vencimiento_id', CASE WHEN count(*) = 1 THEN min(t.e->>'vencimiento_id') END,
+             'comprobante_compra_id', min(t.e->>'comprobante_compra_id'),
+             'monto_imputado', round(sum((t.e->>'monto_imputado')::numeric), 2),
+             'retiene_ganancias', NULL,
+             'cancela_vencimiento', NULL) AS obj
+    FROM jsonb_array_elements(v_out) WITH ORDINALITY AS t(e, ord)
+    WHERE (t.e->>'monto_imputado')::numeric > 0 AND NULLIF(t.e->>'movimiento_cc_id', '') IS NOT NULL
+    GROUP BY t.e->>'movimiento_cc_id'
+    UNION ALL
+    SELECT t.ord, t.e
+    FROM jsonb_array_elements(v_out) WITH ORDINALITY AS t(e, ord)
+    WHERE NOT ((t.e->>'monto_imputado')::numeric > 0 AND NULLIF(t.e->>'movimiento_cc_id', '') IS NOT NULL)
+  ) x;
 
   RETURN v_out;
 END;

@@ -255,6 +255,26 @@ function NuevaOrdenPagoContent() {
         const mov = movDeVenc(v)
         return !!mov && !comprobantesCC.some((c: any) => c.id === mov)
     })
+    // CUOTAS: un comprobante con acuerdo en cuotas (30/60/90) tiene varios vencimientos pendientes
+    // sobre el mismo movimiento. Se listan de la más próxima a la más lejana. El pago las cancela
+    // SIEMPRE en ese orden (lo decide la base), así que la pantalla tilda "hasta la cuota N":
+    // el importe imputado al comprobante es la suma de las cuotas tildadas.
+    const cuotasDeMov = (movId: string): any[] =>
+        vencimientosProv
+            .filter((v: any) => movDeVenc(v) === movId && !esEstimadoOC(v))
+            .sort((a: any, b: any) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)) || String(a.concepto).localeCompare(String(b.concepto)))
+    /** Suma de las primeras n cuotas, sin pasarse del saldo del comprobante */
+    const sumaCuotas = (movId: string, n: number, saldo: number) =>
+        Math.min(redondear(cuotasDeMov(movId).slice(0, n).reduce((t: number, v: any) => t + (Number(v.monto) || 0), 0)), Number(saldo) || 0)
+    /** Cuántas cuotas enteras cubre un importe */
+    const cuotasCubiertas = (movId: string, monto: number) => {
+        let acum = 0, n = 0
+        for (const v of cuotasDeMov(movId)) {
+            acum += Number(v.monto) || 0
+            if (acum <= monto + 0.01) n++; else break
+        }
+        return n
+    }
     // El vencimiento pendiente de un comprobante (si es uno solo), para marcarlo pagado junto con él
     const vencDeMov = (movId: string): string | undefined => {
         const vs = vencimientosProv.filter((v: any) => movDeVenc(v) === movId && !tomadoPorVenc.has(v.id))
@@ -275,6 +295,7 @@ function NuevaOrdenPagoContent() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [provCargado, proveedorId])
 
+    const avisoOrdenCuotas = useRef(false)
     // Tilda un vencimiento que llegó por la URL (uno o varios: "Pagar" desde el calendario)
     function preseleccionarVencimiento(vencId: string) {
 
@@ -303,6 +324,32 @@ function NuevaOrdenPagoContent() {
                 return
             }
             setVencOrigen(venc)
+            const cuotas = cuotasDeMov(movId)
+            if (cuotas.length > 1) {
+                // Es UNA cuota de un comprobante en cuotas: se preselecciona solo esa cuota (su importe).
+                // Si llegan varias cuotas del mismo comprobante, se suman en un solo renglón.
+                const montoCuota = Number(venc.monto) || 0
+                const saldo = Number(comp.saldo_pendiente) || 0
+                setImputaciones(prev => {
+                    const ya = prev.find(i => i.movimiento_cc_id === movId)
+                    if (ya) {
+                        return prev.map(i => i.movimiento_cc_id === movId
+                            ? { ...i, vencimiento_id: undefined, monto_imputado: Math.min(redondear(Number(i.monto_imputado) + montoCuota), saldo) }
+                            : i)
+                    }
+                    return [...prev, {
+                        movimiento_cc_id: movId,
+                        vencimiento_id: vencId,
+                        monto_imputado: Math.min(montoCuota, saldo),
+                        descripcion: comp.numero || venc.concepto,
+                    }]
+                })
+                if (cuotas[0].id !== vencId && !avisoOrdenCuotas.current) {
+                    avisoOrdenCuotas.current = true
+                    toast.info("Las cuotas de un comprobante se cancelan en orden: el pago baja primero la cuota más próxima.", { duration: 10000 })
+                }
+                return
+            }
             setImputaciones(prev => prev.some(i => i.movimiento_cc_id === movId) ? prev : [...prev, {
                 movimiento_cc_id: movId,
                 vencimiento_id: vencId,
@@ -516,6 +563,30 @@ function NuevaOrdenPagoContent() {
     }
     function responderRetencion(vencId: string, retiene: boolean) {
         setImputaciones(prev => prev.map(i => i.vencimiento_id === vencId && !i.movimiento_cc_id ? { ...i, retiene_ganancias: retiene } : i))
+    }
+
+    // Tildar la cuota N = pagar hasta la cuota N; destildarla = pagar hasta la anterior
+    function toggleCuota(comp: any, indice: number) {
+        if (tomadoPorMov.has(comp.id) && !imputaciones.some(i => i.movimiento_cc_id === comp.id)) {
+            toast.warning(`Ese comprobante ya está en la orden de pago pendiente ${tomadoPorMov.get(comp.id)}. Confirmala o eliminala primero.`)
+            return
+        }
+        const cuotas = cuotasDeMov(comp.id)
+        const imp = imputaciones.find(i => i.movimiento_cc_id === comp.id)
+        const cubiertas = imp ? cuotasCubiertas(comp.id, Number(imp.monto_imputado)) : 0
+        const hasta = indice < cubiertas ? indice : indice + 1          // ya tildada → se destilda ella y las siguientes
+        const monto = hasta >= cuotas.length ? Number(comp.saldo_pendiente) : sumaCuotas(comp.id, hasta, comp.saldo_pendiente)
+        if (hasta === 0 || monto <= 0) {
+            setImputaciones(imputaciones.filter(i => i.movimiento_cc_id !== comp.id))
+            return
+        }
+        const fila: Imputacion = {
+            movimiento_cc_id: comp.id,
+            vencimiento_id: hasta === 1 ? cuotas[0].id : undefined,
+            monto_imputado: monto,
+            descripcion: comp.numero || comp.tipo,
+        }
+        setImputaciones(imp ? imputaciones.map(i => i.movimiento_cc_id === comp.id ? fila : i) : [...imputaciones, fila])
     }
 
     // E-55: pago parcial de un comprobante — se puede bajar el importe (nunca pasarse del saldo)
@@ -1020,9 +1091,13 @@ function NuevaOrdenPagoContent() {
                                         {comprobantesCC.map((c: any) => {
                                             const sel = !!imputaciones.find(i => i.movimiento_cc_id === c.id)
                                             const tomado = sel ? undefined : tomadoPorMov.get(c.id)
+                                            const cuotas = cuotasDeMov(c.id)
+                                            const enCuotas = cuotas.length > 1
+                                            const cubiertas = sel ? cuotasCubiertas(c.id, Number(imputaciones.find(i => i.movimiento_cc_id === c.id)!.monto_imputado)) : 0
                                             return (
-                                                <div key={c.id}
-                                                    className={`flex items-center gap-3 p-2 rounded-lg border ${tomado ? "opacity-60 cursor-not-allowed" : "hover:bg-muted/50 cursor-pointer"} ${sel ? "border-indigo-300 bg-indigo-50/40" : ""}`}
+                                              <div key={c.id} className={`rounded-lg border ${sel ? "border-indigo-300 bg-indigo-50/40" : ""}`}>
+                                                <div
+                                                    className={`flex items-center gap-3 p-2 rounded-lg ${tomado ? "opacity-60 cursor-not-allowed" : "hover:bg-muted/50 cursor-pointer"}`}
                                                     onClick={() => toggleImputacionCC(c)}>
                                                     <Checkbox checked={sel} disabled={!!tomado} />
                                                     <div className="flex-1">
@@ -1038,7 +1113,8 @@ function NuevaOrdenPagoContent() {
                                                         {tomado && (
                                                             <span className="text-xs font-semibold text-amber-700 ml-2">ya está en la OP pendiente {tomado}</span>
                                                         )}
-                                                        {(() => {
+                                                        {enCuotas && <span className="text-xs font-semibold text-indigo-700 ml-2">en {cuotas.length} cuotas</span>}
+                                                        {!enCuotas && (() => {
                                                             const vd = vencDeComprobante(c.id)
                                                             return vd ? <p className="mt-0.5 text-xs text-muted-foreground">Vencimiento del {fmtFecha(vd.fecha_vencimiento)} · {detalleVenc(vd)}</p> : null
                                                         })()}
@@ -1059,6 +1135,30 @@ function NuevaOrdenPagoContent() {
                                                         <span className="text-sm font-medium">{formatCurrency(c.saldo_pendiente)}</span>
                                                     )}
                                                 </div>
+                                                {enCuotas && (
+                                                    <div className="border-t px-2 pb-2 pt-1.5 pl-9 space-y-1">
+                                                        {cuotas.map((v: any, idx: number) => {
+                                                            const tildada = idx < cubiertas
+                                                            return (
+                                                                <div key={v.id}
+                                                                    className={`flex items-center gap-2 rounded px-1.5 py-1 text-sm ${tomado ? "opacity-60 cursor-not-allowed" : "cursor-pointer hover:bg-muted/50"}`}
+                                                                    onClick={() => { if (!tomado) toggleCuota(c, idx) }}>
+                                                                    <Checkbox checked={tildada} disabled={!!tomado} />
+                                                                    <span className="font-medium">Cuota {idx + 1}/{cuotas.length}</span>
+                                                                    <span className="text-xs text-muted-foreground">vence {fmtFecha(v.fecha_vencimiento)}</span>
+                                                                    {v.monto_original != null && Number(v.monto_pagado) > 0 && (
+                                                                        <span className="text-xs text-amber-700">falta de {formatCurrency(v.monto_original)} (ya se pagó {formatCurrency(v.monto_pagado)})</span>
+                                                                    )}
+                                                                    <span className="ml-auto tabular-nums">{formatCurrency(v.monto)}</span>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                        <p className="text-[11px] text-muted-foreground">
+                                                            Las cuotas se cancelan en orden, de la más próxima a la más lejana. Tildar el comprobante = todas las cuotas.
+                                                        </p>
+                                                    </div>
+                                                )}
+                                              </div>
                                             )
                                         })}
                                     </div>
