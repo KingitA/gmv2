@@ -13,6 +13,7 @@ import { evaluarFinalizarOC, esComprobanteConPrecios, type ControlFinalizarOC } 
 import { armarVerificacion, type DatosVerificacion, type Verificacion } from "./verificacion"
 import { controlSuma } from "./control-suma"
 import { tipoDescuentoDe } from "./diferencias"
+import { totalesOC } from "./oc-totales"
 
 export interface DocumentoRecepcion {
   id: string
@@ -44,7 +45,17 @@ export interface VerificacionOC {
     conformidad_transporte: string | null; bultos_declarados: number | null; bultos_recibidos: number | null; conformidad_observaciones: string | null
   }>
   documentos: DocumentoRecepcion[]
-  control: ControlFinalizarOC & { /** Artículos de la orden que no llegaron completos (E-92) */ pendientes: Array<{ articulo_id: string; sku: string; unidades: number }> }
+  control: ControlFinalizarOC & {
+    /** Artículos de la orden que no llegaron completos (E-92) */
+    pendientes: Array<{ articulo_id: string; sku: string; unidades: number }>
+    /**
+     * Parte de la orden (con factura / sin factura) que NO tiene ningún comprobante validado de su
+     * canal: con factura = FA / FB / FC, sin factura = adquisición. Finalizar así cancela lo que
+     * esa parte tenía estimado (deuda provisoria y vencimiento estimado): hay que confirmarlo
+     * expresamente (`aceptar_canal_sin_comprobante`).
+     */
+    canales_sin_comprobante: Array<{ canal: "blanco" | "negro"; nombre: string; total_orden: number; provision: number; vencimiento_estimado: number }>
+  }
   /** Comprobantes sin validar cuyos renglones no suman lo que dice el comprobante (E-46): no se pueden validar así */
   descuadres: Array<{ comprobante_id: string; comprobante: string; faltas: string[] }>
   /**
@@ -74,12 +85,15 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
   }
 
   // ── Etapa 1: todo lo que cuelga directo de la orden, a la vez ──
-  const [rOrden, rItems, rComps, rRecs, rTardios] = await Promise.all([
-    medir("orden", supabase.from("ordenes_compra").select("*, proveedor:proveedores(nombre, tipo_descuento)").eq("id", ordenId).maybeSingle()),
-    medir("detalle_oc", supabase.from("ordenes_compra_detalle").select("articulo_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4").eq("orden_compra_id", ordenId)),
+  const [rOrden, rItems, rComps, rRecs, rTardios, rProvision, rEstimados] = await Promise.all([
+    medir("orden", supabase.from("ordenes_compra").select("*, proveedor:proveedores(*)").eq("id", ordenId).maybeSingle()),
+    medir("detalle_oc", supabase.from("ordenes_compra_detalle").select("*").eq("orden_compra_id", ordenId)),
     medir("comprobantes", supabase.from("comprobantes_compra").select("id, tipo_comprobante, numero_comprobante, fecha_comprobante, estado, total_factura_declarado, total_neto, total_iva, percepcion_iva_monto, percepcion_iibb_monto, retencion_ganancias_monto, impuestos_internos, otros_impuestos, descuento_fuera_factura, origen_nc, foto_url, created_at").eq("orden_compra_id", ordenId).order("created_at", { ascending: true })),
     medir("recepciones", supabase.from("recepciones").select("id, estado, numero_tanda, fecha_fin, transporte_id, conformidad_transporte, bultos_declarados, bultos_recibidos, conformidad_observaciones, created_at").eq("orden_compra_id", ordenId).neq("estado", "cancelada").order("created_at", { ascending: true })),
     medir("conteos_tardios", supabase.from("mobile_alertas_integridad").select("id, capturado_at, detalle").eq("tipo", "recepcion_tardia").eq("resuelta", false).eq("detalle->>orden_compra_id", ordenId).order("created_at", { ascending: true })),
+    // Lo ESTIMADO que la orden todavía tiene (si la consulta falla no se cae la pantalla: se muestra en 0)
+    medir("provision", supabase.from("cuenta_corriente_proveedores").select("*").eq("referencia_tipo", "orden_compra").eq("referencia_id", ordenId).eq("tipo_movimiento", "orden_compra")),
+    medir("estimados", supabase.from("vencimientos").select("*").eq("referencia_tipo", "orden_compra").eq("referencia_id", ordenId).eq("es_estimado", true).in("estado", ["pendiente", "vencido"])),
   ])
   const ordenFila: any = ok(rOrden as any, "orden")
   if (!ordenFila) return null
@@ -115,7 +129,7 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
   const articulosP: Promise<any[]> = medir("articulos", (async (): Promise<any[]> => {
       const todos: any[] = []
       for (let i = 0; i < idsArt.length; i += 200) {
-        const r = await supabase.from("articulos").select("id, sku, descripcion, unidades_por_bulto").in("id", idsArt.slice(i, i + 200))
+        const r = await supabase.from("articulos").select("id, sku, descripcion, unidades_por_bulto, iva_compras").in("id", idsArt.slice(i, i + 200))
         todos.push(...(ok<any[]>(r, "artículos") || []))
       }
       return todos
@@ -172,6 +186,25 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
     .filter((f) => f.banderas.includes("pendiente"))
     .map((f) => ({ articulo_id: f.articulo_id, sku: f.sku, unidades: f.dif.pendiente_oc }))
 
+  // Orden con parte con factura y parte sin factura: cada parte necesita SU comprobante validado.
+  // Lo que valía cada parte: lo guardado en la orden (oc_guardar); si no, la misma cuenta.
+  const artDe = new Map<string, any>(articulos.map((a: any) => [a.id, a]))
+  const calculado = totalesOC(
+    ocItems.map((i: any) => ({ ...i, unidades_por_bulto: artDe.get(i.articulo_id)?.unidades_por_bulto ?? null, iva_compras: i.iva_compras || artDe.get(i.articulo_id)?.iva_compras || null })),
+    { tipo_descuento: tipoDto, mixto_pct_factura: ordenFila.mixto_pct_factura ?? provOrden?.mixto_pct_factura ?? null, percepcion_iva: provOrden?.percepcion_iva, percepcion_iibb: provOrden?.percepcion_iibb },
+  )
+  const totalCanal = { blanco: Number(ordenFila.total_blanco ?? calculado.total_blanco) || 0, negro: Number(ordenFila.total_negro ?? calculado.total_negro) || 0 }
+  const validadoDelCanal = (canal: "blanco" | "negro") => comprobantes.some((c) => validados.has(c.id) && (c.tipo_comprobante === "Adquisicion") === (canal === "negro"))
+  const estimados: any[] = ((rEstimados as any)?.data as any[]) || []
+  const sumaCanal = (filas: any[], canal: string) => Math.round(filas.filter((x) => (x.canal || "blanco") === canal).reduce((s, x) => s + (Number(x.monto) || 0), 0) * 100) / 100
+  const provisiones: any[] = ((rProvision as any)?.data as any[]) || []
+  const canales_sin_comprobante = (["blanco", "negro"] as const)
+    .filter((canal) => totalCanal[canal] > 0 && !validadoDelCanal(canal))
+    .map((canal) => ({
+      canal, nombre: canal === "negro" ? "sin factura" : "con factura", total_orden: totalCanal[canal],
+      provision: sumaCanal(provisiones, canal), vencimiento_estimado: sumaCanal(estimados, canal),
+    }))
+
   // E-46: comprobantes todavía sin validar que no cierran
   const descuadres = comprobantes
     .filter((c) => !["validado", "cerrado", "esperada"].includes(c.estado))
@@ -193,7 +226,7 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
       conformidad_observaciones: r.conformidad_observaciones ?? null,
     })),
     documentos,
-    control: { ...control, pendientes },
+    control: { ...control, pendientes, canales_sin_comprobante },
     descuadres,
     // si la consulta falla (tabla sin permiso, etc.) no se cae la pantalla: queda en el registro
     conteos_tardios: (((rTardios as any)?.data as any[]) || []).filter((a) => a.detalle?.articulo_id).map((a) => ({

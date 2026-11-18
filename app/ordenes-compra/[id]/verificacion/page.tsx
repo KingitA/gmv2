@@ -95,12 +95,18 @@ export default function VerificacionOCPage() {
         if (porValidar.length > 0) lineas.push(`Se validan ${porValidar.length} comprobante(s): ${porValidar.map((c) => `${c.tipo_comprobante} ${c.numero_comprobante}`).join(", ")}. Cada uno registra su deuda en la cuenta corriente del proveedor y su vencimiento.`)
         if (sinResolver > 0) lineas.push(`⚠ Hay ${sinResolver} artículo(s) con diferencias de precio o cantidad SIN resolver.`)
         if (pendientes.length > 0) lineas.push(`⚠ Falta recibir mercadería de ${pendientes.length} artículo(s): ${pendientes.slice(0, 6).map((p) => `${p.sku} (${cant(p.unidades)} u)`).join(", ")}${pendientes.length > 6 ? "…" : ""}. Al finalizar, la orden se cierra SIN el resto: el depósito ya no la va a poder recibir.`)
+        // Si el comprobante de esa parte está cargado y se valida en este mismo paso, no falta nada
+        const sinComprobante = (control.canales_sin_comprobante || []).filter((x) =>
+            !porValidar.some((c) => ["FA", "FB", "FC", "Adquisicion"].includes(c.tipo_comprobante) && (c.tipo_comprobante === "Adquisicion") === (x.canal === "negro")))
+        for (const x of sinComprobante) {
+            lineas.push(`⚠ La parte ${x.nombre} de la orden (${moneda(x.total_orden)}) no tiene ningún comprobante validado. Si finalizás así, se CANCELAN ${moneda(x.provision)} de deuda provisoria y ${moneda(x.vencimiento_estimado)} de vencimiento estimado: esa plata deja de figurar como deuda. Si el comprobante va a llegar, cargalo y validalo antes de finalizar.`)
+        }
         lineas.push("Una orden finalizada queda en solo lectura.")
         const ok = await confirmar({
             titulo: pendientes.length > 0 ? `¿Cerrar ${datos.orden.numero_orden} sin el resto de la mercadería?` : `¿Finalizar ${datos.orden.numero_orden}?`,
             detalle: lineas.join("\n\n"),
             confirmar: pendientes.length > 0 ? "Cerrar sin el resto" : "Finalizar",
-            peligro: pendientes.length > 0 || sinResolver > 0,
+            peligro: pendientes.length > 0 || sinResolver > 0 || sinComprobante.length > 0,
         })
         if (!ok) return
 
@@ -120,7 +126,7 @@ export default function VerificacionOCPage() {
             const res = await fetch(`/api/ordenes-compra/${ordenId}/finalizar`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ aceptar_faltantes: pendientes.length > 0 }),
+                body: JSON.stringify({ aceptar_faltantes: pendientes.length > 0, aceptar_canal_sin_comprobante: sinComprobante.length > 0 }),
             })
             const fin = await res.json().catch(() => ({}))
             for (const a of (fin.avisos || []) as string[]) avisos.push(a)

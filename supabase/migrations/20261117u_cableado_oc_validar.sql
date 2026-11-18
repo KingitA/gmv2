@@ -255,7 +255,8 @@ BEGIN
     END IF;
 
     -- ── 5. Provisión de la OC (solo la tocan los comprobantes de DEUDA) ──
-    IF NOT v_credito AND v_oc IS NOT NULL THEN
+    -- Una nota de débito NO es la factura de la orden: no baja la provisión.
+    IF NOT v_credito AND NOT v_debito_nota AND v_oc IS NOT NULL THEN
       SELECT count(*) INTO v_otros
         FROM comprobantes_compra
        WHERE orden_compra_id = v_oc
@@ -362,11 +363,15 @@ BEGIN
     END IF;
 
     -- ── 7. El vencimiento ESTIMADO de la orden deja lugar al real ──
-    -- Solo si este comprobante quedó con vencimiento real (nuevo o uno que ya existía). Baja los
-    -- estimados de ESE canal por el importe del comprobante, del más próximo al más lejano, y borra
-    -- los que llegan a cero: si la orden se factura en partes, queda estimado solo lo que falta.
-    -- No toca ningún vencimiento que no sea un estimado de esta orden.
-    IF v_oc IS NOT NULL AND v_venc IS NOT NULL THEN
+    -- SOLO cuando el vencimiento real nació en ESTA validación (v_venc_nuevo): es el único lugar
+    -- donde nace el vencimiento de una factura de una orden, así que el estimado se descuenta una
+    -- sola vez. Si el vencimiento ya existía (uno cargado a mano, o de una factura que entró por
+    -- mail antes de este cambio), el estimado no se toca: se quita al finalizar la orden.
+    -- Una nota de débito tampoco lo descuenta: no es la factura de la mercadería pedida.
+    -- Baja los estimados de ESE canal por el importe del comprobante, del más próximo al más
+    -- lejano, y borra los que llegan a cero: si la orden se factura en partes, queda estimado solo
+    -- lo que falta. No toca ningún vencimiento que no sea un estimado de esta orden.
+    IF v_oc IS NOT NULL AND v_venc IS NOT NULL AND v_venc_nuevo AND NOT v_debito_nota THEN
       v_estimados := public.oc_vencimiento_estimado_reemplazar(v_oc, v_canal, v_total);
     END IF;
   END IF;

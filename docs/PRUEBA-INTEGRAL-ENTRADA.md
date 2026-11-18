@@ -325,6 +325,12 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 | Kardex "en camino" | Antes de la primera recepción lo escribe `oc_kardex_pendiente_sincronizar` (al crear, editar o cancelar la orden). Desde la primera recepción lo ajusta `sincronizarKardexEnCamino` (cada entrega, cada validación, al finalizar). No se pisan: una orden con recepción no se puede editar ni cancelar. |
 | Estados | `ESTADOS_A_RECIBIR` = pendiente, enviada, recibida_parcial. "confirmada" y "en_camino" no existen. |
 
+### Arreglos de la revisión final del cableado (18/11, rama `entrada-t1-cableado2`)
+
+1. **El vencimiento real de una factura de una orden nace en UN solo lugar: al validar.** El procesador de mails (`lib/ai/email-invoice-processor.ts`) ya no crea el vencimiento ni descuenta el estimado cuando la factura es de una orden: deja el comprobante y la deuda en la cuenta corriente, y el pago sigue a la vista por el vencimiento estimado hasta que se valida. Al validar salen las cuotas del acuerdo y se descuenta el estimado, una sola vez. Como segunda barrera, el paso 7 de `20261117u` (y el servidor sin la u) solo descuenta el estimado si el vencimiento nació en esa misma validación. Las facturas por mail SIN orden siguen como antes (no hay estimado que descontar).
+2. **Finalizar una orden con parte con factura y parte sin factura:** cada parte necesita su comprobante validado (factura / adquisición). Si falta, `/finalizar` contesta 409 `falta_comprobante_del_canal` con los importes; la pantalla lo avisa antes y solo cierra con confirmación expresa (`aceptar_canal_sin_comprobante`), diciendo cuánta deuda provisoria y cuánto vencimiento estimado se cancelan. La pantalla muestra los avisos que devuelve `/finalizar`.
+3. **Una nota de débito con orden de compra** no baja la provisión ni el estimado de la orden.
+
 ### Orden de las migraciones de la Tanda 1
 
 Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `20261116c`, `20261116p`, `20261116q`, `20261117a_remito_no_se_valida`, `20261117a_op_ganancias_bases_neto`.
