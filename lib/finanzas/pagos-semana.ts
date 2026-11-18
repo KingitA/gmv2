@@ -196,7 +196,10 @@ export function armarPagosSemana(e: EntradaSemana) {
         for (const canal of ["negro", "blanco"]) {
           const objetivo = r2(items.filter((i) => i.canal === canal).reduce((s, i) => s + i.neto, 0))
           if (objetivo <= 0) continue
-          const win = ventanaCheques(e.hoy, plazoDe(canal), sumarDiasISO)
+          // Igual que la Nueva OP: la fecha sale del vencimiento de lo que se paga (el más
+          // próximo de este proveedor y canal), nunca antes de hoy, más el plazo del acuerdo
+          const vence = items.filter((i) => i.canal === canal).map((i) => i.fecha_vencimiento).sort()[0]
+          const win = ventanaCheques(vence && vence > e.hoy ? vence : e.hoy, plazoDe(canal), sumarDiasISO)
           const candidatos = libres.filter((c) => !usados.has(c.id)
             && (canal === "negro" ? colorDeCheque(c) === "NEGRO" : colorDeCheque(c) !== "NEGRO")
             && c.fecha_vencimiento >= win.desde && c.fecha_vencimiento <= win.hasta)
