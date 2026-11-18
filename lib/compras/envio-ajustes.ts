@@ -46,6 +46,13 @@ export async function leerAjustesEnvio(supabase: any): Promise<LecturaAjustesEnv
   }
 }
 
-/** Cómo conectar la cuenta de envío cuando no está conectada (texto para la pantalla). */
-export const comoConectarCuenta = (cuenta: string) =>
-  `La cuenta ${cuenta} no está conectada al sistema. Para conectarla: entrá a Gmail con ${cuenta} en este navegador, abrí el asistente del sistema, tocá "Conectar Gmail", elegí esa cuenta y aceptá todos los permisos que pide Google. Después volvé a abrir esta ventana.`
+/** Dónde se conecta la cuenta de envío (el único lugar de la pantalla que tiene el botón). */
+export const DONDE_CONECTAR_GMAIL = "Órdenes de compra → Envío de órdenes → Conectar Gmail"
+
+/** Por qué no se puede enviar desde la cuenta y cómo arreglarlo (texto para la pantalla). */
+export function comoConectarCuenta(cuenta: string, estado: "vencida" | "sin_permiso" | "no_conectada" | "conectada" = "no_conectada"): string {
+  const que = estado === "vencida" ? `La conexión con la cuenta ${cuenta} venció o fue revocada.`
+    : estado === "sin_permiso" ? `La cuenta ${cuenta} está conectada pero sin permiso para enviar mails.`
+    : `La cuenta ${cuenta} no está conectada al sistema.`
+  return `${que} Para ${estado === "no_conectada" ? "conectarla" : "volver a conectarla"}: entrá a Gmail con ${cuenta} en este navegador y tocá "Conectar Gmail" (${DONDE_CONECTAR_GMAIL}). Google te va a pedir elegir la cuenta y aceptar los permisos.`
+}

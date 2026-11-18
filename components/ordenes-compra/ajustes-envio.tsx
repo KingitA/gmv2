@@ -12,6 +12,20 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { fechaHora } from "@/lib/formato"
+import { ConectarGmail, TEXTO_ESTADO_CUENTA, URL_CONECTAR_GMAIL, type EstadoCuentaGmail } from "./conectar-gmail"
+
+/** Resultado de volver de Google (parámetros ?gmail_connected= / ?gmail_error= de la pantalla) */
+export interface VueltaDeGoogle { conectada?: string | null; error?: string | null }
+
+const ERROR_GOOGLE: Record<string, string> = {
+  access_denied: "No se aceptaron los permisos en Google (o se canceló). Sin aceptarlos no se puede enviar.",
+  no_code: "Google no devolvió la autorización. Probá de nuevo.",
+  no_user: "Se perdió la sesión del sistema durante la conexión. Entrá de nuevo y repetí.",
+  solo_admin: "Solo un administrador puede conectar una cuenta de Gmail. Pedile a un administrador que la conecte.",
+  sin_sesion: "Se cerró la sesión del sistema mientras estabas en Google. Entrá de nuevo y volvé a tocar “Conectar Gmail”.",
+  otro_usuario: "La conexión la pidió otro usuario del sistema en este navegador. Volvé a tocar “Conectar Gmail”.",
+  token_exchange_failed: "Google aceptó, pero el sistema no pudo guardar la conexión. Probá de nuevo; si sigue, avisá a sistemas.",
+}
 
 interface Ajustes {
   ok: boolean
@@ -19,6 +33,7 @@ interface Ajustes {
   admin: boolean
   cuenta_envio?: string
   cuenta_conectada?: boolean
+  cuenta_estado?: EstadoCuentaGmail
   como_conectar?: string | null
   modo_prueba?: boolean
   mail_prueba?: string
@@ -27,7 +42,7 @@ interface Ajustes {
   frase_confirmacion?: string
 }
 
-export function AjustesEnvioOrdenes({ onCambio }: { onCambio?: () => void }) {
+export function AjustesEnvioOrdenes({ onCambio, vuelta }: { onCambio?: () => void; vuelta?: VueltaDeGoogle | null }) {
   const [a, setA] = useState<Ajustes | null>(null)
   const [abierto, setAbierto] = useState(false)
   const [cuenta, setCuenta] = useState("")
@@ -44,6 +59,9 @@ export function AjustesEnvioOrdenes({ onCambio }: { onCambio?: () => void }) {
     } catch { /* sin datos: no se muestra el botón */ }
   }, [])
   useEffect(() => { cargar() }, [cargar])
+  // Al volver de Google se abre solo, con el resultado arriba
+  const volvio = !!vuelta && (!!vuelta.conectada || !!vuelta.error)
+  useEffect(() => { if (volvio) setAbierto(true) }, [volvio])
 
   const guardar = async (cambios: Record<string, unknown>, mensaje: string) => {
     if (guardando) return
@@ -60,6 +78,8 @@ export function AjustesEnvioOrdenes({ onCambio }: { onCambio?: () => void }) {
   }
 
   if (!a) return null
+  const estado: EstadoCuentaGmail = a.cuenta_estado ?? (a.cuenta_conectada ? "conectada" : "no_conectada")
+  const otraCuenta = !!vuelta?.conectada && !!a.cuenta_envio && vuelta.conectada.trim().toLowerCase() !== a.cuenta_envio
   const prueba = !a.ok || a.modo_prueba !== false
   const fraseOk = !!a.frase_confirmacion && frase.trim() === a.frase_confirmacion
 
@@ -94,10 +114,34 @@ export function AjustesEnvioOrdenes({ onCambio }: { onCambio?: () => void }) {
                 </span>
               </div>
 
+              {vuelta?.error && (
+                <div className="flex gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span><b>No se conectó la cuenta.</b> {ERROR_GOOGLE[vuelta.error] ?? `Google respondió: ${vuelta.error}.`}</span>
+                </div>
+              )}
+              {vuelta?.conectada && !otraCuenta && (
+                <div className="flex gap-2 rounded-md border border-green-300 bg-green-50 p-3 text-sm text-green-900">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" /> <span><b>Cuenta conectada: {vuelta.conectada}</b></span>
+                </div>
+              )}
+              {otraCuenta && (
+                <div className="flex gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span><b>Se conectó {vuelta!.conectada}, pero las órdenes salen de {a.cuenta_envio}.</b> En Google quedó elegida otra cuenta: entrá a Gmail con {a.cuenta_envio} y volvé a tocar “Conectar Gmail” eligiendo esa.</span>
+                </div>
+              )}
+
               <div className="text-sm">
                 <div><span className="text-muted-foreground">Salen desde:</span> <b>{a.cuenta_envio}</b>{" "}
-                  {a.cuenta_conectada ? <span className="text-green-700">(conectada)</span> : <span className="font-semibold text-red-600">(NO conectada)</span>}</div>
-                {!a.cuenta_conectada && a.como_conectar && <div className="mt-1 rounded-md border border-red-200 bg-red-50 p-2 text-red-800">{a.como_conectar}</div>}
+                  {estado === "conectada" ? <span className="text-green-700">({TEXTO_ESTADO_CUENTA[estado]})</span> : <span className="font-semibold text-red-600">({TEXTO_ESTADO_CUENTA[estado]})</span>}</div>
+                {estado !== "conectada" && <ConectarGmail cuenta={a.cuenta_envio || ""} estado={estado} className="mt-2" />}
+                {estado === "conectada" && a.admin && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    ¿Hay que conectarla de nuevo? Entrá antes a Gmail con {a.cuenta_envio} en este navegador y{" "}
+                    <a href={URL_CONECTAR_GMAIL} className="font-medium text-primary underline">volvé a conectar Gmail</a>.
+                  </div>
+                )}
                 {a.actualizado_at && <div className="mt-1 text-xs text-muted-foreground">Último cambio: {fechaHora(a.actualizado_at)}{a.actualizado_por ? ` por ${a.actualizado_por}` : ""}.</div>}
               </div>
 

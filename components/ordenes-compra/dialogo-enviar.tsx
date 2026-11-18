@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { CargaProgreso } from "@/components/ui/carga-progreso"
 import { fechaHora, moneda } from "@/lib/formato"
+import { ConectarGmail, type EstadoCuentaGmail } from "./conectar-gmail"
 
 interface Previa {
   orden: { id: string; numero_orden: string; estado: string; envios: number; enviada_at: string | null; enviada_a: string | null; prueba_enviada_at?: string | null; prueba_enviada_a?: string | null; cambio_sin_enviar: boolean; total: number; renglones: number }
@@ -23,7 +24,7 @@ interface Previa {
   puede_enviar: boolean
   motivo: string | null
   envio:
-    | { ok: true; cuenta: string; cuenta_conectada: boolean; como_conectar: string | null; modo_prueba: boolean; mail_prueba: string | null }
+    | { ok: true; cuenta: string; cuenta_conectada: boolean; cuenta_estado?: EstadoCuentaGmail; como_conectar: string | null; modo_prueba: boolean; mail_prueba: string | null }
     | { ok: false; bloqueo: string }
   para: string[]
   para_origen: "ordenes_compra" | "vendedor" | "oficina" | "general" | null
@@ -45,11 +46,13 @@ export function DialogoEnviarOrden({ ordenId, onCerrar, onEnviada }: { ordenId: 
   const [conExcel, setConExcel] = useState(false)
   const [guardarMail, setGuardarMail] = useState(false)
   const [enviando, setEnviando] = useState(false)
+  // Google rechazó el envío por la conexión de la cuenta: se muestra el botón para volver a conectarla
+  const [reconectar, setReconectar] = useState<{ mensaje: string; estado?: EstadoCuentaGmail } | null>(null)
 
   useEffect(() => {
     if (!ordenId) return
     let vivo = true
-    setPrevia(null); setError(null); setEnviando(false)
+    setPrevia(null); setError(null); setEnviando(false); setReconectar(null)
     fetch(`/api/ordenes-compra/${ordenId}/enviar`, { cache: "no-store" })
       .then(async (r) => ({ ok: r.ok, data: await r.json().catch(() => ({})) }))
       .then(({ ok, data }) => {
@@ -85,7 +88,11 @@ export function DialogoEnviarOrden({ ordenId, onCerrar, onEnviada }: { ordenId: 
         body: JSON.stringify({ para, cc, asunto, cuerpo, adjuntar_excel: conExcel, guardar_mail_en_ficha: guardarMail }),
       })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) { toast.error(data.error || `No se envió (error ${res.status}).`, { duration: 12000 }); return }
+      if (!res.ok) {
+        if (data.reconectar) setReconectar({ mensaje: data.error || "Hay que volver a conectar la cuenta de envío.", estado: data.cuenta_estado })
+        toast.error(data.error || `No se envió (error ${res.status}).`, { duration: 12000 })
+        return
+      }
       toast.success(data.modo_prueba
         ? `PRUEBA: la orden ${data.numero_orden} se mandó a ${(data.para || []).join(", ")}, no al proveedor.`
         : `Orden ${data.numero_orden} enviada a ${(data.para || []).join(", ")}`)
@@ -140,8 +147,19 @@ export function DialogoEnviarOrden({ ordenId, onCerrar, onEnviada }: { ordenId: 
               </div>
             )}
             {envio.ok && !envio.cuenta_conectada && (
-              <div className="flex gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
-                <AlertTriangle className="h-4 w-4 shrink-0" /> <span><b>No se puede enviar.</b> {envio.como_conectar}</span>
+              <div className="space-y-2">
+                <div className="flex gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> <span><b>No se puede enviar.</b> {envio.como_conectar}</span>
+                </div>
+                <ConectarGmail cuenta={envio.cuenta} estado={envio.cuenta_estado} />
+              </div>
+            )}
+            {envio.ok && envio.cuenta_conectada && reconectar && (
+              <div className="space-y-2">
+                <div className="flex gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> <span><b>El mail no se envió.</b> {reconectar.mensaje}</span>
+                </div>
+                <ConectarGmail cuenta={envio.cuenta} estado={reconectar.estado ?? "vencida"} />
               </div>
             )}
             {!previa.puede_enviar && (

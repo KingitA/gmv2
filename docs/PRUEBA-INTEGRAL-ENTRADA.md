@@ -410,6 +410,15 @@ Juan va a renovar todos los datos de los proveedores con el Excel. Fichas de pro
 - **Vista previa**: resumen arriba (con cambios / sin cambios / con errores / códigos que no existen) y, proveedor por proveedor, cada campo que cambia "antes → después". Lo vacío no pisa nada; una fila con error no se importa.
 - Lo que el Excel no puede expresar y por eso sale vacío (no se toca): proveedor "no inscripto" en Ganancias, régimen de servicios, y un CUIT que hoy está guardado con error.
 
+### Conectar la cuenta de Gmail de compras (18/11, rama `entrada-t1-gmail`)
+
+Probando en producción, el envío pedía reconectar la cuenta "desde el asistente", pero ese botón no estaba en ninguna pantalla (`components/ai/ai-chat-widget.tsx` no se monta). Ahora:
+
+- **Órdenes de compra → Envío de órdenes**: muestra cómo está la cuenta de envío preguntándole a Google (conectada / la conexión venció o fue revocada / conectada sin permiso para enviar / no conectada) y el botón **Conectar Gmail**, con la aclaración de entrar antes a Gmail con esa cuenta en el navegador.
+- El mismo botón aparece en la ventana de envío cuando la cuenta no sirve, y también si Google rechaza el envío por la conexión.
+- Después de Google se vuelve a `/ordenes-compra` (antes a `/`, donde nada mostraba el resultado): el panel se abre solo con "Cuenta conectada: …" o el motivo del error, y avisa si se conectó una cuenta distinta de la de envío.
+- Los mensajes de error dicen dónde está el botón (`lib/ai/gmail.ts`, `lib/compras/envio-ajustes.ts`).
+
 ### Los estimados de una orden se cancelan, no se borran (18/11, rama `entrada-t1-estimados`)
 
 **Qué pasó en producción:** validar FA 0003-00045711 de la OC-000012 daba "vencimientos_historial es un historial: no se modifica ni se borra". Cada alta y cada cambio de un vencimiento escribe en `vencimientos_historial` (auditoría de `20261105`), que es inmutable y cuelga del vencimiento con `ON DELETE CASCADE`: **ningún vencimiento se puede borrar**. Las funciones de la orden de compra borraban los estimados, así que fallaban siempre validar, finalizar, cancelar y editar una orden.

@@ -33,7 +33,8 @@ function getOAuth2Client() {
 
 /**
  * Genera la URL de autorización de Google OAuth
- * @param userId - ID del usuario del sistema que está conectando Gmail
+ * @param userId - lo que viaja en "state" y vuelve en el callback: quién conecta y a dónde
+ *                 volver (lib/ai/gmail-vuelta.ts → armarEstado). Antes era solo el id del usuario.
  */
 export function getAuthUrl(userId: string): string {
     const oauth2Client = getOAuth2Client()
@@ -115,16 +116,27 @@ export async function exchangeCodeForTokens(code: string, userId: string): Promi
  * Usa .limit(1) en vez de .single() para manejar duplicados
  * (tokens huérfanos sin user_id que coexisten con tokens vinculados).
  */
+/**
+ * De varias filas de google_tokens del MISMO mail (la conectó más de un usuario, o quedó una
+ * fila vieja), la que vale es la que se tocó por última vez: una conexión nueva o un acceso
+ * renovado actualizan updated_at; una conexión vencida o revocada deja de actualizarse.
+ * Desempate: la que tiene usuario, y después el acceso que vence más tarde.
+ */
+function masRecientePrimero(a: any, b: any): number {
+    const t = (x: any) => { const n = Date.parse(String(x?.updated_at ?? '')); return Number.isFinite(n) ? n : 0 }
+    return (t(b) - t(a))
+        || (Number(!!b?.user_id) - Number(!!a?.user_id))
+        || (Number(b?.expiry_date ?? 0) - Number(a?.expiry_date ?? 0))
+}
+
 async function getGmailClient(email: string): Promise<gmail_v1.Gmail> {
     const db = getSupabaseAdmin()
     const { data: rows, error } = await db
         .from('google_tokens')
         .select('*')
         .eq('email', email)
-        .order('user_id', { ascending: false, nullsFirst: false })
-        .limit(1)
 
-    const tokenData = rows?.[0]
+    const tokenData = [...(rows ?? [])].sort(masRecientePrimero)[0]
 
     if (error || !tokenData) {
         throw new Error(`No hay tokens de Google para ${email}. Conectá tu cuenta primero.`)
@@ -613,6 +625,67 @@ export async function cuentaGmailConectada(email: string): Promise<string | null
     return (data as any[]).map((t) => String(t.email)).find((e) => e.toLowerCase() === buscada) ?? null
 }
 
+/** Permisos de Google con los que se puede enviar (users.messages.send acepta cualquiera). */
+const PERMISOS_PARA_ENVIAR = [
+    'https://mail.google.com/',
+    'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/gmail.compose',
+    'https://www.googleapis.com/auth/gmail.send',
+]
+
+export type EstadoCuentaGmail = 'conectada' | 'vencida' | 'sin_permiso' | 'no_conectada'
+
+/**
+ * Cómo está DE VERDAD una cuenta de Gmail para enviar, preguntándole a Google (no alcanza con
+ * que haya una fila guardada):
+ *   no_conectada → nunca se conectó
+ *   vencida      → la conexión venció o fue revocada (Google no renueva el acceso)
+ *   sin_permiso  → está conectada pero sin ninguno de los permisos que dejan enviar
+ *   conectada    → lista para enviar
+ * Si Google no contesta la consulta de permisos (red), se da por conectada: el envío mismo
+ * avisa si falta algo. No envía nada.
+ */
+export async function estadoCuentaGmail(email: string): Promise<{ estado: EstadoCuentaGmail; cuenta: string | null }> {
+    const buscada = String(email || '').trim().toLowerCase()
+    if (!buscada) return { estado: 'no_conectada', cuenta: null }
+    const db = getSupabaseAdmin()
+    const { data, error } = await db
+        .from('google_tokens')
+        .select('*')
+    if (error || !data) return { estado: 'no_conectada', cuenta: null }
+    // Si el mismo mail está en más de una fila, se mira la más reciente: es la misma que usa
+    // el envío (getGmailClient), así el estado que se muestra es el de la conexión que se usa.
+    const fila = (data as any[]).filter((t) => String(t.email).toLowerCase() === buscada).sort(masRecientePrimero)[0]
+    if (!fila) return { estado: 'no_conectada', cuenta: null }
+    const cuenta = String(fila.email)
+
+    const oauth2Client = getOAuth2Client()
+    oauth2Client.setCredentials({
+        access_token: fila.access_token,
+        refresh_token: fila.refresh_token,
+        token_type: fila.token_type,
+        expiry_date: fila.expiry_date,
+    })
+    let token: string | null | undefined
+    try {
+        // renueva el acceso si venció; si Google no lo renueva, la conexión no sirve más
+        token = (await oauth2Client.getAccessToken()).token
+    } catch {
+        return { estado: 'vencida', cuenta }
+    }
+    if (!token) return { estado: 'vencida', cuenta }
+    try {
+        const info = await oauth2Client.getTokenInfo(token)
+        const permisos: string[] = info.scopes || []
+        if (!permisos.some((p) => PERMISOS_PARA_ENVIAR.includes(p))) return { estado: 'sin_permiso', cuenta }
+    } catch (err: any) {
+        const detalle = String(err?.response?.data?.error_description || err?.response?.data?.error || err?.message || '')
+        if (/invalid_token|invalid_grant|expired|revoked/i.test(detalle)) return { estado: 'vencida', cuenta }
+        // sin respuesta de Google: no se bloquea por esto
+    }
+    return { estado: 'conectada', cuenta }
+}
+
 /**
  * Envía un mensaje ya armado (MIME en base64url, ver lib/compras/mail-orden.ts) desde una
  * cuenta de Gmail conectada. Usa users.messages.send, que según la documentación de Google
@@ -638,10 +711,10 @@ export async function enviarMailGmail(email: string, raw: string, threadId?: str
             return enviarMailGmail(email, raw, null)
         }
         if (codigo === 403 && /insufficient|scope|permission/i.test(detalle)) {
-            throw new Error(`La cuenta ${email} está conectada sin permiso para enviar mails. Hay que volver a conectarla desde el asistente (botón "Conectar Gmail"), aceptando todos los permisos que pide Google.`)
+            throw new Error(`La cuenta ${email} está conectada sin permiso para enviar mails. Hay que volver a conectarla aceptando todos los permisos que pide Google: Órdenes de compra → Envío de órdenes → Conectar Gmail.`)
         }
         if (codigo === 401 || /invalid_grant|invalid credentials/i.test(detalle)) {
-            throw new Error(`La conexión con la cuenta ${email} venció o fue revocada. Hay que volver a conectarla desde el asistente (botón "Conectar Gmail").`)
+            throw new Error(`La conexión con la cuenta ${email} venció o fue revocada. Hay que volver a conectarla: Órdenes de compra → Envío de órdenes → Conectar Gmail.`)
         }
         throw new Error(`Gmail no pudo enviar el mail: ${detalle || 'error desconocido'}`)
     }
