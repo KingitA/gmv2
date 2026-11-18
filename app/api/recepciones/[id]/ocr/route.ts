@@ -369,6 +369,10 @@ export async function DELETE(
         } else if (storagePath) {
             await supabase.storage.from("comprobantes").remove([storagePath]);
         }
+        // Documento de varias hojas (app Depósito, E-38): se borran todas, no solo la primera
+        const otrasHojas: string[] = (Array.isArray(doc.hojas) ? doc.hojas : [])
+            .map((h: any) => h?.path).filter((p: any) => typeof p === 'string' && p && p !== storagePath);
+        if (otrasHojas.length > 0) await supabase.storage.from("comprobantes").remove(otrasHojas);
 
         if (doc.comprobante_id) {
             const { error: revertError } = await revertirComprobanteOCR(supabase, doc.comprobante_id);
