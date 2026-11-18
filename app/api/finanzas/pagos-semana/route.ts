@@ -66,7 +66,8 @@ export async function GET(request: Request) {
     let avisoRetencion: string | null = null
     if (retRes.error) {
       console.error("[pagos-semana] proyección de retenciones:", retRes.error.message)
-      avisoRetencion = "No se pudo calcular la retención de Ganancias estimada: los importes se muestran SIN restar la retención."
+      // Pantalla solo de admin: el detalle ayuda a encontrar qué dato lo corta
+      avisoRetencion = `No se pudo calcular la retención de Ganancias estimada: los importes se muestran SIN restar la retención. (Detalle para sistemas: ${String(retRes.error.message).slice(0, 200)})`
     } else {
       for (const r of (retRes.data as any[]) ?? []) {
         const ret = Number(r.retencion_proyectada)
