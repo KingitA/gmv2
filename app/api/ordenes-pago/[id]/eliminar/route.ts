@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requirePermiso, tienePermiso } from '@/lib/auth'
+import { bloqueoPorBanco } from '@/lib/bancos/operaciones'
 
 /**
  * POST /api/ordenes-pago/[id]/eliminar — elimina la OP como si nunca hubiera
@@ -34,6 +35,11 @@ export async function POST(
                 { status: 403 },
             )
         }
+
+        // Tanda 2-A: con un pago mandado a Credicoop que no esté rechazado, la orden no se elimina
+        // (el banco puede pagar igual, o ya pagó). La base lo corta también (guardia de 20261119d).
+        const esperaBanco = await bloqueoPorBanco(supabase, opId, 'eliminar')
+        if (esperaBanco) return NextResponse.json({ error: esperaBanco, error_code: 'ESPERA_BANCO' }, { status: 409 })
 
         const { data, error } = await supabase.rpc('op_eliminar', {
             p_op_id: opId,

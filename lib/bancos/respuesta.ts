@@ -8,7 +8,7 @@ import { ErrorOperacion } from "./operaciones"
  * en duda (INCIERTO / DUPLICADO): en ese caso hay que actualizar el estado, no reenviar.
  */
 export function respuestaErrorBanco(e: unknown, donde: string) {
-  if (e instanceof ErrorOperacion) return NextResponse.json({ error: e.message }, { status: e.status })
+  if (e instanceof ErrorOperacion) return NextResponse.json({ error: e.message, ...e.extra }, { status: e.status })
   if (e instanceof ErrorCredicoop) {
     const status = e.clase === "SIN_CONEXION" ? 503 : e.clase === "LIMITE" ? 429 : e.clase === "DATOS" ? 422 : e.clase === "INCIERTO" || e.clase === "DUPLICADO" ? 409 : 502
     return NextResponse.json({ error: e.message, clase: e.clase, codigo: e.codigo ?? null, operacion: (e as any).operacion ?? null }, { status })

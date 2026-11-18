@@ -181,6 +181,17 @@ export function crearSimuladorCredicoop(opciones: OpcionesSimulador = {}) {
     firmar(idOrigen: string) { const op = operaciones.get(idOrigen); if (op) op.estado = FINAL_OK[op.tipo]; return !!op },
     rechazar(idOrigen: string, motivo = "Fondos insuficientes") { const op = operaciones.get(idOrigen); if (op) { op.estado = "Rechazada"; op.motivo = motivo } return !!op },
     cortarProximoEnvio() { cortar = true },
+    /**
+     * Carga una operación que el sistema ya tiene guardada, con el estado que le corresponde. Así la
+     * consulta contesta lo mismo aunque el servidor se haya reiniciado (en la nube, la memoria no dura).
+     */
+    sembrar(o: { tipo: Tipo; idOrigen: string; pedido: any; hecha: boolean; idOperacion?: string | number | null }) {
+      const previa = operaciones.get(o.idOrigen)
+      operaciones.set(o.idOrigen, {
+        tipo: o.tipo, idOperacion: Number(o.idOperacion) || previa?.idOperacion || ++siguiente, idOrigen: o.idOrigen, pedido: o.pedido ?? {},
+        estado: previa?.estado === "Rechazada" ? "Rechazada" : o.hecha ? FINAL_OK[o.tipo] : "Enviada a la firma", motivo: previa?.motivo, consultas: previa?.consultas ?? 0, creada: previa?.creada ?? ahora().toISOString(),
+      })
+    },
     operacion: (idOrigen: string) => operaciones.get(idOrigen) ?? null,
     get pedidos() { return pedidos },
     get cantidad() { return operaciones.size },

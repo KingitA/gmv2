@@ -14,19 +14,19 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { AlertTriangle, ArrowLeft, CheckCircle2, Landmark, RefreshCw, Send } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Ban, CheckCircle2, Landmark, RefreshCw, Send } from "lucide-react"
 import { toast } from "sonner"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
-import { EstadoOperacionBanco, type OperacionBanco } from "@/components/bancos/credicoop-orden-pago"
+import { CartelSimuladorReal, EstadoOperacionBanco, RechazarOperacionBanco, SIN_TERMINAR, type OperacionBanco } from "@/components/bancos/credicoop-orden-pago"
 import { fecha, fechaHora, formatCuit, hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
 import { cn } from "@/lib/utils"
 
 interface Operacion extends OperacionBanco {
   tipo: string; tipo_nombre: string; beneficiario: string | null; monto: number; fecha_pago: string | null
-  numero_vep: string | null; orden_pago: string | null; cuenta: string | null; creado_at: string
+  numero_vep: string | null; orden_pago: string | null; orden_pago_numero: string | null; cuenta: string | null; creado_at: string
 }
 interface Estado {
-  conexion: { conectado: boolean; ambiente: string | null; falta: string[] }
+  conexion: { conectado: boolean; ambiente: string | null; falta: string[]; simulador_en_produccion?: boolean }
   falta_migracion: boolean
   cuentas: Array<{ id: string; nombre: string; cbu: string | null; tiene_cbu: boolean }>
   operaciones: Operacion[]
@@ -38,6 +38,7 @@ interface Vep {
 interface Movs {
   cuenta: string; desde: string; hasta: string; traidos: number; saldo: number | null; parcial: boolean
   importado: { importados?: number; duplicados?: number } | null
+  de_prueba?: boolean
   coincidencias: Array<{ operacion_id: string; tipo: string; beneficiario: string | null; monto: number; fecha_movimiento: string; descripcion: string }>
 }
 
@@ -63,6 +64,7 @@ export default function BancosPage() {
   const [veps, setVeps] = useState<Vep[] | null>(null)
   const [vepError, setVepError] = useState<string | null>(null)
   const [vepAPagar, setVepAPagar] = useState<Vep | null>(null)
+  const [aRechazar, setARechazar] = useState<{ id: string; descripcion: string } | null>(null)
 
   const [desde, setDesde] = useState(sumarDiasISO(hoy, -7))
   const [hasta, setHasta] = useState(hoy)
@@ -95,7 +97,7 @@ export default function BancosPage() {
   async function pagarVep(v: Vep) {
     setVepAPagar(null); setTrabajando(`vep-${v.numeroVep}`)
     try {
-      await pedir("/api/bancos/credicoop/veps", { numero_vep: v.numeroVep, cuenta_bancaria_id: cuentaId })
+      await pedir("/api/bancos/credicoop/veps", { numero_vep: v.numeroVep, cuenta_bancaria_id: cuentaId, monto_visto: v.monto })
       toast.success("El pago del VEP quedó en Credicoop esperando la firma con token.", { duration: 10000 })
     } catch (e: any) { toast.error(e?.message || "No se pudo mandar el VEP", { duration: 15000 }) } finally { setTrabajando(null); await Promise.all([traerVeps(), cargar()]) }
   }
@@ -134,6 +136,8 @@ export default function BancosPage() {
       {cargando && !estado && <CargaProgreso compacto mensajes={MENSAJES.finanzas} className="mx-auto max-w-sm py-10" />}
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>}
 
+      {estado?.conexion.simulador_en_produccion && <CartelSimuladorReal />}
+
       {estado && (
         <>
           <Tarjeta titulo="Conexión">
@@ -158,7 +162,7 @@ export default function BancosPage() {
             <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
               <span className="font-semibold text-neutro-600">Cuenta de Credicoop:</span>
               {estado.cuentas.length === 0 ? (
-                <span className="text-ambar-800">No hay ninguna cuenta bancaria de Credicoop cargada en Finanzas → Cuentas.</span>
+                <span className="text-ambar-800">Ninguna cuenta bancaria está habilitada para operar con Credicoop por el sistema. La habilita sistemas, una sola vez (que el banco se llame “Credicoop” no alcanza).</span>
               ) : (
                 <Select value={cuentaId || undefined} onValueChange={setCuentaId}>
                   <SelectTrigger className="w-72"><SelectValue placeholder="Elegí la cuenta" /></SelectTrigger>
@@ -219,6 +223,11 @@ export default function BancosPage() {
                   {movs.importado ? <> · nuevos en la conciliación: <b>{movs.importado.importados ?? 0}</b>{movs.importado.duplicados ? ` (${movs.importado.duplicados} ya estaban)` : ""}</> : null}
                   {movs.saldo != null ? <> · saldo que informa el banco: <b>{moneda(movs.saldo)}</b></> : null}
                 </p>
+                {movs.de_prueba && (
+                  <div className="rounded-md border border-neutro-300 bg-neutro-100 p-3 text-neutro-800">
+                    <b>Movimientos de prueba</b> (simulador o banco de prueba): se muestran, pero NO se cargaron en la conciliación porque no son movimientos de la cuenta.
+                  </div>
+                )}
                 {movs.parcial && (
                   <div className="flex gap-2 rounded-md border border-ambar-200 bg-ambar-50 p-3 font-semibold text-ambar-800">
                     <AlertTriangle className="h-4 w-4 shrink-0" /> El banco cortó la lista por la cantidad de movimientos: FALTAN movimientos. Pedí un rango de fechas más corto.
@@ -254,14 +263,20 @@ export default function BancosPage() {
                     {estado.operaciones.map((o) => (
                       <tr key={o.id} className="border-t border-neutro-100 align-top">
                         <td className="px-2 py-1.5 whitespace-nowrap">{fechaHora(o.creado_at)}</td>
-                        <td className="px-2 py-1.5">{o.tipo_nombre}<div className="text-xs text-neutro-500">{o.orden_pago ? `Orden de pago ${o.orden_pago}` : o.numero_vep ? `VEP ${o.numero_vep}` : ""}{o.cuenta ? ` · ${o.cuenta}` : ""}</div></td>
+                        <td className="px-2 py-1.5">{o.tipo_nombre}<div className="text-xs text-neutro-500">{o.orden_pago ?? o.orden_pago_numero ? `Orden de pago ${o.orden_pago ?? `${o.orden_pago_numero} (eliminada)`}` : o.numero_vep ? `VEP ${o.numero_vep}` : ""}{o.cuenta ? ` · ${o.cuenta}` : ""}</div></td>
                         <td className="px-2 py-1.5">{o.beneficiario ?? "—"}</td>
                         <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{moneda(o.monto)}</td>
-                        <td className="px-2 py-1.5"><EstadoOperacionBanco op={o} />{o.motivo && <div className="mt-0.5 max-w-xs text-xs text-neutro-600">{o.motivo}</div>}</td>
+                        <td className="px-2 py-1.5"><EstadoOperacionBanco op={o} />{o.estado_banco && SIN_TERMINAR.includes(o.estado) && <div className="mt-0.5 text-xs text-neutro-500">El banco dice: “{o.estado_banco}”</div>}{o.motivo && <div className="mt-0.5 max-w-xs text-xs text-neutro-600">{o.motivo}</div>}</td>
                         <td className="px-2 py-1.5 text-right">
                           {!["rechazada", "acreditada", "firmada"].includes(o.estado) && (
                             <Button size="sm" variant="outline" disabled={!conectado || trabajando === `op-${o.id}`} onClick={() => accionOperacion(o.id, "actualizar")}>
                               <RefreshCw className={cn("h-4 w-4", trabajando === `op-${o.id}` && "animate-spin")} /> Actualizar estado
+                            </Button>
+                          )}
+                          {SIN_TERMINAR.includes(o.estado) && (
+                            <Button size="sm" variant="ghost" className="mt-1 text-red-700 hover:bg-red-50 hover:text-red-800" disabled={trabajando === `op-${o.id}`}
+                              onClick={() => setARechazar({ id: o.id, descripcion: `${o.tipo_nombre} a ${o.beneficiario ?? "—"} por ${moneda(o.monto)}` })}>
+                              <Ban className="h-4 w-4" /> Marcar como rechazada
                             </Button>
                           )}
                         </td>
@@ -301,6 +316,8 @@ export default function BancosPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RechazarOperacionBanco operacion={aRechazar} onCerrar={() => setARechazar(null)} onHecho={cargar} />
     </div>
   )
 }

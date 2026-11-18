@@ -9,8 +9,9 @@ const vista = (o: any) => o && ({ id: o.id, estado: o.estado, estado_nombre: EST
 
 /**
  * GET  /api/bancos/credicoop/veps — VEP de ARCA pendientes de pago que informa Credicoop.
- * POST { numero_vep, cuenta_bancaria_id, vencimiento_id? } — manda a firmar el pago de ESE VEP.
- *      El importe y los CUIT se toman del banco. Solo admin.
+ * POST { numero_vep, cuenta_bancaria_id, monto_visto, vencimiento_id? } — manda a firmar el pago de ESE VEP.
+ *      El importe y los CUIT se toman del banco. Si el importe ya no es el que se vio en la pantalla
+ *      (monto_visto), no se manda y se devuelve el nuevo (monto_actual). Solo admin.
  */
 export async function GET() {
   // Mandar plata al banco: mismo permiso que confirmar una orden de pago (solo admin)
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
     const numeroVep = String(body?.numero_vep ?? "").replace(/[^0-9]/g, "")
     const cuenta = typeof body?.cuenta_bancaria_id === "string" ? body.cuenta_bancaria_id : ""
     if (!numeroVep || !cuenta) return NextResponse.json({ error: "Falta el número de VEP o la cuenta de la que sale el pago." }, { status: 400 })
-    const o = await enviarPagoVep(createAdminClient(), { numeroVep, cuentaBancariaId: cuenta, vencimientoId: typeof body?.vencimiento_id === "string" ? body.vencimiento_id : null }, auth.user.id)
+    const o = await enviarPagoVep(createAdminClient(), { numeroVep, cuentaBancariaId: cuenta, montoVisto: typeof body?.monto_visto === "number" && Number.isFinite(body.monto_visto) ? body.monto_visto : null, vencimientoId: typeof body?.vencimiento_id === "string" ? body.vencimiento_id : null }, auth.user.id)
     return NextResponse.json({ ok: true, operacion: vista(o) })
   } catch (e) { return respuestaErrorBanco(e, "pagar VEP") }
 }

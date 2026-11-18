@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 import { generateKeyPairSync, createVerify } from "node:crypto"
 import {
   armarEmisionEcheq, armarGestionEcheq, armarJwt, armarListaEcheqs, armarListaVeps, armarPagoVep, armarTransferencia,
-  crearClienteCredicoop, crearSimuladorCredicoop, ErrorCredicoop, errorDelBanco, estadoDesdeBanco, fechaBanco, fechaDesdeBanco,
+  crearClienteCredicoop, crearSimuladorCredicoop, endosoSegunEcheq, ErrorCredicoop, errorDelBanco, estadoBancoConocido, estadoDesdeBanco, estadoEcheq, fechaBanco, fechaDesdeBanco,
   leerMovimientos, leerOperacion, montoBanco, montoDesdeBanco, RUTAS, SCOPES, textoBanco, type ConfigCredicoop,
 } from "@gm/credicoop"
 
@@ -283,6 +283,12 @@ describe("Credicoop: estados y errores", () => {
     expect(estadoDesdeBanco("Enviada a Banco Destino")).toBe("firmada")
     expect(estadoDesdeBanco("Aceptada")).toBe("firmada")
     expect(estadoDesdeBanco("Rechazada")).toBe("rechazada")
+    // Lo que termina mal gana aunque el texto hable de la firma
+    for (const t of ["Rechazada por el firmante", "Firma rechazada", "Anulada", "Vencida sin firma", "Cancelada por el firmante", "Caducada"]) expect(estadoDesdeBanco(t)).toBe("rechazada")
+    // Un texto que el sistema no conoce no es ni hecho ni rechazado, y se sabe que es desconocido
+    expect(estadoBancoConocido("Un texto nuevo del banco")).toBe(false)
+    expect(estadoBancoConocido("")).toBe(false)
+    for (const t of ["Enviada a la firma", "Aceptada", "Retenida", "Rechazada por el firmante", "Aceptada parcialmente"]) expect(estadoBancoConocido(t)).toBe(true)
     for (const t of ["En procesamiento", "Retenida", "Enviada a proceso", "Confeccionada", "Aceptada parcialmente", "Un texto nuevo del banco", ""]) expect(estadoDesdeBanco(t)).toBe("en_proceso")
   })
   it("una respuesta sin estado no se toma como hecha: queda en duda", () => {
@@ -301,5 +307,29 @@ describe("Credicoop: estados y errores", () => {
     const desconocido = errorDelBanco(400, { codigo: 9999, descripcion: "Algo raro del banco" })
     expect(desconocido.clase).toBe("RECHAZO")
     expect(desconocido.message).toContain("Algo raro del banco")
+  })
+})
+
+describe("Credicoop — revisión: endoso de e-cheq y simulador sin memoria", () => {
+  it("el endoso solo se da por hecho con un estado concreto del e-cheq", () => {
+    expect(estadoEcheq(" activo pendiente ")).toBe("ACTIVO-PENDIENTE")
+    expect(estadoEcheq("Activo_Pendiente")).toBe("ACTIVO-PENDIENTE")
+    expect(endosoSegunEcheq("ACTIVO-PENDIENTE")).toBe("hecho")
+    expect(endosoSegunEcheq("activo - pendiente".replace(/ /g, ""))).toBe("hecho")
+    expect(endosoSegunEcheq("activo")).toBe("pendiente")
+    // No encontrado, vacío o un estado que no se esperaba: NUNCA hecho
+    for (const t of [undefined, null, "", "RECHAZADO", "ANULADO", "CUSTODIA", "DEPOSITADO", "UN-ESTADO-NUEVO"]) expect(endosoSegunEcheq(t)).toBe("desconocido")
+  })
+
+  it("un simulador recién creado contesta por una operación sembrada (no depende de la memoria del servidor)", async () => {
+    const pedido = armarTransferencia(EMPRESA, { idOrigen: "sembrada-1", cbuCuentaDebito: CBU_NUESTRO, hoy: HOY, beneficiarios: [PROVEEDOR] })
+    const consultar = async (hecha: boolean) => {
+      const sim = crearSimuladorCredicoop()   // otro servidor: no vio el envío
+      const cliente = crearClienteCredicoop(CONFIG, { fetch: sim.fetch, firmar: () => "f" })
+      sim.sembrar({ tipo: "transferencia", idOrigen: "sembrada-1", pedido, hecha })
+      return (await cliente.consultarTransferencia({ idOrigen: "sembrada-1" })).resultado.estado
+    }
+    expect(await consultar(false)).toBe("enviada_a_firma")
+    expect(await consultar(true)).toBe("firmada")
   })
 })

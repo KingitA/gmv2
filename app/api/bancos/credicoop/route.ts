@@ -30,7 +30,8 @@ export async function GET() {
         estado_nombre: ESTADO_NOMBRE[o.estado as keyof typeof ESTADO_NOMBRE] ?? o.estado, estado_banco: o.estado_banco, motivo: o.motivo,
         ambiente: o.ambiente, beneficiario: o.beneficiario_nombre, monto: Number(o.monto), fecha_pago: o.fecha_pago, numero_vep: o.numero_vep,
         id_operacion_banco: o.id_operacion_banco, orden_pago: o.ordenes_pago?.numero_op ?? null, orden_pago_id: o.orden_pago_id,
-        cuenta: o.cuentas_bancarias?.nombre ?? null, creado_at: o.creado_at, firmado_at: o.firmado_at,
+        orden_pago_numero: o.orden_pago_numero ?? null, rechazo_manual: !!o.rechazo_manual_at,
+        cuenta: o.cuentas_bancarias?.nombre ?? null, creado_at: o.creado_at, enviado_at: o.enviado_at ?? null, firmado_at: o.firmado_at,
       })),
     })
   } catch (e) { return respuestaErrorBanco(e, "estado") }

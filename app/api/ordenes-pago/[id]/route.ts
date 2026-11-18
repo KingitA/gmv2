@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requirePermiso } from '@/lib/auth'
 import { anotarResponsableOP } from '@/lib/ordenes-pago/responsable'
+import { bloqueoPorBanco } from '@/lib/bancos/operaciones'
 
 // GET /api/ordenes-pago/[id]
 export async function GET(
@@ -60,13 +61,23 @@ export async function DELETE(
         )
     }
 
+    // Tanda 2-A: con un pago mandado a Credicoop (esperando la firma, en duda o ya hecho) la orden
+    // no se cancela: el banco puede pagar igual. La base lo corta también (guardia de 20261119d).
+    try {
+        const esperaBanco = await bloqueoPorBanco(supabase, id, 'cancelar')
+        if (esperaBanco) return NextResponse.json({ error: esperaBanco, error_code: 'ESPERA_BANCO' }, { status: 409 })
+    } catch (e: any) {
+        return NextResponse.json({ error: e.message }, { status: 500 })
+    }
+
     const { error } = await supabase
         .from('ordenes_pago')
         .update({ estado: 'cancelada', updated_at: new Date().toISOString() })
         .eq('id', id)
 
     if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
+        // P0001 = una guardia de la base, con el mensaje ya escrito para la persona
+        return NextResponse.json({ error: error.message }, { status: error.code === 'P0001' ? 409 : 500 })
     }
 
     await anotarResponsableOP(supabase, id, 'anulado', auth.user?.id)

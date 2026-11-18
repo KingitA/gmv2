@@ -29,7 +29,12 @@ export interface EstadoConexion {
   /** Qué falta, en palabras, si no está conectado */
   falta: string[]
   numeroAdherente: number | null
+  /** El simulador está encendido en el sistema REAL: nada de lo que se mande llega al banco */
+  simulador_en_produccion: boolean
 }
+
+/** ¿Este servidor es el sistema real (el que usa la oficina)? */
+const esSistemaReal = () => process.env.VERCEL_ENV === "production" || (!process.env.VERCEL_ENV && process.env.NODE_ENV === "production")
 
 /** La clave puede venir en PEM con "\n" escritos, o entera en base64. */
 function leerClave(v: string | undefined): string {
@@ -53,7 +58,7 @@ const esSimulador = () => process.env.CREDICOOP_SIMULADOR === "1"
 
 export function estadoConexion(): EstadoConexion {
   const adherente = Number(process.env.CREDICOOP_NUMERO_ADHERENTE) || null
-  if (esSimulador()) return { conectado: true, ambiente: "simulador", falta: [], numeroAdherente: adherente ?? 1234 }
+  if (esSimulador()) return { conectado: true, ambiente: "simulador", falta: [], numeroAdherente: adherente ?? 1234, simulador_en_produccion: esSistemaReal() }
   const falta: string[] = []
   if (!process.env.CREDICOOP_CLIENT_ID?.trim()) falta.push("el identificador de la conexión (CREDICOOP_CLIENT_ID)")
   if (!leerClave(process.env.CREDICOOP_CLAVE_PRIVADA)) falta.push("la clave privada (CREDICOOP_CLAVE_PRIVADA)")
@@ -62,9 +67,19 @@ export function estadoConexion(): EstadoConexion {
   return {
     conectado: falta.length === 0,
     ambiente: falta.length ? null : /homo/i.test(url) ? "homologacion" : "produccion",
-    falta, numeroAdherente: adherente,
+    falta, numeroAdherente: adherente, simulador_en_produccion: false,
   }
 }
+
+/** El simulador en uso (solo en modo simulador): para cargarle las operaciones guardadas antes de consultar. */
+export function simuladorEnUso(): SimuladorCredicoop | null {
+  if (!esSimulador()) return null
+  simulador ??= crearSimuladorCredicoop()
+  return simulador
+}
+
+/** Segundos después del envío en que el simulador da por firmada una operación (depende de la hora, no de la memoria). */
+export const SIMULADOR_FIRMA_A_LOS_SEGUNDOS = 60
 
 // Un simulador y un cliente por proceso: el token (30 minutos) y el contador de pedidos por
 // minuto se comparten entre los pedidos que atiende el mismo servidor.
@@ -86,7 +101,7 @@ export function clienteCredicoop(): { cliente: ClienteCredicoop; ambiente: Ambie
     throw new ErrorCredicoop(`Credicoop no está conectado: falta cargar ${estado.falta.join(", ")}. No se mandó nada al banco.`, "SIN_CONEXION")
   }
   if (estado.ambiente === "simulador") {
-    simulador ??= crearSimuladorCredicoop({ firmaSolaAlConsultar: 2 })
+    simulador ??= crearSimuladorCredicoop()
     const config: ConfigCredicoop = { baseUrl: URL_HOMOLOGACION, realm: REALM_HOMOLOGACION, clientId: "simulador", clavePrivada: "simulador", numeroAdherente: estado.numeroAdherente ?? 1234, firmantes: leerFirmantes(process.env.CREDICOOP_FIRMANTES) }
     const clave = "simulador"
     if (cliente?.clave !== clave) cliente = { clave, cliente: crearClienteCredicoop(config, { fetch: simulador.fetch, firmar: () => "firma-simulada" }) }

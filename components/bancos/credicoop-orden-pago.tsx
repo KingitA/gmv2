@@ -13,7 +13,9 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { AlertTriangle, CheckCircle2, Clock, Landmark, RefreshCw, Send, XCircle } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
+import { AlertTriangle, Ban, CheckCircle2, Clock, Landmark, RefreshCw, Send, XCircle } from "lucide-react"
 import { toast } from "sonner"
 import { fecha, fechaHora, formatCuit, moneda } from "@/lib/formato"
 import { cn } from "@/lib/utils"
@@ -24,14 +26,84 @@ export interface OperacionBanco {
 }
 interface Pago {
   detalle_id: string; tipo: string; tipo_nombre: string; banco: string; cuenta: string | null; cuenta_cbu: string | null
+  cuentas_a_elegir: Array<{ id: string; nombre: string }>
   beneficiario: string; beneficiario_cuit: string | null; beneficiario_cbu: string | null; monto: number; fecha: string
   cheque: { numero: string | null; banco: string | null } | null
   problemas: string[]; operacion: OperacionBanco | null
 }
 interface Datos {
   orden: { id: string; numero_op: string; estado: string; proveedor: string }
-  conexion: { conectado: boolean; ambiente: string | null; falta: string[] }
+  conexion: { conectado: boolean; ambiente: string | null; falta: string[]; simulador_en_produccion?: boolean }
   pagos: Pago[]
+}
+
+/** Estados en los que una operación todavía no terminó (se puede actualizar o, verificando en el banco, marcar como rechazada). */
+export const SIN_TERMINAR = ["preparada", "enviada_a_firma", "en_proceso", "error"]
+
+/** Cartel rojo: el simulador quedó encendido en el sistema real. Nada de lo que se mande llega al banco. */
+export function CartelSimuladorReal() {
+  return (
+    <div role="alert" className="flex gap-3 rounded-xl border-2 border-red-700 bg-red-600 p-4 text-white">
+      <AlertTriangle className="h-7 w-7 shrink-0" />
+      <div>
+        <div className="text-lg font-extrabold uppercase tracking-wide">Simulador encendido en el sistema real</div>
+        <p className="text-sm font-semibold">
+          NADA de lo que se mande desde acá llega a Credicoop: ningún pago sale, aunque la pantalla diga “firmada”.
+          Avisá a sistemas para que lo apaguen (variable CREDICOOP_SIMULADOR) antes de mandar un pago de verdad.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Destrabe a mano: marcar como rechazada una operación que no termina. Pide confirmación y motivo;
+ * el servidor registra quién lo hizo. Lo usan la ventana de la orden y la pantalla de Bancos.
+ */
+export function RechazarOperacionBanco({ operacion, onCerrar, onHecho }: { operacion: { id: string; descripcion: string } | null; onCerrar: () => void; onHecho: () => void }) {
+  const [motivo, setMotivo] = useState("")
+  const [guardando, setGuardando] = useState(false)
+  useEffect(() => { if (operacion) setMotivo("") }, [operacion])
+  async function rechazar() {
+    if (!operacion) return
+    setGuardando(true)
+    try {
+      const r = await fetch(`/api/bancos/credicoop/operaciones/${operacion.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "rechazar", motivo }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) { toast.error(j?.error || "No se pudo marcar como rechazada", { duration: 12000 }); return }
+      toast.success("La operación quedó marcada como rechazada. El pago se puede volver a mandar o hacer de otra forma.", { duration: 10000 })
+      onCerrar(); onHecho()
+    } catch (e: any) { toast.error(e?.message || "No se pudo marcar como rechazada") } finally { setGuardando(false) }
+  }
+  return (
+    <AlertDialog open={!!operacion} onOpenChange={(o) => { if (!o && !guardando) onCerrar() }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>¿Marcar esta operación como rechazada?</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2 text-sm text-neutro-800">
+              <p className="font-semibold">{operacion?.descripcion}</p>
+              <div className="flex gap-2 rounded-md border border-red-200 bg-red-50 p-3 font-semibold text-red-800">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>Hacelo SOLO después de mirar en Banca Internet Empresa que esta operación no se hizo y que no quedó esperando la firma. Si sigue ahí para firmar, anulala primero en el banco: si la marcás como rechazada y después alguien la firma, el pago puede salir dos veces.</span>
+              </div>
+              <p>Al marcarla, el sistema deja volver a mandar el pago o cambiarle la forma de pago. Queda registrado quién la marcó y por qué.</p>
+              <div className="space-y-1">
+                <label className="text-[13px] font-semibold text-neutro-600" htmlFor="motivo-rechazo-banco">Motivo (qué viste en el banco)</label>
+                <Textarea id="motivo-rechazo-banco" value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={3} maxLength={400} placeholder="Ej.: en Banca Empresa figura anulada / no figura entre las pendientes de firma" />
+              </div>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={guardando}>Volver</AlertDialogCancel>
+          <AlertDialogAction className="bg-red-600 hover:bg-red-700" disabled={guardando || motivo.trim().length < 5} onClick={(e) => { e.preventDefault(); rechazar() }}>Marcar como rechazada</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
 }
 
 const TONO: Record<string, string> = {
@@ -60,6 +132,9 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
   const [error, setError] = useState<string | null>(null)
   const [trabajando, setTrabajando] = useState<string | null>(null)
   const [aConfirmar, setAConfirmar] = useState<Pago | null>(null)
+  const [aRechazar, setARechazar] = useState<{ id: string; descripcion: string } | null>(null)
+  // Endoso con más de una cuenta de Credicoop habilitada: la cuenta que se eligió para cada pago
+  const [cuentaElegida, setCuentaElegida] = useState<Record<string, string>>({})
 
   const cargar = useCallback(async () => {
     if (!ordenPagoId) return
@@ -77,7 +152,7 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
     setAConfirmar(null); setTrabajando(p.detalle_id)
     try {
       const r = await fetch(`/api/bancos/credicoop/ordenes-pago/${ordenPagoId}`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ detalle_id: p.detalle_id }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ detalle_id: p.detalle_id, cuenta_bancaria_id: cuentaElegida[p.detalle_id] ?? null }),
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) toast.error(j?.error || "No se pudo mandar a Credicoop", { duration: 15000 })
@@ -100,7 +175,11 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
     } catch (e: any) { toast.error(e?.message || "No se pudo consultar a Credicoop") } finally { setTrabajando(null); await cargar(); onCambio?.() }
   }
 
-  const todosHechos = !!datos && datos.pagos.length > 0 && datos.pagos.every((p) => p.operacion && (p.operacion.estado === "firmada" || p.operacion.estado === "acreditada"))
+  const hecha = (p: Pago) => !!p.operacion && (p.operacion.estado === "firmada" || p.operacion.estado === "acreditada")
+  // Solo cuenta lo hecho contra el banco real: lo del simulador o del banco de prueba no paga nada
+  const todosHechos = !!datos && datos.pagos.length > 0 && datos.pagos.every((p) => hecha(p) && p.operacion!.ambiente === "produccion")
+  const hechosDePrueba = !!datos && datos.pagos.some((p) => hecha(p) && p.operacion!.ambiente !== "produccion")
+  const nombreCuenta = (p: Pago) => p.cuenta ?? p.cuentas_a_elegir.find((c) => c.id === cuentaElegida[p.detalle_id])?.nombre ?? null
 
   return (
     <>
@@ -118,13 +197,14 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
 
           {datos && (
             <div className="space-y-3">
+              {datos.conexion.simulador_en_produccion && <CartelSimuladorReal />}
               {!datos.conexion.conectado && (
                 <div className="flex gap-2 rounded-md border border-ambar-200 bg-ambar-50 p-3 text-sm text-ambar-800">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   <span><b>Credicoop no está conectado.</b> Falta cargar {datos.conexion.falta.join(", ")}. Hasta entonces no se manda nada al banco.</span>
                 </div>
               )}
-              {datos.conexion.ambiente === "simulador" && (
+              {datos.conexion.ambiente === "simulador" && !datos.conexion.simulador_en_produccion && (
                 <div className="rounded-md border border-neutro-300 bg-neutro-100 p-3 text-sm text-neutro-800">
                   <b>Modo simulador:</b> esto NO es el banco. Nada de lo que mandes acá mueve plata; sirve para probar la pantalla.
                 </div>
@@ -157,7 +237,14 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
                       {p.tipo === "transferencia" && (<><dt className="text-neutro-500">CBU destino</dt><dd className="font-mono">{cbuLegible(p.beneficiario_cbu)}</dd></>)}
                       {p.cheque && (<><dt className="text-neutro-500">E-cheq</dt><dd>{[p.cheque.banco, p.cheque.numero].filter(Boolean).join(" ") || "—"}</dd></>)}
                       <dt className="text-neutro-500">{p.tipo === "echeq_endoso" ? "Cuenta" : "Sale de"}</dt>
-                      <dd>{p.cuenta ?? "—"}</dd>
+                      <dd>
+                        {p.cuenta ?? (p.cuentas_a_elegir.length > 0 && !viva ? (
+                          <Select value={cuentaElegida[p.detalle_id] || undefined} onValueChange={(v) => setCuentaElegida((a) => ({ ...a, [p.detalle_id]: v }))}>
+                            <SelectTrigger className="h-8 w-64"><SelectValue placeholder="Elegí la cuenta de Credicoop" /></SelectTrigger>
+                            <SelectContent>{p.cuentas_a_elegir.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}</SelectContent>
+                          </Select>
+                        ) : "—")}
+                      </dd>
                       <dt className="text-neutro-500">{p.tipo === "transferencia" ? "Fecha" : "Fecha de pago"}</dt>
                       <dd>{p.fecha ? fecha(p.fecha) : "—"}{p.tipo === "transferencia" ? " (hoy: el banco no acepta otra fecha)" : ""}</dd>
                     </dl>
@@ -177,7 +264,7 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
 
                     <div className="mt-3 flex flex-wrap gap-2">
                       {!viva && (
-                        <Button size="sm" disabled={ocupado || p.problemas.length > 0 || !datos.conexion.conectado} onClick={() => setAConfirmar(p)}>
+                        <Button size="sm" disabled={ocupado || p.problemas.length > 0 || !datos.conexion.conectado || (p.cuentas_a_elegir.length > 0 && !cuentaElegida[p.detalle_id])} onClick={() => setAConfirmar(p)}>
                           <Send className="h-4 w-4" /> {op ? "Volver a mandar a Credicoop" : "Mandar a Credicoop para firmar"}
                         </Button>
                       )}
@@ -186,11 +273,23 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
                           <RefreshCw className={cn("h-4 w-4", ocupado && "animate-spin")} /> Actualizar estado
                         </Button>
                       )}
+                      {op && SIN_TERMINAR.includes(op.estado) && (
+                        <Button size="sm" variant="ghost" className="text-red-700 hover:bg-red-50 hover:text-red-800" disabled={ocupado}
+                          onClick={() => setARechazar({ id: op.id, descripcion: `${p.tipo_nombre} a ${p.beneficiario} por ${moneda(p.monto)}` })}>
+                          <Ban className="h-4 w-4" /> Marcar como rechazada
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )
               })}
 
+              {hechosDePrueba && datos.orden.estado === "pendiente" && (
+                <div className="flex gap-2 rounded-md border border-neutro-300 bg-neutro-100 p-3 text-sm text-neutro-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span><b>Lo que figura hecho fue una prueba</b> (simulador o banco de prueba): no salió plata y no cuenta como pago de esta orden.</span>
+                </div>
+              )}
               {todosHechos && datos.orden.estado === "pendiente" && (
                 <div className="flex gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
@@ -212,7 +311,7 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
                   <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-neutro-200 bg-neutro-50 p-3">
                     <dt className="text-neutro-500">Operación</dt><dd className="font-semibold">{aConfirmar.tipo_nombre}</dd>
                     <dt className="text-neutro-500">Banco</dt><dd>{aConfirmar.banco}</dd>
-                    <dt className="text-neutro-500">Cuenta</dt><dd>{aConfirmar.cuenta ?? "—"} <span className="font-mono text-xs text-neutro-500">{cbuLegible(aConfirmar.cuenta_cbu)}</span></dd>
+                    <dt className="text-neutro-500">Cuenta</dt><dd>{nombreCuenta(aConfirmar) ?? "—"} <span className="font-mono text-xs text-neutro-500">{cbuLegible(aConfirmar.cuenta_cbu)}</span></dd>
                     <dt className="text-neutro-500">{aConfirmar.tipo === "echeq_endoso" ? "Se endosa a" : "Beneficiario"}</dt><dd className="font-semibold">{aConfirmar.beneficiario}</dd>
                     <dt className="text-neutro-500">CUIT</dt><dd>{aConfirmar.beneficiario_cuit ? formatCuit(aConfirmar.beneficiario_cuit) : "—"}</dd>
                     {aConfirmar.tipo === "transferencia" && (<><dt className="text-neutro-500">CBU</dt><dd className="font-mono">{cbuLegible(aConfirmar.beneficiario_cbu)}</dd></>)}
@@ -231,6 +330,8 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RechazarOperacionBanco operacion={aRechazar} onCerrar={() => setARechazar(null)} onHecho={() => { cargar(); onCambio?.() }} />
     </>
   )
 }

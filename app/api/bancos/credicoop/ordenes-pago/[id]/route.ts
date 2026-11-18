@@ -14,7 +14,8 @@ const vista = (o: any) => o && ({
  * GET  /api/bancos/credicoop/ordenes-pago/[id] — qué pagos de la orden se pueden mandar a
  *      Credicoop (transferencias, e-cheq a emitir, e-cheq de terceros a endosar), con los datos
  *      que se van a mandar, lo que falta para poder mandarlos y el estado si ya se mandaron.
- * POST { detalle_id } — manda ESE pago a Credicoop para firmar con token. No confirma la orden.
+ * POST { detalle_id, cuenta_bancaria_id? } — manda ESE pago a Credicoop para firmar con token. No confirma la orden.
+ *      cuenta_bancaria_id: solo para endosar un e-cheq cuando hay más de una cuenta de Credicoop habilitada.
  * Solo admin.
  */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -37,7 +38,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const body = await req.json().catch(() => ({}))
     const detalleId = typeof body?.detalle_id === "string" ? body.detalle_id : ""
     if (!detalleId) return NextResponse.json({ error: "Falta indicar qué pago de la orden se manda." }, { status: 400 })
-    const operacion = await enviarPagoDeOrden(createAdminClient(), id, detalleId, auth.user.id)
+    const operacion = await enviarPagoDeOrden(createAdminClient(), id, detalleId, auth.user.id, typeof body?.cuenta_bancaria_id === "string" ? body.cuenta_bancaria_id : null)
     return NextResponse.json({ ok: true, operacion: vista(operacion) })
   } catch (e) { return respuestaErrorBanco(e, "enviar pago") }
 }

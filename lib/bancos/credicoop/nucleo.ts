@@ -230,11 +230,35 @@ const sinTildes = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLo
 export function estadoDesdeBanco(descripcion: unknown): EstadoOperacion {
   const d = sinTildes(String(descripcion ?? ""))
   if (!d) return "en_proceso"
+  // Primero lo que termina mal: "Rechazada por el firmante" habla de la firma, pero es un rechazo
+  if (/rechazad|anulad|vencid|cancelad|caducad|repudiad/.test(d)) return "rechazada"
   if (d.includes("firma")) return "enviada_a_firma"
-  if (d.includes("rechazad")) return "rechazada"
   if (d.includes("parcial")) return "en_proceso"
   if (d === "enviada a banco destino" || d === "aceptada" || d === "pagado" || d === "pagada") return "firmada"
   return "en_proceso"   // en procesamiento, retenida, enviada a proceso, confeccionada, o cualquier texto nuevo
+}
+
+/** ¿El texto del banco es uno de los que este sistema conoce? Si no, se muestra tal cual y lo resuelve una persona. */
+export function estadoBancoConocido(descripcion: unknown): boolean {
+  const d = sinTildes(String(descripcion ?? ""))
+  return /rechazad|anulad|vencid|cancelad|caducad|repudiad|firma|parcial/.test(d)
+    || ["enviada a banco destino", "aceptada", "pagado", "pagada", "en procesamiento", "retenida", "enviada a proceso", "confeccionada"].includes(d)
+}
+
+/** Estado de un e-cheq tal como lo lista el banco, normalizado: mayúsculas y guiones ("activo pendiente" → "ACTIVO-PENDIENTE"). */
+export const estadoEcheq = (v: unknown) => String(v ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase().replace(/[\s_]+/g, "-")
+
+/**
+ * ¿El endoso de un e-cheq quedó hecho? Solo con un estado CONCRETO del cheque:
+ *   ACTIVO-PENDIENTE = endosado a un tercero, esperando que lo acepte (así lo define el banco).
+ * ACTIVO = sigue en nuestro poder (el endoso no se firmó). Cualquier otra cosa —el cheque no
+ * aparece, o un estado que no se esperaba— NO se toma como hecho: queda en proceso y lo mira una persona.
+ */
+export function endosoSegunEcheq(estado: unknown): "hecho" | "pendiente" | "desconocido" {
+  const e = estadoEcheq(estado)
+  if (e === "ACTIVO-PENDIENTE") return "hecho"
+  if (e === "ACTIVO") return "pendiente"
+  return "desconocido"
 }
 
 // ─── Pedidos ───────────────────────────────────────────────────────────────
