@@ -122,6 +122,11 @@ export default function VerificacionOCPage() {
             for (const comp of porValidar) {
                 const res = await fetch(`/api/comprobantes-compra/${comp.id}/validar`, { method: "POST" })
                 const data = await res.json().catch(() => ({}))
+                if (res.status === 409 && data.codigo === "vencimiento_a_mano") {
+                    // E-102: puede estar anotada a mano en el calendario; eso se decide comprobante por comprobante
+                    toast.error(`La orden no se finalizó. ${comp.tipo_comprobante} ${comp.numero_comprobante} puede ser una factura que ya estaba anotada a mano en el calendario: validalo con su botón (✓) para decir si es esa o es otra cosa, y después finalizá la orden.`, { duration: 20000 })
+                    return
+                }
                 if (!res.ok) {
                     // Se frena acá: la orden NO queda finalizada con un comprobante sin validar
                     toast.error(`La orden no se finalizó. No se pudo validar ${comp.tipo_comprobante} ${comp.numero_comprobante}: ${data.error || `error ${res.status}`}`, { duration: 15000 })
