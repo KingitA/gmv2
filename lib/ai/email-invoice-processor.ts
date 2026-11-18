@@ -431,7 +431,18 @@ export async function processEmailAsInvoice(
             const existingCC = convierteProvision ? await provisionDelCanal(db, proveedorId, pendingOC.id, canalComprobante) : null
 
             let ccResult: any = null
-            if (existingCC) {
+            // La provisión baja por lo FACTURADO, igual que el vencimiento estimado. Si este comprobante
+            // es por menos que la provisión (la orden se factura en partes), la provisión queda por el
+            // resto y la deuda entra como movimiento propio. Solo si la cubre entera se convierte.
+            const restoProvision = existingCC && existingCC.monto != null ? Math.round((Number(existingCC.monto) - Math.abs(montoFinal)) * 100) / 100 : 0
+            if (existingCC && restoProvision > 0.01) {
+                await db.from('cuenta_corriente_proveedores')
+                    .update({ monto: restoProvision, descripcion: `Provisión OC: ${pendingOC.numero_orden} (resto sin facturar)`, updated_at: new Date().toISOString() })
+                    .eq('id', existingCC.id)
+                ccResult = await createCCMovement(db, proveedorId, invoiceData, tipoComp, fechaHoy, { sinVencimiento: true })
+                await vincularMovimientoAComprobante(db, ccResult?.id, comprobante.id)
+                console.log(`[InvoiceProcessor] Provisión ${existingCC.id} reducida a ${restoProvision}; ${tipoComp} entra como movimiento propio`)
+            } else if (existingCC) {
                 // Update the OC movement → becomes the factura
                 const { data: updated } = await db.from('cuenta_corriente_proveedores')
                     .update({
@@ -872,7 +883,7 @@ async function plazoDePago(db: any, proveedorId: string, ordenCompraId: string |
 }
 
 /** La provisión de una orden de compra que corresponde a un canal (ver el uso). Solo lee. */
-async function provisionDelCanal(db: any, proveedorId: string, ordenCompraId: string, canal: 'blanco' | 'negro'): Promise<{ id: string } | null> {
+async function provisionDelCanal(db: any, proveedorId: string, ordenCompraId: string, canal: 'blanco' | 'negro'): Promise<{ id: string; monto?: number | null } | null> {
     const leer = (columnas: string) => db.from('cuenta_corriente_proveedores')
         .select(columnas)
         .eq('proveedor_id', proveedorId)
@@ -880,9 +891,9 @@ async function provisionDelCanal(db: any, proveedorId: string, ordenCompraId: st
         .eq('referencia_id', ordenCompraId)
         .eq('tipo_movimiento', 'orden_compra')
         .order('created_at', { ascending: true })
-    let { data, error } = await leer('id, canal')
+    let { data, error } = await leer('id, canal, monto')
     // base sin la columna canal (migración 20261117n sin aplicar): había una sola provisión por orden
-    if (error) ({ data, error } = await leer('id'))
+    if (error) ({ data, error } = await leer('id, monto'))
     const filas: any[] = data || []
     return filas.find((m) => m.canal === canal) ?? filas.find((m) => m.canal == null) ?? null
 }

@@ -11,6 +11,8 @@ import { GEMINI_MODEL, GEMINI_MODEL_FALLBACK } from "@/lib/ai/gemini-model";
 const urlGemini = (modelo: string, version: "v1" | "v1beta") =>
     `https://generativelanguage.googleapis.com/${version}/models/${modelo}:generateContent`;
 
+import { avisoRenglonesContraTotal, renglonesDeLectura } from "./lectura-renglones";
+
 export interface ExtractedItem {
     descripcion: string;
     codigo: string | null;
@@ -46,6 +48,8 @@ export interface ParseResult {
     items: ExtractedItem[];
     comprobante?: ComprobanteMeta | null;
     raw_text?: string;
+    /** Cosas que la oficina tiene que saber de esta lectura (renglones juntados, renglones que faltan…) */
+    avisos?: string[];
     metadata?: any;
     error?: string;
 }
@@ -112,6 +116,7 @@ CONTEXTO:
 
 TAREA:
 Extraé TODA la información del documento: encabezado del comprobante Y los ítems de detalle.
+Listá TODOS los renglones del detalle, sin saltear ninguno aunque se parezcan entre sí: un objeto por renglón, todos en la ÚNICA lista "items" (no repitas la clave "items" ni pongas renglones en otra parte del JSON). La suma de los importes de los renglones tiene que dar el subtotal del documento.
 Priorizá exactitud en códigos, descripciones y valores monetarios.
 Si hay precios por bulto/pack y precios unitarios, extraé ambos.
 Los documentos son de Argentina: las fechas vienen dd/mm/aaaa (día primero, NUNCA mes/día) y los montos 1.234,56 (punto = miles, coma = decimales). Devolvé las fechas como AAAA-MM-DD y los montos como número JSON con punto decimal y sin separador de miles (ej: 1234.56).
@@ -196,10 +201,18 @@ FORMATO JSON:
         const jsonStr = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
         const parsedData = JSON.parse(jsonStr || '{}');
 
-        const saneado = sanearOcr(parsedData);
+        // Ningún renglón leído se pierde en silencio: se juntan todas las listas de renglones que
+        // traiga el texto (no solo la que queda al interpretar el JSON) y se avisa si falta alguno.
+        const leidos = renglonesDeLectura(jsonStr, parsedData?.items, parsedData);
+        const saneado = sanearOcr({ ...parsedData, items: leidos.items });
+        const avisos = [...leidos.avisos];
+        const descuadre = avisoRenglonesContraTotal(saneado.items, saneado.comprobante);
+        if (descuadre) avisos.push(descuadre);
+        if (modeloUsado !== GEMINI_MODEL) avisos.push('Se leyó con el modelo de respaldo (el principal no respondió): controlá los renglones contra el papel.');
         return {
             items: saneado.items,
             comprobante: saneado.comprobante,
+            ...(avisos.length > 0 ? { avisos } : {}),
             raw_text: text,
             metadata: { model: modeloUsado }
         };

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -68,7 +68,9 @@ export default function VerificacionOCPage() {
             setError(null)
             setDatos(data)
             // Si la foto que se estaba mirando ya no existe, se cierra el panel
-            setDocVisible((d) => (d ? (data.documentos || []).find((x: DocumentoRecepcion) => x.id === d.id) || null : null))
+            // (se conserva el MISMO objeto: el enlace firmado cambia en cada carga y, si se reemplazara,
+            // la foto o el PDF se volverían a descargar y a dibujar en cada refresco de la pantalla)
+            setDocVisible((d) => (d ? ((data.documentos || []).some((x: DocumentoRecepcion) => x.id === d.id) ? d : null) : null))
         } catch {
             setError("No se pudo cargar la verificación: sin conexión con el servidor.")
         } finally {
@@ -79,6 +81,10 @@ export default function VerificacionOCPage() {
     useEffect(() => { if (ordenId) cargar() }, [ordenId, cargar])
 
     const v = datos?.verificacion
+    // La MISMA lista mientras no cambien los datos: si se armara una nueva en cada dibujado, los
+    // componentes que dependen de ella (los renglones sin vincular) volverían a pedir todo al servidor
+    // cada vez que se abre un cartel o cambia cualquier cosa de la pantalla.
+    const comprobantesVisibles = useMemo(() => (datos?.comprobantes || []).filter((c) => c.estado !== "esperada"), [datos])
     const filas = v?.filas || []
     const columnas = v?.columnas || []
     const control = datos?.control
@@ -331,7 +337,7 @@ export default function VerificacionOCPage() {
             {/* Comprobantes: subir, editar, validar, eliminar, documentos no leídos y revisar matches */}
             <div className="mb-6">
                 <ComprobantesSection ordenId={ordenId} onChanged={cargar} soloLectura={soloLectura}
-                    comprobantes={datos.comprobantes.filter((c) => c.estado !== "esperada")}
+                    comprobantes={comprobantesVisibles}
                     documentos={documentos} onVerDocumento={setDocVisible} />
             </div>
 
@@ -470,7 +476,7 @@ export default function VerificacionOCPage() {
                             {(docVisible.tipo_mime || "").includes("pdf") || /\.pdf($|\?)/i.test(docVisible.nombre_archivo || "")
                                 ? <iframe src={docVisible.url || ""} title="Comprobante" className="w-full h-[75vh] border rounded" />
                                 // eslint-disable-next-line @next/next/no-img-element
-                                : <div className="max-h-[75vh] overflow-auto border rounded"><img src={docVisible.url || ""} alt="Comprobante" className="w-full" /></div>}
+                                : <div className="max-h-[75vh] overflow-auto border rounded"><img src={docVisible.url || ""} alt="Comprobante" className="w-full" decoding="async" /></div>}
                         </CardContent>
                     </Card>
                 )}

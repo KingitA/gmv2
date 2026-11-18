@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { formatearNumeroComprobante } from '@/lib/services/numero-comprobante';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { revertirComprobanteOCR } from '@/lib/services/detalle';
@@ -40,6 +41,8 @@ export async function PATCH(
         if (Object.keys(cambios).length === 0) {
             return NextResponse.json({ error: 'Nada para actualizar' }, { status: 400 });
         }
+        // con el formato del papel: 0001-00008821
+        if (typeof cambios.numero_comprobante === 'string') cambios.numero_comprobante = formatearNumeroComprobante(cambios.numero_comprobante);
         cambios.updated_at = new Date().toISOString();
 
         const { data, error } = await supabase
@@ -70,11 +73,24 @@ export async function DELETE(
         const { id } = await params;
         const supabase = createAdminClient();
 
+        // Documentos (foto o PDF) de los que se leyó este comprobante: se van con él. Antes quedaban
+        // en la lista de archivos de la orden, sin comprobante, y al volver a subir el mismo archivo
+        // aparecía dos veces.
+        const { data: docs } = await supabase.from('recepciones_documentos').select('id, storage_path').eq('comprobante_id', id);
+
         const { error: revertError } = await revertirComprobanteOCR(supabase, id);
         if (revertError) {
             return NextResponse.json({ error: revertError }, { status: 409 });
         }
-        return NextResponse.json({ success: true });
+
+        let documentosQuitados = 0;
+        for (const d of docs || []) {
+            const { error: delErr } = await supabase.from('recepciones_documentos').delete().eq('id', d.id);
+            if (delErr) { console.error('[comprobante DELETE] documento:', delErr.message); continue; }
+            documentosQuitados++;
+            if (d.storage_path) await supabase.storage.from('comprobantes').remove([d.storage_path]);
+        }
+        return NextResponse.json({ success: true, documentos_quitados: documentosQuitados });
     } catch (error: any) {
         console.error('[comprobante DELETE] Error:', error);
         return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });

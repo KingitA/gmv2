@@ -352,7 +352,7 @@ export default function OrdenesPagoPage() {
                                                 {fecha(op.fecha)}
                                             </TableCell>
                                             <TableCell className="font-medium">
-                                                {op.proveedores?.sigla || op.proveedores?.nombre || "—"}
+                                                {op.proveedores?.nombre || op.proveedores?.sigla || "—"}
                                             </TableCell>
                                             <TableCell className="text-sm text-muted-foreground">
                                                 {getMediosResumen(op.ordenes_pago_detalle)}

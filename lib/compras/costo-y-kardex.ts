@@ -95,7 +95,15 @@ export interface ResultadoCosto {
  * lo facturado y deja el último costo de cada artículo. Las notas de crédito / débito y los
  * remitos no pasan por acá.
  */
-export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocId: string | null): Promise<ResultadoCosto> {
+/**
+ * `soloArticulos`: recalcular solo esos artículos (cuando se resuelve una diferencia de precio
+ * después de validada la factura).
+ *
+ * Diferencia de precio RECLAMADA al proveedor (queda una nota de crédito esperada): el costo del
+ * artículo es el precio de la ORDEN, que es lo que se termina pagando. Aceptada por la empresa: el
+ * precio facturado. Sin resolver todavía: el facturado, y se corrige solo cuando se resuelve.
+ */
+export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocId: string | null, soloArticulos?: readonly string[] | null): Promise<ResultadoCosto> {
   const { data: detalle, error: detErr } = await supabase
     .from("comprobantes_compra_detalle")
     .select("articulo_id, cantidad_facturada, precio_unitario, descuento1, descuento2, descuento3, descuento4, tipo_cantidad, recepcion_item_id, match_estado")
@@ -137,13 +145,41 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
   const factorPie = dtoPie > 0 && dtoPie <= 100 ? 1 - dtoPie / 100 : 1
 
   // Precio por unidad de cada artículo: el primer renglón CON cargo (lo bonificado no baja el costo)
-  const precio = new Map<string, { lista: number; neto: number }>()
+  const precio = new Map<string, { lista: number; neto: number; reclamado?: boolean }>()
   for (const l of conArticulo) {
     if (precio.has(l.articulo_id)) continue
     const neto = netoCompra(l.precio_unitario, descuentos(l), tipoDto) * factorPie
     if (!(neto > 0)) continue
     const f = l.tipo_cantidad === "bulto" ? ((factorItem.get(l.recepcion_item_id) || 0) > 1 ? factorItem.get(l.recepcion_item_id)! : unidadesPorBultoDe(art.get(l.articulo_id)?.unidades_por_bulto)) : 1
     precio.set(l.articulo_id, { lista: r4(num(l.precio_unitario) / f), neto: r4(neto / f) })
+  }
+  // Diferencias de precio de esta orden que se le RECLAMARON al proveedor: el costo de esos
+  // artículos es el de la orden (lista y descuentos de la orden), no el facturado.
+  if (ocId && precio.size > 0) {
+    const { data: reclamos, error: recErr } = await supabase
+      .from("recepciones_diferencias")
+      .select("articulo_id")
+      .eq("orden_compra_id", ocId)
+      .eq("tipo", "precio")
+      .in("destino", ["proveedor", "descuento_fuera_factura"])
+    if (recErr) console.warn("[costo] no se pudieron leer los reclamos de precio de la orden:", recErr.message)
+    const reclamados = [...new Set(((reclamos || []) as any[]).map((r) => r.articulo_id).filter((id) => id && precio.has(id)))] as string[]
+    if (reclamados.length > 0) {
+      const { data: ocDet } = await supabase
+        .from("ordenes_compra_detalle")
+        .select("articulo_id, precio_unitario, descuento1, descuento2, descuento3, descuento4")
+        .eq("orden_compra_id", ocId)
+        .in("articulo_id", reclamados)
+      for (const d of (ocDet || []) as any[]) {
+        const netoOC = netoCompra(d.precio_unitario, descuentos(d), tipoDto)
+        // el precio de la orden es siempre por unidad; el primer renglón del artículo manda
+        if (netoOC > 0 && precio.get(d.articulo_id)?.reclamado !== true) precio.set(d.articulo_id, { lista: r4(num(d.precio_unitario)), neto: r4(netoOC), reclamado: true })
+      }
+    }
+  }
+  if (soloArticulos) {
+    const solo = new Set(soloArticulos)
+    for (const id of [...precio.keys()]) if (!solo.has(id)) precio.delete(id)
   }
   if (precio.size === 0) return resultado
 

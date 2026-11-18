@@ -47,3 +47,22 @@ export function tiposCompatibles(tipo: unknown): string[] {
     if (t === 'ND') return ['ND', 'NDA', 'NDB', 'NDC'];
     return t ? [t] : [];
 }
+
+/**
+ * Número como se escribe en el papel: punto de venta de 4 dígitos (5 si no entra) y número de 8.
+ * "0001-000008821" (un cero de más leído por la IA), "1-8821" y "A 0001 - 00008821" quedan
+ * "0001-00008821". Si no se reconoce la forma (sin punto de venta, o un número de más de 8
+ * dígitos significativos) se devuelve tal cual, sin espacios: no se inventa nada.
+ */
+export function formatearNumeroComprobante(numero: unknown): string {
+    const s = String(numero || '').trim();
+    if (!s || esNumeroProvisorio(s)) return s;
+    const grupos: string[] = Array.from(s.match(/\d+/g) || []);
+    const sinCeros = (d: string) => d.replace(/^0+/, '') || '0';
+    let pv = '', num = '';
+    if (grupos.length === 2) { pv = sinCeros(grupos[0]!); num = sinCeros(grupos[1]!); }
+    else if (grupos.length === 1 && grupos[0]!.length > 8 && grupos[0]!.length <= 13) { pv = sinCeros(grupos[0]!.slice(0, -8)); num = sinCeros(grupos[0]!.slice(-8)); }
+    else return s;
+    if (pv.length > 5 || num.length > 8) return s;
+    return `${pv.padStart(4, '0')}-${num.padStart(8, '0')}`;
+}

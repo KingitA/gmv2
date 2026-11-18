@@ -17,7 +17,7 @@
 import { todayArgentina } from '@/lib/utils';
 import { inferirTipoComprobante, type ParseResult } from '@/lib/services/ocr';
 import { matchAndCreateDetalle } from '@/lib/services/detalle';
-import { esNumeroProvisorio, normalizarNumeroComprobante, tiposCompatibles } from '@/lib/services/numero-comprobante';
+import { esNumeroProvisorio, formatearNumeroComprobante, normalizarNumeroComprobante, tiposCompatibles } from '@/lib/services/numero-comprobante';
 import { fechaISO } from '@/lib/formato';
 
 export { esNumeroProvisorio, normalizarNumeroComprobante, tiposCompatibles };
@@ -106,9 +106,10 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
     ocr: ParseResult;
     tipo_documento?: string;
     foto_url?: string | null;
-}): Promise<{ comprobante: any | null; sumado_a_provisorio: boolean; otro_provisorio?: boolean; error?: string; vinculados: any[] }> {
+}): Promise<{ comprobante: any | null; sumado_a_provisorio: boolean; otro_provisorio?: boolean; error?: string; vinculados: any[]; /** Lo que la oficina tiene que saber: renglones juntados, que faltan o que no se pudieron guardar */ avisos?: string[] }> {
     const meta = p.ocr.comprobante;
-    const numero = meta?.numero_comprobante && !esNumeroProvisorio(meta.numero_comprobante) ? String(meta.numero_comprobante).trim() : '';
+    // Con el formato del papel (0001-00008821): la lectura a veces agrega o saca un cero
+    const numero = meta?.numero_comprobante && !esNumeroProvisorio(meta.numero_comprobante) ? formatearNumeroComprobante(meta.numero_comprobante) : '';
     const tipoComp = inferirTipoComprobante(p.ocr, p.tipo_documento);
     const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
     const totalFactura = Number(meta?.total_factura || 0);
@@ -214,5 +215,11 @@ export async function comprobanteDesdeOCR(supabase: any, p: {
         documento_id: p.documento_id || undefined,
     });
 
-    return { comprobante, sumado_a_provisorio: sumado, otro_provisorio: otroProvisorio, vinculados };
+    // Ningún renglón leído desaparece en silencio
+    const avisos: string[] = [...(p.ocr.avisos || [])];
+    const descartados: Array<{ descripcion: string; motivo: string }> = (vinculados as any).descartados || [];
+    if (descartados.length > 0) {
+        avisos.push(`ATENCIÓN: ${descartados.length} renglón(es) leído(s) NO se pudieron guardar en el comprobante: ${descartados.map((d) => d.descripcion).join('; ')}. Agregalos a mano (botón +). Detalle para sistemas: ${descartados[0]!.motivo}`);
+    }
+    return { comprobante, sumado_a_provisorio: sumado, otro_provisorio: otroProvisorio, vinculados, ...(avisos.length > 0 ? { avisos } : {}) };
 }
