@@ -74,3 +74,6 @@ The codebase is bilingual — Spanish domain terms in DB/routes, English in gene
 - `articulos` = products/articles, `viajes` = delivery trips
 - `comprobantes_venta` = sales invoices, `comprobantes_proveedor` = supplier invoices
 - `cuenta_corriente` = account statement, `vencimientos` = due dates/expirations
+
+### IMPORTANTE:
+En cada respuesta, en algun momento debes indicar mi nombre o dirigirte hacia mi como "JUAN", ejemplo en vez de iniciar un mensaje con "Tengo todo el contexto." debes indicar "Juan, ya tengo todo el contexto".

@@ -15,7 +15,8 @@
  *     facturas, remitos y cheques pasaba sola a un modelo peor, sin ningún aviso.
  *   - `gemini-3.6-flash` también es estable y sin fecha de baja.
  *
- * Respaldo `gemini-2.5-flash`: es el que está probado en producción, y solo se usa si el
+ * Respaldo `gemini-3.6-flash` (estable, sin fecha de baja): `gemini-2.5-flash` está deprecado y desde el 01/12/2026 Google
+ * lo redirige a un modelo "lite", peor para leer comprobantes.
  * principal falla (dado de baja, cuota, caído). OJO: desde el 01/12/2026 ese nombre responde
  * con el modelo "lite"; a partir de ahí conviene poner GEMINI_MODEL_FALLBACK=gemini-3.6-flash.
  *
@@ -29,7 +30,7 @@
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash"
 
 /** Se usa UNA vez si el principal falla (ver arriba por qué es este). */
-export const GEMINI_MODEL_FALLBACK = process.env.GEMINI_MODEL_FALLBACK || "gemini-2.5-flash"
+export const GEMINI_MODEL_FALLBACK = process.env.GEMINI_MODEL_FALLBACK || "gemini-3.6-flash"
 
 /**
  * ¿El error es del MODELO o del servicio (dado de baja, cuota, caído) y vale la pena
