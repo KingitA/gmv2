@@ -14,6 +14,7 @@
     "dev:vendedor": "npm run dev -w @gm/app-vendedor",
     "dev:deposito": "npm run dev -w @gm/app-deposito",
     "build:apks": "node scripts/build-apks.mjs",
+    "publicar:apk": "node scripts/publicar-apk.mjs",
     "keystores": "node scripts/crear-keystores.mjs"
   },
   "devDependencies": {

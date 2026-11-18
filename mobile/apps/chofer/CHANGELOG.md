@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.11 (versionCode 17) — 2026-11-18
+
+- Actualización con un botón: la app avisa en el inicio cuando hay una versión nueva y se actualiza sola (ACTUALIZAR → INSTALAR)
+
 ## v0.3.10 (versionCode 16) — 2026-11-03
 
 - Resumen de cuenta de cada comprobante en el cobro (total, devoluciones, 10 %, pagos, debe)

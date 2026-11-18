@@ -19,6 +19,7 @@
 
 import { createHash, randomUUID } from "node:crypto"
 import { createServer } from "node:http"
+import { atenderActualizacion } from "./mock-actualizacion.mjs"
 
 const PUERTO = Number(process.env.PORT || 3999)
 const N_ARTICULOS = Number(process.env.ARTICULOS || 6000)
@@ -292,12 +293,14 @@ const sesion = (email) => {
 
 createServer(async (req, res) => {
   const url = new URL(req.url, "http://x")
-  const cors = { "Access-Control-Allow-Origin": req.headers.origin || "*", "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS", "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Device-Id, X-App-Version", "Access-Control-Max-Age": "86400" }
+  const cors = { "Access-Control-Allow-Origin": req.headers.origin || "*", "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS", "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Device-Id, X-App-Version, X-App-Version-Code", "Access-Control-Max-Age": "86400" }
   const json = (status, body) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", ...cors }); res.end(JSON.stringify(body)) }
   let raw = ""
   for await (const ch of req) raw += ch
   const body = raw && (req.headers["content-type"] || "").includes("json") ? JSON.parse(raw) : null
 
+  // Actualización con un botón (/__mock/actualizacion, /__mock/apk, /api/mobile/actualizacion)
+  if ((url.pathname.startsWith("/__mock/") || S.red) && (await atenderActualizacion(url, req, res, json, cors))) return
   if (url.pathname.startsWith("/__mock/")) {
     if (url.pathname === "/__mock/red") {
       const on = url.searchParams.get("on") !== "0"

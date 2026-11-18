@@ -7,7 +7,7 @@ import { mantenerAlDia } from "./datos/frescura"
 void montarApp({
   // Los datasets dependen del chofer logueado (sus viajes, su billetera): al ingresar otro
   // usuario en el mismo equipo se limpia la réplica del anterior (default del core).
-  config: { app: "chofer", apiBase: __API_BASE__, version: __APP_VERSION__, datasets: DATASETS },
+  config: { app: "chofer", apiBase: __API_BASE__, version: __APP_VERSION__, versionCode: __APP_VERSION_CODE__, datasets: DATASETS },
   nombreApp: "Chofer",
   rutas,
 }).then((rt) => {

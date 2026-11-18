@@ -36,6 +36,8 @@ export function configApp(appDir: string, puerto: number): UserConfigFnObject {
       },
       define: {
         __APP_VERSION__: JSON.stringify(version.versionName),
+        // versionCode: con él la app pregunta si hay una actualización (MOBILE.md → "Actualización desde la app")
+        __APP_VERSION_CODE__: JSON.stringify(Number(version.versionCode) || 0),
         __API_BASE__: JSON.stringify(env.VITE_API_BASE || "https://gmv2.vercel.app"),
       },
       server: { port: puerto, strictPort: true, fs: { allow: [RAIZ_REPO] } },

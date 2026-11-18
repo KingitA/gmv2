@@ -668,6 +668,78 @@ arregla reiniciando el equipo** (no hace falta borrar datos ni reinstalar).
    nueva figura al pie del inicio.
 9. Si algo sale mal: reinstalar el APK anterior **no** funciona encima (Android no deja
    bajar de versionCode): se publica un patch nuevo con el arreglo.
+10. **Equipos lejos de la oficina**: en vez del paso 7, `npm run publicar:apk` (ver
+    "Actualización desde la app", abajo): el operario toca ACTUALIZAR → INSTALAR.
+
+### Actualización desde la app (17/11/2026)
+Para los NuStar que no pasan por la oficina (500 km, gente grande, sin WhatsApp): cada
+app se actualiza sola con **dos toques: ACTUALIZAR (en el inicio) → INSTALAR (cartel de
+Android)**. Las tres apps, mismo código en `@gm/core`.
+
+**Flujo**
+1. La app pregunta `GET /api/mobile/actualizacion?app=X` (`app/api/mobile/actualizacion`)
+   **al abrir, al volver a primer plano y cada 30 min**, solo con señal y sesión
+   (`core/src/actualizacion/actualizador.ts`; entre dos consultas automáticas ≥ 1 min).
+   Manda su versionCode en el header `X-App-Version-Code` (`__APP_VERSION_CODE__` lo
+   inyecta `vite.app.ts` desde `version.json`, igual que Gradle).
+2. El servidor compara contra la última fila de `mobile_versiones` de esa app
+   (`lib/mobile/actualizacion.ts` → `elegirActualizacion`: la más nueva; es
+   **obligatoria** si alguna de las que le faltan al equipo lo es) y devuelve
+   `{hay, version_name, version_code, notas, obligatoria, tamano_bytes, sha256, url}`
+   (`RespuestaActualizacion` en `lib/mobile/contrato.ts`). `url` = URL **firmada** del
+   bucket privado `apks` que vence en 15 min: el APK nunca pasa por Vercel (4,5 MB).
+   De paso registra el equipo (`mobile_dispositivos.app_version` + `app_version_code`).
+3. Hay versión nueva ⇒ `<FranjaActualizacion />` (`core/src/ui/actualizacion.tsx`) **solo
+   en el inicio** de cada app — nunca en medio de un pedido, un cobro o un picking.
+   Letra grande, un botón por paso. "Más tarde" la esconde hasta el próximo arranque;
+   si es obligatoria no se puede cerrar.
+4. ACTUALIZAR: si Android todavía no dejó instalar ("instalar apps desconocidas"), pantalla
+   "Tocá PERMITIR y volvé" que abre el ajuste **de esta app**; al volver a primer plano
+   sigue sola. Después pide una URL fresca, baja el APK con barra de progreso, verifica el
+   **sha256** y abre el instalador de Android (`REQUEST_INSTALL_PACKAGES` en los tres
+   manifests). Si el operario cancela el cartel, al volver queda el botón para reintentar.
+5. Errores sin texto técnico: "No se pudo bajar la actualización. Probá con señal.",
+   "La actualización llegó incompleta. Probá de nuevo con señal.", "No se pudo abrir el
+   instalador. Avisá a la oficina."
+6. Instalar encima (misma firma) conserva sesión, réplica y outbox (es lo mismo que
+   `adb install -r`).
+
+**Nativo**: plugin propio `GmArchivos` (`mobile/packages/capacitor-archivos`; ahora también
+en depósito): `puedeInstalar`, `abrirPermisoInstalar`, `descargarApk` (baja a
+`cache/actualizacion/`, evento `progresoDescarga`, verifica el sha256 en Java y borra el
+archivo si no coincide) e `instalarApk` (ACTION_VIEW `application/vnd.android.package-archive`
+por el FileProvider que ya existía). En el navegador (desarrollo) baja y verifica con
+`fetch` + `crypto.subtle`, pero no instala.
+
+**Publicar** (separado del build a propósito: compilar NO publica)
+```bash
+cd mobile
+npm run build:apks -- --apps vendedor --notas "qué cambió"     # compila y sube versionCode
+npm run publicar:apk -- --app vendedor --notas "Arreglos del cobro"           # opcional
+npm run publicar:apk -- --app chofer --obligatoria --notas "Cambio necesario"  # no se puede posponer
+```
+`scripts/publicar-apk.mjs` toma `dist-apks/<app>-v<versión>.apk` (la versión de
+`apps/<app>/version.json`), lo sube a `apks/<app>/<app>-v<versión>-<code>.apk` con la
+service key de `.env.local` (nunca commiteada, nunca en el APK) e inserta la fila en
+`mobile_versiones` (sha256, tamaño, notas, obligatoria, quién). Rechaza un versionCode
+igual o menor al último publicado.
+
+**Revertir**: Android no deja instalar un versionCode menor. Se vuelve al código de la
+versión anterior (`git checkout` del tag/commit), se compila (el build sube el
+versionCode) y se publica: los equipos la ven como "versión nueva".
+
+**Seguimiento**: ERP → Ajustes → **Equipos y apps** (`/admin/equipos`, solo admin): equipo,
+usuario, app, versión instalada ("al día" / "sin actualizar" contra la última publicada) y
+última conexión.
+
+**Migración**: `supabase/migrations/20261117b_mobile_versiones.sql` (tabla
+`mobile_versiones`, columna `mobile_dispositivos.app_version_code`, bucket privado
+`apks`). Idempotente. Sin aplicarla las apps siguen normales (no hay nada publicado).
+
+**Probar sin backend**: los tres mocks atienden `/api/mobile/actualizacion`
+(`scripts/mock-actualizacion.mjs`). `POST /__mock/actualizacion?code=99&nombre=9.9.9`
+publica una versión (`&obligatoria=1`, `&corrupto=1` para probar el sha256, `&off=1`
+la saca); `/__mock/apk` manda un "APK" de 2 MB de a poco para ver la barra.
 
 ### Actualización OTA del bundle (propuesta, no implementada)
 Viable sin infra paga: `@capgo/capacitor-updater` en modo **self-hosted**

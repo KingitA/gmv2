@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router"
 import { useContadoresOutbox, useNoEnviados, useOverlay, useRuntime } from "@gm/core"
+import { FranjaActualizacion } from "@gm/core/ui"
 import { DS } from "../datasets"
 import { useBorradores } from "../datos/borradores"
 import { rechazosDe, useClientes, useMe, usePedidos, useRefrescarAlEntrar, useViajes, useYo } from "../datos/hooks"
@@ -77,6 +78,8 @@ export function Inicio() {
       {/* Veredicto del BCRA de los cheques cobrados (llega después del cobro, también si se cargó sin señal) */}
       <AvisosBcra />
       <div className="mx-auto w-full max-w-2xl space-y-6 p-4">
+        {/* Actualización con un botón: solo acá, nunca en medio de un pedido o un cobro */}
+        <FranjaActualizacion />
         {borradores.map((b) => (
           <button key={b.clienteId} onClick={() => navigate(`/pedido/nuevo/${b.clienteId}`)} className="flex w-full items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-left">
             <span className="text-2xl">🛒</span>
