@@ -180,3 +180,14 @@ describe("descuento único leído de una foto o un PDF", () => {
     expect(descuentosDeLectura(undefined)).toEqual([null, null, null, null])
   })
 })
+
+describe("descuentos a 2 decimales, como los guarda el artículo", () => {
+  it("12,3456 de la lista queda 12,35", () => {
+    const c = cambioDeItem({ descuento1: 12.3456 }, { precio_compra: 1000, descuento1: 10 })
+    expect(c.nuevo.descuentos[0]).toBe(12.35)
+    expect(c.cambios).toEqual({ descuento1: 12.35 })
+  })
+  it("ya aplicado (el artículo tiene 12,35): no vuelve a aparecer como cambio", () => {
+    expect(cambioDeItem({ descuento1: 12.3456 }, { precio_compra: 1000, descuento1: 12.35 }).cambios).toEqual({})
+  })
+})

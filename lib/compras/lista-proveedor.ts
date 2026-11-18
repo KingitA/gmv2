@@ -109,7 +109,9 @@ export function cambioDeItem(item: ItemLista, art: ArticuloCosto | null | undefi
   const pNuevo = traePrecio ? r4(num(item.precio_compra) / factor) : pActual
   const dItem = [item.descuento1, item.descuento2, item.descuento3, item.descuento4]
   // descuento: null = no tocar; 0 = pasa a 0
-  const dNuevo = dItem.map((d, i) => (d === null || d === undefined ? dActual[i]! : r4(num(d))))
+  // a 2 decimales, que es como los guarda el artículo: un 12,3456 de la lista queda 12,35 y, ya
+  // aplicado, no vuelve a aparecer como cambio
+  const dNuevo = dItem.map((d, i) => (d === null || d === undefined ? dActual[i]! : r2(num(d))))
 
   const cambios: CambioLista["cambios"] = {}
   if (Math.abs(pNuevo - pActual) > 0.00005) cambios.precio_compra = pNuevo

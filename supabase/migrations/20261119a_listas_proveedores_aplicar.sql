@@ -202,10 +202,12 @@ BEGIN
 
       -- precio vacío o 0 = no tocar; descuento vacío = no tocar; descuento 0 = pasa a 0
       v_precio := CASE WHEN coalesce(it.precio_compra, 0) > 0 THEN round(it.precio_compra / v_factor, 4) ELSE coalesce(a.precio_compra, 0) END;
-      v_d1 := coalesce(it.descuento1, a.descuento1, 0);
-      v_d2 := coalesce(it.descuento2, a.descuento2, 0);
-      v_d3 := coalesce(it.descuento3, a.descuento3, 0);
-      v_d4 := coalesce(it.descuento4, a.descuento4, 0);
+      -- A 2 decimales, que es como los guarda el artículo (articulos.descuentoN es numeric(5,2)) y el
+      -- historial: si no, un 12,3456 de la lista se guarda 12,35 y en cada reaplicación daría "distinto".
+      v_d1 := round(coalesce(it.descuento1, a.descuento1, 0), 2);
+      v_d2 := round(coalesce(it.descuento2, a.descuento2, 0), 2);
+      v_d3 := round(coalesce(it.descuento3, a.descuento3, 0), 2);
+      v_d4 := round(coalesce(it.descuento4, a.descuento4, 0), 2);
       IF v_d1 < 0 OR v_d1 > 100 OR v_d2 < 0 OR v_d2 > 100 OR v_d3 < 0 OR v_d3 > 100 OR v_d4 < 0 OR v_d4 > 100 THEN
         RAISE EXCEPTION 'un descuento está fuera de 0 a 100 %%';
       END IF;
