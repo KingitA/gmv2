@@ -545,6 +545,7 @@ export async function POST(
         //  · el kardex "en camino" de la orden se ajusta a lo que falta recibir (ya no se "confirma":
         //    eso duplicaba la compra de la recepción, E-31).
         const avisos: string[] = [];
+        let preciosVenta: any[] = [];
         if (!resultado.ya_validado && Number(resultado.pagado_antes || 0) > 0.01) {
             avisos.push(`Este comprobante ya tenía ${moneda(Number(resultado.pagado_antes))} pagados antes de validarlo: los vencimientos quedaron por el saldo que falta pagar.`);
         }
@@ -559,6 +560,13 @@ export async function POST(
                 // (Que los renglones sumen el neto ya se controló antes de validar: control-suma.ts.)
                 if (!resultado.ya_validado) {
                     const costo = await aplicarCostoDeFactura(supabase, comprobante, ocId);
+                    // Precios de venta: NO se tocan. Se avisa cuáles conviene revisar porque el costo facturado
+                    // no es el de la ficha del artículo (de donde sale el precio de venta).
+                    preciosVenta = costo.precios_venta;
+                    if (preciosVenta.length > 0) {
+                        const lista = preciosVenta.slice(0, 6).map((v) => `${v.sku || v.descripcion || 'artículo'} (ficha ${moneda(v.neto_ficha)} → factura ${moneda(v.neto_factura)})`).join(', ');
+                        avisos.push(`Precios de venta para revisar: ${preciosVenta.length} artículo(s) se facturaron a un costo distinto del de su ficha: ${lista}${preciosVenta.length > 6 ? '…' : ''}. El precio de venta NO se tocó: revisalos en Artículos.`);
+                    }
                     if (costo.historial_fallas > 0) {
                         avisos.push(`El último costo de ${costo.historial_fallas} artículo(s) se actualizó, pero no se pudo anotar el cambio en el historial de costos. Avisá a sistemas.`);
                     }
@@ -576,7 +584,7 @@ export async function POST(
         }
         if (resultado.sin_vencimiento) avisos.push('Quedó validado pero SIN vencimiento: el proveedor no tiene plazo de pago cargado y el comprobante no trae fecha de vencimiento. Cargá el vencimiento a mano en Finanzas.');
 
-        return NextResponse.json({ success: true, comprobante_id, ...resultado, atomico, avisos });
+        return NextResponse.json({ success: true, comprobante_id, ...resultado, atomico, avisos, precios_venta: preciosVenta });
 
     } catch (error: any) {
         console.error('[Validar Comprobante] Error:', error);

@@ -25,6 +25,7 @@
 
 import { netoCompra } from "./neto-compra"
 import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
+import { avisoPrecioVenta, type AvisoVenta } from "./lista-proveedor"
 import { tipoDescuentoProveedor } from "./tipo-descuento-proveedor"
 import { esComprobanteConPrecios } from "./finalizar-oc"
 import { pendientesDeOrden } from "@/lib/deposito/recepciones"
@@ -85,6 +86,11 @@ export interface ResultadoCosto {
   kardex_valorizados: number
   /** Cambios de último costo que NO se pudieron anotar en el historial (se avisa en pantalla) */
   historial_fallas: number
+  /**
+   * Artículos cuyo costo en ESTA factura es distinto del de su ficha (precio de lista y descuentos,
+   * que es de donde sale el precio de venta). No se toca nada: es para avisar y revisarlos.
+   */
+  precios_venta: Array<{ articulo_id: string; sku: string | null; descripcion: string | null; neto_ficha: number; neto_factura: number } & AvisoVenta>
   /** Suma de los renglones (neto) y neto del comprobante, para avisar si no cierran (E-46) */
   neto_renglones: number
   neto_comprobante: number
@@ -121,7 +127,7 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
       ? num(comprobante.total_neto)
       : num(comprobante.total_factura_declarado) - num(comprobante.total_iva) - num(comprobante.percepcion_iva_monto) - num(comprobante.percepcion_iibb_monto),
   )
-  const resultado: ResultadoCosto = { costos_actualizados: 0, kardex_valorizados: 0, historial_fallas: 0, neto_renglones: netoRenglones, neto_comprobante: netoComprobante }
+  const resultado: ResultadoCosto = { costos_actualizados: 0, kardex_valorizados: 0, historial_fallas: 0, precios_venta: [], neto_renglones: netoRenglones, neto_comprobante: netoComprobante }
   if (!esComprobanteConPrecios(comprobante.tipo_comprobante)) return resultado
 
   const conArticulo = lineas.filter((l) => !!l.articulo_id)
@@ -135,7 +141,7 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
     const { data: its } = await supabase.from("recepciones_items").select("id, factor_conversion").in("id", itemIds)
     for (const it of its || []) factorItem.set(it.id, num(it.factor_conversion))
   }
-  const { data: arts, error: artErr } = await supabase.from("articulos").select("id, unidades_por_bulto, ultimo_costo, precio_compra, descuento1, descuento2, descuento3, descuento4").in("id", idsArt)
+  const { data: arts, error: artErr } = await supabase.from("articulos").select("id, sku, descripcion, unidades_por_bulto, ultimo_costo, precio_compra, descuento1, descuento2, descuento3, descuento4, precio_base, porcentaje_ganancia, bonif_recargo").in("id", idsArt)
   if (artErr) throw artErr
   const art = new Map<string, any>((arts || []).map((a: any) => [a.id, a]))
 
@@ -185,6 +191,14 @@ export async function aplicarCostoDeFactura(supabase: any, comprobante: any, ocI
 
   // ── Último costo del artículo ──
   for (const [articuloId, p] of precio) {
+    // Precio de venta: sale del costo de la FICHA (lista y descuentos), que una factura no cambia.
+    // Si lo facturado es otro costo, se avisa para que alguien revise el precio de venta.
+    const ficha = art.get(articuloId)
+    if (ficha) {
+      const netoFicha = netoCompra(ficha.precio_compra, [ficha.descuento1, ficha.descuento2, ficha.descuento3, ficha.descuento4], tipoDto)
+      const aviso = netoFicha > 0 && Math.abs(p.neto - netoFicha) / netoFicha >= 0.01 ? avisoPrecioVenta(ficha, netoFicha, p.neto) : null
+      if (aviso) resultado.precios_venta.push({ articulo_id: articuloId, sku: ficha.sku ?? null, descripcion: ficha.descripcion ?? null, neto_ficha: r2(netoFicha), neto_factura: r2(p.neto), ...aviso })
+    }
     if (Math.abs(num(art.get(articuloId)?.ultimo_costo) - p.neto) < 0.00005) continue
     const { error } = await supabase.from("articulos").update({ ultimo_costo: p.neto }).eq("id", articuloId)
     if (error) throw error
