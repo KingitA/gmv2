@@ -663,8 +663,28 @@ function NuevaOrdenPagoContent() {
 
     // ── Cheques de cartera: ventana por fecha (editable) + filtro por color ──
     // Al día (plazo 0): default = solo cheques ya exigibles (365 antes / 0 después).
-    // A X días: objetivo = fecha OP + X, default ±5 días. Ambos ajustables.
-    const fechaObjetivoCheque = plazoCheque > 0 ? addDiasISO(fecha, plazoCheque) : fecha
+    // A X días: objetivo = base + X, default ±5 días. Ambos ajustables.
+    // La BASE es el vencimiento de lo que se está pagando (la cuota o el vencimiento tildado;
+    // si son varios, el más próximo), nunca antes de la fecha de la orden. Sin nada tildado
+    // con vencimiento, la fecha de la orden. Ej.: cuota que vence el 18/12, acuerdo al día →
+    // el cheque va con fecha 18/12, no con la de hoy.
+    const vencimientosPagados: string[] = imputaciones.flatMap((i): string[] => {
+        if (!(Number(i.monto_imputado) > 0)) return []
+        if (i.movimiento_cc_id) {
+            const cuotas = cuotasDeMov(i.movimiento_cc_id)
+            if (cuotas.length > 0) {
+                const n = Math.max(1, cuotasCubiertas(i.movimiento_cc_id, Number(i.monto_imputado)))
+                return cuotas.slice(0, n).map((v: any) => String(v.fecha_vencimiento || "").slice(0, 10))
+            }
+            const comp = comprobantesCC.find((c: any) => c.id === i.movimiento_cc_id)
+            return comp?.vencimiento ? [String(comp.vencimiento).slice(0, 10)] : []
+        }
+        const v = i.vencimiento_id ? vencimientosProv.find((x: any) => x.id === i.vencimiento_id) : null
+        return v?.fecha_vencimiento ? [String(v.fecha_vencimiento).slice(0, 10)] : []
+    }).filter(Boolean).sort()
+    const vencePrimero: string | null = vencimientosPagados[0] ?? null
+    const fechaBaseCheque = vencePrimero && vencePrimero > fecha ? vencePrimero : fecha
+    const fechaObjetivoCheque = plazoCheque > 0 ? addDiasISO(fechaBaseCheque, plazoCheque) : fechaBaseCheque
     useEffect(() => {
         if (!fichaPago) return
         if (plazoCheque > 0) { setDiasAntes("5"); setDiasDespues("5") }
@@ -1477,7 +1497,7 @@ function NuevaOrdenPagoContent() {
                             {fichaUsaEcheq && <Badge className="bg-indigo-600">según ficha</Badge>}
                             <span className="text-[11px] text-muted-foreground">
                                 {restante != null && restante > 0
-                                    ? `Hay que hacerlo por ${formatCurrency(restante)} con fecha de pago ${fmtFechaCorta(fechaObjetivoCheque)}${plazoCheque > 0 ? ` (acuerdo: cheques a ${plazoCheque} días)` : " (acuerdo: al día)"}. Se puede cambiar.`
+                                    ? `Hay que hacerlo por ${formatCurrency(restante)} con fecha de pago ${fmtFechaCorta(fechaObjetivoCheque)} (${fechaBaseCheque !== fecha ? `lo que se paga vence el ${fmtFechaCorta(fechaBaseCheque)}; ` : ""}${plazoCheque > 0 ? `acuerdo: cheques a ${plazoCheque} días` : "acuerdo: al día"}). Se puede cambiar.`
                                     : "Cheque o e-cheq de una cuenta nuestra. El banco baja cuando se debita."}
                             </span>
                         </div>

@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { sumarDocumentado } from '@/lib/compras/documentado';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { resolveFactorConversion } from '@/lib/services/conversion';
@@ -153,18 +154,14 @@ export async function PATCH(
                     const cantBase = Number(detalle.cantidad_facturada || 0) * conversion.factor;
                     tipoCantidad = conversion.factor === 1 ? 'unidad' : 'bulto';
 
-                    await supabase
-                        .from('recepciones_items')
-                        .update({
-                            cantidad_documentada: Number(recItem.cantidad_documentada || 0) + cantBase,
-                            precio_documentado: detalle.precio_unitario || 0,
-                            precio_real: detalle.precio_unitario || recItem.precio_oc || 0,
-                            cantidad_base: cantBase,
-                            factor_conversion: conversion.factor,
-                            conversion_source: conversion.source,
-                            requires_review: conversion.requiresReview,
-                        })
-                        .eq('id', recItem.id);
+                    await sumarDocumentado(supabase, recItem.id, cantBase, {
+                        precio_documentado: detalle.precio_unitario || 0,
+                        precio_real: detalle.precio_unitario || recItem.precio_oc || 0,
+                        cantidad_base: cantBase,
+                        factor_conversion: conversion.factor,
+                        conversion_source: conversion.source,
+                        requires_review: conversion.requiresReview,
+                    });
 
                     recepcionItemId = recItem.id;
                 }

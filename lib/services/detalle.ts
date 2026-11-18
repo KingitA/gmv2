@@ -1,4 +1,5 @@
 import { MatchingEngine } from '@/lib/matching/matcher';
+import { sumarDocumentado } from '@/lib/compras/documentado';
 import { resolveFactorConversion } from '@/lib/services/conversion';
 
 // El OCR a veces devuelve el descuento como MONTO en pesos en vez de %.
@@ -206,24 +207,18 @@ export async function matchAndCreateDetalle(supabase: any, params: {
         }
 
         if (recItem) {
-            // Acumular (no pisar): puede haber varios documentos por recepción. Se lee el valor
-            // fresco justo antes de sumar: otro documento de la misma orden puede haber sumado
-            // lo suyo mientras este se leía.
-            const { data: fresco } = await supabase.from('recepciones_items').select('cantidad_documentada').eq('id', recItem.id).maybeSingle();
-            if (fresco) recItem.cantidad_documentada = fresco.cantidad_documentada;
-            await supabase
-                .from('recepciones_items')
-                .update({
-                    cantidad_documentada: Number(recItem.cantidad_documentada || 0) + cantBase,
-                    precio_documentado: precioNeto,
-                    precio_real: precioNeto || recItem.precio_oc || 0,
-                    cantidad_base: cantBase,
-                    factor_conversion: conversion.factor,
-                    conversion_source: conversion.source,
-                    requires_review: conversion.requiresReview,
-                })
-                .eq('id', recItem.id);
-            recItem.cantidad_documentada = Number(recItem.cantidad_documentada || 0) + cantBase;
+            // Acumular (no pisar): puede haber varios documentos por recepción. La suma la hace la
+            // base en un solo paso (lib/compras/documentado.ts): dos documentos de la misma orden
+            // leídos a la vez suman los dos.
+            const quedo = await sumarDocumentado(supabase, recItem.id, cantBase, {
+                precio_documentado: precioNeto,
+                precio_real: precioNeto || recItem.precio_oc || 0,
+                cantidad_base: cantBase,
+                factor_conversion: conversion.factor,
+                conversion_source: conversion.source,
+                requires_review: conversion.requiresReview,
+            });
+            recItem.cantidad_documentada = quedo ?? Number(recItem.cantidad_documentada || 0) + cantBase;
         }
 
         matched.push({ articulo_id: articuloId, descripcion: item.descripcion });
@@ -283,18 +278,13 @@ export async function revertirComprobanteOCR(supabase: any, comprobante_id: stri
         // Misma convención que al sumar: solo un renglón 'bulto' se multiplica por el factor de la línea
         const factor = det.tipo_cantidad === 'bulto' ? Number(item.factor_conversion || 1) : 1;
         const restar = Number(det.cantidad_facturada || 0) * factor;
-        const nuevaCant = Math.max(0, Number(item.cantidad_documentada || 0) - restar);
+        // La resta también la hace la base en un solo paso (otro documento puede estar sumando)
+        const nuevaCant = (await sumarDocumentado(supabase, item.id, -restar)) ?? 0;
 
-        // Línea creada solo por este documento (fuera de OC, sin recepción física): eliminarla
+        // Línea creada solo por este documento (fuera de OC, sin recepción física): eliminarla.
+        // La condición va en el mismo DELETE: si otro documento le sumó recién, no se borra.
         if (item.fuera_de_oc && nuevaCant === 0 && Number(item.cantidad_fisica || 0) === 0) {
-            await supabase.from('recepciones_items').delete().eq('id', item.id);
-        } else {
-            await supabase.from('recepciones_items')
-                .update({
-                    cantidad_documentada: nuevaCant,
-                    ...(nuevaCant === 0 ? { precio_documentado: 0 } : {}),
-                })
-                .eq('id', item.id);
+            await supabase.from('recepciones_items').delete().eq('id', item.id).eq('cantidad_documentada', 0);
         }
     }
 

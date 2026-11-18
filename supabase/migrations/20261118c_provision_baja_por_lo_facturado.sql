@@ -12,11 +12,17 @@
 -- la orden (oc_cerrar_estimados la quita al finalizar). Provisión y estimado bajan igual.
 --
 -- Es la misma función comprobante_compra_validar de 20261117u con ese único cambio.
--- VA DESPUÉS de 20261117u (corta con mensaje si falta). No toca datos. Se puede correr más de una vez.
+-- Y la provisión se baja UNA sola vez: solo cuando el movimiento de deuda nace en esta validación.
+-- Si la factura entró por mail, el procesador ya la bajó (o la convirtió) al dejar la deuda.
+--
+-- VA DESPUÉS de 20261117u y de 20261118b (corta con mensaje si falta alguna). No toca datos. Se puede correr más de una vez.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 DO $$
 BEGIN
+  IF to_regprocedure('public.oc_vencimientos_estimados_cancelar(uuid, text, text, uuid)') IS NULL THEN
+    RAISE EXCEPTION 'Falta aplicar ANTES la migración 20261118b_oc_estimados_sin_borrar.sql. No se cambió nada.';
+  END IF;
   IF to_regprocedure('public.entrada_cableado_version()') IS NULL
      OR to_regprocedure('public.op_vencimientos_sincronizar_movimiento(uuid, uuid, boolean)') IS NULL THEN
     RAISE EXCEPTION 'Falta aplicar ANTES la migración 20261117u_cableado_oc_validar.sql. No se cambió nada.';
@@ -243,7 +249,10 @@ BEGIN
 
     -- ── 5. Provisión de la OC (solo la tocan los comprobantes de DEUDA) ──
     -- Una nota de débito NO es la factura de la orden: no baja la provisión.
-    IF NOT v_credito AND NOT v_debito_nota AND v_oc IS NOT NULL THEN
+    -- SOLO si el movimiento de deuda nació en ESTA validación (v_mov_nuevo). Si ya existía —una
+    -- factura que entró por mail: el procesador ya bajó la provisión al dejar la deuda, o la
+    -- convirtió entera— no se vuelve a restar: se restaría dos veces lo mismo.
+    IF NOT v_credito AND NOT v_debito_nota AND v_oc IS NOT NULL AND v_mov_nuevo THEN
       SELECT count(*) INTO v_otros
         FROM comprobantes_compra
        WHERE orden_compra_id = v_oc

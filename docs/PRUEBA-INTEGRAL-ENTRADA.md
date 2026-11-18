@@ -356,6 +356,13 @@ El merge NO depende de ninguna: el código detecta si están y, si no, sigue por
 10. **Pestaña que se cuelga en la verificación.** No se pudo medir con el navegador desde la sesión de trabajo: la causa NO está confirmada. Se corrigió lo que la pantalla hacía de más en cada refresco: (a) el enlace firmado de la foto cambia en cada carga y el visor volvía a descargar y dibujar la imagen cada vez (ahora conserva el enlace mientras sea el mismo documento); (b) "Revisar matches" volvía a pedir los renglones de todos los comprobantes cada vez que la pantalla se dibujaba (al abrir un cartel, por ejemplo) porque recibía una lista nueva en cada dibujado. Si vuelve a pasar, hace falta el perfil del navegador.
 11. **Nombre del proveedor en lugar de la sigla** en la cuenta corriente (la sigla va chica al lado) y en la lista de órdenes de pago.
 
+### Arreglos de la revisión de `entrada-t1-ocr-match` (18/11)
+
+1. **La provisión se baja una sola vez.** La validación la baja solo cuando el movimiento de deuda nace ahí (`v_mov_nuevo`); si la factura entró por mail, el procesador ya la bajó (o la convirtió) al dejar la deuda. `20261118c` corta si falta la `20261118b`. Con orden de compra y sin la función de validar, el servidor contesta "falta migración" (ya no hay camino por partes).
+2. **Dos lecturas a la vez, resuelto en la base** (`20261118e_recepcion_documentado_atomico.sql`, independiente): lo documentado de una línea se suma en un solo UPDATE (`recepcion_item_sumar_documentado`, lo usan la oficina, la app Depósito, el mail, "Revisar matches" y los renglones a mano) y el comprobante provisorio lo decide la base con la orden bloqueada (`comprobante_provisorio_obtener`). Sin la migración sigue el camino anterior.
+3. **Matching:** "el código es el SKU" corre solo en compras y después de la equivalencia aprendida del proveedor. Un código de barras que cae en un artículo de otro proveedor queda sugerido y marcado, nunca asignado solo.
+4. El mail y la recepción sin orden pasan el contexto de compra. Al corregir un renglón se usa un solo factor de bulto para lo de antes y lo nuevo, sin pisar el factor de la recepción.
+
 ### Orden de las migraciones de la Tanda 1
 
 Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `20261116c`, `20261116p`, `20261116q`, `20261117a_remito_no_se_valida`, `20261117a_op_ganancias_bases_neto`.
@@ -372,7 +379,8 @@ Las que ya están aplicadas en producción (16/11): `20261116a`, `20261116b`, `2
 | 8 | `20261117u_cableado_oc_validar.sql` | **la d, la n y la p** (corta con mensaje si falta alguna). Sin ella el servidor no valida comprobantes de una orden de compra (avisa que falta). |
 | 9 | `20261118a_comprobantes_compra_cambios.sql` | independiente (registro de renglones tocados a mano) |
 | 10 | `20261118b_oc_estimados_sin_borrar.sql` | la n |
-| 11 | `20261118c_provision_baja_por_lo_facturado.sql` | **la u** (corta con mensaje si falta). Reemplaza la función de validar. |
+| 11 | `20261118c_provision_baja_por_lo_facturado.sql` | **la u y la 18b** (corta con mensaje si falta alguna). Reemplaza la función de validar. |
+| 12 | `20261118e_recepcion_documentado_atomico.sql` | independiente (sumado atómico de lo documentado y provisorio con bloqueo) |
 
 Aparte, una sola vez y a mano: `scripts/entrada-limpieza-kardex-en-camino.sql`.
 
