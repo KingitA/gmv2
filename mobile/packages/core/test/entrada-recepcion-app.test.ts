@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest"
 import { lineaIncompleta, resumenCierre, textoFalta, unidadesFaltantes, vistaRecepcion } from "../../../apps/deposito/src/datos/overlay"
 import { faltaParaRegistrarBultos } from "../../../apps/deposito/src/datos/borradorBultos"
-import { documentoCompleto, documentosEnCola, enviosDeDocumento, lecturaDeDocumento, LIMITE_SUBIDA_BYTES, megas, motivoNoLeido, nombreTipoComprobante, repartirEnEnvios, revisarArchivo, type HojaLocal } from "../../../apps/deposito/src/datos/documentos"
+import { documentoCompleto, documentosEnCola, enviosDeDocumento, lecturaDeDocumento, LIMITE_SUBIDA_BYTES, megas, motivoNoLeido, nombreTipoComprobante, repartirEnEnvios, revisarArchivo, revisarSeleccion, type HojaLocal } from "../../../apps/deposito/src/datos/documentos"
 import { documentoCompleto as completoServidor, documentoParaApp, hojasDeDocumento, motivoParaOperario, tandasDeLectura, unirLecturas, validarEnvioDocumento } from "../../../../lib/deposito/documentos-reglas"
 import type { OrdenRecepcion } from "../../../apps/deposito/src/datasets"
 import { avisoErrorSync } from "../src/ui/aviso-sync"
@@ -289,5 +289,54 @@ describe("lectura: tandas por peso, unión, motivo en castellano y app vieja (re
     expect(documentoParaApp(leido)).toBe(leido)
     const viejo = { lectura_estado: null, procesado: false, datos_ocr: null }
     expect(documentoParaApp(viejo)).toBe(viejo)
+  })
+})
+
+describe("varios archivos elegidos de una vez (fotos que llegaron por WhatsApp)", () => {
+  const foto = (n: number) => ({ name: `IMG-WA000${n}.jpg`, type: "image/jpeg", size: 1000 })
+  const pdf = (n = 1) => ({ name: `factura-${n}.pdf`, type: "application/pdf", size: 1000 })
+  const nombres = (r: { aceptados: { archivo: { name: string } }[] }) => r.aceptados.map((a) => a.archivo.name)
+
+  it("tres fotos juntas entran las tres, en el orden elegido", () => {
+    const r = revisarSeleccion([foto(1), foto(2), foto(3)], [])
+    expect(nombres(r)).toEqual(["IMG-WA0001.jpg", "IMG-WA0002.jpg", "IMG-WA0003.jpg"])
+    expect(r.avisos).toEqual([])
+  })
+
+  it("se suman a las hojas que ya había (cámara + archivo en el mismo documento)", () => {
+    const r = revisarSeleccion([foto(2), foto(3)], [{ mime: "image/jpeg" }])
+    expect(nombres(r)).toEqual(["IMG-WA0002.jpg", "IMG-WA0003.jpg"])
+    expect(r.avisos).toEqual([])
+  })
+
+  it("un PDF va solo: ni con fotos ni con otro PDF", () => {
+    expect(nombres(revisarSeleccion([pdf()], []))).toEqual(["factura-1.pdf"])
+    const dos = revisarSeleccion([pdf(1), pdf(2)], [])
+    expect(nombres(dos)).toEqual(["factura-1.pdf"])
+    expect(dos.avisos[0]).toMatch(/Un PDF por documento/)
+    const mezcla = revisarSeleccion([pdf(), foto(1), foto(2)], [])
+    expect(nombres(mezcla)).toEqual(["IMG-WA0001.jpg", "IMG-WA0002.jpg"])
+    expect(mezcla.avisos[0]).toMatch(/un PDF va solo/)
+    const conFotos = revisarSeleccion([pdf()], [{ mime: "image/jpeg" }])
+    expect(conFotos.aceptados).toEqual([])
+    expect(conFotos.avisos[0]).toMatch(/Un PDF va solo/)
+    const yaPdf = revisarSeleccion([foto(1)], [{ mime: "application/pdf" }])
+    expect(yaPdf.aceptados).toEqual([])
+    expect(yaPdf.avisos[0]).toMatch(/ya es un PDF/)
+  })
+
+  it("lo que no sirve queda afuera con su nombre y lo demás entra", () => {
+    const r = revisarSeleccion([foto(1), { name: "lista.xlsx", type: "application/vnd.ms-excel", size: 10 }, foto(2)], [])
+    expect(nombres(r)).toEqual(["IMG-WA0001.jpg", "IMG-WA0002.jpg"])
+    expect(r.avisos).toEqual(["lista.xlsx: Ese archivo no sirve: tiene que ser una foto o un PDF."])
+    // un solo archivo: el motivo sin el nombre adelante
+    expect(revisarSeleccion([{ name: "lista.xlsx", type: "", size: 10 }], []).avisos).toEqual(["Ese archivo no sirve: tiene que ser una foto o un PDF."])
+  })
+
+  it("tope de 30 hojas por documento: entra lo que cabe y lo dice", () => {
+    const r = revisarSeleccion(Array.from({ length: 5 }, (_, i) => foto(i)), Array(28).fill({ mime: "image/jpeg" }))
+    expect(r.aceptados.length).toBe(2)
+    expect(r.avisos[0]).toMatch(/entraron 2 de las 5/)
+    expect(revisarSeleccion([], []).aceptados).toEqual([])
   })
 })

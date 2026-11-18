@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.5.7 (versionCode 21) — 2026-11-18
+
+- Documentos de la recepcion: se pueden elegir varias fotos juntas desde archivo y sumar hojas desde archivo o camara en el mismo comprobante
+
 ## v0.5.6 (versionCode 20) — 2026-11-18
 
 - Documentos de la recepcion: lectura mas segura (todo o nada), documentos pesados en tandas, motivos en castellano

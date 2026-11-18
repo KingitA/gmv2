@@ -1405,6 +1405,18 @@ La v0.5.5 no se instaló en ningún equipo; esta la reemplaza.
   (`/comprobantes/<ruta>`) y se firma al mostrar, como ya hacía el resto del sistema.
 - La app espera la lectura hasta 310 s y muestra "pendiente" si la lectura quedó a medias.
 
+### v0.5.7 (18/11/2026): varias fotos desde archivo en un mismo documento
+
+Solo la app; no cambia el servidor ni el outbox.
+
+- El `<input type="file">` de "PDF o archivo" lleva `multiple`: Capacitor lo traduce a
+  `EXTRA_ALLOW_MULTIPLE` y el selector de Android deja marcar varias fotos (las 2 o 3 de una
+  factura que llegó por WhatsApp). Entran como hojas del MISMO documento, en el orden elegido.
+- Con hojas ya cargadas hay dos botones: "📷 Otra hoja" (cámara) y "🖼️ Otra hoja desde archivo".
+  Se pueden mezclar fotos de la cámara y del archivo en un documento.
+- Regla pura `revisarSeleccion(archivos, hojasActuales)` (`datos/documentos.ts`): un PDF va solo
+  (ni con fotos ni con otro PDF), tope de 30 hojas, lo que no es foto ni PDF queda afuera con aviso.
+
 ---
 
 ## 18. Vendedor (com.gm.vendedor) — Sesión 1

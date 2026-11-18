@@ -5,6 +5,7 @@
 // =====================================================
 
 import Anthropic from '@anthropic-ai/sdk'
+import { MODELO_CLAUDE, ESFUERZO_SIMPLE } from './modelos-claude'
 import { parseMonto } from '@/lib/formato'
 import {
     SYSTEM_PROMPT_XLSX_ORDER,
@@ -33,7 +34,8 @@ function getClient(): Anthropic {
     return anthropicClient
 }
 
-const MODEL = 'claude-sonnet-4-6'
+// El modelo se nombra en un solo lugar: lib/ai/modelos-claude.ts (E-82)
+const MODEL = MODELO_CLAUDE.extraccion
 const MAX_TOTAL_CHARS = 50000  // Max chars to send to Claude
 
 // ─── Retry Helper ──────────────────────────────────────
@@ -303,14 +305,16 @@ export async function analyzeXlsxOrder(buffer: Buffer, filename: string): Promis
     const client = getClient()
 
     const totalRows = sheets.reduce((sum, s) => sum + s.totalRows, 0)
-    // 16384 tokens for large orders (1 token ≈ 4 chars; 246 items × ~90 chars ≈ ~5500 tokens + overhead)
-    const maxTokens = 16384
+    // Pedido grande: 246 ítems ≈ 5.500 tokens con el modelo anterior. El modelo actual cuenta
+    // ~30 % más tokens por el mismo texto y además piensa dentro del tope: 32.000 da margen.
+    const maxTokens = 32000
 
     console.log(`[ClaudeXlsx] Sending ${formattedData.length} chars to Claude (${totalRows} total rows, max_tokens: ${maxTokens})`)
 
     const response = await withRateLimitRetry(() => client.messages.create({
         model: MODEL,
         max_tokens: maxTokens,
+        output_config: { effort: ESFUERZO_SIMPLE },
         system: SYSTEM_PROMPT_XLSX_ORDER,
         messages: [{
             role: 'user',
@@ -344,13 +348,15 @@ export async function analyzeXlsxPriceList(buffer: Buffer, filename: string): Pr
     const client = getClient()
 
     const totalRows = sheets.reduce((sum, s) => sum + s.totalRows, 0)
-    const maxTokens = 4096
+    // antes 4096: el modelo actual cuenta más tokens por el mismo texto y piensa dentro del tope
+    const maxTokens = 16000
 
     console.log(`[ClaudeXlsx] Sending ${formattedData.length} chars to Claude (${totalRows} total rows, max_tokens: ${maxTokens})`)
 
     const response = await withRateLimitRetry(() => client.messages.create({
         model: MODEL,
         max_tokens: maxTokens,
+        output_config: { effort: ESFUERZO_SIMPLE },
         system: SYSTEM_PROMPT_XLSX_PRICELIST,
         messages: [{
             role: 'user',
@@ -385,7 +391,8 @@ export async function analyzeXlsxInvoice(buffer: Buffer, filename: string): Prom
 
     const response = await withRateLimitRetry(() => client.messages.create({
         model: MODEL,
-        max_tokens: 4096,
+        max_tokens: 16000, // antes 4096 (ver nota en lib/ai/modelos-claude.ts)
+        output_config: { effort: ESFUERZO_SIMPLE },
         system: SYSTEM_PROMPT_XLSX_INVOICE,
         messages: [{
             role: 'user',
