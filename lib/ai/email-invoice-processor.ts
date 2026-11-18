@@ -450,63 +450,17 @@ export async function processEmailAsInvoice(
                 console.log(`[InvoiceProcessor] ✅ Updated CC movement ${existingCC.id} from OC to ${tipoComp}`)
             } else {
                 // No existing OC movement found, create new one
-                ccResult = await createCCMovement(db, proveedorId, invoiceData, tipoComp, fechaHoy)
+                ccResult = await createCCMovement(db, proveedorId, invoiceData, tipoComp, fechaHoy, { sinVencimiento: true })
                 await vincularMovimientoAComprobante(db, ccResult?.id, comprobante.id)
             }
 
-            // Calculate and set vencimiento on the CC movement
-            if (ccResult && !isCredit) {
-                try {
-                    // E-06: el plazo sale del acuerdo de pago (el de la orden si lo tiene; si no, el de la
-                    // ficha del proveedor). plazo_dias / plazo_desde son legado y ya no se leen.
-                    const plazo = await plazoDePago(db, proveedorId, pendingOC.id, canalComprobante)
-                    const plazoDias = plazo.dias
-                    const plazoDesde = plazo.desde === 'recepcion' ? 'fecha_recepcion' : 'fecha_factura'
-
-                    let fechaBase = invoiceData.fecha_comprobante || fechaHoy
-                    // If plazo is from recepcion, check if there's a finished recepcion
-                    if (plazoDesde === 'fecha_recepcion') {
-                        const { data: rec } = await db.from('recepciones')
-                            .select('fecha_fin')
-                            .eq('orden_compra_id', pendingOC.id)
-                            .eq('estado', 'finalizada')
-                            .limit(1)
-                            .maybeSingle()
-                        // fecha_fin es timestamptz: el día argentino, no el UTC
-                        if (rec?.fecha_fin) fechaBase = fechaISO(rec.fecha_fin)
-                    }
-
-                    const fechaVencStr = invoiceData.fecha_vencimiento || sumarDiasISO(fechaBase, Number(plazoDias))
-
-                    // Update CC with vencimiento
-                    await db.from('cuenta_corriente_proveedores')
-                        .update({ fecha_vencimiento: fechaVencStr })
-                        .eq('id', ccResult.id)
-
-                    // Create vencimiento entry
-                    await db.from('vencimientos').insert({
-                        proveedor_id: proveedorId,
-                        tipo: 'factura',
-                        concepto: descripcion,
-                        monto: montoFinal,
-                        fecha_vencimiento: fechaVencStr,
-                        estado: 'pendiente',
-                        referencia_id: ccResult.id,
-                        referencia_tipo: 'cuenta_corriente',
-                        dias_alerta: 3,
-                        forma_pago: plazo.forma_pago,
-                        modalidad: plazo.modalidad,
-                        canal: canalComprobante,
-                        observaciones: plazo.aviso,
-                    })
-                    // Llegó el vencimiento real: se descuenta del ESTIMADO que generó la orden (E-05).
-                    // Si la función todavía no está en la base (migración 20261117n), no pasa nada.
-                    const { error: errEst } = await db.rpc('oc_vencimiento_estimado_reemplazar', { p_orden_id: pendingOC.id, p_canal: canalComprobante, p_monto: Math.abs(montoFinal) })
-                    if (errEst) console.warn('[InvoiceProcessor] No se reemplazó el vencimiento estimado de la orden:', errEst.message)
-                } catch (vErr) {
-                    console.error('[InvoiceProcessor] Error creating vencimiento for OC invoice:', vErr)
-                }
-            }
+            // El VENCIMIENTO REAL de una factura de una orden nace en UN solo lugar: al validar el
+            // comprobante (app/api/comprobantes-compra/[id]/validar + comprobante_compra_validar).
+            // Ahí salen las cuotas del acuerdo y se descuenta el vencimiento ESTIMADO de la orden.
+            // Antes este procesador creaba acá un vencimiento (uno solo, sin cuotas) y descontaba el
+            // estimado; al validar se volvía a descontar y, en una orden facturada en partes, se comía
+            // el estimado de lo que todavía no se facturó. Mientras el comprobante no se valida, el
+            // pago sigue a la vista por el vencimiento estimado de la orden.
 
             console.log(`[InvoiceProcessor] ✅ Created comprobante ${comprobante.id} linked to OC ${pendingOC.numero_orden}`)
 
@@ -555,7 +509,7 @@ export async function processEmailAsInvoice(
                             diferencia_centavos: 0,
                         }).select('id').single()
                         // Create CC movement (vinculado al comprobante: validar lo reutiliza, no lo duplica)
-                        const addMov = await createCCMovement(db, proveedorId, addInv, addTipo, fechaHoy)
+                        const addMov = await createCCMovement(db, proveedorId, addInv, addTipo, fechaHoy, { sinVencimiento: true })
                         await vincularMovimientoAComprobante(db, addMov?.id, addComp?.id)
                         // Article-level OCR for additional
                         if (recepcion && addComp) {
@@ -798,7 +752,9 @@ async function createCCMovement(
     proveedorId: string,
     invoiceData: ParsedInvoiceData,
     tipoComp: string,
-    fechaHoy: string
+    fechaHoy: string,
+    /** sinVencimiento: el comprobante es de una ORDEN de compra; su vencimiento nace al validarlo */
+    opts: { sinVencimiento?: boolean } = {}
 ) {
     const isCredit = ['NCA', 'NCB', 'NCC'].includes(tipoComp)
     const monto = invoiceData.total || 0
@@ -838,7 +794,7 @@ async function createCCMovement(
     if (error) throw error
 
     // Create vencimiento automatically for facturas (not credit notes)
-    if (!isCredit && data && montoFinal > 0) {
+    if (!isCredit && data && montoFinal > 0 && !opts.sinVencimiento) {
         try {
             // Get proveedor payment terms
             const { data: prov } = await db.from('proveedores')

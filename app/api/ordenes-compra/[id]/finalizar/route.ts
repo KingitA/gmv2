@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { cargarVerificacionOC } from '@/lib/compras/cargar-verificacion';
 import { cant } from '@/lib/deposito/unidades';
+import { moneda } from '@/lib/formato';
 import { sincronizarKardexEnCamino } from '@/lib/compras/costo-y-kardex';
 import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 
@@ -14,7 +15,10 @@ import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 //     tanto queda "recibida parcial" y el depósito puede recibir lo que falta.
 //
 //   GET  → { puede, faltas[], falta_factura, sin_validar[], sin_cubrir[], pendientes[] }
-//   POST → { aceptar_faltantes?: boolean } · finaliza, o 409 con los mismos datos y `error`.
+//   · si la orden tiene parte con factura y parte sin factura, cada parte necesita su comprobante
+//     validado; cerrarla sin él cancela lo estimado de esa parte y hay que decirlo expresamente
+//     (`aceptar_canal_sin_comprobante: true`).
+//   POST → { aceptar_faltantes?: boolean, aceptar_canal_sin_comprobante?: boolean } · finaliza, o 409 con los mismos datos y `error`.
 
 export async function GET(
     _request: NextRequest,
@@ -69,6 +73,19 @@ export async function POST(
             }, { status: 409 });
         }
 
+        // Orden con parte con factura y parte sin factura: cada parte necesita su comprobante validado
+        // (factura / adquisición). Cerrar sin él cancela lo que esa parte tenía estimado, y eso lo tiene
+        // que decidir alguien expresamente.
+        const sinComprobante = control.canales_sin_comprobante || [];
+        if (sinComprobante.length > 0 && body?.aceptar_canal_sin_comprobante !== true) {
+            const detalle = sinComprobante.map((x) => `la parte ${x.nombre} (${moneda(x.total_orden)} en la orden) no tiene ningún comprobante validado; al cerrar se cancelan ${moneda(x.provision)} de deuda provisoria y ${moneda(x.vencimiento_estimado)} de vencimiento estimado`).join('; ');
+            return NextResponse.json({
+                error: `La orden ${orden.numero_orden} no se finalizó: ${detalle}. Cargá y validá ese comprobante, o cerrala expresamente sin él.`,
+                codigo: 'falta_comprobante_del_canal',
+                ...control,
+            }, { status: 409 });
+        }
+
         // Solo si sigue en el estado que se leyó (dos personas finalizando a la vez: una sola escribe)
         const { data: cambiada, error: updErr } = await supabase
             .from('ordenes_compra')
@@ -103,6 +120,9 @@ export async function POST(
         } else if (cierre.error) {
             console.error('[OC finalizar] cierre de estimados:', cierre.error.message);
             avisos.push('La orden quedó finalizada, pero no se pudo quitar lo que tenía estimado (deuda provisoria y vencimientos estimados): revisalo en Finanzas y avisá a sistemas.');
+        }
+        for (const x of sinComprobante) {
+            avisos.push(`Se cerró sin comprobante de la parte ${x.nombre}: se cancelaron ${moneda(x.provision)} de deuda provisoria y ${moneda(x.vencimiento_estimado)} de vencimiento estimado de esta orden.`);
         }
         return NextResponse.json({ success: true, cerrada_sin_el_resto: control.pendientes.length > 0, avisos });
     } catch (error: any) {

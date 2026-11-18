@@ -523,7 +523,8 @@ export async function POST(
         // (contesta estimados_reemplazados). Sin ella se hace acá, apenas validado.
         const avisosEstimado: string[] = [];
         if (!resultado.ya_validado && !resultado.sin_deuda && !esCredito && !esRemito && ocId
-            && resultado.vencimiento_id && resultado.estimados_reemplazados === undefined) {
+            && !['ND', 'NDA', 'NDB', 'NDC'].includes(comprobante.tipo_comprobante)
+            && resultado.vencimiento_id && resultado.vencimiento_nuevo === true && resultado.estimados_reemplazados === undefined) {
             const est = await supabase.rpc('oc_vencimiento_estimado_reemplazar', { p_orden_id: ocId, p_canal: plan.canal, p_monto: total });
             if (est.error && !faltaLaFuncion(est.error, 'oc_vencimiento_estimado_reemplazar')) {
                 console.error('[Validar Comprobante] vencimiento estimado de la orden:', est.error.message);
