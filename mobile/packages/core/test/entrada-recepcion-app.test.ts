@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest"
 import { lineaIncompleta, resumenCierre, textoFalta, unidadesFaltantes, vistaRecepcion } from "../../../apps/deposito/src/datos/overlay"
 import { faltaParaRegistrarBultos } from "../../../apps/deposito/src/datos/borradorBultos"
+import { lecturaDeDocumento, LIMITE_SUBIDA_BYTES, megas, motivoNoLeido, nombreTipoComprobante, revisarArchivo } from "../../../apps/deposito/src/datos/documentos"
 import type { OrdenRecepcion } from "../../../apps/deposito/src/datasets"
 import { avisoErrorSync } from "../src/ui/aviso-sync"
 
@@ -104,5 +105,39 @@ describe("aviso de la barra de datos", () => {
     expect(avisoErrorSync("Failed to fetch", { sinSesion: false, online: false })).toMatch(/sin señal/)
     expect(avisoErrorSync("HTTP 500", { sinSesion: false, online: true })).toBe(" · último intento falló")
     expect(avisoErrorSync(undefined, { sinSesion: false, online: true })).toBe("")
+  })
+})
+
+describe("documentos de la recepción (E-38)", () => {
+  it("lo que leyó el sistema: tipo, número, total y renglones", () => {
+    const l = lecturaDeDocumento({ id: "d", procesado: true, datos_ocr: { comprobante: { tipo_comprobante: "FA", numero_comprobante: "0003-00045711", total_factura: 218969.34 }, items: [{}, {}, {}] } })
+    expect(l).toEqual({ estado: "leido", tipo: "Factura A", numero: "0003-00045711", total: 218969.34, renglones: 3, motivo: null })
+  })
+  it("no leído: lo dice en castellano, nunca el error crudo del lector", () => {
+    const l = lecturaDeDocumento({ id: "d", procesado: false, datos_ocr: { no_leido: true, motivo: "[GoogleGenerativeAI Error]: 402 Payment Required: quota exceeded" } })
+    expect(l.estado).toBe("no_leido")
+    expect(l.motivo).toMatch(/lector automático no está disponible/)
+    expect(l.motivo).not.toMatch(/Google|quota|402/)
+    expect(motivoNoLeido("Sin renglones")).toMatch(/Sacala de nuevo/)
+    expect(motivoNoLeido("fetch failed: timeout")).toMatch(/tardó demasiado/)
+    expect(motivoNoLeido(null)).toMatch(/No se pudo leer/)
+  })
+  it("foto de respaldo: adjunta, sin lectura", () => {
+    expect(lecturaDeDocumento({ id: "d", procesado: true, datos_ocr: null }).estado).toBe("adjunto")
+    expect(lecturaDeDocumento({ id: "d", procesado: true, datos_ocr: { items: [] } }).estado).toBe("adjunto")
+  })
+  it("nombres de tipo de comprobante", () => {
+    expect([nombreTipoComprobante("Remito"), nombreTipoComprobante("Adquisicion"), nombreTipoComprobante("NCA"), nombreTipoComprobante("otro"), nombreTipoComprobante("")]).toEqual(["Remito", "Adquisición", "Nota de crédito A", "otro", null])
+  })
+  it("qué archivos se aceptan: fotos (se achican después) y PDF de hasta 4 MB", () => {
+    expect(revisarArchivo({ type: "image/jpeg", name: "f.jpg", size: 6_000_000 })).toEqual({ ok: true, esImagen: true, esPdf: false })
+    expect(revisarArchivo({ type: "application/pdf", name: "factura.pdf", size: 900_000 })).toEqual({ ok: true, esImagen: false, esPdf: true })
+    expect(revisarArchivo({ type: "", name: "FACTURA.PDF", size: 900_000 })).toMatchObject({ ok: true, esPdf: true })
+    const grande = revisarArchivo({ type: "application/pdf", name: "f.pdf", size: LIMITE_SUBIDA_BYTES + 1 })
+    expect(grande.ok).toBe(false)
+    expect((grande as { motivo: string }).motivo).toMatch(/máximo es 4 MB/)
+    expect(revisarArchivo({ type: "application/zip", name: "x.zip", size: 10 })).toMatchObject({ ok: false })
+    expect(revisarArchivo({ type: "image/png", name: "x.png", size: 0 })).toMatchObject({ ok: false })
+    expect(megas(3_355_443)).toBe("3,2 MB")
   })
 })

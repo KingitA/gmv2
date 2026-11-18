@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { useNavigate, useParams } from "react-router"
 import { ErrorHttp, esQrOUrl, lecturaError, lecturaOk, useLector, useNoEnviados, useOnline, useOverlay, useRuntime } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
 import { fecha, moneda, parseMonto } from "@gm/formato"
 import { aUnidadesBase, cant, cantidadConUnidad, textoCantidad, type UnidadConteo } from "@gm/deposito"
+import { comprimirFoto } from "@gm/cheques/foto"
 import { DS } from "../../datasets"
 import { borrarBorradorBultos, faltaParaRegistrarBultos, guardarBorradorBultos, leerBorradorBultos } from "../../datos/borradorBultos"
 import { buscarPorCodigo, eansDe, padEan13 } from "../../datos/busqueda"
+import { lecturaDeDocumento, LIMITE_SUBIDA_BYTES, megas, revisarArchivo, type DocumentoRecepcion } from "../../datos/documentos"
 import { useArticulos, useCatalogos, useEncolar, useRecepcion, useRecepciones, useRefrescarAlEntrar } from "../../datos/hooks"
 import { lineaIncompleta, resumenCierre, textoFalta, unidadesFaltantes, type LineaRecepcion, type RecepcionVista } from "../../datos/overlay"
 import { BarraProgreso, C, Contadores, dejarAviso, DESCRIPCION, Marco, META, Rechazos, SinEnviar, TarjetaSwipe, TITULO_GRUPO, useAvisoEntrante, useTecladoAbierto, useToast, useVolver, Vacio } from "../../ui"
@@ -680,16 +682,40 @@ export function RecepcionFaltantes() {
   )
 }
 
-// ─── /recibir/:id/documentos — fotos + OCR (ONLINE-ONLY, MOBILE.md §9) ───────
+// ─── /recibir/:id/documentos — fotos, PDF y lo que leyó el sistema (ONLINE-ONLY, MOBILE.md §9) ───
 
-interface Documento {
-  id: string
-  tipo_documento?: string
-  url_imagen?: string | null
-  nombre_archivo?: string | null
-  procesado?: boolean
-  /** no_leido: la lectura automática falló o no encontró renglones (queda adjunto, sin comprobante). E-37 */
-  datos_ocr?: { comprobante?: { numero_comprobante?: string; total_factura?: number } | null; no_leido?: boolean; motivo?: string } | null
+type Documento = DocumentoRecepcion
+
+/** Lo que el sistema leyó de un documento (o por qué no pudo), en castellano. */
+function LecturaDoc({ doc, destacado }: { doc: Documento; destacado?: boolean }) {
+  const l = lecturaDeDocumento(doc)
+  if (l.estado === "adjunto") return destacado ? <div style={{ fontSize: 14, color: C.sub, fontWeight: 600 }}>📎 Quedó adjunto (no se lee: es una foto de respaldo).</div> : null
+  if (l.estado === "no_leido") {
+    return (
+      <div style={{ background: C.redL, border: `1.5px solid ${C.redB}`, borderRadius: 12, padding: "8px 10px", marginTop: destacado ? 0 : 6 }}>
+        <div style={{ color: C.red, fontWeight: 800, fontSize: 13 }}>NO SE PUDO LEER</div>
+        <div style={{ color: C.text, fontSize: 13, lineHeight: 1.35, marginTop: 2 }}>{l.motivo}</div>
+      </div>
+    )
+  }
+  const dato = (etiqueta: string, valor: string, falta = false) => (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 10, color: C.light, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>{etiqueta}</div>
+      <div style={{ fontSize: destacado ? 16 : 14, fontWeight: 800, color: falta ? C.orange : C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{valor}</div>
+    </div>
+  )
+  return (
+    <div style={{ background: C.greenL, border: `1.5px solid ${C.greenB}`, borderRadius: 12, padding: "8px 10px", marginTop: destacado ? 0 : 6 }}>
+      <div style={{ color: C.green, fontWeight: 800, fontSize: 12, marginBottom: 4 }}>✓ EL SISTEMA LEYÓ</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px" }}>
+        {dato("Tipo", l.tipo ?? "sin identificar", !l.tipo)}
+        {dato("Número", l.numero ?? "no se leyó", !l.numero)}
+        {dato("Total", l.total != null ? moneda(l.total) : "no se leyó", l.total == null)}
+        {dato("Renglones", String(l.renglones), l.renglones === 0)}
+      </div>
+      {(!l.numero || l.total == null) && <div style={{ color: C.orange, fontSize: 12, fontWeight: 700, marginTop: 4 }}>Falta algún dato: la oficina lo completa en la verificación.</div>}
+    </div>
+  )
 }
 
 export function RecepcionDocumentos() {
@@ -700,8 +726,11 @@ export function RecepcionDocumentos() {
   const { toast, mostrar } = useToast()
   const [docs, setDocs] = useState<Documento[] | null>(null)
   const [tipo, setTipo] = useState<"remito" | "factura" | "foto">("remito")
-  const [subiendo, setSubiendo] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const [subiendo, setSubiendo] = useState<string | null>(null)
+  // El último documento subido, para mostrarle al operario enseguida qué leyó el sistema
+  const [ultimo, setUltimo] = useState<Documento | null>(null)
+  const camaraRef = useRef<HTMLInputElement>(null)
+  const archivoRef = useRef<HTMLInputElement>(null)
   const recepcionId = r?.recepcionId ?? null
   const ordenId = r?.orden.id
 
@@ -716,25 +745,40 @@ export function RecepcionDocumentos() {
 
   if (!r) return <Marco titulo="Documentos">{toast}<OrdenNoDisponible cargando={cargando} /></Marco>
 
-  const subir = async (file: File) => {
-    if (!recepcionId) return
-    setSubiendo(true)
+  const subir = async (original: File) => {
+    if (!recepcionId || subiendo) return
+    const revision = revisarArchivo(original)
+    if (!revision.ok) { mostrar(revision.motivo, "err"); return }
+    setUltimo(null)
     try {
+      // Las fotos se achican ANTES de viajar: la cámara saca 3–6 MB y el servidor corta en 4,5 MB
+      let file = original
+      if (revision.esImagen) {
+        setSubiendo("Achicando la foto…")
+        const c = await comprimirFoto(original, { maxLado: 2000, calidad: 0.78 })
+        file = new File([c.blob], c.nombre, { type: c.mime })
+      }
+      if (file.size > LIMITE_SUBIDA_BYTES) {
+        mostrar(`El archivo pesa ${megas(file.size)} y el máximo es ${megas(LIMITE_SUBIDA_BYTES)}. ${revision.esPdf ? "Sacale fotos a las hojas en vez de subir el PDF." : "Sacá la foto de nuevo."}`, "err")
+        return
+      }
+      setSubiendo(tipo === "foto" ? "Subiendo…" : "Subiendo y leyendo…")
       const fd = new FormData()
       fd.append("file", file)
       fd.append("tipo_documento", tipo)
       const data = await api.postForm<{ document: Documento; ocr_processing_results?: unknown[]; no_leido?: boolean; aviso?: string }>(`/api/recepciones/${recepcionId}/ocr`, fd)
       setDocs((p) => [...(p || []), data.document])
-      const cnt = data.ocr_processing_results?.length || 0
-      // aviso del servidor: la foto no se pudo leer (quedó adjunta, sin comprobante) o no se leyó el número.
+      setUltimo(data.document)
+      const l = lecturaDeDocumento(data.document)
       // Un comprobante que ya estaba cargado llega como error (409) y lo muestra el catch.
-      if (data.aviso) mostrar(data.aviso, data.no_leido ? "err" : "ok")
-      else mostrar(cnt > 0 ? `📷 OCR: ${cnt} artículo${cnt > 1 ? "s" : ""} detectados` : "📷 Foto adjuntada")
+      if (l.estado === "no_leido") mostrar("No se pudo leer: mirá el detalle arriba", "err")
+      else if (l.estado === "leido") mostrar(`✓ Leído: ${l.renglones} renglón${l.renglones === 1 ? "" : "es"}`)
+      else mostrar("📎 Adjuntado")
       void sync.dataset(DATASET)
     } catch (e) {
-      mostrar(e instanceof ErrorHttp ? e.message : "Sin señal: la foto no se subió. Probá de nuevo cerca del WiFi.", "err")
+      mostrar(e instanceof ErrorHttp ? e.message : "Sin señal: el archivo no se subió. Probá de nuevo cerca del WiFi.", "err")
     } finally {
-      setSubiendo(false)
+      setSubiendo(null)
     }
   }
   const eliminar = async (docId: string) => {
@@ -742,62 +786,76 @@ export function RecepcionDocumentos() {
     try {
       await api.delete(`/api/recepciones/${recepcionId}/ocr`, { document_id: docId })
       setDocs((p) => (p || []).filter((d) => d.id !== docId))
+      setUltimo((u) => (u?.id === docId ? null : u))
       mostrar("Documento eliminado")
       void sync.dataset(DATASET)
-    } catch {
-      mostrar("Error al eliminar", "err")
+    } catch (e) {
+      mostrar(e instanceof ErrorHttp ? e.message : "No se pudo eliminar: sin señal", "err")
     }
   }
+  const elegido = (e: ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void subir(f) }
 
   const habilitado = online && !!recepcionId
+  const ocupado = !habilitado || !!subiendo
+  const boton = { border: "none", borderRadius: 14, padding: "10px 14px", minHeight: 52, fontSize: 15, fontWeight: 800, opacity: ocupado ? 0.5 : 1 } as const
   return (
     <Marco titulo="Documentos">
       {toast}
       <div style={{ padding: "16px 14px" }}>
         {!habilitado && (
           <div style={{ background: C.yellowL, border: `1px solid ${C.yellowB}`, borderRadius: 14, padding: 14, color: C.yellow, fontWeight: 600, fontSize: 14, marginBottom: 14 }}>
-            {online ? "La recepción todavía se está enviando al servidor. Probá en unos segundos." : "Sin señal: las fotos y el OCR necesitan conexión. Seguí contando y sacá las fotos cuando vuelvas a tener WiFi."}
+            {online ? "La recepción todavía se está enviando al servidor. Probá en unos segundos." : "Sin señal: las fotos y la lectura necesitan conexión. Seguí contando y sacá las fotos cuando vuelvas a tener WiFi."}
           </div>
         )}
-        <div style={{ marginBottom: 14, display: "flex", gap: 8 }}>
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void subir(f); e.target.value = "" }} />
-          <select value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)} style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 15, color: C.text, fontWeight: 600, flex: 1, minHeight: 48 }}>
-            <option value="remito">Remito</option>
-            <option value="factura">Factura</option>
-            <option value="foto">Foto</option>
+        <input ref={camaraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={elegido} />
+        <input ref={archivoRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={elegido} />
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ color: C.sub, fontSize: 13, fontWeight: 600, marginBottom: 4 }}>¿Qué vas a subir?</div>
+          <select value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)} style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 12, padding: "10px 12px", fontSize: 16, color: C.text, fontWeight: 700, width: "100%", minHeight: 50 }}>
+            <option value="remito">Remito (controla cantidades)</option>
+            <option value="factura">Factura (cantidades y precios)</option>
+            <option value="foto">Foto de respaldo (no se lee)</option>
           </select>
-          <button onClick={() => fileRef.current?.click()} disabled={!habilitado || subiendo} style={{ background: C.green, color: "#fff", border: "none", borderRadius: 14, padding: "10px 20px", minHeight: 48, fontSize: 15, fontWeight: 700, opacity: !habilitado || subiendo ? 0.5 : 1 }}>
-            {subiendo ? "⏳ OCR..." : "📷 Foto"}
-          </button>
         </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <button onClick={() => camaraRef.current?.click()} disabled={ocupado} style={{ ...boton, flex: 1.3, background: C.green, color: "#fff" }}>📷 Sacar foto</button>
+          <button onClick={() => archivoRef.current?.click()} disabled={ocupado} style={{ ...boton, flex: 1, background: C.white, color: C.text, border: `1.5px solid ${C.border}` }}>📄 PDF o archivo</button>
+        </div>
+        {subiendo && (
+          <div style={{ background: "#eff6ff", border: "1.5px solid #bfdbfe", borderRadius: 14, padding: 14, color: "#1d4ed8", fontWeight: 700, fontSize: 15, marginBottom: 14 }}>
+            ⏳ {subiendo} <span style={{ fontWeight: 500 }}>No cierres esta pantalla: leer una factura puede tardar hasta un minuto.</span>
+          </div>
+        )}
+        {ultimo && !subiendo && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 13, color: C.sub, fontWeight: 700, marginBottom: 4 }}>Recién subido: {ultimo.nombre_archivo || ultimo.tipo_documento}</div>
+            <LecturaDoc doc={ultimo} destacado />
+          </div>
+        )}
         {docs && docs.length === 0 && (
           <div style={{ textAlign: "center", padding: "40px 0", color: C.light }}>
             <div style={{ fontSize: 48 }}>📎</div>
             <div style={{ fontSize: 15, marginTop: 10 }}>No hay documentos adjuntos</div>
-            <div style={{ fontSize: 13, marginTop: 6 }}>Tomá una foto de la factura, remito o comprobante</div>
+            <div style={{ fontSize: 13, marginTop: 6 }}>Sacale una foto a la factura o al remito, o subí el PDF</div>
           </div>
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {(docs || []).map((doc) => {
-            const nro = doc.datos_ocr?.comprobante?.numero_comprobante
-            const total = doc.datos_ocr?.comprobante?.total_factura
+            const esPdf = (doc.tipo_mime || "").includes("pdf") || (doc.nombre_archivo || "").toLowerCase().endsWith(".pdf") || (doc.url_imagen || "").includes(".pdf")
             return (
-              <div key={doc.id} style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 18, padding: "14px 16px", display: "flex", gap: 12, alignItems: "center" }}>
-                <div style={{ fontSize: 32 }}>{doc.url_imagen && !doc.url_imagen.includes(".pdf") ? "🖼️" : "📄"}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.nombre_archivo || doc.tipo_documento || "Documento"}</div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+              <div key={doc.id} style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 18, padding: "12px 14px" }}>
+                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  <div style={{ fontSize: 30 }}>{esPdf ? "📄" : "🖼️"}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.nombre_archivo || doc.tipo_documento || "Documento"}</div>
                     <span style={{ fontSize: 11, background: "#e0f2fe", color: "#0369a1", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>{doc.tipo_documento}</span>
-                    {nro && <span style={{ fontSize: 11, color: C.sub }}>{nro}</span>}
-                    {total != null && parseMonto(total) != null && <span style={{ fontSize: 11, color: C.sub }}>{moneda(parseMonto(total))}</span>}
-                    {doc.procesado && <span style={{ fontSize: 11, background: "#dcfce7", color: "#15803d", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>OCR ✓</span>}
-                    {!doc.procesado && doc.datos_ocr?.no_leido && <span style={{ fontSize: 11, background: C.redL, color: C.red, padding: "2px 8px", borderRadius: 999, fontWeight: 700 }}>NO LEÍDO</span>}
                   </div>
+                  {doc.url_imagen && (
+                    <a href={doc.url_imagen} target="_blank" rel="noopener noreferrer" aria-label="Ver documento" style={{ background: "#f0f9ff", border: "1.5px solid #bae6fd", borderRadius: 10, minWidth: 44, minHeight: 44, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>👁️</a>
+                  )}
+                  <button onClick={() => void eliminar(doc.id)} disabled={ocupado} aria-label="Eliminar documento" style={{ background: C.redL, border: `1.5px solid ${C.redB}`, borderRadius: 10, minWidth: 44, minHeight: 44, fontSize: 16 }}>🗑️</button>
                 </div>
-                {doc.url_imagen && (
-                  <a href={doc.url_imagen} target="_blank" rel="noopener noreferrer" aria-label="Ver documento" style={{ background: "#f0f9ff", border: "1.5px solid #bae6fd", borderRadius: 10, minWidth: 44, minHeight: 44, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>👁️</a>
-                )}
-                <button onClick={() => void eliminar(doc.id)} disabled={!habilitado} aria-label="Eliminar documento" style={{ background: C.redL, border: `1.5px solid ${C.redB}`, borderRadius: 10, minWidth: 44, minHeight: 44, fontSize: 16 }}>🗑️</button>
+                <LecturaDoc doc={doc} />
               </div>
             )
           })}
