@@ -50,7 +50,7 @@ describe("diferencias de precio y cantidad", () => {
     d.recItems = [rec("i2", "b", 48)]
     const b = armarVerificacion(d).filas.find((f) => f.articulo_id === "b")!
     expect(b.banderas).toEqual(["precio"])
-    expect(b.dif.precio).toMatchObject({ neto: 1677.6, total: 2029.9 })
+    expect(b.dif.precio).toMatchObject({ neto: 1677.7, total: 2030.02 })
     expect(b.por_comprobante.fa).toEqual({ unidades: 48, neto_unidad: 1450 })
     expect(b.recepcion_item_id).toBe("i2")
   })

@@ -1,14 +1,15 @@
 // E-90 / E-91 — la cuenta de una diferencia de compra: netos por unidad + IVA discriminado.
 // Casos reales de la prueba en pantalla del 17/11 (OC-000011).
 import { describe, expect, it } from "vitest"
-import { calcularDiferencia, importe, netoDocumento, precioNeto, reclamablePorDevolucion } from "../../../../lib/compras/diferencias"
+import { calcularDiferencia, importe, netoCompra, reclamablePorDevolucion } from "../../../../lib/compras/diferencias"
 
 describe("precio neto", () => {
   it("descuentos en cascada", () => {
-    expect(precioNeto(100, [10, 10])).toBeCloseTo(81, 6)
-    expect(netoDocumento(1812.5, [20])).toBe(1450)
-    expect(netoDocumento(1768.81, [20])).toBe(1415.05)
-    expect(netoDocumento(696.04, [20])).toBe(556.83)
+    expect(netoCompra(100, [10, 10])).toBeCloseTo(81, 6)
+    expect(netoCompra(1812.5, [20])).toBeCloseTo(1450, 6)
+    // el neto por unidad NO se redondea: se redondea el importe del renglón, una sola vez
+    expect(netoCompra(1768.81, [20])).toBeCloseTo(1415.048, 6)
+    expect(netoCompra(696.04, [20])).toBeCloseTo(556.832, 6)
   })
 })
 
@@ -18,13 +19,15 @@ describe("diferencia de PRECIO (caso real: generaba $2.097,12)", () => {
     factura: [{ cantidad_facturada: 48, factor: 1, precio_unitario: 1812.5, descuentos: [20, 0, 0, 0], iva_porcentaje: 21 }],
     recibido_unidades: 48,
   })
-  it("(1.450,00 − 1.415,05) × 48 = $1.677,60 neto, con IVA aparte", () => {
+  // Un solo redondeo, el del importe: 48 × 1.450,00 − 48 × 1.415,048 = 69.600,00 − 67.922,30 = $1.677,70
+  // (lo mismo que da el total de la orden contra el de la factura; redondeando antes el unitario daba $1.677,60)
+  it("(1.450,00 − 1.415,048) × 48 = $1.677,70 neto, con IVA aparte", () => {
     expect(d.precio).not.toBeNull()
-    expect(d.precio!.por_unidad).toBe(34.95)
+    expect(d.precio!.por_unidad).toBeCloseTo(34.952, 6)
     expect(d.precio!.unidades).toBe(48)
-    expect(d.precio!.neto).toBe(1677.6)
-    expect(d.precio!.iva).toBe(352.3)
-    expect(d.precio!.total).toBe(2029.9)
+    expect(d.precio!.neto).toBe(1677.7)
+    expect(d.precio!.iva).toBe(352.32)
+    expect(d.precio!.total).toBe(2030.02)
     expect(d.precio!.a_favor).toBe("nuestro")
   })
   it("no hay diferencia de cantidad", () => expect(d.cantidad).toBeNull())
@@ -40,8 +43,8 @@ describe("FALTANTE (caso real: generaba $34.802,00 y bajaba 50 de stock)", () =>
     factura: [{ cantidad_facturada: 200, factor: 1, precio_unitario: 696.04, descuentos: [20], iva_porcentaje: 21 }],
     recibido_unidades: 150,
   })
-  it("50 u × $556,83 = $27.841,50 neto + IVA", () => {
-    expect(d.cantidad).toMatchObject({ tipo: "faltante", unidades: 50, neto: 27841.5, iva: 5846.72, total: 33688.22 })
+  it("50 u × $556,832 = $27.841,60 neto + IVA (el importe se redondea una sola vez)", () => {
+    expect(d.cantidad).toMatchObject({ tipo: "faltante", unidades: 50, neto: 27841.6, iva: 5846.74, total: 33688.34 })
   })
   it("sin diferencia de precio", () => expect(d.precio).toBeNull())
 })
@@ -163,14 +166,14 @@ describe("otros casos", () => {
 })
 
 describe("descuentos del proveedor: en cascada o sobre precio de lista (decisión de Juan, 17/11)", async () => {
-  const { netoCompra, netoDocumento, calcularDiferencia, tipoDescuentoDe } = await import("../../../../lib/compras/diferencias")
+  const { netoCompra, calcularDiferencia, tipoDescuentoDe } = await import("../../../../lib/compras/diferencias")
   it("en cascada: uno sobre el otro — 1.000 con 10 % y 5 % = 855", () => {
     expect(netoCompra(1000, [10, 5], "cascada")).toBeCloseTo(855, 6)
     expect(netoCompra(1000, [10, 5])).toBeCloseTo(855, 6)
   })
   it("sobre lista: se suman — 1.000 con 10 % y 5 % = 850", () => {
     expect(netoCompra(1000, [10, 5], "sobre_lista")).toBeCloseTo(850, 6)
-    expect(netoDocumento(1768.81, [10, 10], "sobre_lista")).toBe(1415.05)
+    expect(netoCompra(1768.81, [10, 10], "sobre_lista")).toBeCloseTo(1415.048, 6)
   })
   it("sobre lista: descuentos que suman más de 100 % no dan un precio negativo", () => {
     expect(netoCompra(1000, [60, 50], "sobre_lista")).toBe(0)

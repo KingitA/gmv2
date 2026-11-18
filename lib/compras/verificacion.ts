@@ -18,7 +18,7 @@
  */
 
 import { totalesOC } from "./oc-totales"
-import { calcularDiferencia, combinarLineasOC, precioNeto, type DiferenciaLinea, type LineaFactura, type TipoDescuento } from "./diferencias"
+import { calcularDiferencia, combinarLineasOC, netoCompra, type DiferenciaLinea, type LineaFactura, type TipoDescuento } from "./diferencias"
 import { esComprobanteConPrecios, esRemito } from "./finalizar-oc"
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
@@ -174,7 +174,7 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
       const c = comp.get(l.comprobante_id)!
       const f = factorDe(l)
       const unidades = num(l.cantidad_facturada) * f
-      const neto = precioNeto(l.precio_unitario, descuentos(l), tipoDto) / f
+      const neto = netoCompra(l.precio_unitario, descuentos(l), tipoDto) / f
       const pc = (porComprobante[c.id] ??= { unidades: 0, neto_unidad: 0 })
       pc.unidades += unidades
       if (!pc.neto_unidad && neto > 0) pc.neto_unidad = r2(neto)
@@ -271,7 +271,7 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
         return {
           comprobante: `${c.tipo_comprobante} ${c.numero_comprobante}`,
           descripcion: l.descripcion_proveedor || "(sin descripción)",
-          importe: r2(num(l.cantidad_facturada) * precioNeto(l.precio_unitario, descuentos(l), tipoDto)),
+          importe: r2(num(l.cantidad_facturada) * netoCompra(l.precio_unitario, descuentos(l), tipoDto)),
         }
       }),
   }
