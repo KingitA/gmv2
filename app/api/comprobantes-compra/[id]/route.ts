@@ -1,7 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { formatearNumeroComprobante } from '@/lib/services/numero-comprobante';
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requirePermiso } from '@/lib/auth';
 import { revertirComprobanteOCR } from '@/lib/services/detalle';
 
 // PATCH /api/comprobantes-compra/[id] — editar a mano los datos del comprobante
@@ -9,7 +9,7 @@ export async function PATCH(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     try {
@@ -66,7 +66,7 @@ export async function DELETE(
     _request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     try {
@@ -78,7 +78,7 @@ export async function DELETE(
         // aparecía dos veces.
         const { data: docs } = await supabase.from('recepciones_documentos').select('id, storage_path').eq('comprobante_id', id);
 
-        const { error: revertError } = await revertirComprobanteOCR(supabase, id);
+        const { error: revertError } = await revertirComprobanteOCR(supabase, id, { usuarioId: auth.user.id });
         if (revertError) {
             return NextResponse.json({ error: revertError }, { status: 409 });
         }

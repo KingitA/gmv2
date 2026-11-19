@@ -376,7 +376,7 @@ export async function DELETE(
         if (otrasHojas.length > 0) await supabase.storage.from("comprobantes").remove(otrasHojas);
 
         if (doc.comprobante_id) {
-            const { error: revertError } = await revertirComprobanteOCR(supabase, doc.comprobante_id);
+            const { error: revertError } = await revertirComprobanteOCR(supabase, doc.comprobante_id, { usuarioId: auth.user.id });
             if (revertError) {
                 return NextResponse.json({ error: revertError }, { status: 409 });
             }

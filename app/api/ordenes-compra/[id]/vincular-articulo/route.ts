@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 
 /**
  * POST /api/ordenes-compra/[id]/vincular-articulo — "no era ese artículo,
@@ -21,7 +21,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso('compras')
   if (auth.error) return auth.error
   const { id: ocId } = await params
   try {

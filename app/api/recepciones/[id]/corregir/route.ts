@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requirePermiso } from '@/lib/auth';
 import { conversionesDeRecepcion } from '@/lib/deposito/recepciones';
 import { aUnidadesBase, cant } from '@/lib/deposito/unidades';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
@@ -18,7 +18,7 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     try {
@@ -79,6 +79,7 @@ export async function POST(
         }
         const r: any = rpc.data;
         const ajuste = Number(r.ajuste_stock || 0);
+        let avisoKardex = '';
 
         // Kardex del ajuste (solo si se movió stock). Valorizado al NETO, igual que la compra que
         // corrige: el neto con el que quedó esa compra en el kardex de esta recepción (el de la
@@ -115,7 +116,9 @@ export async function POST(
                     operador_id: auth.user.id,
                 }, { sku: a?.sku, descripcion: a?.descripcion, categoria: a?.categoria, marca_id: a?.marca_id, proveedor_id: a?.proveedor_id, iva_compras: a?.iva_compras, iva_ventas: a?.iva_ventas });
             } catch (e: any) {
+                // El stock YA se movió (lo hizo la función SQL): no se deshace, pero se avisa en pantalla
                 console.error('[corregir conteo] kardex:', e?.message || e);
+                avisoKardex = `ATENCIÓN: el stock ${ajuste > 0 ? 'subió' : 'bajó'} ${cant(Math.abs(ajuste))} unidades, pero no se pudo anotar el movimiento en el kardex; avisá a sistemas.`;
             }
         }
 
@@ -123,7 +126,7 @@ export async function POST(
         const mensaje = ajuste === 0
             ? `Lo recibido pasó de ${cant(totalAntes)} a ${cant(unidades)} unidades. El stock no cambió${r.ya_habia_sumado_stock ? '' : ' (la recepción todavía no se finalizó)'}.`
             : `Lo recibido pasó de ${cant(totalAntes)} a ${cant(unidades)} unidades y el stock ${ajuste > 0 ? `subió ${cant(ajuste)}` : `bajó ${cant(-ajuste)}`}.`;
-        return NextResponse.json({ success: true, ...r, mensaje });
+        return NextResponse.json({ success: true, ...r, mensaje: avisoKardex ? `${mensaje} ${avisoKardex}` : mensaje, ...(avisoKardex ? { aviso_kardex: avisoKardex } : {}) });
     } catch (error: any) {
         console.error('[corregir conteo] Error:', error);
         return NextResponse.json({ error: `No se pudo corregir y no se cambió nada. Detalle para sistemas: ${error.message || error}` }, { status: 500 });

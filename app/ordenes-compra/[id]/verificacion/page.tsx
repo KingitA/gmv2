@@ -99,7 +99,7 @@ export default function VerificacionOCPage() {
         const porValidar = datos.comprobantes.filter((c) => c.tipo_comprobante !== "Remito" && !["validado", "cerrado", "esperada"].includes(c.estado))
         const lineas: string[] = []
         if (porValidar.length > 0) lineas.push(`Se validan ${porValidar.length} comprobante(s): ${porValidar.map((c) => `${c.tipo_comprobante} ${c.numero_comprobante}`).join(", ")}. Cada uno registra su deuda en la cuenta corriente del proveedor y su vencimiento.`)
-        if (sinResolver > 0) lineas.push(`⚠ Hay ${sinResolver} artículo(s) con diferencias de precio o cantidad SIN resolver.`)
+        if (sinResolver > 0) lineas.push(`⚠ Hay ${sinResolver} artículo(s) con diferencias de precio o cantidad SIN resolver. Si finalizás, quedan aceptadas así (se anota quién y cuándo) y ya no se van a poder resolver: la orden queda en solo lectura.`)
         if (pendientes.length > 0) lineas.push(`⚠ Falta recibir mercadería de ${pendientes.length} artículo(s): ${pendientes.slice(0, 6).map((p) => `${p.sku} (${cant(p.unidades)} u)`).join(", ")}${pendientes.length > 6 ? "…" : ""}. Al finalizar, la orden se cierra SIN el resto: el depósito ya no la va a poder recibir.`)
         // Si el comprobante de esa parte está cargado y se valida en este mismo paso, no falta nada
         const sinComprobante = (control.canales_sin_comprobante || []).filter((x) =>
@@ -137,7 +137,8 @@ export default function VerificacionOCPage() {
             const res = await fetch(`/api/ordenes-compra/${ordenId}/finalizar`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ aceptar_faltantes: pendientes.length > 0, aceptar_canal_sin_comprobante: sinComprobante.length > 0 }),
+                // aceptar_diferencias: solo porque la persona ya lo confirmó en el diálogo de arriba
+                body: JSON.stringify({ aceptar_faltantes: pendientes.length > 0, aceptar_canal_sin_comprobante: sinComprobante.length > 0, aceptar_diferencias: sinResolver > 0 }),
             })
             const fin = await res.json().catch(() => ({}))
             for (const a of (fin.avisos || []) as string[]) avisos.push(a)

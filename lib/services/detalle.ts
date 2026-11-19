@@ -272,7 +272,8 @@ export async function matchAndCreateDetalle(supabase: any, params: {
 // de recepciones_items (vía comprobantes_compra_detalle.recepcion_item_id) y
 // elimina detalle + comprobante creado por ese documento.
 // Devuelve error si el comprobante ya fue validado (tiene CC/vencimientos).
-export async function revertirComprobanteOCR(supabase: any, comprobante_id: string): Promise<{ error?: string }> {
+// La deuda que dejó el mail (sin validar) la deshace comprobante_compra_deshacer_deuda (20261119o).
+export async function revertirComprobanteOCR(supabase: any, comprobante_id: string, opts: { usuarioId?: string | null } = {}): Promise<{ error?: string }> {
     const { data: comprobante } = await supabase
         .from('comprobantes_compra')
         .select('id, estado')
@@ -282,6 +283,26 @@ export async function revertirComprobanteOCR(supabase: any, comprobante_id: stri
     if (!comprobante) return {};
     if (comprobante.estado === 'validado' || comprobante.estado === 'cerrado') {
         return { error: 'El comprobante ya fue validado — anulá la validación antes de eliminar el documento' };
+    }
+
+    // Deuda que dejó el mail en la cuenta corriente (referencia_tipo 'comprobante_compra'): ANTES de
+    // borrar nada vuelve a la provisión de la orden (o se quita), en una transacción. Antes quedaba
+    // huérfana y, al volver a cargar el comprobante, la deuda quedaba dos veces (revisión 19/11).
+    // Si después falla el borrado, el comprobante queda sin deuda y al validarlo nace una sola vez.
+    const { createAdminClient } = await import('@/lib/supabase/admin');
+    const deshacer = await createAdminClient().rpc('comprobante_compra_deshacer_deuda', { p_comprobante_id: comprobante_id, p_usuario_id: opts.usuarioId ?? null });
+    if (deshacer.error) {
+        if (!faltaLaFuncion(deshacer.error, 'comprobante_compra_deshacer_deuda')) {
+            if (deshacer.error.code === 'P0001') return { error: deshacer.error.message };
+            return { error: `No se pudo deshacer la deuda del comprobante en la cuenta corriente; no se eliminó nada. Detalle para sistemas: ${deshacer.error.message}` };
+        }
+        // Migración 20261119o sin aplicar: solo se frena si hay deuda vinculada (borrarlo la dejaría huérfana)
+        const { count } = await supabase.from('cuenta_corriente_proveedores')
+            .select('id', { count: 'exact', head: true })
+            .eq('referencia_tipo', 'comprobante_compra').eq('referencia_id', comprobante_id);
+        if ((count ?? 0) > 0) {
+            return { error: 'Este comprobante entró por mail y ya tiene su deuda en la cuenta corriente del proveedor: todavía no se puede eliminar sin duplicarla al volver a cargarlo (falta aplicar la migración 20261119o). No se eliminó nada.' };
+        }
     }
 
     const { data: detalle } = await supabase

@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requireAuth, requirePermiso } from '@/lib/auth'
 import { cuentaRenglon, factorDeUnidad, faltaEnRenglon, type UnidadRenglon } from '@/lib/compras/renglon-manual'
 import { tipoDescuentoProveedor } from '@/lib/compras/tipo-descuento-proveedor'
 import { netoCompra } from '@/lib/compras/neto-compra'
@@ -138,7 +138,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso('compras')
   if (auth.error) return auth.error
   const { id: comprobanteId } = await params
   try {
@@ -196,7 +196,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso('compras')
   if (auth.error) return auth.error
   const { id: comprobanteId } = await params
   try {
@@ -256,7 +256,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso('compras')
   if (auth.error) return auth.error
   const { id: comprobanteId } = await params
   try {

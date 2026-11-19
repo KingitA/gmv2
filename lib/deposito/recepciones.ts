@@ -32,6 +32,41 @@ export const ESTADOS_A_RECIBIR = ["pendiente", "enviada", "recibida_parcial"]
 /** Estados en los que una recepción todavía se puede contar y finalizar */
 const ABIERTA = ["en_proceso", "borrador"]
 
+/** Estados de la ORDEN en los que ya no se recibe nada: la oficina la cerró o la canceló */
+const ORDEN_CERRADA = ["finalizada", "cancelada"]
+
+/** Rechazo de negocio (4xx ⇒ el outbox no reintenta: el operario ve el mensaje) */
+function ordenCerrada(oc: { numero_orden?: string | null; estado?: string | null }) {
+  const cual = oc.numero_orden ? `La orden ${oc.numero_orden}` : "La orden"
+  const como = oc.estado === "cancelada" ? "fue cancelada por la oficina" : oc.estado === "finalizada" ? "ya la cerró la oficina" : `está ${String(oc.estado || "").replace(/_/g, " ")}`
+  return new ErrorDeposito(`${cual} ${como}: ya no se puede recibir mercadería con ella. Si llegó mercadería, avisá a la oficina. Este cambio no se aplicó.`, 409, { codigo: "orden_cerrada" })
+}
+
+/**
+ * Antes de contar, controlar bultos o finalizar: la recepción tiene que estar abierta y su orden no
+ * puede estar cancelada ni finalizada (revisión 19/11: antes un conteo tardío se aplicaba igual).
+ */
+async function recepcionParaContar(supabase: any, recepcion_id: string) {
+  const { data: rec, error } = await supabase.from("recepciones").select("id, estado, numero_tanda, orden_compra_id").eq("id", recepcion_id).maybeSingle()
+  if (error) throw error
+  if (!rec) throw new ErrorDeposito("Recepción no encontrada", 404)
+  if (!ABIERTA.includes(rec.estado)) {
+    throw new ErrorDeposito(
+      rec.estado === "finalizada"
+        ? `La entrega ${rec.numero_tanda || 1} de esta orden ya se finalizó: este cambio no se aplicó. Si hay que corregir lo recibido, avisá a la oficina.`
+        : "Esta recepción fue cancelada: este cambio no se aplicó.",
+      409,
+      { codigo: rec.estado === "finalizada" ? "recepcion_finalizada" : "recepcion_cancelada" },
+    )
+  }
+  if (rec.orden_compra_id) {
+    const { data: oc, error: ocErr } = await supabase.from("ordenes_compra").select("numero_orden, estado").eq("id", rec.orden_compra_id).maybeSingle()
+    if (ocErr) throw ocErr
+    if (oc && ORDEN_CERRADA.includes(oc.estado)) throw ordenCerrada(oc)
+  }
+  return rec as { id: string; estado: string; numero_tanda: number | null; orden_compra_id: string | null }
+}
+
 // ── Migración 20261116a_recepcion_unidades.sql (E-30 / E-40) ─────────────────
 // Agrega recepciones_items.unidad_conteo (+ rastro de lo aplicado al stock) y la
 // función recepcion_aplicar_stock. Mientras no esté aplicada todo sigue andando:
@@ -268,11 +303,15 @@ export async function obtenerOCrearRecepcion(supabase: any, orden_compra_id: str
   if (ultima && ultima.estado !== "finalizada") return ultima
 
   // Detalle de la OC (cantidades pedidas y precios) + proveedor
-  const { data: ocData } = await supabase.from("ordenes_compra").select("id, proveedor_id, estado").eq("id", orden_compra_id).maybeSingle()
+  const { data: ocData } = await supabase.from("ordenes_compra").select("id, numero_orden, proveedor_id, estado").eq("id", orden_compra_id).maybeSingle()
   if (!ocData) {
     if (ultima) return ultima
     throw new ErrorDeposito("Orden de compra no encontrada", 404)
   }
+  // Primera entrega de una orden que la oficina ya canceló o cerró (un equipo sin señal que
+  // sincroniza tarde): rechazo de negocio, el operario lo ve y no se reintenta. Antes se creaba la
+  // recepción y la orden cancelada "revivía" como recibida en parte (revisión 19/11).
+  if (!ultima && !ESTADOS_A_RECIBIR.includes(ocData.estado)) throw ordenCerrada(ocData)
 
   let detalles: Array<{ articulo_id: string; cantidad_pedida: number; precio_unitario: number }>
   if (ultima) {
@@ -331,7 +370,8 @@ export async function obtenerOCrearRecepcion(supabase: any, orden_compra_id: str
   }))
   if (itemsNuevos.length > 0) await supabase.from("recepciones_items").insert(itemsNuevos)
 
-  await supabase.from("ordenes_compra").update({ estado: "recibida_parcial" }).eq("id", orden_compra_id)
+  // Solo una orden que se puede recibir: nunca una que la oficina canceló o finalizó mientras tanto
+  await supabase.from("ordenes_compra").update({ estado: "recibida_parcial" }).eq("id", orden_compra_id).in("estado", ESTADOS_A_RECIBIR)
 
   const { data: full } = await supabase.from("recepciones").select(SELECT_FULL).eq("id", nueva.id).single()
   return full
@@ -352,6 +392,7 @@ export async function guardarConformidad(supabase: any, recepcion_id: string, co
   if (estado === "no_conforme" && !observaciones?.trim()) {
     throw new ErrorDeposito("Si los bultos no coinciden, la observación es obligatoria", 400)
   }
+  await recepcionParaContar(supabase, recepcion_id)
   const { data, error } = await supabase
     .from("recepciones")
     .update({
@@ -386,6 +427,7 @@ export async function aplicarItemRecepcion(
 ) {
   const { estado_linea, cantidad } = estadoLineaRecepcion(Number(cantidad_fisica))
   const elegida: UnidadConteo | null = cantidad > 0 && esUnidadConteo(unidad) ? unidad : null
+  const recepcion = await recepcionParaContar(supabase, recepcion_id)
   const conColumnas = await hayColumnasConteo(supabase)
 
   if (elegida && !conColumnas) {
@@ -420,6 +462,16 @@ export async function aplicarItemRecepcion(
     .eq("articulo_id", articulo_id)
     .select()
   if (error) throw error
+
+  // Recepción "borrador" (la creó la oficina al subir la factura): con el primer conteo pasa a
+  // "en proceso", la orden a "recibida en parte", y desde ahí la oficina ya no la puede cancelar ni
+  // editar mientras el depósito cuenta (oc_cancelar / oc_guardar miran "en_proceso"). Revisión 19/11.
+  if (recepcion.estado === "borrador") {
+    await supabase.from("recepciones").update({ estado: "en_proceso" }).eq("id", recepcion_id).eq("estado", "borrador")
+    if (recepcion.orden_compra_id) {
+      await supabase.from("ordenes_compra").update({ estado: "recibida_parcial" }).eq("id", recepcion.orden_compra_id).in("estado", ESTADOS_A_RECIBIR)
+    }
+  }
 
   // Artículo escaneado que NO está en la OC: registrarlo igual como
   // fuera_de_oc para que la verificación lo muestre (pedido 0, recibido N).
@@ -489,6 +541,12 @@ export async function finalizarRecepcion(supabase: any, recepcion_id: string, op
   if (!rec) throw new ErrorDeposito("Recepción no encontrada", 404)
   if (rec.estado === "finalizada") return { ok: true, ya_finalizada: true }
   if (rec.estado === "cancelada") throw new ErrorDeposito("La recepción fue cancelada.", 409, { codigo: "recepcion_cancelada" })
+  // La oficina ya cerró o canceló la orden: no se suma stock de una entrega que quedó abierta (19/11)
+  if (rec.orden_compra_id) {
+    const { data: oc, error: ocErr } = await supabase.from("ordenes_compra").select("numero_orden, estado").eq("id", rec.orden_compra_id).maybeSingle()
+    if (ocErr) throw ocErr
+    if (oc && ORDEN_CERRADA.includes(oc.estado)) throw ordenCerrada(oc)
+  }
 
   const conColumnas = await hayColumnasConteo(supabase)
   const { data: items, error: itemsErr } = await supabase
