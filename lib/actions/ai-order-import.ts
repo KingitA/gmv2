@@ -102,6 +102,8 @@ export async function parseOrderFile(formData: FormData): Promise<ParseResult> {
             }
             totalDetected += result.totalDetected
             needsReview += result.needsReview
+            // p. ej. "LECTURA INCOMPLETA" de un Excel largo: se muestra, no se pierde en silencio
+            if (result.errors?.length) errors.push(...result.errors.map((e) => `${file.name}: ${e}`))
         } catch (error: any) {
             console.error(`Error processing file ${file.name}:`, error)
             errors.push(`${file.name}: ${error.message || "Error desconocido"}`)
@@ -188,7 +190,9 @@ export async function processOrder(buffer: Buffer, fileName: string, mimeType: s
             console.log("Total items extracted via Claude:", finalParsedData.items.length)
             console.log("Detected Customer:", finalParsedData.customer || headerCustomer || "None")
 
-            return await processMatches(finalParsedData)
+            const resultado = await processMatches(finalParsedData)
+            if (xlsxAnalysis.aviso_incompleto) resultado.errors = [...(resultado.errors || []), xlsxAnalysis.aviso_incompleto]
+            return resultado
 
         } catch (xlsxErr: any) {
             console.error("Error parsing/processing XLSX:", xlsxErr)

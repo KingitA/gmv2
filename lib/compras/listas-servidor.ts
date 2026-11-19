@@ -40,17 +40,54 @@ export async function enlacesArchivosLista(supabase: any, lista: { storage_path?
   return salida
 }
 
-export interface ItemParaLista extends FilaLista {
-  /** Si ya viene resuelto (mail): artículo y qué tan seguro es */
-  articulo_id?: string | null
-  confianza?: "segura" | "dudosa" | null
+/**
+ * Un renglón de la lista tal como viene del archivo. El artículo NO viene resuelto de afuera (antes
+ * el mail lo traía decidido y salteaba la regla del proveedor): lo decide siempre vincularRenglon.
+ */
+export type ItemParaLista = FilaLista
+
+/**
+ * El vínculo de UN renglón con nuestros artículos, en contexto de compra del proveedor (lo mismo
+ * para la carga a mano, la que llega por mail y cuando se elige el proveedor después):
+ *   articuloId → encontrado con seguridad entre los del proveedor: se aplica;
+ *   sugeridoId → parecido, o de otro proveedor: queda "por revisar".
+ * SIN proveedor no hay "seguro": lo encontrado queda como sugerencia (no se sabe de quién es la lista).
+ */
+async function vincularRenglon(engine: MatchingEngine, it: FilaLista, proveedorId: string | null): Promise<{ articuloId: string | null; sugeridoId: string | null }> {
+  if (!it.codigo && !it.descripcion) return { articuloId: null, sugeridoId: null }
+  try {
+    // contexto de compra: el código exacto y los artículos del proveedor primero; uno de otro
+    // proveedor nunca se asigna solo
+    const m = await engine.resolveItem({ description: it.descripcion || "", code: it.codigo || undefined, price: it.precio_compra ?? undefined }, proveedorId || "", proveedorId ? {} : null)
+    const best = m.bestCandidate
+    if (!best?.sku_id) return { articuloId: null, sugeridoId: null }
+    if (proveedorId && m.status === "matched" && !best.otro_proveedor) return { articuloId: best.sku_id, sugeridoId: null }
+    if (best.confidence_level === "suggestion" || best.otro_proveedor || (!proveedorId && m.status === "matched")) return { articuloId: null, sugeridoId: best.sku_id }
+  } catch (e: any) {
+    console.warn("[listas] matching:", e?.message || e)
+  }
+  return { articuloId: null, sugeridoId: null }
+}
+
+/** Vincula muchos renglones, de a unos pocos a la vez (cada uno consulta la base y arma un embedding). */
+async function vincularRenglones(items: FilaLista[], proveedorId: string | null) {
+  const engine = new MatchingEngine()
+  const salida: Array<{ articuloId: string | null; sugeridoId: string | null }> = new Array(items.length)
+  const LOTE = 5
+  for (let i = 0; i < items.length; i += LOTE) {
+    const r = await Promise.all(items.slice(i, i + LOTE).map((it) => vincularRenglon(engine, it, proveedorId)))
+    r.forEach((v, j) => { salida[i + j] = v })
+  }
+  return salida
 }
 
 /**
  * Crea la lista con sus renglones. Cada renglón queda:
- *   pendiente  → artículo encontrado con seguridad: se aplica;
- *   revisar    → artículo sugerido (parecido, o de otro proveedor): falta confirmarlo;
+ *   pendiente  → artículo encontrado con seguridad entre los del proveedor: se aplica;
+ *   revisar    → artículo sugerido (parecido, o de otro proveedor, o lista sin proveedor): falta confirmarlo;
  *   ignorado   → sin artículo.
+ * Una lista SIN proveedor (mail de alguien que no se identificó) no tiene ningún renglón "pendiente"
+ * y no se puede aplicar hasta que se elija el proveedor (asignarProveedorLista).
  * Todo o nada: si los renglones no se pueden guardar, la cabecera se borra (no queda una lista vacía).
  */
 export async function crearListaProveedor(supabase: any, p: {
@@ -94,23 +131,10 @@ export async function crearListaProveedor(supabase: any, p: {
   if (error || !lista) throw new Error(error?.message || "No se pudo crear la lista")
 
   try {
-    const engine = new MatchingEngine()
+    const vinculos = await vincularRenglones(p.items, p.proveedor_id || null)
     const filas: any[] = []
-    for (const it of p.items) {
-      let articuloId: string | null = it.articulo_id && it.confianza === "segura" ? it.articulo_id : null
-      let sugeridoId: string | null = it.articulo_id && it.confianza !== "segura" ? it.articulo_id : null
-      if (!articuloId && !sugeridoId && (it.codigo || it.descripcion)) {
-        try {
-          // contexto de compra: el código exacto y los artículos del proveedor primero; uno de otro
-          // proveedor nunca se asigna solo
-          const m = await engine.resolveItem({ description: it.descripcion || "", code: it.codigo || undefined, price: it.precio_compra ?? undefined }, p.proveedor_id || "", p.proveedor_id ? {} : null)
-          const best = m.bestCandidate
-          if (m.status === "matched" && best?.sku_id && !best.otro_proveedor) articuloId = best.sku_id
-          else if (best?.sku_id && (best.confidence_level === "suggestion" || best.otro_proveedor)) sugeridoId = best.sku_id
-        } catch (e: any) {
-          console.warn("[listas] matching:", e?.message || e)
-        }
-      }
+    for (const [n, it] of p.items.entries()) {
+      const { articuloId, sugeridoId } = vinculos[n]
       filas.push({
         lista_id: lista.id,
         articulo_id: articuloId,
@@ -347,6 +371,50 @@ export async function vistaPreviaLista(supabase: any, listaId: string, op: { umb
       venta_cambian_solos: conCambio.filter((i) => i.venta?.tipo === "cambia_solo").length,
     },
   }
+}
+
+/**
+ * Elige (o corrige) el proveedor de una lista que todavía no se aplicó — típicamente una que llegó
+ * por mail de alguien que no se pudo identificar. Vuelve a vincular los renglones que decidió la
+ * máquina (por revisar, y sin artículo ni sugerencia) en contexto de ESE proveedor: lo encontrado
+ * con seguridad entre sus artículos queda para aplicar. Lo que alguien ya confirmó o descartó a mano
+ * no se toca. Una lista con algún renglón aplicado no cambia de proveedor.
+ */
+export async function asignarProveedorLista(supabase: any, listaId: string, proveedorId: string): Promise<{ revinculados: number; pendientes: number; revisar: number }> {
+  const { data: prov } = await supabase.from("proveedores").select("*").eq("id", proveedorId).maybeSingle()
+  if (!prov) throw Object.assign(new Error("El proveedor no existe."), { status: 404 })
+  const { data: lista } = await supabase.from("listas_proveedores").select("id, estado, proveedor_id").eq("id", listaId).maybeSingle()
+  if (!lista) throw Object.assign(new Error("La lista no existe."), { status: 404 })
+  if (lista.estado === "aplicada" || lista.estado === "programada") throw Object.assign(new Error("La lista ya está aplicada o programada: no se puede cambiar el proveedor."), { status: 409 })
+  const { count: aplicados } = await supabase.from("listas_proveedores_items").select("id", { count: "exact", head: true }).eq("lista_id", listaId).eq("estado_item", "aplicado")
+  if ((aplicados ?? 0) > 0) throw Object.assign(new Error("La lista ya tiene renglones aplicados: no se puede cambiar el proveedor."), { status: 409 })
+
+  const cambios: Record<string, unknown> = { proveedor_id: proveedorId }
+  if (prov.lista_precio_por) cambios.precio_por = precioPorDe(prov.lista_precio_por)
+  let upd = await supabase.from("listas_proveedores").update(cambios).eq("id", listaId)
+  if (faltaColumna(upd.error)) upd = await supabase.from("listas_proveedores").update({ proveedor_id: proveedorId }).eq("id", listaId)
+  if (upd.error) throw new Error(upd.error.message)
+
+  // Lo que decidió la máquina: "por revisar" sin error (los frenados por el tope tienen motivo y ya
+  // tienen artículo) y "sin artículo" sin sugerencia. Lo confirmado o descartado a mano queda igual.
+  const items: any[] = await fetchAllRows(() => supabase.from("listas_proveedores_items")
+    .select("id, estado_item, articulo_id, articulo_sugerido_id, error, codigo_proveedor, descripcion_proveedor, precio_compra")
+    .eq("lista_id", listaId).in("estado_item", ["revisar", "ignorado"]).order("created_at").order("id"))
+  const aRevincular = items.filter((i) => !i.articulo_id && !i.error && (i.estado_item === "revisar" || !i.articulo_sugerido_id))
+  const vinculos = await vincularRenglones(aRevincular.map((i) => ({
+    codigo: i.codigo_proveedor, descripcion: i.descripcion_proveedor, precio_compra: i.precio_compra != null ? num(i.precio_compra) : null,
+    descuento1: null, descuento2: null, descuento3: null, descuento4: null,
+  })), proveedorId)
+  let pendientes = 0, revisar = 0
+  for (const [n, it] of aRevincular.entries()) {
+    const { articuloId, sugeridoId } = vinculos[n]
+    const estado = articuloId ? "pendiente" : sugeridoId ? "revisar" : "ignorado"
+    if (estado === "pendiente") pendientes++
+    else if (estado === "revisar") revisar++
+    const r = await supabase.from("listas_proveedores_items").update({ articulo_id: articuloId, articulo_sugerido_id: sugeridoId, estado_item: estado }).eq("id", it.id)
+    if (r.error) throw new Error(`No se pudo volver a vincular un renglón: ${r.error.message}`)
+  }
+  return { revinculados: aRevincular.length, pendientes, revisar }
 }
 
 /** Cuántos cambios de costo dejó una lista en el historial. null si no se puede saber. */

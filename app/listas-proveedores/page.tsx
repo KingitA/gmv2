@@ -152,7 +152,7 @@ export default function ListasProveedoresPage() {
                                 <TableRow><TableCell colSpan={6} className="text-center h-20 text-muted-foreground">Sin listas importadas aún</TableCell></TableRow>
                             ) : listas.map((lista: any) => (
                                 <TableRow key={lista.id}>
-                                    <TableCell>{(lista.proveedor as any)?.nombre || '—'}</TableCell>
+                                    <TableCell>{(lista.proveedor as any)?.nombre || (lista.estado !== 'aplicada' ? <span className="text-red-700 font-semibold">Falta el proveedor</span> : '—')}</TableCell>
                                     <TableCell className="font-medium">{lista.nombre || '—'}</TableCell>
                                     <TableCell>{fecha(lista.fecha_vigencia)}</TableCell>
                                     <TableCell>{fecha(lista.fecha_fin) || '—'}</TableCell>

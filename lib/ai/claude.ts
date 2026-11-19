@@ -15,6 +15,7 @@ import type {
     EnrichedClassificationResult,
     ChatMessage,
 } from './types'
+import { registrarFallaIA } from './fallas-ia'
 
 // Singleton client
 let anthropicClient: Anthropic | null = null
@@ -34,6 +35,20 @@ function getClient(): Anthropic {
 
 // El modelo se nombra en un solo lugar: lib/ai/modelos-claude.ts (E-82)
 const MODEL = MODELO_CLAUDE.extraccion
+
+/**
+ * Llama a Claude y, si falla por saldo o cuota (402 / 429 / "credit balance"), lo anota en
+ * ia_fallas y deja el aviso en la bandeja de Jarvis (E-101). El error se relanza igual: quien
+ * llama decide qué hacer. registrarFallaIA no lanza nunca.
+ */
+async function conAvisoDeFalla<T>(origen: string, fn: () => Promise<T>): Promise<T> {
+    try {
+        return await fn()
+    } catch (e) {
+        await registrarFallaIA('claude', e, origen)
+        throw e
+    }
+}
 
 /**
  * Clasifica un mensaje (email, chat, WhatsApp) determinando su tipo,
@@ -68,7 +83,7 @@ export async function classifyMessage(
         userContent = parts.join('\n')
     }
 
-    const response = await client.messages.create({
+    const response = await conAvisoDeFalla('clasificar un mensaje', () => client.messages.create({
         model: MODEL,
         max_tokens: TOPE_RESPUESTA_CORTA, // el modelo piensa antes de contestar y eso cuenta en el tope
         output_config: { effort: ESFUERZO_SIMPLE },
@@ -79,7 +94,7 @@ export async function classifyMessage(
                 content: userContent,
             },
         ],
-    })
+    }))
 
     const textBlock = response.content.find((block) => block.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {
@@ -154,7 +169,7 @@ export async function classifyAndExtract(
         ? userContent.substring(0, maxLen) + '\n\n[... contenido truncado por exceder límite]'
         : userContent
 
-    const response = await client.messages.create({
+    const response = await conAvisoDeFalla('clasificar un mail', () => client.messages.create({
         model: MODEL,
         max_tokens: 16000, // antes 4096: ahora el pensamiento cuenta en el tope y el JSON de un mail largo no puede cortarse
         output_config: { effort: ESFUERZO_SIMPLE },
@@ -165,7 +180,7 @@ export async function classifyAndExtract(
                 content: truncatedContent,
             },
         ],
-    })
+    }))
 
     const textBlock = response.content.find((block) => block.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {
@@ -187,13 +202,16 @@ export async function classifyAndExtract(
         parsed.hasAttachmentContent = !!attachmentContent.trim()
         return parsed
     } catch {
-        console.error('Error parsing Claude unified classification response:', textBlock.text.substring(0, 500))
+        console.error(`Error parsing Claude unified classification response (stop_reason: ${response.stop_reason}):`, textBlock.text.substring(0, 500))
         return {
             classification: 'otro',
             entityType: 'desconocido',
             entityName: null,
             confidence: 0,
-            summary: 'No se pudo clasificar el mensaje',
+            // que quede el motivo: no es lo mismo "no es nada" que "la lectura se cortó"
+            summary: response.stop_reason === 'max_tokens'
+                ? 'No se pudo clasificar el mensaje: la respuesta de la IA se cortó (mail o adjuntos demasiado largos). Revisarlo a mano.'
+                : 'No se pudo clasificar el mensaje: la respuesta de la IA no se pudo leer. Revisarlo a mano.',
             extractedData: {},
             hasAttachmentContent: !!attachmentContent.trim(),
         }
@@ -222,13 +240,13 @@ export async function chat(
             content: m.content,
         }))
 
-    const response = await client.messages.create({
+    const response = await conAvisoDeFalla('chat', () => client.messages.create({
         model: MODEL,
         max_tokens: 8000, // antes 2048: deja lugar para pensar
         output_config: { effort: ESFUERZO_SIMPLE },
         system: systemPrompt,
         messages: anthropicMessages,
-    })
+    }))
 
     const textBlock = response.content.find((block) => block.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {
@@ -257,7 +275,7 @@ export async function summarizeEmail(
         .filter(Boolean)
         .join('\n')
 
-    const response = await client.messages.create({
+    const response = await conAvisoDeFalla('resumir un mail', () => client.messages.create({
         model: MODEL,
         max_tokens: TOPE_RESPUESTA_CORTA, // antes 256: con ese tope el modelo nuevo puede gastarlo pensando y no escribir el resumen
         output_config: { effort: ESFUERZO_SIMPLE },
@@ -268,7 +286,7 @@ export async function summarizeEmail(
                 content: userContent,
             },
         ],
-    })
+    }))
 
     const textBlock = response.content.find((block) => block.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {

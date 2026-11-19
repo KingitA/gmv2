@@ -1,7 +1,10 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { cambiosDeCostoDeLista, vistaPreviaLista, type FiltroLista } from '@/lib/compras/listas-servidor';
+import { asignarProveedorLista, cambiosDeCostoDeLista, vistaPreviaLista, type FiltroLista } from '@/lib/compras/listas-servidor';
+
+// Elegir el proveedor vuelve a vincular los renglones (puede tardar en una lista larga)
+export const maxDuration = 300;
 
 // GET /api/listas-proveedores/[id]?umbral=15&filtro=cambian&pagina=1
 // (las cuentas del resumen son de toda la lista; los renglones vienen de a 200 y ya filtrados)
@@ -41,6 +44,8 @@ export async function GET(
 //   { accion: 'desprogramar' }                      una lista programada vuelve a pendiente
 //   { accion: 'precio_por', valor: 'unidad'|'bulto', guardar_en_proveedor?: boolean }   en qué viene el precio de la lista
 //   { accion: 'tope', valor: 50 }                   tope de cambio que no se aplica sin confirmar
+//   { accion: 'proveedor', proveedor_id }           elige el proveedor y revincula los renglones con sus artículos
+// Una lista SIN proveedor no deja confirmar ni incluir renglones (409 sin_proveedor).
 // Nada de esto cambia precios: solo prepara la lista. Una lista aplicada no se toca.
 export async function PATCH(
     request: NextRequest,
@@ -55,6 +60,25 @@ export async function PATCH(
         const { data: lista } = await supabase.from('listas_proveedores').select('id, estado, proveedor_id').eq('id', id).maybeSingle();
         if (!lista) return NextResponse.json({ error: 'La lista no existe.' }, { status: 404 });
         if (lista.estado === 'aplicada') return NextResponse.json({ error: 'La lista ya está aplicada: no se puede cambiar.' }, { status: 409 });
+
+        if (body.accion === 'proveedor') {
+            // Elegir el proveedor (lista que llegó por mail sin proveedor identificado, o corregirlo):
+            // los renglones se vuelven a vincular con SUS artículos. No cambia ningún precio.
+            if (!body.proveedor_id) return NextResponse.json({ error: 'Elegí el proveedor.' }, { status: 400 });
+            try {
+                const r = await asignarProveedorLista(supabase, id, String(body.proveedor_id));
+                return NextResponse.json({ success: true, ...r });
+            } catch (e: any) {
+                if (e?.status) return NextResponse.json({ error: e.message }, { status: e.status });
+                throw e;
+            }
+        }
+
+        // Sin proveedor no se prepara nada para aplicar: no se sabe de quién es la lista, ni cómo se
+        // aplican sus descuentos, ni si el artículo es suyo.
+        if (!lista.proveedor_id && ['confirmar', 'incluir', 'confirmar_tope'].includes(body.accion)) {
+            return NextResponse.json({ error: 'La lista no tiene proveedor: elegilo primero (arriba, "Falta el proveedor"). Hasta entonces no se aplica ningún renglón.', codigo: 'sin_proveedor' }, { status: 409 });
+        }
 
         if (body.accion === 'desprogramar') {
             const { data, error } = await supabase.from('listas_proveedores').update({ estado: 'pendiente' }).eq('id', id).eq('estado', 'programada').select('id');

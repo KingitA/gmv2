@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import * as XLSX from 'xlsx';
 import { processWithGemini } from '@/lib/services/ocr';
-import { parseFecha } from '@/lib/formato';
+import { fecha, parseFecha } from '@/lib/formato';
 import { descuentosDeLectura, filasDeListaExcel, precioPorEnTitulos, type FilaLista, type PrecioPor } from '@/lib/compras/lista-proveedor';
 import { normalizarDescuentoPct } from '@/lib/services/detalle';
 import { crearListaProveedor } from '@/lib/compras/listas-servidor';
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
 
         // 3. Lista + renglones (misma función que usan las listas que llegan por mail)
         const r = await crearListaProveedor(supabase, {
-            proveedor_id, nombre: nombre || `Lista ${prov.nombre} ${fecha_vigencia}`, fecha_vigencia, fecha_fin, observaciones,
+            proveedor_id, nombre: nombre || `Lista ${prov.nombre} ${fecha(fecha_vigencia)}`, fecha_vigencia, fecha_fin, observaciones,
             storage_path: uploadError ? null : storagePath,
             archivos: uploadError ? null : [{ nombre: nombreArchivo, ruta: storagePath }],
             origen: 'manual', creado_por: auth.user.id, items, precio_por: precioPor,

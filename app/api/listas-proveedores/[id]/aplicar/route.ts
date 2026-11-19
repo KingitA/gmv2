@@ -32,6 +32,14 @@ export async function POST(
         const body = await request.json().catch(() => ({}));
         const supabase = createAdminClient();
 
+        // Sin proveedor no se aplica ni se programa (también lo rechaza lista_proveedor_aplicar desde
+        // la migración 20261119p; esto cubre la base sin ella)
+        const { data: cab } = await supabase.from('listas_proveedores').select('id, proveedor_id, estado').eq('id', lista_id).maybeSingle();
+        if (!cab) return NextResponse.json({ error: 'La lista no existe (puede que la hayan eliminado).' }, { status: 404 });
+        if (!cab.proveedor_id && cab.estado !== 'aplicada') {
+            return NextResponse.json({ error: 'No se aplicó: la lista no tiene proveedor. Elegilo primero (arriba, "Falta el proveedor"); no cambió ningún precio.', codigo: 'sin_proveedor' }, { status: 409 });
+        }
+
         // Antes de aplicar (solo en la primera llamada): qué precios de venta van a quedar
         // desactualizados. Después de aplicar ya no se puede saber.
         let venta: any[] = [];

@@ -8,7 +8,7 @@ import { acuerdoDeProveedorConLegado, acuerdoDelCanal, diasDePago, formaPagoVenc
 import { downloadAttachment, type ParsedEmail } from './gmail'
 import { analyzeXlsxInvoice } from './claude-xlsx-analyzer'
 import type { AttachmentContent } from './attachment-content-extractor'
-import { GEMINI_MODEL } from './gemini-model'
+import { conRespaldoGemini } from './gemini-model'
 import { getSupabaseAdmin } from './supabase-admin'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { MatchingEngine } from '@/lib/matching/matcher'
@@ -127,6 +127,8 @@ export async function processEmailAsInvoice(
     // ALWAYS run this even if we got data from Priority 1, because the email
     // may contain multiple invoices (e.g. factura + adquisicion de stock)
     const parsedInvoices: ParsedInvoiceData[] = []
+    /** Lecturas que FALLARON (Gemini caído, sin crédito, respuesta ilegible): "archivo: motivo" */
+    const fallasLectura: string[] = []
     const attachmentBuffers: Map<string, { buffer: Buffer, filename: string, mimeType: string }> = new Map()
     if (emailData.attachments.length > 0) {
         for (const att of emailData.attachments) {
@@ -151,7 +153,15 @@ export async function processEmailAsInvoice(
                 // Store buffer for article-level OCR later
                 attachmentBuffers.set(att.filename, { buffer, filename: att.filename, mimeType: att.mimeType })
 
-                const parsed = await parseInvoiceWithGemini(buffer, att.filename, att.mimeType)
+                let parsed: ParsedInvoiceData | null = null
+                try {
+                    parsed = await parseInvoiceWithGemini(buffer, att.filename, att.mimeType)
+                } catch (iaErr) {
+                    // La IA falló (no es "no es factura"): queda anotado y se dice en el resultado
+                    const motivo = iaErr instanceof Error ? iaErr.message : String(iaErr)
+                    console.error(`[InvoiceProcessor] La lectura automática falló en ${att.filename}:`, motivo)
+                    fallasLectura.push(`${att.filename}: ${motivo.slice(0, 200)}`)
+                }
 
                 if (parsed && (parsed.total || parsed.numero_comprobante)) {
                     console.log(`[InvoiceProcessor] ✅ Parsed invoice from ${att.filename}: ${parsed.tipo_comprobante} ${parsed.numero_comprobante} — $${parsed.total}`)
@@ -175,6 +185,7 @@ export async function processEmailAsInvoice(
             invoiceData = await parseInvoiceFromText(emailData.bodyText)
         } catch (err) {
             console.error(`[InvoiceProcessor] Error parsing body:`, err)
+            fallasLectura.push(`texto del mail: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`)
         }
     }
 
@@ -194,8 +205,17 @@ export async function processEmailAsInvoice(
             ccMovementCreated: false,
             isService: false,
             proveedorFound: false,
-            error: 'No se pudo extraer datos de factura del email',
+            // Si la IA falló, se dice eso (y que hay que cargarla a mano): no es lo mismo que "no trae factura"
+            error: fallasLectura.length > 0
+                ? `La lectura automática FALLÓ (${fallasLectura.join(' · ')}): no se sabe si el mail trae una factura. Revisalo y cargala a mano.`
+                : 'No se pudo extraer datos de factura del email',
         }
+    }
+    if (fallasLectura.length > 0) {
+        // Se carga lo que se pudo leer. El aviso para la oficina lo deja el pipeline (los mismos adjuntos
+        // los lee antes attachment-content-extractor: si la IA está caída, falla ahí y queda la tarea
+        // "No se pudo leer un adjunto"); la falla por saldo o cuota ya quedó en ia_fallas.
+        console.warn(`[InvoiceProcessor] ⚠️ Adjuntos sin leer: ${fallasLectura.join(' · ')}`)
     }
 
     // ── 2. Find the supplier ──────────────────────────
@@ -414,7 +434,7 @@ export async function processEmailAsInvoice(
 
             // Update the existing OC movement in CC to become the factura
             // (instead of creating a new one, which would duplicate the debt)
-            const isCredit = ['NCA', 'NCB', 'NCC'].includes(tipoComp)
+            const isCredit = esCredito(tipoComp)
             const monto = invoiceData.total || 0
             const montoFinal = isCredit ? -Math.abs(monto) : Math.abs(monto)
             const descripcion = [tipoComp, invoiceData.numero_comprobante, invoiceData.razon_social_emisor].filter(Boolean).join(' — ')
@@ -654,8 +674,6 @@ async function parseInvoiceWithGemini(
     filename: string,
     mimeType: string
 ): Promise<ParsedInvoiceData | null> {
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
-
     const base64Data = buffer.toString('base64')
     const geminiMime = mimeType.startsWith('image/') ? mimeType : 'application/pdf'
 
@@ -680,36 +698,33 @@ Respondé SOLO con JSON válido, sin comentarios:
 
 Si no es una factura/comprobante fiscal, respondé: {"error": "No es un comprobante fiscal"}`
 
-    try {
-        const result = await model.generateContent([
-            prompt,
-            {
-                inlineData: {
-                    data: base64Data,
-                    mimeType: geminiMime,
-                }
+    // Con respaldo y aviso de falla por saldo o cuota (E-101). Si la IA FALLA, esto LANZA (no
+    // devuelve null): null quiere decir "leído, no es un comprobante"; una falla no es eso.
+    const result = await conRespaldoGemini((modelo) => genAI.getGenerativeModel({ model: modelo }).generateContent([
+        prompt,
+        {
+            inlineData: {
+                data: base64Data,
+                mimeType: geminiMime,
             }
-        ])
-
-        const text = result.response.text()
-        const jsonMatch = text.match(/\{[\s\S]*\}/)
-        if (!jsonMatch) return null
-
-        const parsed = JSON.parse(jsonMatch[0])
-        if (parsed.error) {
-            console.log(`[InvoiceProcessor] Gemini: ${parsed.error}`)
-            return null
         }
-        return parsed as ParsedInvoiceData
-    } catch (err) {
-        console.error(`[InvoiceProcessor] Gemini parse error:`, err)
+    ]), 'lectura de factura por mail')
+
+    const text = result.response.text()
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error(`la lectura automática de ${filename} no devolvió datos`)
+
+    let parsed: any
+    try { parsed = JSON.parse(jsonMatch[0]) } catch { throw new Error(`la lectura automática de ${filename} devolvió una respuesta ilegible`) }
+    if (parsed.error) {
+        console.log(`[InvoiceProcessor] Gemini: ${parsed.error}`)
         return null
     }
+    return parsed as ParsedInvoiceData
 }
 
 // ── Parse invoice data from email body text ────────────
 async function parseInvoiceFromText(bodyText: string): Promise<ParsedInvoiceData | null> {
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
     const prompt = `Analizá este texto de email y extraé datos de factura/comprobante si los hay.
 
@@ -735,17 +750,18 @@ Respondé SOLO con JSON válido:
 
 Si no hay datos de factura, respondé: {"error": "No se encontraron datos de factura"}`
 
-    try {
-        const result = await model.generateContent(prompt)
-        const text = result.response.text()
-        const jsonMatch = text.match(/\{[\s\S]*\}/)
-        if (!jsonMatch) return null
+    // Igual que el adjunto: si la IA falla, lanza (con respaldo y aviso de falla)
+    const result = await conRespaldoGemini((modelo) => genAI.getGenerativeModel({ model: modelo }).generateContent(prompt), 'lectura de factura en el texto de un mail')
+    const text = result.response.text()
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) return null
 
+    try {
         const parsed = JSON.parse(jsonMatch[0])
         if (parsed.error) return null
         return parsed as ParsedInvoiceData
     } catch {
-        return null
+        throw new Error('la lectura automática del texto del mail devolvió una respuesta ilegible')
     }
 }
 
@@ -772,7 +788,7 @@ async function createCCMovement(
     /** sinVencimiento: el comprobante es de una ORDEN de compra; su vencimiento nace al validarlo */
     opts: { sinVencimiento?: boolean } = {}
 ) {
-    const isCredit = ['NCA', 'NCB', 'NCC'].includes(tipoComp)
+    const isCredit = esCredito(tipoComp)
     const monto = invoiceData.total || 0
     const montoFinal = isCredit ? -Math.abs(monto) : Math.abs(monto)
 
@@ -900,24 +916,30 @@ async function provisionDelCanal(db: any, proveedorId: string, ordenCompraId: st
 }
 
 // ── Helper: Map invoice type ───────────────────────────
-function mapTipoComprobante(tipo: string | null): string {
+/** Resta de la deuda: notas de crédito y la Reversa (la "nota de crédito" del canal sin factura) */
+const esCredito = (tipo: string) => ['NC', 'NCA', 'NCB', 'NCC', 'Reversa'].includes(tipo)
+
+/**
+ * Tipo leído por la IA → valor de comprobantes_compra.tipo_comprobante (su CHECK acepta FA FB FC,
+ * NC NCA NCB NCC, ND NDA NDB NDC, Adquisicion, Reversa, Remito).
+ * La LETRA es la del final ("Nota de crédito B" → NCB). Antes se preguntaba si el texto CONTENÍA
+ * una "A", y "NOTADECREDITO" siempre la contiene: toda nota de crédito salía NCA. "Reversa" salía FA
+ * y 'REV' lo rechazaba la base.
+ */
+export function mapTipoComprobante(tipo: string | null): string {
     if (!tipo) return 'FA'
-    const upper = tipo.toUpperCase().replace(/[^A-Z0-9]/g, '')
-    // Map common names
+    const upper = tipo.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, '')
     // Un solo valor para la adquisición: 'Adquisicion', el que usan la validación, la verificación y
     // los pagos. (Hasta el 18/11 acá se guardaba 'ADQ'; los que ya están así se siguen leyendo.)
     if (upper.includes('PRESUPUESTO') || upper.includes('ADQUISICION') || upper === 'ADQ') return 'Adquisicion'
-    if (upper.includes('NOTA') && upper.includes('CRED')) {
-        if (upper.includes('A') || upper.endsWith('A')) return 'NCA'
-        if (upper.includes('B') || upper.endsWith('B')) return 'NCB'
-        return 'NCA'
-    }
-    if (upper.includes('NOTA') && upper.includes('DEB')) {
-        if (upper.includes('A') || upper.endsWith('A')) return 'NDA'
-        return 'NDA'
-    }
-    const valid = ['FA', 'FB', 'FC', 'NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC', 'REV']
-    return valid.includes(upper) ? upper : 'FA'
+    if (upper.startsWith('REV')) return 'Reversa' // "Reversa", "REV"
+    // La letra es la del final, sin contar "...ELECTRONICA" ni la C de la sigla "NC" sola
+    const sinSufijo = upper.replace(/ELECTRONIC[AO]$/, '').replace(/^(NC|ND)$/, '')
+    const letra = /[ABC]$/.exec(sinSufijo)?.[0] ?? 'A'
+    if ((upper.includes('NOTA') && upper.includes('CRED')) || /^NC[ABC]?$/.test(upper)) return `NC${letra}`
+    if ((upper.includes('NOTA') && upper.includes('DEB')) || /^ND[ABC]?$/.test(upper)) return `ND${letra}`
+    if (upper.includes('FACTURA') || /^F[ABC]$/.test(upper)) return `F${letra}`
+    return 'FA'
 }
 
 // ── Article-level OCR for invoices linked to OC ───────────
