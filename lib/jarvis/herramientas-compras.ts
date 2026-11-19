@@ -36,7 +36,8 @@ export interface AyudasJarvis {
 }
 
 const n0 = (v: unknown) => Number(v) || 0
-const red = (v: unknown, dec = 0) => Math.round(n0(v) * 10 ** dec) / 10 ** dec
+// Los importes van SIEMPRE con centavos (docs/FORMATOS.md): la IA los repite tal cual y las tablas los muestran exactos
+const red = (v: unknown, dec = 2) => Math.round(n0(v) * 10 ** dec) / 10 ** dec
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null)
 const limite = (v: unknown, def = 15, max = 50) => Math.max(1, Math.min(max, Number(v) || def))
 const fechaSola = (v: unknown) => (v == null ? null : String(v).slice(0, 10))
@@ -94,9 +95,9 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
       const titulo = `Compras ${r.etiqueta}${prov ? ` — ${prov.nombre}` : ""}${art ? ` — ${art.sku} ${art.descripcion}` : ""}`
       const cols: { clave: string; titulo: string; formato?: Formato }[] = [
         { clave: "nombre", titulo: agrupar === "proveedor" ? "Proveedor" : agrupar === "mes" ? "Mes" : agrupar === "articulo" ? "Artículo" : agrupar === "canal" ? "Canal" : "" },
-        { clave: "con_factura_neto", titulo: "Con factura (neto)", formato: "pesos" },
-        ...(porRenglon ? [] : [{ clave: "con_factura_total", titulo: "Con factura (total)", formato: "pesos" as Formato }]),
-        { clave: "sin_factura", titulo: "Sin factura", formato: "pesos" }, { clave: "total", titulo: "Total", formato: "pesos" },
+        { clave: "con_factura_neto", titulo: "Con factura (neto)", formato: "moneda" },
+        ...(porRenglon ? [] : [{ clave: "con_factura_total", titulo: "Con factura (total)", formato: "moneda" as Formato }]),
+        { clave: "sin_factura", titulo: "Sin factura", formato: "moneda" }, { clave: "total", titulo: "Total", formato: "moneda" },
         ...(porRenglon ? [{ clave: "unidades", titulo: "Unidades", formato: "numero" as Formato }] : []),
       ]
       const bloque = a.tabla(titulo, cols, filas.slice(0, lim), {
@@ -156,8 +157,8 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
         [
           { clave: "fecha", titulo: "Fecha", formato: "fecha" }, ...(art ? [{ clave: "proveedor", titulo: "Proveedor" }] : [{ clave: "articulo", titulo: "Artículo" }]),
           { clave: "comprobante", titulo: "Comprobante" }, { clave: "cantidad", titulo: "Cantidad" },
-          { clave: "precio_lista", titulo: "Precio de lista", formato: "pesos" as Formato }, { clave: "descuentos", titulo: "Dtos. %" },
-          { clave: "costo_neto_unidad", titulo: "Costo neto x unidad", formato: "pesos" as Formato },
+          { clave: "precio_lista", titulo: "Precio de lista", formato: "moneda" as Formato }, { clave: "descuentos", titulo: "Dtos. %" },
+          { clave: "costo_neto_unidad", titulo: "Costo neto x unidad", formato: "moneda" as Formato },
         ],
         filas.slice(0, lim),
         { nota: "El precio de lista está como vino en la factura (por bulto si se facturó por bulto); el costo neto está siempre por unidad, sin IVA." },
@@ -264,8 +265,8 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
         })).filter((x) => x.deuda > 0.5 || x.comprometido_oc > 0.5).sort((x, y) => y.deuda - x.deuda)
         const total = red(filas.reduce((s, x) => s + x.deuda, 0)), comprometido = red(filas.reduce((s, x) => s + x.comprometido_oc, 0))
         const bloque = a.tabla("Lo que les debemos a los proveedores", [
-          { clave: "proveedor", titulo: "Proveedor" }, { clave: "deuda", titulo: "Le debemos", formato: "pesos" }, { clave: "vencido", titulo: "Vencido", formato: "pesos" },
-          { clave: "proximo_vencimiento", titulo: "Próx. vencimiento", formato: "fecha" }, { clave: "comprometido_oc", titulo: "Comprometido (no es deuda)", formato: "pesos" },
+          { clave: "proveedor", titulo: "Proveedor" }, { clave: "deuda", titulo: "Le debemos", formato: "moneda" }, { clave: "vencido", titulo: "Vencido", formato: "moneda" },
+          { clave: "proximo_vencimiento", titulo: "Próx. vencimiento", formato: "fecha" }, { clave: "comprometido_oc", titulo: "Comprometido (no es deuda)", formato: "moneda" },
         ], filas.slice(0, lim), { total: { deuda: total, comprometido_oc: comprometido } })
         return {
           consultado: "Calendario de pagos y cuenta corriente de todos los proveedores",
@@ -290,8 +291,8 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
       const comprometido = abiertos.filter((x) => x.clase === "comprometido").map((x) => ({ fecha: fechaSola(x.fecha), detalle: String(x.descripcion ?? "orden de compra"), importe: red(x.saldo, 2) }))
       const manuales = aMano.map((x) => ({ concepto: String(x.concepto), importe: red(x.monto, 2), vence: fechaSola(x.vence), dias_vencido: x.dias_vencido == null ? null : n0(x.dias_vencido) }))
       const bloque = a.tabla(`Le debemos a ${prov.nombre}`, [
-        { clave: "comprobante", titulo: "Comprobante" }, { clave: "fecha", titulo: "Fecha", formato: "fecha" }, { clave: "importe", titulo: "Importe", formato: "pesos" },
-        { clave: "falta_pagar", titulo: "Falta pagar", formato: "pesos" }, { clave: "vence", titulo: "Vence", formato: "fecha" }, { clave: "dias_vencido", titulo: "Días vencido", formato: "numero" },
+        { clave: "comprobante", titulo: "Comprobante" }, { clave: "fecha", titulo: "Fecha", formato: "fecha" }, { clave: "importe", titulo: "Importe", formato: "moneda" },
+        { clave: "falta_pagar", titulo: "Falta pagar", formato: "moneda" }, { clave: "vence", titulo: "Vence", formato: "fecha" }, { clave: "dias_vencido", titulo: "Días vencido", formato: "numero" },
       ], [
         ...deudas,
         ...manuales.map((m) => ({ comprobante: `${m.concepto} (anotado a mano)`, fecha: null, importe: m.importe, falta_pagar: m.importe, vence: m.vence, dias_vencido: m.dias_vencido })),
@@ -371,7 +372,7 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
       const lim = limite(p.limite, 20)
       const bloque = a.tabla(`Notas de crédito / débito esperadas${prov ? ` — ${prov.nombre}` : ""}`, [
         { clave: "proveedor", titulo: "Proveedor" }, { clave: "tipo", titulo: "Qué" }, { clave: "motivo", titulo: "Por qué" }, { clave: "situacion", titulo: "Situación" },
-        { clave: "anotada", titulo: "Desde", formato: "fecha" }, { clave: "dias", titulo: "Días", formato: "numero" }, { clave: "total", titulo: "Importe", formato: "pesos" },
+        { clave: "anotada", titulo: "Desde", formato: "fecha" }, { clave: "dias", titulo: "Días", formato: "numero" }, { clave: "total", titulo: "Importe", formato: "moneda" },
         { clave: "numero_real", titulo: "N° que llegó" }, { clave: "articulos", titulo: "Artículos" },
       ], filas.slice(0, lim), { total: { total: red(esperadas.reduce((s, x) => s + x.total, 0), 2) }, nota: "El total suma solo las que todavía no llegaron." })
       return {
@@ -469,7 +470,7 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
       const lim = limite(p.limite, 20)
       const bloque = a.tabla(`Diferencias de factura ${ordenId ? "" : r.etiqueta}${prov ? ` — ${prov.nombre}` : ""}`.trim(), [
         { clave: "fecha", titulo: "Fecha", formato: "fecha" }, { clave: "proveedor", titulo: "Proveedor" }, { clave: "orden", titulo: "Orden" }, { clave: "articulo", titulo: "Artículo" },
-        { clave: "tipo", titulo: "De" }, { clave: "unidades", titulo: "Unidades", formato: "numero" }, { clave: "importe", titulo: "Importe", formato: "pesos" },
+        { clave: "tipo", titulo: "De" }, { clave: "unidades", titulo: "Unidades", formato: "numero" }, { clave: "importe", titulo: "Importe", formato: "moneda" },
         { clave: "como_se_resolvio", titulo: "Cómo se resolvió" }, { clave: "nota", titulo: "Nota de crédito / débito" },
       ], filas.slice(0, lim), { nota: "Solo las diferencias ya resueltas en la verificación. Una diferencia que nadie resolvió todavía no figura acá." })
       return {
@@ -510,7 +511,7 @@ export function crearHerramientasCompras(a: AyudasJarvis): Herramienta[] {
       })))
       const bloque = a.tabla(`Pagos de la semana del ${d.semana.desde.slice(8, 10)}/${d.semana.desde.slice(5, 7)} al ${d.semana.hasta.slice(8, 10)}/${d.semana.hasta.slice(5, 7)}`, [
         { clave: "como", titulo: "Cómo se paga" }, { clave: "proveedor", titulo: "A quién" }, { clave: "vence", titulo: "Vence", formato: "fecha" },
-        { clave: "bruto", titulo: "Importe", formato: "pesos" }, { clave: "retencion", titulo: "Retención est.", formato: "pesos" }, { clave: "neto", titulo: "Neto a pagar", formato: "pesos" },
+        { clave: "bruto", titulo: "Importe", formato: "moneda" }, { clave: "retencion", titulo: "Retención est.", formato: "moneda" }, { clave: "neto", titulo: "Neto a pagar", formato: "moneda" },
       ], filas, { total: { neto: red(d.totales.neto) }, nota: "Neto de la retención de Ganancias estimada. No incluye los estimados de órdenes de compra." })
       const minimo = d.proyeccion.minimo
       return {
