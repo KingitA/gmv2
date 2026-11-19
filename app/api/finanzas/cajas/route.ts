@@ -18,7 +18,7 @@ export async function GET() {
 
     const [cajasRes, bancosRes, inversionRes, saldosRes] = await Promise.all([
       supabase.from("cajas_financieras").select("id, nombre").eq("activo", true).order("nombre"),
-      supabase.from("cuentas_bancarias").select("id, nombre, banco").eq("activo", true).order("nombre"),
+      supabase.from("cuentas_bancarias").select("id, nombre, banco, api_banco").eq("activo", true).order("nombre"),
       supabase.from("cuentas_inversion").select("id, nombre, tipo_instrumento").eq("activo", true).order("nombre"),
       supabase.from("saldos_financieros").select("cuenta_tipo, cuenta_id, color, saldo, updated_at"),
     ])
@@ -51,6 +51,8 @@ export async function GET() {
         cuenta_id: b.id,
         nombre: b.nombre,
         grupo: "BANCOS",
+        // Conectada por API (Credicoop): el e-cheq lo emite el banco y él pone el número
+        api_banco: (b as any).api_banco ?? null,
         saldos: saldoDe("BANCO", b.id),
         updated_at: updatedDe("BANCO", b.id),
       })),
