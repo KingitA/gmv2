@@ -305,13 +305,15 @@ export async function analyzeXlsxOrder(buffer: Buffer, filename: string): Promis
     const client = getClient()
 
     const totalRows = sheets.reduce((sum, s) => sum + s.totalRows, 0)
+    // Con un tope así la librería exige streaming (sin streaming corta antes de llamar:
+    // "Streaming is required for operations that may take longer than 10 minutes", 19/11/2026).
     // Pedido grande: 246 ítems ≈ 5.500 tokens con el modelo anterior. El modelo actual cuenta
     // ~30 % más tokens por el mismo texto y además piensa dentro del tope: 32.000 da margen.
     const maxTokens = 32000
 
     console.log(`[ClaudeXlsx] Sending ${formattedData.length} chars to Claude (${totalRows} total rows, max_tokens: ${maxTokens})`)
 
-    const response = await withRateLimitRetry(() => client.messages.create({
+    const response = await withRateLimitRetry(() => client.messages.stream({
         model: MODEL,
         max_tokens: maxTokens,
         output_config: { effort: ESFUERZO_SIMPLE },
@@ -320,7 +322,7 @@ export async function analyzeXlsxOrder(buffer: Buffer, filename: string): Promis
             role: 'user',
             content: formattedData,
         }],
-    }), 2, 'ClaudeXlsx-Order')
+    }).finalMessage(), 2, 'ClaudeXlsx-Order')
 
     const textBlock = response.content.find(block => block.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {
@@ -353,7 +355,7 @@ export async function analyzeXlsxPriceList(buffer: Buffer, filename: string): Pr
 
     console.log(`[ClaudeXlsx] Sending ${formattedData.length} chars to Claude (${totalRows} total rows, max_tokens: ${maxTokens})`)
 
-    const response = await withRateLimitRetry(() => client.messages.create({
+    const response = await withRateLimitRetry(() => client.messages.stream({
         model: MODEL,
         max_tokens: maxTokens,
         output_config: { effort: ESFUERZO_SIMPLE },
@@ -362,7 +364,7 @@ export async function analyzeXlsxPriceList(buffer: Buffer, filename: string): Pr
             role: 'user',
             content: formattedData,
         }],
-    }), 2, 'ClaudeXlsx-PriceList')
+    }).finalMessage(), 2, 'ClaudeXlsx-PriceList')
 
     const textBlock = response.content.find(block => block.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {
@@ -389,7 +391,7 @@ export async function analyzeXlsxInvoice(buffer: Buffer, filename: string): Prom
     const formattedData = formatSheetsForClaude(sheets, filename)
     const client = getClient()
 
-    const response = await withRateLimitRetry(() => client.messages.create({
+    const response = await withRateLimitRetry(() => client.messages.stream({
         model: MODEL,
         max_tokens: 16000, // antes 4096 (ver nota en lib/ai/modelos-claude.ts)
         output_config: { effort: ESFUERZO_SIMPLE },
@@ -398,7 +400,7 @@ export async function analyzeXlsxInvoice(buffer: Buffer, filename: string): Prom
             role: 'user',
             content: formattedData,
         }],
-    }), 2, 'ClaudeXlsx-Invoice')
+    }).finalMessage(), 2, 'ClaudeXlsx-Invoice')
 
     const textBlock = response.content.find(block => block.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {
