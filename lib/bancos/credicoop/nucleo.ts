@@ -474,6 +474,8 @@ export interface ResultadoOperacion {
   motivo: string | null
   /** e-cheq emitido: el identificador que le puso el banco */
   idCheque?: string | null
+  /** e-cheq emitido: el número de cheque que le puso el banco (si lo informa) */
+  numeroCheque?: string | null
 }
 
 /** Lee la respuesta de enviar o consultar una transferencia, una emisión, una gestión o un pago de VEP. */
@@ -490,6 +492,7 @@ export function leerOperacion(respuesta: unknown): ResultadoOperacion {
     estadoBanco,
     motivo: String(op?.estadoOperacion?.motivo ?? cheque?.estado?.motivo ?? "").trim() || null,
     idCheque: cheque?.idCheque != null ? String(cheque.idCheque) : null,
+    numeroCheque: String(cheque?.numeroCheque ?? "").trim() || null,
   }
 }
 

@@ -945,6 +945,12 @@ function NuevaOrdenPagoContent() {
             else toast.success(confirmada
                 ? `Pago hecho. Orden de pago ${data.numero_op ?? ""} confirmada.`
                 : `Orden de pago ${data.numero_op ?? ""} creada. Queda pendiente: la plata sale cuando se confirma.`)
+            // "Pagar ahora": la orden se le manda al proveedor por mail, igual que al confirmarla con el tilde verde
+            if (confirmada && data.envio?.mensaje) {
+                if (data.envio.estado === "enviada") toast.success(data.envio.mensaje, { duration: 10000 })
+                else if (data.envio.estado === "sin_mail") toast.info(data.envio.mensaje, { duration: 10000 })
+                else toast.error(`${data.envio.mensaje} La orden quedó pagada igual: se puede reintentar desde Órdenes de pago (botón del sobre).`, { duration: 15000 })
+            }
         } catch (e: any) {
             toast.error(e.message || "No se pudo crear la orden de pago")
         } finally {
@@ -1739,6 +1745,11 @@ function NuevaOrdenPagoContent() {
                                 </p>
                             ) : (
                                 <p className="rounded-md border px-3 py-2 text-muted-foreground">Todavía no salió la plata: se confirma desde Órdenes de pago.</p>
+                            )}
+                            {resultado.confirmada && resultado.op?.envio?.mensaje && (
+                                <p className={`rounded-md border px-3 py-2 ${resultado.op.envio.estado === "fallo" ? "border-red-200 bg-red-50 text-red-800" : resultado.op.envio.estado === "sin_mail" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-sky-200 bg-sky-50 text-sky-900"}`}>
+                                    {resultado.op.envio.mensaje}
+                                </p>
                             )}
                             <div>
                                 <div className="mb-1 flex items-center justify-between">

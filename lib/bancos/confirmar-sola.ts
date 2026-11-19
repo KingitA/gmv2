@@ -22,6 +22,7 @@ import { confirmarOrdenPago } from "@/lib/ordenes-pago/confirmar"
 import { enviarOrdenAlProveedor, type ResumenEnvio } from "@/lib/ordenes-pago/envio"
 import { estadoConexion } from "./credicoop/config"
 import { decidirConfirmacion, type MedioDeOrden, type OperacionDeOrden } from "./credicoop/confirmacion"
+import { anotarFallaConfirmacion } from "./falla-confirmacion"
 import { CONFIRMAR_SOLA, faltaTablaBancos } from "./operaciones"
 
 export interface ResultadoConfirmacionSola {
@@ -68,7 +69,10 @@ export async function confirmarSiElBancoTermino(db: SupabaseClient, ordenPagoId:
     }
     if (decision.accion === "esperar") return NADA
     if (decision.accion === "falta_resto") {
-      return { estado: "falta_resto", envio: null, mensaje: `El banco ya confirmó, pero la orden ${orden.numero_op} tiene pagos que no pasan por el banco (${decision.medios.join(", ")}): falta confirmar el resto a mano, con el tilde verde.` }
+      const mensaje = `El banco ya confirmó, pero la orden ${orden.numero_op} tiene pagos que no pasan por el banco (${decision.medios.join(", ")}): falta confirmar el resto a mano, con el tilde verde.`
+      // Queda a la vista (la orden, Finanzas → Bancos y la bandeja de Jarvis): la respuesta de la consulta periódica no la mira nadie
+      await anotarFallaConfirmacion(db, ordenPagoId, "falta_resto", mensaje)
+      return { estado: "falta_resto", envio: null, mensaje }
     }
 
     // Todo hecho en el banco real: se confirma por el mismo camino que el tilde verde
@@ -78,7 +82,9 @@ export async function confirmarSiElBancoTermino(db: SupabaseClient, ordenPagoId:
       // ¿La confirmó otro pedido al mismo tiempo (la consulta periódica y una persona)? Entonces no pasó nada malo.
       const { data: ahora } = await db.from("ordenes_pago").select("estado").eq("id", ordenPagoId).maybeSingle()
       if (ahora?.estado === "pagada") return NADA
-      return { estado: "no_se_pudo", envio: null, mensaje: `El banco ya confirmó el pago, pero la orden ${orden.numero_op} no se pudo confirmar sola: ${r.error} Confirmala a mano con el tilde verde.` }
+      const mensaje = `El banco ya confirmó el pago, pero la orden ${orden.numero_op} no se pudo confirmar sola: ${r.error} Confirmala a mano con el tilde verde.`
+      await anotarFallaConfirmacion(db, ordenPagoId, "no_se_pudo", mensaje)
+      return { estado: "no_se_pudo", envio: null, mensaje }
     }
     // Otro pedido la confirmó en el mismo momento (op_confirmar es idempotente): ese ya dejó la constancia y mandó el mail
     if (r.data?.ya_confirmada === true) return NADA

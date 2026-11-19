@@ -46,6 +46,7 @@ export default function CuentaCorrienteProveedorPage() {
     const [comprometido, setComprometido] = useState<FilaExtracto[]>([])
     const [proveedor, setProveedor] = useState<{ nombre: string; sigla?: string | null; cuit?: string | null } | null>(null)
     const [loading, setLoading] = useState(true)
+    const [sinPermiso, setSinPermiso] = useState<string | null>(null)
     const [desde, setDesde] = useState("")
     const [hasta, setHasta] = useState("")
     const [selectedMovs, setSelectedMovs] = useState<Set<string>>(new Set())
@@ -67,6 +68,7 @@ export default function CuentaCorrienteProveedorPage() {
             if (hasta) q.set("hasta", hasta)
             const res = await fetch(`/api/proveedores/${id}/cuenta-corriente${q.toString() ? `?${q}` : ""}`)
             const data = await res.json()
+            if (res.status === 403) { setSinPermiso(data?.error || "La cuenta corriente del proveedor la ven solo los administradores."); return }
             if (!res.ok) throw new Error(data?.error || "No se pudo cargar la cuenta corriente")
             setMovimientos(data.comprobantes || [])
             setSaldo(Number(data.totales?.saldo ?? 0))
@@ -161,6 +163,19 @@ export default function CuentaCorrienteProveedorPage() {
     }
 
     const claseFila: Record<string, string> = { pago: "bg-green-50/50", anulacion: "bg-red-50/50", provision: "text-muted-foreground" }
+
+    // Revisión 19/11: solo admin (permiso de órdenes de pago). A otro rol, un mensaje claro en vez de una pantalla vacía.
+    if (sinPermiso) {
+        return (
+            <div className="min-h-screen bg-background p-6">
+                <div className="mb-4 flex items-center gap-4">
+                    <Link href="/proveedores"><Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button></Link>
+                    <h1 className="text-2xl font-bold">Cuenta corriente del proveedor</h1>
+                </div>
+                <p role="alert" className="max-w-2xl rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">{sinPermiso}</p>
+            </div>
+        )
+    }
 
     return (
         <div className="min-h-screen bg-background p-6">

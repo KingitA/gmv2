@@ -6,7 +6,8 @@
  * una transacción con guardas de idempotencia). Solo servidor.
  */
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { bloqueoPorBanco } from "@/lib/bancos/operaciones"
+import { bloqueoPorBanco, completarEcheqsEmitidos } from "@/lib/bancos/operaciones"
+import { limpiarFallaConfirmacion } from "@/lib/bancos/falla-confirmacion"
 import { anotarResponsableOP } from "./responsable"
 
 export type ResultadoConfirmar =
@@ -44,7 +45,14 @@ export async function confirmarOrdenPago(
   }
   if (res.error) return { ok: false, error: res.error.message, status: 400 }
 
-  // Quién hizo salir la plata (Jarvis: "¿quién pagó / autorizó este pago?")
-  await anotarResponsableOP(supabase, opId, "confirmado", usuarioId)
-  return { ok: true, data: (res.data ?? {}) as Record<string, any> }
+  const data = (res.data ?? {}) as Record<string, any>
+  if (data.ya_confirmada !== true) {
+    // Quién hizo salir la plata (Jarvis: "¿quién pagó / autorizó este pago?")
+    await anotarResponsableOP(supabase, opId, "confirmado", usuarioId)
+    // Revisión 19/11: el aviso de "el banco pagó y no se pudo confirmar sola" se cierra, y el
+    // e-cheq que emitió el banco queda con su identificador y número en el cheque propio.
+    await limpiarFallaConfirmacion(supabase, opId)
+    await completarEcheqsEmitidos(supabase, opId)
+  }
+  return { ok: true, data }
 }
