@@ -468,7 +468,7 @@ export async function actualizarOperacion(db: SupabaseClient, operacionId: strin
     return anotar(db, op.id, usuarioId, resultado, cruda)
   } catch (e) {
     // El banco no conoce esa operación. Solo importa para una que estaba en duda o sin enviar.
-    if (e instanceof ErrorCredicoop && e.clase === "RECHAZO" && ["APIE-0026", "APIE-1025", "APIE-4024"].includes(e.codigo ?? "") && (op.estado === "error" || op.estado === "preparada")) {
+    if (e instanceof ErrorCredicoop && e.clase === "RECHAZO" && ["APIE-0026", "APIE-1025", "APIE-1029", "APIE-4024"].includes(e.codigo ?? "") && (op.estado === "error" || op.estado === "preparada")) {
       const desde = Date.parse(op.enviado_at ?? op.creado_at)
       const minutos = Number.isFinite(desde) ? (Date.now() - desde) / 60_000 : 0
       const yaPaso = minutos >= MINUTOS_PARA_DAR_POR_NO_ENTRADA
