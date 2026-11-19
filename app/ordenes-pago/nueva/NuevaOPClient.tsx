@@ -764,6 +764,9 @@ function NuevaOrdenPagoContent() {
 
     // ── Bancos y cajas con saldo vivo ──
     const bancosFondos = cuentasFondos.filter((c: any) => c.grupo === "BANCOS")
+    // E-cheq de una cuenta conectada al banco por API: lo emite el banco y el número lo pone él
+    const numeroLoPoneElBanco = (m: { es_echeq?: boolean; cuenta_origen_id?: string }) =>
+        m.es_echeq === true && !!bancosFondos.find((b: any) => b.cuenta_id === m.cuenta_origen_id && b.api_banco)
     const cajasFondos = cuentasFondos.filter((c: any) => c.grupo === "EFECTIVO")
     const saldoTotalDe = (c: any) => Number(c.saldos?.BLANCO ?? 0) + Number(c.saldos?.NEGRO ?? 0)
 
@@ -839,7 +842,7 @@ function NuevaOrdenPagoContent() {
             if (m.medio !== "cheque_propio") continue
             const que = m.es_echeq ? "e-cheq" : "cheque propio"
             if (!m.cuenta_origen_id) { toast.warning(`Elegí de qué cuenta bancaria sale el ${que}.`); return false }
-            if (!String(m.cheque_numero || "").trim()) { toast.warning(`Cargá el número del ${que}.`); return false }
+            if (!String(m.cheque_numero || "").trim() && !numeroLoPoneElBanco(m)) { toast.warning(`Cargá el número del ${que}.`); return false }
             if (!m.cheque_fecha_vencimiento) { toast.warning(`Cargá la fecha de pago del ${que}.`); return false }
             if (!(Number(m.monto) > 0)) { toast.warning(`Cargá el importe del ${que}.`); return false }
         }
@@ -1529,7 +1532,7 @@ function NuevaOrdenPagoContent() {
                                                     <option value="">¿De qué cuenta?</option>
                                                     {bancosFondos.map((b: any) => <option key={b.cuenta_id} value={b.cuenta_id}>{b.nombre}</option>)}
                                                 </select>
-                                                <Input className={`h-7 w-24 text-xs ${m.cheque_numero ? "" : "border-red-400"}`} placeholder="Número" value={m.cheque_numero || ""} onChange={e => actualizarMedio(m.id, "cheque_numero", e.target.value)} />
+                                                <Input className={`h-7 w-24 text-xs ${m.cheque_numero || numeroLoPoneElBanco(m) ? "" : "border-red-400"}`} placeholder={numeroLoPoneElBanco(m) ? "lo da el banco" : "Número"} title={numeroLoPoneElBanco(m) ? "Lo emite Credicoop: el número lo pone el banco al firmarlo" : undefined}value={m.cheque_numero || ""} onChange={e => actualizarMedio(m.id, "cheque_numero", e.target.value)} />
                                                 <span className="text-[11px] text-muted-foreground">fecha de pago</span>
                                                 <DateInputAR className={`h-7 w-32 text-xs ${m.cheque_fecha_vencimiento ? "" : "border-red-400"}`} value={m.cheque_fecha_vencimiento || ""} onChange={v => actualizarMedio(m.id, "cheque_fecha_vencimiento", v)} />
                                                 <label className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground">
