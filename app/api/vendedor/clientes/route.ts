@@ -176,6 +176,14 @@ export async function POST(request: Request) {
         metodo_facturacion: metodoGeneral,
         ...patchListasMetodos(segmentos, ["lista_limpieza_id", "lista_perf0_id", "lista_perf_plus_id", "metodo_limpieza", "metodo_perf0", "metodo_perf_plus"]),
         condicion_pago: condicion_pago || null,
+        // Condición y forma de pago nuevas (fase 4 de las apps): solo si vienen; si llega
+        // solo el texto viejo, la base lo traduce (trg_clientes_condicion_pago)
+        ...Object.fromEntries(
+          (["condicion_pago_tipo", "plazo_dias", "forma_pago", "cheque_dias_desde", "cheque_dias_hasta"] as const)
+            .filter((k) => body[k] !== undefined && body[k] !== null && body[k] !== "")
+            .map((k) => [k, body[k]]),
+        ),
+        ...(typeof body.codigo_postal === "string" && body.codigo_postal.trim() ? { codigo_postal: body.codigo_postal.trim() } : {}),
         condicion_entrega: condicion_entrega || null,
         direccion: direccion?.trim() || null,
         localidad_id: localidad_id || null,

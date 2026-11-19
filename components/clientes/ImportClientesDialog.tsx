@@ -42,8 +42,10 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: "direccion",            label: "Dirección",                     aliases: ["direccion", "dirección", "domicilio"] },
   { id: "localidad",            label: "Localidad",                     aliases: ["localidad", "ciudad"] },
   { id: "provincia",            label: "Provincia",                     aliases: ["provincia"] },
+  { id: "codigo_postal",        label: "Código postal",                 aliases: ["codigopostal", "cp", "postal"] },
   { id: "condicion_iva",        label: "Condición IVA",                 aliases: ["condicioniva", "condición iva", "iva", "condiva"] },
   { id: "metodo_facturacion",   label: "Método de facturación",         aliases: ["metodofacturacion", "facturacion", "facturación"] },
+  // Texto viejo ("Efectivo", "Cheque 30 días"…): la base lo pasa a condición + forma de pago
   { id: "condicion_pago",       label: "Condición de pago",             aliases: ["condicionpago", "formapago", "pago"] },
   { id: "tipo_canal",           label: "Tipo de canal",                 aliases: ["tipocanal", "canal"] },
   { id: "nro_iibb",             label: "N° de inscripción IIBB (NO es la percepción)", aliases: ["nroiibb", "numeroiibb", "iibbnro", "inscripcioniibb"] },
@@ -79,6 +81,7 @@ function suggestField(colName: string): string {
   if (has("mail", "email", "correo")) return "mail"
   if (has("telefono", "celular") || n === "tel" || n === "cel") return "telefono"
   if (has("direccion", "domicilio")) return "direccion"
+  if (has("postal") || n === "cp") return "codigo_postal"
   if (has("localidad", "ciudad")) return "localidad"
   if (has("provincia")) return "provincia"
   if (has("condicioniva", "condiva")) return "condicion_iva"

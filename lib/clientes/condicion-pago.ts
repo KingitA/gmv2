@@ -106,6 +106,8 @@ export function textoCondicionPago(c: CondicionPago): string {
  */
 export const TEXTO_VIEJO: Record<string, CondicionPago> = {
   "efectivo": { condicion_pago_tipo: "contado", plazo_dias: 0, forma_pago: "efectivo", cheque_dias_desde: null, cheque_dias_hasta: null },
+  // POST /api/clientes manda "contado" por defecto: se sabe cuándo, no cómo
+  "contado": { condicion_pago_tipo: "contado", plazo_dias: 0, forma_pago: null, cheque_dias_desde: null, cheque_dias_hasta: null },
   "transferencia": { condicion_pago_tipo: "contado", plazo_dias: 0, forma_pago: "transferencia", cheque_dias_desde: null, cheque_dias_hasta: null },
   "cheque al dia": { condicion_pago_tipo: "contado", plazo_dias: 0, forma_pago: "cheque", cheque_dias_desde: 0, cheque_dias_hasta: 0 },
   "cheque 30 dias": { condicion_pago_tipo: "contado", plazo_dias: 0, forma_pago: "cheque", cheque_dias_desde: 30, cheque_dias_hasta: 30 },

@@ -11,11 +11,18 @@ import { Trash2, Plus, Pencil } from "lucide-react"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { BuscadorTabla, CabeceraFiltrable, useTablaFiltrable, type ColumnaTabla } from "@/components/search/tabla-filtrable"
 import { InputMonto } from "@/components/ui/input-monto"
+import { desdeTextoViejo, textoCondicionPago } from "@/lib/clientes/condicion-pago"
+
+// 19/11/2026: la condición de pago del cliente ahora es condición (contado / cuenta corriente /
+// anticipado) + forma (efectivo / transferencia / cheque) y se carga en la ficha. Esta tabla queda
+// como las OPCIONES que muestran las APK instaladas (texto viejo); cada una dice cómo se guarda.
+const comoSeGuarda = (nombre: string) => textoCondicionPago(desdeTextoViejo(nombre))
 
 const COLUMNAS: ColumnaTabla<any>[] = [
   { id: "nombre", titulo: "Nombre", valor: (i) => i.nombre },
   { id: "dias", titulo: "Días Plazo", numero: (i) => Number(i.dias_plazo) || 0 },
   { id: "descripcion", titulo: "Descripción", valor: (i) => i.descripcion },
+  { id: "guarda", titulo: "Se guarda como", valor: (i) => comoSeGuarda(i.nombre) || "No se reconoce" },
 ]
 
 export default function CondicionesPagoPage() {
@@ -87,11 +94,14 @@ export default function CondicionesPagoPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold">Condiciones de Pago</h1>
-          <p className="text-sm text-muted-foreground">Efectivo, Cheque 30 días, Transferencia, etc.</p>
+          <p className="text-sm text-muted-foreground">Opciones que muestran las apps instaladas al dar de alta un cliente</p>
         </div>
         <Button onClick={openNew} size="sm"><Plus className="h-4 w-4 mr-1" /> Nueva</Button>
       </div>
 
+      <div className="mb-4 rounded-lg border border-azul-100 bg-azul-50 px-3 py-2 text-xs text-azul-900">
+        La condición de pago de cada cliente ahora se carga en su ficha en dos partes: <b>cuándo paga</b> (contado, cuenta corriente a N días o anticipado) y <b>cómo paga</b> (efectivo, transferencia o cheque de N a M días). Esta lista es lo que eligen las apps instaladas; al guardar se traduce como dice la columna &quot;Se guarda como&quot;. Una opción que no se reconoce deja la condición vacía en la ficha (no frena el alta).
+      </div>
       <BuscadorTabla tabla={tabla} placeholder="Buscar condición…" />
       <div className="bg-white border rounded-xl overflow-hidden">
         <Table>
@@ -100,19 +110,21 @@ export default function CondicionesPagoPage() {
               <TableHead><CabeceraFiltrable tabla={tabla} id="nombre" /></TableHead>
               <TableHead><CabeceraFiltrable tabla={tabla} id="dias" /></TableHead>
               <TableHead><CabeceraFiltrable tabla={tabla} id="descripcion" /></TableHead>
+              <TableHead><CabeceraFiltrable tabla={tabla} id="guarda" /></TableHead>
               <TableHead className="w-[100px] text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={4} className="text-center py-8"><CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm" /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={5} className="text-center py-8"><CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm" /></TableCell></TableRow>
             ) : tabla.filas.length === 0 ? (
-              <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">{items.length === 0 ? "No hay condiciones cargadas" : "Ninguno coincide con la búsqueda o los filtros"}</TableCell></TableRow>
+              <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">{items.length === 0 ? "No hay condiciones cargadas" : "Ninguno coincide con la búsqueda o los filtros"}</TableCell></TableRow>
             ) : tabla.filas.map(item => (
               <TableRow key={item.id}>
                 <TableCell className="font-medium">{item.nombre}</TableCell>
                 <TableCell>{item.dias_plazo || 0} días</TableCell>
                 <TableCell className="text-muted-foreground text-sm">{item.descripcion || "—"}</TableCell>
+                <TableCell className={`text-sm ${comoSeGuarda(item.nombre) ? "" : "text-red-600"}`}>{comoSeGuarda(item.nombre) || "No se reconoce"}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex gap-1 justify-end">
                     <Button variant="ghost" size="icon" onClick={() => openEdit(item)}><Pencil className="h-3.5 w-3.5" /></Button>

@@ -22,7 +22,8 @@
 --      ya existe).
 --   2) Pasa los clientes actuales: todos CONTADO según su texto viejo
 --      (Efectivo → efectivo; Transferencia → transferencia; Cheque 30 días → cheque
---      30–30; Cheque al día → cheque 0–0; Cheque 30/60/90 → cheque 30–90). Sin texto
+--      30–30; Cheque al día → cheque 0–0; Cheque 30/60/90 → cheque 30–90; "Cheque N
+--      días" escrito a mano → cheque N–N; "contado" → contado sin forma). Sin texto
 --      o con un texto que no se reconoce → queda vacío (nunca un valor supuesto).
 --      Solo completa los que todavía no tienen condición nueva.
 --   3) Compatibilidad con las APK instaladas y la importación de Excel, que siguen
@@ -93,6 +94,7 @@ language sql immutable as $fn$
   from (select btrim(lower(regexp_replace(translate(coalesce(p_texto, ''), 'áéíóúÁÉÍÓÚ', 'aeiouAEIOU'), '\s+', ' ', 'g'))) as k) x
   left join (values
     ('efectivo',        'contado', 0, 'efectivo',      null::int, null::int),
+    ('contado',         'contado', 0, null,            null,      null),
     ('transferencia',   'contado', 0, 'transferencia', null,      null),
     ('cheque al dia',   'contado', 0, 'cheque',        0,         0),
     ('cheque 30 dias',  'contado', 0, 'cheque',        30,        30),
