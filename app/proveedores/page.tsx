@@ -20,6 +20,7 @@ import * as XLSX from "xlsx"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PROVINCIAS_ARGENTINA, TIPOS_IVA_DJ, CONDICIONES_PAGO } from "@/lib/constants"
 import { useRealtime } from "@/lib/hooks/use-realtime"
+import { useMisRoles } from "@/lib/hooks/useMisRoles"
 import { errorCuit, formatCuit, normalizarCuit } from "@/lib/formato"
 import { normalizarCodigo, esCodigoDuplicado } from "@/lib/codigos"
 import { toast } from "sonner"
@@ -39,6 +40,9 @@ export default function ProveedoresPage() {
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isHistorialOpen, setIsHistorialOpen] = useState(false)
   const [fichaFiscal, setFichaFiscal] = useState<{ id: string; nombre: string } | null>(null)
+  // Revisión 19/11: la ficha fiscal y la cuenta corriente del proveedor son del permiso de órdenes
+  // de pago (solo admin; el servidor lo controla). A otro rol no se le ofrecen los botones.
+  const { esAdmin } = useMisRoles()
   const [paraBaja, setParaBaja] = useState<Proveedor | null>(null)
   const [formData, setFormData] = useState({
     nombre: "",
@@ -425,7 +429,7 @@ export default function ProveedoresPage() {
                       proveedorId={editingProveedor?.id ?? null}
                       onSubmit={handleSubmit}
                       onCancelar={() => setIsDialogOpen(false)}
-                      onFichaFiscal={editingProveedor ? () => setFichaFiscal({ id: editingProveedor.id, nombre: editingProveedor.nombre }) : undefined}
+                      onFichaFiscal={editingProveedor && esAdmin ? () => setFichaFiscal({ id: editingProveedor.id, nombre: editingProveedor.nombre }) : undefined}
                     />
                   </DialogContent>
                 </Dialog>
@@ -481,21 +485,25 @@ export default function ProveedoresPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex gap-2 justify-end">
-                            <Link href={`/proveedores/${proveedor.id}/cuenta-corriente`}>
-                              <Button variant="outline" size="sm" className="gap-2 bg-transparent">
-                                <FileText className="h-4 w-4" />
-                                Cta Cte
+                            {esAdmin && (
+                              <Link href={`/proveedores/${proveedor.id}/cuenta-corriente`}>
+                                <Button variant="outline" size="sm" className="gap-2 bg-transparent">
+                                  <FileText className="h-4 w-4" />
+                                  Cta Cte
+                                </Button>
+                              </Link>
+                            )}
+                            {esAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setFichaFiscal({ id: proveedor.id, nombre: proveedor.nombre })}
+                                className="hover:bg-indigo-50 hover:text-indigo-600"
+                                title="Ficha fiscal (RG 830, exclusiones, legajo)"
+                              >
+                                <ShieldCheck className="h-4 w-4" />
                               </Button>
-                            </Link>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setFichaFiscal({ id: proveedor.id, nombre: proveedor.nombre })}
-                              className="hover:bg-indigo-50 hover:text-indigo-600"
-                              title="Ficha fiscal (RG 830, exclusiones, legajo)"
-                            >
-                              <ShieldCheck className="h-4 w-4" />
-                            </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"

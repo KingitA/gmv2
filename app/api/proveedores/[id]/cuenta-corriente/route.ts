@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextResponse } from "next/server";
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 import { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all'
 import { armarExtracto, type OrdenPagoResumen } from '@/lib/proveedores/extracto-cc'
 import { parseFecha } from '@/lib/formato'
@@ -22,8 +22,16 @@ export async function GET(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth()
-    if (auth.error) return auth.error
+    // Revisión 19/11: la cuenta corriente del proveedor muestra órdenes de pago, medios (CBU,
+    // cheques) y certificados de retención: permiso de órdenes de pago (solo admin), no cualquier rol.
+    const auth = await requirePermiso('ordenes_pago')
+    if (auth.error) {
+        if (auth.error.status !== 403) return auth.error
+        return NextResponse.json({
+            error: 'La cuenta corriente del proveedor (pagos, órdenes de pago, cheques y certificados de retención) la ven solo los administradores.',
+            error_code: 'SIN_PERMISO', permiso: 'ordenes_pago',
+        }, { status: 403 })
+    }
     const { id: proveedorId } = await params;
     const sp = new URL(request.url).searchParams
     // parseFecha (lib/formato): devuelve AAAA-MM-DD o null si no es una fecha válida

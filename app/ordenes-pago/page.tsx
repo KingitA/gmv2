@@ -401,6 +401,12 @@ export default function OrdenesPagoPage() {
                                             </TableCell>
                                             <TableCell className="text-center">
                                                 {getBadgeEstado(op.estado)}
+                                                {op.estado === "pendiente" && op.banco_confirmacion_falla && (
+                                                    <button type="button" title={op.banco_confirmacion_falla} onClick={() => setCredicoopOp(op.id)}
+                                                        className="mt-0.5 block w-full text-[11px] font-semibold text-red-700 underline-offset-2 hover:underline">
+                                                        {op.banco_confirmacion_falla_estado === "falta_resto" ? "el banco ya pagó · falta el resto" : "el banco ya pagó · no se confirmó sola"}
+                                                    </button>
+                                                )}
                                                 {op.estado === "pagada" && op.confirmada_por_banco_at && (
                                                     <div className="mt-0.5 text-[11px] text-muted-foreground" title="La confirmó el sistema cuando el banco confirmó la firma">
                                                         por el banco · {fechaHora(op.confirmada_por_banco_at)}
@@ -551,6 +557,14 @@ export default function OrdenesPagoPage() {
                                         </ul>
                                         <p>Si algún comprobante ya no tiene saldo (lo pagó otra orden), no se confirma y avisa cuál.</p>
                                         {retCargando && <p className="text-muted-foreground">Calculando la retención de hoy…</p>}
+                                        {dialogo.op.banco_confirmacion_falla && (
+                                            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">{dialogo.op.banco_confirmacion_falla}</p>
+                                        )}
+                                        {retHoy?.retencion_fija_por_banco && !retHoy?.cambia && Math.abs(Number(retHoy.retencion_calculada_hoy ?? retHoy.retencion_guardada) - Number(retHoy.retencion_guardada)) > 0.01 && (
+                                            <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sky-900">
+                                                El banco ya hizo el pago de esta orden: la retención queda la de la orden ({formatCurrency(retHoy.retencion_guardada)}), no la que daría hoy ({formatCurrency(retHoy.retencion_calculada_hoy)}). El certificado lo aclara.
+                                            </p>
+                                        )}
                                         {retHoy?.cambia && (
                                             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
                                                 <p className="font-semibold">La retención de Ganancias cambió desde que se armó la orden.</p>

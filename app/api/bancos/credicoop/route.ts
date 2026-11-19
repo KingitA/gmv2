@@ -5,6 +5,7 @@ import { estadoConexion } from "@/lib/bancos/credicoop/config"
 import { ESTADO_NOMBRE } from "@/lib/bancos/credicoop/nucleo"
 import { cuentasCredicoopDelSistema, faltaTablaBancos, TIPO_NOMBRE } from "@/lib/bancos/operaciones"
 import { respuestaErrorBanco } from "@/lib/bancos/respuesta"
+import { ordenesPagadasPorBancoSinConfirmar, type OrdenPagadaPorBanco } from "@/lib/bancos/falla-confirmacion"
 
 /**
  * GET /api/bancos/credicoop — estado de la conexión con Credicoop, las cuentas del sistema que
@@ -22,8 +23,13 @@ export async function GET() {
     const r = await db.from("bancos_operaciones")
       .select("*, ordenes_pago(numero_op), cuentas_bancarias(nombre)").order("creado_at", { ascending: false }).limit(100)
     if (r.error) { if (!faltaTablaBancos(r.error)) throw new Error(r.error.message); faltaMigracion = true } else operaciones = r.data ?? []
+    // Revisión 19/11: órdenes cuyo pago el banco real ya hizo y siguen pendientes (y por qué no se confirmaron solas)
+    let sinConfirmar: OrdenPagadaPorBanco[] = []
+    if (!faltaMigracion) {
+      try { sinConfirmar = await ordenesPagadasPorBancoSinConfirmar(db) } catch (e) { console.warn("[bancos] órdenes pagadas sin confirmar:", (e as Error)?.message) }
+    }
     return NextResponse.json({
-      conexion: estadoConexion(), falta_migracion: faltaMigracion,
+      conexion: estadoConexion(), falta_migracion: faltaMigracion, pagadas_sin_confirmar: sinConfirmar,
       cuentas: cuentas.map((c) => ({ id: c.id, nombre: c.nombre, cbu: c.cbu ?? null, tiene_cbu: /^\d{22}$/.test(String(c.cbu ?? "")) })),
       operaciones: operaciones.map((o) => ({
         id: o.id, tipo: o.tipo, tipo_nombre: TIPO_NOMBRE[o.tipo as keyof typeof TIPO_NOMBRE] ?? o.tipo, estado: o.estado,

@@ -1,9 +1,13 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 
 /**
  * Ficha fiscal del proveedor (R6).
+ *
+ * Revisión 19/11: ver y cambiar la ficha fiscal (régimen de Ganancias, exención, acuerdo de pago,
+ * CBU) es del permiso de órdenes de pago (lib/auth.ts → ordenes_pago, solo admin): define cuánto
+ * se le retiene y cómo se le paga. Antes alcanzaba con estar logueado.
  *
  * GET  → { proveedor: { regimen_ganancias, condicion_ganancias, cuit, nombre },
  *          exclusiones: [...activas e históricas...], regimenes: [catálogo] }
@@ -12,12 +16,21 @@ import { requireAuth } from '@/lib/auth'
  *          desactivar_exclusiones?: [ids] }
  */
 
+/** Sin el permiso: un mensaje que diga qué es y quién lo ve (la pantalla lo muestra tal cual). */
+function sinPermiso(error: NextResponse) {
+  if (error.status !== 403) return error
+  return NextResponse.json({
+    error: 'La ficha fiscal del proveedor (retención de Ganancias, exención, acuerdo de pago y CBU) la ven y la cambian solo los administradores.',
+    error_code: 'SIN_PERMISO', permiso: 'ordenes_pago',
+  }, { status: 403 })
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
-  if (auth.error) return auth.error
+  const auth = await requirePermiso('ordenes_pago')
+  if (auth.error) return sinPermiso(auth.error)
   const { id } = await params
   try {
     const supabase = createAdminClient()
@@ -49,8 +62,8 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
-  if (auth.error) return auth.error
+  const auth = await requirePermiso('ordenes_pago')
+  if (auth.error) return sinPermiso(auth.error)
   const { id } = await params
   try {
     const body = await request.json()

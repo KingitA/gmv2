@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requirePermiso } from '@/lib/auth'
 import { anotarResponsableOP } from '@/lib/ordenes-pago/responsable'
+import { bloqueoAnularPorBanco } from '@/lib/bancos/operaciones'
 
 /**
  * POST /api/ordenes-pago/[id]/anular — reversa completa de una OP pagada
@@ -22,6 +23,11 @@ export async function POST(
     try {
         const body = await request.json().catch(() => ({}))
         const supabase = createAdminClient()
+
+        // Revisión 19/11: si Credicoop (banco real) ya hizo el pago, anular devolvería la deuda y
+        // dejaría los vencimientos para pagar otra vez (pago doble). Desde 20261119n la base también lo corta.
+        const banco = await bloqueoAnularPorBanco(supabase, opId)
+        if (banco) return NextResponse.json({ error: banco, error_code: 'PAGADA_POR_BANCO' }, { status: 409 })
 
         const { data, error } = await supabase.rpc('op_anular', {
             p_op_id: opId,

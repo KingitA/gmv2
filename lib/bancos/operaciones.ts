@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
 import { importarExtracto } from "@/lib/finanzas/extractos-import"
+import { faltaLaFuncion } from "@/lib/utils/migracion-pendiente"
 import { clienteCredicoop, estadoConexion, simuladorEnUso, SIMULADOR_FIRMA_A_LOS_SEGUNDOS, type AmbienteCredicoop } from "./credicoop/config"
 import {
   armarEmisionEcheq, armarGestionEcheq, armarListaEcheqs, armarListaVeps, armarPagoVep, armarTransferencia, cbuValido, cuitDeOnce,
@@ -117,6 +118,29 @@ export async function pagosEnviablesDeOrden(db: SupabaseClient, ordenPagoId: str
     const r = await db.from("bancos_operaciones").select("*").eq("orden_pago_id", ordenPagoId).order("creado_at", { ascending: false })
     if (r.error) { if (!faltaTablaBancos(r.error)) throw new Error(r.error.message); sinTabla = true } else operaciones = (r.data ?? []) as Fila[]
   }
+  // Retención de Ganancias (revisión 19/11): si cambió desde que se armó la orden, se acepta ANTES
+  // de mandar el pago al banco (el importe del pago puede cambiar). Una vez que el banco hizo un
+  // pago, la retención queda fija (op_banco_pago_hecho, migración 20261119n): no se vuelve a mirar.
+  let retencion: RetencionAntesDeEnviar | null = null
+  if (op.estado === "pendiente" && !sinTabla) {
+    const r = await db.rpc("op_retencion_al_confirmar", { p_op_id: ordenPagoId })
+    if (!r.error && r.data) retencion = r.data as RetencionAntesDeEnviar
+    else if (r.error && !faltaLaFuncion(r.error, "op_retencion_al_confirmar")) throw new Error(r.error.message)
+  }
+  const problemaRetencion = retencion?.cambia
+    ? (retencion.se_puede_ajustar
+      ? `La retención de Ganancias cambió desde que se armó la orden (era ${moneda(retencion.retencion_guardada)} y hoy corresponde ${moneda(retencion.retencion_hoy)}). Aceptala arriba antes de mandar el pago: el importe puede cambiar.`
+      : `La retención de Ganancias cambió desde que se armó la orden (era ${moneda(retencion.retencion_guardada)} y hoy corresponde ${moneda(retencion.retencion_hoy)}) y no hay una transferencia ni efectivo sin mandar donde ajustar la diferencia: eliminá la orden y armala de nuevo.`)
+    : null
+  // ¿El banco ya pagó y la orden no se pudo confirmar sola? (columnas de 20261119n; sin la migración, nada)
+  let fallaConfirmacion: { mensaje: string; estado: string | null; at: string | null } | null = null
+  {
+    const r = await db.from("ordenes_pago").select("banco_confirmacion_falla, banco_confirmacion_falla_estado, banco_confirmacion_falla_at").eq("id", ordenPagoId).maybeSingle()
+    if (!r.error && r.data?.banco_confirmacion_falla && op.estado === "pendiente") {
+      fallaConfirmacion = { mensaje: r.data.banco_confirmacion_falla, estado: r.data.banco_confirmacion_falla_estado ?? null, at: r.data.banco_confirmacion_falla_at ?? null }
+    }
+  }
+
   const hoy = hoyISO()
   const cuit = cuitDeOnce(prov?.cuit)
   const pagos: PagoEnviable[] = []
@@ -144,6 +168,7 @@ export async function pagosEnviablesDeOrden(db: SupabaseClient, ordenPagoId: str
     const fecha = tipo === "transferencia" ? hoy : String((esEndoso ? cheque?.fecha_vencimiento : d.cheque_fecha_vencimiento) ?? "").slice(0, 10)
     if (tipo === "echeq_emision" && (!fecha || fecha < hoy)) problemas.push("La fecha de pago del e-cheq falta o ya pasó: no se puede emitir con esa fecha.")
     if (sinTabla) problemas.push(AVISO_SIN_TABLA)
+    if (problemaRetencion) problemas.push(problemaRetencion)
     pagos.push({
       detalle_id: d.id, tipo, tipo_nombre: TIPO_NOMBRE[tipo], banco: "Banco Credicoop",
       cuenta: cuenta?.nombre ?? null, cuenta_cbu: cuenta?.cbu ?? null,
@@ -158,8 +183,43 @@ export async function pagosEnviablesDeOrden(db: SupabaseClient, ordenPagoId: str
   return {
     orden: { id: op.id, numero_op: op.numero_op, estado: op.estado, proveedor: prov?.nombre ?? "—", proveedor_id: op.proveedor_id },
     vencimiento_ids: [...new Set(((op.ordenes_pago_imputaciones ?? []) as Fila[]).map((i) => i.vencimiento_id).filter(Boolean))] as string[],
-    pagos, conexion: estadoConexion(), _interno: { prov, cuentaDe, chequeDe, cuentasCredicoop, detalles },
+    pagos, conexion: estadoConexion(), retencion, falla_confirmacion: fallaConfirmacion,
+    _interno: { prov, cuentaDe, chequeDe, cuentasCredicoop, detalles },
   }
+}
+
+/** Lo que devuelve op_retencion_al_confirmar (vista previa; no cambia nada). */
+export interface RetencionAntesDeEnviar {
+  cambia: boolean
+  retencion_guardada: number
+  retencion_hoy: number
+  neto_guardado: number
+  neto_hoy: number
+  se_puede_ajustar: boolean
+  medio_que_se_ajusta: string | null
+  linea_id: string | null
+  fecha_pago: string
+  fecha_orden: string
+  /** 20261119n: el banco real ya hizo un pago de la orden y la retención quedó fija */
+  retencion_fija_por_banco?: boolean
+}
+
+/**
+ * Aceptar la retención de Ganancias de hoy ANTES de mandar el pago al banco (revisión 19/11).
+ * Ajusta la transferencia / efectivo de la orden (nunca uno que ya se mandó al banco) y la orden
+ * sigue pendiente. `retencionVista` = la que la persona vio en la pantalla: si cambió de nuevo,
+ * la base no toca nada y avisa.
+ */
+export async function aceptarRetencionDeOrden(db: SupabaseClient, ordenPagoId: string, retencionVista: number | null): Promise<Fila> {
+  const { data, error } = await db.rpc("op_retencion_actualizar", { p_op_id: ordenPagoId, p_retencion_vista: retencionVista })
+  if (error) {
+    if (faltaLaFuncion(error, "op_retencion_actualizar")) {
+      throw new ErrorOperacion("Falta aplicar la migración 20261119n_pagos_banco_retencion.sql: todavía no se puede aceptar la retención antes de mandar el pago. Mientras tanto, eliminá la orden y armala de nuevo.", 503)
+    }
+    if (esGuardia(error)) throw new ErrorOperacion(error.message, 409)
+    throw new Error(error.message)
+  }
+  return (data ?? {}) as Fila
 }
 
 // ─── Guardar, enviar y registrar el resultado ──────────────────────────────
@@ -248,7 +308,44 @@ async function anotar(db: SupabaseClient, id: string, usuarioId: string | null, 
   if (estaHecha(r.estado) && data.tipo === "echeq_endoso" && data.cheque_id && data.id_cheque_banco) {
     await db.from("cheques").update({ echeq_id: data.id_cheque_banco }).eq("id", data.cheque_id).is("echeq_id", null)
   }
+  // E-cheq emitido (revisión 19/11): el cheque propio lo crea op_confirmar al confirmar la orden, ya
+  // con el identificador del banco (20261119n). Si la orden ya estaba confirmada, se completa acá.
+  if (estaHecha(r.estado) && data.tipo === "echeq_emision" && data.orden_pago_id) await completarEcheqsEmitidos(db, data.orden_pago_id)
   return data
+}
+
+/** Número de cheque que informó el banco en la respuesta de la emisión (si lo informó). */
+const numeroChequeDeRespuesta = (respuesta: unknown): string | null => {
+  const d = ((respuesta as any)?.data ?? {}) as any
+  const c = d.echeq ?? (Array.isArray(d.echeqs) ? d.echeqs[0] : null)
+  return String(c?.numeroCheque ?? "").trim() || null
+}
+
+/**
+ * E-cheq emitidos por Credicoop (banco real) de una orden de pago: el cheque propio de la orden
+ * lleva el identificador y el número que dio el banco (no el número escrito a mano al armar la
+ * orden), así el débito y la conciliación lo encuentran. Solo completa cheques que todavía no
+ * tienen identificador, y solo cuando hay UN cheque de ese importe sin identificar (si hay más,
+ * no adivina). Lo llaman la confirmación de la orden y la consulta al banco. No lanza.
+ */
+export async function completarEcheqsEmitidos(db: SupabaseClient, ordenPagoId: string): Promise<void> {
+  try {
+    const { data: ops, error } = await db.from("bancos_operaciones").select("id_cheque_banco, monto, respuesta")
+      .eq("orden_pago_id", ordenPagoId).eq("tipo", "echeq_emision").eq("ambiente", "produccion").in("estado", ["firmada", "acreditada"])
+      .not("id_cheque_banco", "is", null)
+    if (error || !ops?.length) return
+    for (const o of ops as Fila[]) {
+      const { data: ya } = await db.from("cheques").select("id").eq("echeq_id", o.id_cheque_banco).limit(1)
+      if (ya?.length) continue
+      const { data: chs } = await db.from("cheques").select("id").eq("orden_pago_id", ordenPagoId).eq("tipo", "PROPIO").is("echeq_id", null).eq("monto", Number(o.monto))
+      if (chs?.length !== 1) continue
+      const numero = numeroChequeDeRespuesta(o.respuesta)
+      const u = await db.from("cheques").update({ echeq_id: o.id_cheque_banco, es_echeq: true, ...(numero ? { numero } : {}) }).eq("id", (chs[0] as Fila).id).is("echeq_id", null)
+      if (u.error) console.warn("[bancos] no se pudo anotar el e-cheq del banco en el cheque:", u.error.message)
+    }
+  } catch (e) {
+    console.warn("[bancos] completar e-cheq emitidos:", (e as Error)?.message)
+  }
 }
 
 /**
@@ -528,6 +625,26 @@ export async function bloqueoPorBanco(db: SupabaseClient, ordenPagoId: string, a
   const { data, error } = await db.rpc("bancos_bloqueo_orden", { p_op_id: ordenPagoId, p_accion: accion })
   if (error) { if (faltaTablaBancos(error)) return null; throw new Error(error.message) }
   return typeof data === "string" && data.trim() ? data : null
+}
+
+/**
+ * ¿Se puede ANULAR esta orden pagada? No, si el banco real ya hizo el pago (o todavía lo puede
+ * hacer): anularla devolvería la deuda al proveedor y los vencimientos quedarían para pagar otra
+ * vez (pago doble). Desde 20261119n la base corta igual (op_anular → bancos_bloqueo_orden
+ * 'anular'); esto avisa antes y anda aunque esa migración no esté aplicada.
+ */
+export async function bloqueoAnularPorBanco(db: SupabaseClient, ordenPagoId: string): Promise<string | null> {
+  const { data, error } = await db.from("bancos_operaciones").select("estado, monto, tipo, creado_at")
+    .eq("orden_pago_id", ordenPagoId).eq("ambiente", "produccion").neq("estado", "rechazada")
+  if (error) { if (faltaTablaBancos(error)) return null; throw new Error(error.message) }
+  const ops = (data ?? []) as Fila[]
+  if (!ops.length) return null
+  const hecha = ops.find((o) => estaHecha(o.estado as EstadoOperacion))
+  if (hecha) {
+    const que = hecha.tipo === "transferencia" ? "transferencia" : hecha.tipo === "echeq_emision" ? "e-cheq emitido" : hecha.tipo === "echeq_endoso" ? "e-cheq endosado" : hecha.tipo
+    return `No se puede anular: Credicoop ya hizo el pago de ${moneda(Number(hecha.monto))} de esta orden (${que}) y la plata salió. Si se anula, la deuda vuelve a la cuenta corriente del proveedor y los vencimientos quedan para pagar otra vez: sería un pago doble. Si el proveedor devuelve la plata o hay que corregir algo, registralo aparte (nota de crédito o ajuste en la cuenta corriente del proveedor) y avisá a sistemas.`
+  }
+  return `No se puede anular: esta orden tiene un pago de ${moneda(Number(ops[0].monto))} mandado a Credicoop que todavía puede salir. Primero rechazá esa operación en Banca Internet Empresa y tocá “Actualizar estado” en el botón de Credicoop de la orden.`
 }
 
 /**

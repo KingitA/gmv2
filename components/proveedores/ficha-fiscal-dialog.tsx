@@ -31,6 +31,7 @@ export function FichaFiscalDialog({
   onOpenChange: (o: boolean) => void
 }) {
   const [data, setData] = useState<any>(null)
+  const [errorCarga, setErrorCarga] = useState<string | null>(null)
   const [regimen, setRegimen] = useState("bienes")
   const [condicion, setCondicion] = useState("inscripto")
   // Exento de Ganancias: hasta cuándo vale el certificado (vacío = sin vencimiento)
@@ -52,10 +53,12 @@ export function FichaFiscalDialog({
     setPropuesta(null)
     setNuevaExclusion(null)
     setDesactivar(new Set())
+    setErrorCarga(null)
     fetch(`/api/proveedores/${proveedorId}/fiscal`)
       .then(r => r.json())
       .then(d => {
-        if (d.error) { toast.error(d.error); return }
+        // Sin permiso (solo admin) o error: el mensaje queda en la ventana, no una carga que no termina
+        if (d.error) { setErrorCarga(d.error); return }
         setData(d)
         setRegimen(d.proveedor.regimen_ganancias || "bienes")
         setCondicion(d.proveedor.condicion_ganancias || "inscripto")
@@ -175,7 +178,9 @@ export function FichaFiscalDialog({
           </DialogTitle>
         </DialogHeader>
 
-        {!data ? (
+        {errorCarga ? (
+          <p role="alert" className="rounded-md border border-ambar-200 bg-ambar-50 p-3 text-sm text-ambar-900">{errorCarga}</p>
+        ) : !data ? (
           <CargaProgreso compacto mensajes={MENSAJES.general} className="mx-auto max-w-sm py-6" />
         ) : (
           <div className="space-y-4">

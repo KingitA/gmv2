@@ -3,7 +3,10 @@ import { NextResponse } from 'next/server'
 import { requirePermiso, tienePermiso } from '@/lib/auth'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { anotarResponsableOP } from '@/lib/ordenes-pago/responsable'
-import { ultimosEnvios } from '@/lib/ordenes-pago/envio'
+import { enviarOrdenAlProveedor, ultimosEnvios, type ResumenEnvio } from '@/lib/ordenes-pago/envio'
+
+// "Pagar ahora" confirma y le manda la orden al proveedor por mail (PDF + certificado)
+export const maxDuration = 60
 
 // GET /api/ordenes-pago
 export async function GET(request: Request) {
@@ -122,6 +125,15 @@ export async function POST(request: Request) {
         if (status === 500) console.error(`[ordenes-pago] ${que}:`, error)
         return NextResponse.json({ error: error.message }, { status })
     }
+    // La orden ya quedó pagada: el envío al proveedor nunca la hace fallar (lib/ordenes-pago/envio.ts)
+    const mandarAlProveedor = async (opId: string): Promise<ResumenEnvio | null> => {
+        try {
+            return await enviarOrdenAlProveedor(supabase, opId, { usuarioId: auth.user.id, origen: 'confirmacion' })
+        } catch (e) {
+            console.error('[ordenes-pago] envío al proveedor:', e)
+            return null
+        }
+    }
     const faltaFuncion = (error: any, nombre: string) =>
         (error?.code === 'PGRST202' || error?.code === '42883') && new RegExp(`\\b${nombre}\\(`).test(error.message || '')
 
@@ -133,8 +145,12 @@ export async function POST(request: Request) {
             p_payload: payload, p_usuario: usuario, p_usuario_id: auth.user.id,
         })
         if (!junto.error) {
-            await anotarResponsableOP(supabase, (junto.data as any).id, 'confirmado', auth.user.id)
-            return NextResponse.json({ ...(junto.data as any), confirmada: true })
+            const d = junto.data as any
+            await anotarResponsableOP(supabase, d.id, 'confirmado', auth.user.id)
+            // Revisión 19/11: "Pagar ahora" también le manda la orden al proveedor, igual que el tilde
+            // verde. Si es un reintento de la misma orden (ya estaba confirmada) no se manda otro mail.
+            const envio = d?.confirmacion?.ya_confirmada === true ? null : await mandarAlProveedor(d.id)
+            return NextResponse.json({ ...d, confirmada: true, envio })
         }
         if (!faltaFuncion(junto.error, 'op_crear_y_confirmar')) return responder(junto.error, 'op_crear_y_confirmar')
         // La función todavía no está en la base: mismas dos operaciones, de a una (abajo)
@@ -175,5 +191,6 @@ export async function POST(request: Request) {
         })
     }
     await anotarResponsableOP(supabase, op.id, 'confirmado', auth.user.id)
-    return NextResponse.json({ ...op, estado: 'pagada', confirmada: true, confirmacion: conf.data })
+    const envio = (conf.data as any)?.ya_confirmada === true ? null : await mandarAlProveedor(op.id)
+    return NextResponse.json({ ...op, estado: 'pagada', confirmada: true, confirmacion: conf.data, envio })
 }

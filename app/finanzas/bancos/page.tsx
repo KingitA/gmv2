@@ -28,6 +28,11 @@ interface Operacion extends OperacionBanco {
 interface Estado {
   conexion: { conectado: boolean; ambiente: string | null; falta: string[]; simulador_en_produccion?: boolean }
   falta_migracion: boolean
+  /** Órdenes cuyo pago el banco real ya hizo y siguen pendientes (revisión 19/11) */
+  pagadas_sin_confirmar?: Array<{
+    orden_pago_id: string; numero_op: string | null; proveedor: string | null; neto_a_pagar: number; pagado_por_banco: number
+    ultima_firma: string | null; falla: string | null; falla_estado: string | null; falla_at: string | null
+  }>
   cuentas: Array<{ id: string; nombre: string; cbu: string | null; tiene_cbu: boolean }>
   operaciones: Operacion[]
 }
@@ -141,6 +146,28 @@ export default function BancosPage() {
 
       {estado && (
         <>
+          {(estado.pagadas_sin_confirmar?.length ?? 0) > 0 && (
+            <section role="alert" className="rounded-2xl border-2 border-red-300 bg-red-50 p-4">
+              <h2 className="flex items-center gap-2 text-base font-bold text-red-900"><AlertTriangle className="h-5 w-5" /> Pagos que el banco ya hizo y la orden sigue pendiente</h2>
+              <p className="mt-0.5 text-[13px] text-red-800">La plata salió pero la orden de pago no quedó confirmada: la cuenta corriente del proveedor y los vencimientos todavía no lo muestran. Confirmala desde Órdenes de pago (tilde verde) o resolvé lo que dice el motivo.</p>
+              <ul className="mt-3 space-y-2">
+                {estado.pagadas_sin_confirmar!.map((o) => (
+                  <li key={o.orden_pago_id} className="rounded-lg border border-red-200 bg-white p-3 text-sm">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="font-semibold text-neutro-900">Orden de pago {o.numero_op ?? "—"} · {o.proveedor ?? "—"}</span>
+                      <span className="font-bold tabular-nums">{moneda(o.pagado_por_banco)} <span className="text-xs font-normal text-neutro-500">por el banco{o.ultima_firma ? ` · ${fechaHora(o.ultima_firma)}` : ""}</span></span>
+                    </div>
+                    <p className={cn("mt-1", o.falla ? "font-semibold text-red-800" : "text-neutro-600")}>
+                      {o.falla ?? "Todavía no se intentó confirmarla sola (o falta aplicar la migración 20261119n para ver el motivo). Tocá “Actualizar estado” en la orden."}
+                    </p>
+                    {o.falla_at && <p className="text-xs text-neutro-500">Visto el {fechaHora(o.falla_at)}</p>}
+                  </li>
+                ))}
+              </ul>
+              <Button size="sm" variant="outline" className="mt-3" asChild><Link href="/ordenes-pago">Ir a órdenes de pago</Link></Button>
+            </section>
+          )}
+
           <Tarjeta titulo="Conexión">
             {conectado ? (
               <div className={cn("flex gap-2 rounded-md border p-3 text-sm", estado.conexion.ambiente === "produccion" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-sky-200 bg-sky-50 text-sky-900")}>

@@ -36,7 +36,16 @@ interface Datos {
   orden: { id: string; numero_op: string; estado: string; proveedor: string }
   conexion: { conectado: boolean; ambiente: string | null; falta: string[]; simulador_en_produccion?: boolean }
   pagos: Pago[]
+  /** Retención de Ganancias de hoy frente a la de la orden (op_retencion_al_confirmar) */
+  retencion?: {
+    cambia: boolean; retencion_guardada: number; retencion_hoy: number; neto_guardado: number; neto_hoy: number
+    se_puede_ajustar: boolean; medio_que_se_ajusta: string | null; fecha_pago: string; retencion_fija_por_banco?: boolean
+  } | null
+  /** El banco ya pagó y la orden no se pudo confirmar sola */
+  falla_confirmacion?: { mensaje: string; estado: string | null; at: string | null } | null
 }
+
+const MEDIO_AJUSTE: Record<string, string> = { efectivo: "el efectivo", deposito: "el depósito", transferencia: "la transferencia" }
 
 /** Aviso de lo que pasó con la orden cuando el banco terminó (confirmada sola, falta el resto, no se pudo, o prueba). */
 export function avisarConfirmacion(c: { estado: string; mensaje: string | null; envio?: { estado: string } | null } | null | undefined) {
@@ -146,6 +155,8 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
   const [aRechazar, setARechazar] = useState<{ id: string; descripcion: string } | null>(null)
   // Endoso con más de una cuenta de Credicoop habilitada: la cuenta que se eligió para cada pago
   const [cuentaElegida, setCuentaElegida] = useState<Record<string, string>>({})
+  // La retención de Ganancias cambió: se acepta antes de mandar (pide confirmación)
+  const [aceptarRet, setAceptarRet] = useState(false)
 
   const cargar = useCallback(async () => {
     if (!ordenPagoId) return
@@ -171,6 +182,21 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
     } catch (e: any) {
       toast.error(`${e?.message || "Se cortó la comunicación"}. No se sabe si llegó a Credicoop: tocá “Actualizar estado” antes de volver a mandarlo.`, { duration: 15000 })
     } finally { setTrabajando(null); await cargar(); onCambio?.() }
+  }
+
+  async function aceptarRetencion() {
+    const ret = datos?.retencion
+    setAceptarRet(false)
+    if (!ret) return
+    setTrabajando("retencion")
+    try {
+      const r = await fetch(`/api/bancos/credicoop/ordenes-pago/${ordenPagoId}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "aceptar_retencion", retencion_vista: ret.retencion_hoy }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) toast.error(j?.error || "No se pudo actualizar la retención", { duration: 15000 })
+      else toast.success(`Retención actualizada a ${moneda(ret.retencion_hoy)}. Revisá el importe del pago antes de mandarlo.`, { duration: 10000 })
+    } catch (e: any) { toast.error(e?.message || "No se pudo actualizar la retención") } finally { setTrabajando(null); await cargar(); onCambio?.() }
   }
 
   async function actualizar(p: Pago) {
@@ -226,6 +252,32 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
               {datos.conexion.ambiente === "homologacion" && (
                 <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
                   <b>Banco de prueba (homologación):</b> las operaciones van al ambiente de pruebas de Credicoop, no mueven plata real.
+                </div>
+              )}
+
+              {datos.falla_confirmacion && datos.orden.estado === "pendiente" && (
+                <div role="alert" className="flex gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span>
+                    <b>{datos.falla_confirmacion.estado === "falta_resto" ? "El banco ya pagó lo suyo: falta confirmar el resto a mano." : "El banco ya pagó y la orden no se pudo confirmar sola."}</b>{" "}
+                    {datos.falla_confirmacion.mensaje}
+                    {datos.falla_confirmacion.at ? <span className="text-red-700"> (visto el {fechaHora(datos.falla_confirmacion.at)})</span> : null}
+                  </span>
+                </div>
+              )}
+              {datos.retencion?.cambia && datos.orden.estado === "pendiente" && (
+                <div className="space-y-2 rounded-md border border-ambar-300 bg-ambar-50 p-3 text-sm text-ambar-900">
+                  <p className="font-semibold">La retención de Ganancias cambió desde que se armó la orden: hay que aceptarla antes de mandar el pago.</p>
+                  <p>
+                    La retención cuenta por el día en que se paga (hoy, {fecha(datos.retencion.fecha_pago)}). Era <b>{moneda(datos.retencion.retencion_guardada)}</b> y hoy corresponde <b>{moneda(datos.retencion.retencion_hoy)}</b>:
+                    el neto a pagar pasa de {moneda(datos.retencion.neto_guardado)} a <b>{moneda(datos.retencion.neto_hoy)}</b>.
+                    {datos.retencion.se_puede_ajustar ? ` La diferencia se ajusta en ${MEDIO_AJUSTE[datos.retencion.medio_que_se_ajusta ?? ""] ?? "un pago"} de la orden.` : ""}
+                  </p>
+                  {datos.retencion.se_puede_ajustar ? (
+                    <Button size="sm" disabled={trabajando === "retencion"} onClick={() => setAceptarRet(true)}>Aceptar la retención de hoy</Button>
+                  ) : (
+                    <p className="font-semibold">No hay una transferencia ni efectivo sin mandar al banco donde ajustar la diferencia: eliminá la orden y armala de nuevo.</p>
+                  )}
                 </div>
               )}
 
@@ -307,7 +359,7 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
               {todosHechos && datos.orden.estado === "pendiente" && (
                 <div className="flex gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  <span><b>El banco ya procesó todo, pero la orden sigue pendiente.</b> Tocá “Actualizar estado” para que se confirme sola; si no se puede (por ejemplo, cambió la retención), confirmala con el tilde verde de la lista.</span>
+                  <span><b>El banco ya procesó todo, pero la orden sigue pendiente.</b> Tocá “Actualizar estado” para que se confirme sola (con la retención que tenía la orden al mandar el pago); si no se puede, el motivo queda a la vista y se confirma con el tilde verde de la lista.</span>
                 </div>
               )}
             </div>
@@ -341,6 +393,26 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
           <AlertDialogFooter>
             <AlertDialogCancel>Volver</AlertDialogCancel>
             <AlertDialogAction onClick={(e) => { e.preventDefault(); if (aConfirmar) mandar(aConfirmar) }}>Mandar para firmar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={aceptarRet} onOpenChange={(o) => { if (!o) setAceptarRet(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Aceptar la retención de Ganancias de hoy?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              {datos?.retencion ? (
+                <div className="space-y-2 text-sm text-neutro-800">
+                  <p>La retención pasa de {moneda(datos.retencion.retencion_guardada)} a <b>{moneda(datos.retencion.retencion_hoy)}</b> y el neto a pagar de {moneda(datos.retencion.neto_guardado)} a <b>{moneda(datos.retencion.neto_hoy)}</b>.</p>
+                  <p>La diferencia se ajusta en {MEDIO_AJUSTE[datos.retencion.medio_que_se_ajusta ?? ""] ?? "un pago"} de la orden. La orden sigue pendiente: después mandás el pago a Credicoop con el importe nuevo. Esa retención queda fija cuando el banco hace el pago.</p>
+                </div>
+              ) : <span />}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Volver</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); aceptarRetencion() }}>Aceptar la retención</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
