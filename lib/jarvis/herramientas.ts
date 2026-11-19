@@ -269,12 +269,12 @@ const ventas: Herramienta = {
 const deudaClientes: Herramienta = {
   nombre: "deuda_clientes",
   descripcion:
-    "Lo que deben los clientes según la cuenta corriente (libro mayor, la fuente oficial de deuda), separado por antigüedad: 0-29, 30-59, 60-89 y 90+ días desde la compra que todavía no se pagó. Incluye última compra y último pago. Filtros por zona, vendedor o cliente.",
+    "Lo que deben los clientes según la cuenta corriente (libro mayor, la fuente oficial de deuda), separado por DÍAS DE ATRASO: 0-29, 30-59, 60-89 y 90+ días desde el vencimiento de lo que todavía no se pagó (lo que aún no venció cuenta 0 días). La columna vencida es lo que ya pasó su vencimiento (la misma cifra que la ficha del cliente). Incluye última compra y último pago. Filtros por zona, vendedor o cliente.",
   esquema: {
     type: "object",
     properties: {
       zona: { type: "string" }, vendedor: { type: "string" }, cliente: { type: "string" },
-      min_dias: { type: "integer", description: "Solo clientes cuya deuda más vieja tiene al menos estos días" },
+      min_dias: { type: "integer", description: "Solo clientes cuya deuda más vieja tiene al menos estos días de atraso" },
       ...P_LIMITE,
     },
   },
@@ -290,24 +290,24 @@ const deudaClientes: Herramienta = {
       .filter((f) => (num(f.dias_mas_vieja) ?? 0) >= minDias)
       .map((f) => ({
         cliente: String(f.cliente), zona: (f.zona as string) ?? null, vendedor: (f.vendedor as string) ?? null,
-        saldo: red(n0(f.saldo)), d0_29: red(n0(f.d0_29)), d30_59: red(n0(f.d30_59)), d60_89: red(n0(f.d60_89)), d90_mas: red(n0(f.d90_mas)),
+        saldo: red(n0(f.saldo)), vencida: red(n0(f.vencida)), d0_29: red(n0(f.d0_29)), d30_59: red(n0(f.d30_59)), d60_89: red(n0(f.d60_89)), d90_mas: red(n0(f.d90_mas)),
         dias_mas_vieja: num(f.dias_mas_vieja), ultima_compra: fechaSola(f.ultima_compra), ultimo_pago: fechaSola(f.ultimo_pago),
       }))
     const lim = limite(p.limite, 20)
     const suma = (k: keyof (typeof filas)[number]) => red(filas.reduce((s, f) => s + n0(f[k]), 0))
-    const total = { saldo: suma("saldo"), d0_29: suma("d0_29"), d30_59: suma("d30_59"), d60_89: suma("d60_89"), d90_mas: suma("d90_mas") }
+    const total = { saldo: suma("saldo"), vencida: suma("vencida"), d0_29: suma("d0_29"), d30_59: suma("d30_59"), d60_89: suma("d60_89"), d90_mas: suma("d90_mas") }
     const filtroTxt = filtros.length ? ` (${filtros.join(", ")})` : ""
     const bloque = tabla(
-      `Deuda por antigüedad${filtroTxt}${minDias ? ` — más de ${minDias} días` : ""}`,
+      `Deuda por días de atraso${filtroTxt}${minDias ? ` — más de ${minDias} días de atraso` : ""}`,
       [
         { clave: "cliente", titulo: "Cliente" }, { clave: "zona", titulo: "Zona" },
-        { clave: "saldo", titulo: "Debe", formato: "pesos" },
+        { clave: "saldo", titulo: "Debe", formato: "pesos" }, { clave: "vencida", titulo: "Vencida", formato: "pesos" },
         { clave: "d0_29", titulo: "0-29 d", formato: "pesos" }, { clave: "d30_59", titulo: "30-59 d", formato: "pesos" },
         { clave: "d60_89", titulo: "60-89 d", formato: "pesos" }, { clave: "d90_mas", titulo: "90+ d", formato: "pesos" },
         { clave: "ultima_compra", titulo: "Última compra", formato: "fecha" },
       ],
       filas.slice(0, lim),
-      { total, nota: "Según cuenta corriente. Lo pagado cancela primero lo más viejo." },
+      { total, nota: "Según cuenta corriente. Días de atraso desde el vencimiento de cada comprobante (lo que no venció cuenta 0). Lo pagado cancela primero lo más viejo." },
     )
     return {
       consultado: `Cuentas corrientes de ${todas.length} clientes con saldo${filtroTxt}`,
@@ -420,7 +420,7 @@ const fichaCliente: Herramienta = {
         cliente: c.nombre, razon_social: i.nombre_razon_social, codigo: i.codigo_cliente, activo: i.activo,
         zona: i.localidades?.zonas?.nombre ?? null, localidad: i.localidades?.nombre ?? null, viajante: i.vendedores?.nombre ?? null,
         condicion_pago: i.condicion_pago, facturacion: i.metodo_facturacion, lista: i.listas_precio?.nombre ?? null,
-        deuda: d ? { saldo: red(n0(d.saldo)), d0_29: red(n0(d.d0_29)), d30_59: red(n0(d.d30_59)), d60_89: red(n0(d.d60_89)), d90_mas: red(n0(d.d90_mas)), ultimo_pago: fechaSola(d.ultimo_pago) } : "sin deuda",
+        deuda: d ? { saldo: red(n0(d.saldo)), vencida: red(n0(d.vencida)), d0_29: red(n0(d.d0_29)), d30_59: red(n0(d.d30_59)), d60_89: red(n0(d.d60_89)), d90_mas: red(n0(d.d90_mas)), ultimo_pago: fechaSola(d.ultimo_pago) } : "sin deuda",
         habitos: h ? { compra_cada_dias: num(h.dias_entre_compras), venta_mensual: red(n0(h.venta_mensual_promedio)), ultima_compra: fechaSola(h.ultima_compra), dias_sin_comprar: num(h.dias_sin_comprar) } : "sin compras en 6 meses",
         compras_por_mes: serie, articulos_top: top,
         pedidos_abiertos: (abiertos.data ?? []).map((x: any) => ({ numero: x.numero_pedido, fecha: x.fecha, estado: x.estado, total: red(n0(x.total)) })),
@@ -901,12 +901,12 @@ const clientesRetenidos: Herramienta = {
     const nom = new Map(((us ?? []) as { id: string; nombre: string }[]).map((u) => [u.id, u.nombre]))
     const filas = cs.map((c) => {
       const d = saldo.get(c.id)
-      return { cliente_id: c.id, cliente: c.nombre, desde: fechaSola(c.retener_desde), motivo: c.retener_motivo, decidio: c.retener_por ? nom.get(c.retener_por) ?? "—" : "—", debe: red(n0(d?.saldo)), vencido_30: red(n0(d?.d30_59) + n0(d?.d60_89) + n0(d?.d90_mas)) }
+      return { cliente_id: c.id, cliente: c.nombre, desde: fechaSola(c.retener_desde), motivo: c.retener_motivo, decidio: c.retener_por ? nom.get(c.retener_por) ?? "—" : "—", debe: red(n0(d?.saldo)), vencida: red(n0(d?.vencida)) }
     })
     return {
       consultado: "Clientes con entregas retenidas y su deuda",
       datos: filas,
-      bloques: [{ ...tabla("Clientes con entregas retenidas", [{ clave: "cliente", titulo: "Cliente" }, { clave: "desde", titulo: "Desde", formato: "fecha" }, { clave: "decidio", titulo: "Lo decidió" }, { clave: "debe", titulo: "Debe hoy", formato: "pesos" }, { clave: "vencido_30", titulo: "Vencido +30 d", formato: "pesos" }], filas), recalcular: { herramienta: "clientes_retenidos", parametros: {} } }],
+      bloques: [{ ...tabla("Clientes con entregas retenidas", [{ clave: "cliente", titulo: "Cliente" }, { clave: "desde", titulo: "Desde", formato: "fecha" }, { clave: "decidio", titulo: "Lo decidió" }, { clave: "debe", titulo: "Debe hoy", formato: "pesos" }, { clave: "vencida", titulo: "Vencida", formato: "pesos" }], filas), recalcular: { herramienta: "clientes_retenidos", parametros: {} } }],
     }
   },
 }

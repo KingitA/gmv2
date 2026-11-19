@@ -7,7 +7,8 @@ import { fetchAllRows } from '@/lib/playroom/queries'
 // y Jarvis (v_aging_clientes → cc_deuda_antiguedad_base, migración
 // 20261016_cc_fuente_unica.sql). Antes este reporte tenía su propia cuenta por
 // comprobante, con otros tramos, y no coincidía con la cuenta corriente.
-// Tramos: 0–29 / 30–59 / 60–89 / 90+ días desde la fecha del comprobante.
+// Tramos: 0–29 / 30–59 / 60–89 / 90+ DÍAS DE ATRASO, desde el vencimiento de cada
+// comprobante (20261119r_aging_por_vencimiento.sql); lo que no venció cuenta 0.
 // Las claves t0_30/t31_60/… se mantienen por compatibilidad con la pantalla.
 export async function GET() {
   // E-65: reportes de Playroom, solo admin y administrativo (lib/auth.ts → PERMISOS)

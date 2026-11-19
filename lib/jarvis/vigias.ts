@@ -63,10 +63,11 @@ async function rpc(db: SupabaseClient, fn: string, args: Fila): Promise<Fila[]> 
 
 export type Vigia = (db: SupabaseClient, hoy: string, r: Reglas) => Promise<Candidato[]>
 
-/** Cliente con deuda vencida que volvió a comprar. */
+/** Cliente con deuda vencida que volvió a comprar. "Vencida" = la de cc_deuda_vencimiento
+ *  (vencimiento anterior a hoy, columna vencida de jarvis_deuda_antiguedad), no "más de 30 días". */
 const deudaYCompra: Vigia = async (db, hoy, r) => {
   const deuda = (await rpc(db, "jarvis_deuda_antiguedad", { p_zona_id: null, p_vendedor_id: null, p_cliente_id: null }))
-    .map((f): Fila & { vencida: number } => ({ ...f, vencida: n0(f.d30_59) + n0(f.d60_89) + n0(f.d90_mas) }))
+    .map((f): Fila & { vencida: number } => ({ ...f, vencida: n0(f.vencida) }))
     .filter((f) => f.vencida >= r.regla_deuda_vencida_minima)
   if (!deuda.length) return []
   const { data: ret } = await db.from("clientes").select("id").in("id", deuda.map((d) => d.cliente_id as string)).eq("retener_entregas", true)
@@ -81,15 +82,15 @@ const deudaYCompra: Vigia = async (db, hoy, r) => {
     const nuevo = ps.reduce((s, p) => s + n0(p.total), 0)
     return [{
       clave: `retener_entregas:${d.cliente_id}`, vigia: "deuda_y_compra", tono: "alerta",
-      titulo: `${d.cliente} volvió a pedir y debe ${pesosCorto(d.vencida)} con más de 30 días. ¿Le retengo las entregas hasta que pague?`,
-      detalle: `Pedido nuevo por ${pesosCorto(nuevo)}. Su deuda más vieja tiene ${d.dias_mas_vieja} días${d.ultimo_pago ? "" : " y no registra pagos"}. Con el Sí, el chofer no le baja mercadería sin cobrar.`,
+      titulo: `${d.cliente} volvió a pedir y debe ${pesosCorto(d.vencida)} vencido. ¿Le retengo las entregas hasta que pague?`,
+      detalle: `Pedido nuevo por ${pesosCorto(nuevo)}. Su deuda más vieja tiene ${d.dias_mas_vieja} días de atraso${d.ultimo_pago ? "" : " y no registra pagos"}. Con el Sí, el chofer no le baja mercadería sin cobrar.`,
       acciones: [
         { texto: "Ver su cuenta", pregunta: `Contame de ${d.cliente}: deuda, pagos y cada cuánto compra` },
-        { texto: "¿Qué hago?", pregunta: `${d.cliente} volvió a pedir debiendo más de 30 días. ¿Conviene retenerle la entrega hasta que pague? Mirá su historial.` },
+        { texto: "¿Qué hago?", pregunta: `${d.cliente} volvió a pedir con deuda vencida. ¿Conviene retenerle la entrega hasta que pague? Mirá su historial.` },
       ],
       severidad: d.vencida, entidad: { tipo: "cliente", id: String(d.cliente_id) },
       datos: { deuda_vencida: d.vencida, saldo: n0(d.saldo), pedidos: ps.map((p) => p.numero_pedido) },
-      propuesta: { tipo: "retener_entregas", parametros: { cliente_id: d.cliente_id, cliente: d.cliente, motivo: `debe ${pesosCorto(d.vencida)} con más de 30 días` }, impacto: d.vencida },
+      propuesta: { tipo: "retener_entregas", parametros: { cliente_id: d.cliente_id, cliente: d.cliente, motivo: `debe ${pesosCorto(d.vencida)} vencido` }, impacto: d.vencida },
     }]
   })
 }
@@ -200,13 +201,13 @@ const retenidoAlDia: Vigia = async (db, _hoy, r) => {
   const { data, error } = await db.from("clientes").select("id, nombre, retener_desde").eq("retener_entregas", true)
   if (error || !data?.length) return []
   const deuda = await rpc(db, "jarvis_deuda_antiguedad", { p_zona_id: null, p_vendedor_id: null, p_cliente_id: null })
-  const vencida = new Map(deuda.map((d) => [String(d.cliente_id), n0(d.d30_59) + n0(d.d60_89) + n0(d.d90_mas)]))
+  const vencida = new Map(deuda.map((d) => [String(d.cliente_id), n0(d.vencida)]))
   return (data as { id: string; nombre: string; retener_desde: string | null }[])
     .filter((c) => (vencida.get(c.id) ?? 0) < r.regla_deuda_vencida_minima)
     .map((c): Candidato => ({
       clave: `liberar_entregas:${c.id}`, vigia: "retenido_al_dia", tono: "oportunidad",
       titulo: `${c.nombre} ya no tiene deuda vencida. ¿Le libero las entregas?`,
-      detalle: `Tiene las entregas retenidas desde ${c.retener_desde ? c.retener_desde.slice(8, 10) + "/" + c.retener_desde.slice(5, 7) : "antes"}. Deuda con más de 30 días hoy: ${pesosCorto(vencida.get(c.id) ?? 0)}.`,
+      detalle: `Tiene las entregas retenidas desde ${c.retener_desde ? c.retener_desde.slice(8, 10) + "/" + c.retener_desde.slice(5, 7) : "antes"}. Deuda vencida hoy: ${pesosCorto(vencida.get(c.id) ?? 0)}.`,
       acciones: [{ texto: "Ver su cuenta", pregunta: `Contame de ${c.nombre}: deuda, pagos y cada cuánto compra` }],
       severidad: 1, entidad: { tipo: "cliente", id: c.id }, datos: { vencida: vencida.get(c.id) ?? 0 },
       propuesta: { tipo: "liberar_entregas", parametros: { cliente_id: c.id, cliente: c.nombre }, impacto: 0 },

@@ -17,7 +17,7 @@ interface Regla { clave: string; valor: number | string; descripcion?: string | 
 interface Nota { clave: string; texto: string; por: string; at: string }
 interface Datos { reglas: Regla[]; notas: Nota[]; modelos: Record<"pensador" | "rapido" | "respaldo", string>; esfuerzo_chat: string; tope_mensual_usd: number; gasto_mes_usd: number; soy_admin: boolean }
 interface FilaHistorial { cuando: string; quien: string; que: string; sobre: string; nota: string | null }
-interface Retenido { cliente_id: string; cliente: string; desde: string | null; motivo: string | null; decidio: string; debe: number; vencido_30: number }
+interface Retenido { cliente_id: string; cliente: string; desde: string | null; motivo: string | null; decidio: string; debe: number; vencida: number }
 
 const NOMBRE_REGLA: Record<string, string> = {
   regla_deuda_vencida_minima: "Deuda vencida mínima para avisar ($)",
@@ -73,7 +73,7 @@ export default function JarvisAjustes() {
                   <p className="text-sm font-semibold text-azul-900">{r.cliente}</p>
                   <p className="text-xs text-neutro-400">Desde {r.desde ? fmtFecha(r.desde) : "—"} · lo decidió {r.decidio}{r.motivo ? ` · ${r.motivo}` : ""}</p>
                 </div>
-                <p className="text-sm text-neutro-600">Debe <b>$ {numero(r.debe, 0)}</b>{r.vencido_30 > 0 && <> · vencido <b className="text-alerta-600">$ {numero(r.vencido_30, 0)}</b></>}</p>
+                <p className="text-sm text-neutro-600">Debe <b>$ {numero(r.debe, 0)}</b>{r.vencida > 0 && <> · vencido <b className="text-alerta-600">$ {numero(r.vencida, 0)}</b></>}</p>
                 <button type="button" onClick={async () => {
                   setMsg(null)
                   const res = await fetch("/api/playroom/jarvis/retenidos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cliente_id: r.cliente_id }) })

@@ -322,7 +322,7 @@ export default function CuentasCorrientes() {
       {!loading && chartData.length > 0 && (
         <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1px solid #E3E5EF' }}>
           <p className="text-xs font-semibold mb-4" style={{ color: '#545871' }}>
-            Top {chartData.length} clientes — Antigüedad de saldos
+            Top {chartData.length} clientes — Antigüedad de saldos (días de atraso desde el vencimiento)
           </p>
           <ResponsiveContainer width="100%" height={Math.max(260, chartData.length * 28)}>
             <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 40, top: 0, bottom: 0 }}>
