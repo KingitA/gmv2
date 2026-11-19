@@ -1,4 +1,5 @@
 import type { DefDataset } from "@gm/core"
+import type { CondicionPagoTipo, FormaPago } from "@gm/condicion-pago"
 
 // Datasets que replica la app Vendedor (servidor: lib/mobile/sync/vendedor.ts y,
 // para los insumos de precio, lib/mobile/sync/datasets.ts). MOBILE.md → "Vendedor".
@@ -86,7 +87,7 @@ export interface CatalogosFicha {
   condiciones_pago: Array<{ id: string; nombre: string }>
   condiciones_entrega: Array<{ id: string; codigo: string; nombre: string }>
   zonas: Array<{ id: string; nombre: string }>
-  localidades: Array<{ id: string; nombre: string; provincia: string | null }>
+  localidades: Array<{ id: string; nombre: string; provincia: string | null; codigo_postal?: string | null }>
   listas_precio: ListaPrecio[]
   vendedores: Array<{ id: string; nombre: string; lista_precio_id?: string | null; lista_nombre?: string | null }>
   segmentos: Array<{ key: Segmento; label: string }>
@@ -119,7 +120,19 @@ export interface Cliente {
   telefono: string | null
   mail: string | null
   condicion_iva: string | null
+  /** Texto viejo (lo traduce la base); lo nuevo va en los campos de abajo */
   condicion_pago: string | null
+  // Condición y forma de pago (condiciones de pago, fase 4 — 19/11/2026). null = sin cargar
+  condicion_pago_tipo?: CondicionPagoTipo | null
+  plazo_dias?: number | null
+  forma_pago?: FormaPago | null
+  cheque_dias_desde?: number | null
+  cheque_dias_hasta?: number | null
+  codigo_postal?: string | null
+  /** Deuda vencida / a vencer (v_deuda_vencimiento del servidor; null = sin el dato) */
+  deuda_vencida?: number | null
+  deuda_a_vencer?: number | null
+  proximo_vencimiento?: string | null
   condicion_entrega: string | null
   metodo_facturacion: string | null
   vendedor_id: string | null

@@ -7,11 +7,15 @@ import { DS, type Cliente } from "../../datasets"
 import { useClientes } from "../../datos/hooks"
 import { Pantalla, SinDescargar, SinEnviar, formatCurrency, useAvisoEntrante, useToast, useBusqueda } from "../../ui"
 import { saldoVisible } from "../../datos/saldo"
+import { fechaCorta } from "@gm/formato"
+import { pasaFiltroDeuda, resumenDeuda, textoCondicionCliente, type FiltroDeuda } from "../../datos/condicion-pago"
 
 // Port de app/vendedor/clientes/page.tsx y app/vendedor/pago/page.tsx.
 // El filtro que la web resolvía en GET /api/vendedor/clientes se resuelve LOCAL sobre
 // la cartera replicada, con el mismo criterio: q sobre nombre, razón social, CUIT,
 // código, dirección y localidad; con_deuda = saldo real > 0; sin_rendir = pagos > 0.
+// Con deuda se abre en "Toda / Vencida / A vencer" (condiciones de pago, fase 4 — 19/11/2026):
+// lo calcula el servidor (v_deuda_vencimiento) y viaja en la cartera.
 
 const FILTROS = [
   { key: "todos", label: "Todos" },
@@ -19,17 +23,33 @@ const FILTROS = [
   { key: "sin_rendir", label: "Sin rendir" },
 ] as const
 
+const FILTROS_DEUDA: Array<{ key: FiltroDeuda; label: string }> = [
+  { key: "", label: "Toda" },
+  { key: "vencida", label: "Deuda vencida" },
+  { key: "a_vencer", label: "Deuda a vencer" },
+]
+
 /** = filtro de GET /api/vendedor/clientes (q + localidad + filtro). */
-function filtrarClientes(clientes: Cliente[], q: string, filtro: string, localidad: string): Cliente[] {
+function filtrarClientes(clientes: Cliente[], q: string, filtro: string, localidad: string, deuda: FiltroDeuda = ""): Cliente[] {
   const texto = q.trim()
   return clientes.filter((c) => {
     if (texto && !localMatch(texto, c.nombre, c.razon_social, c.cuit, c.codigo_cliente, c.direccion, c.localidad)) return false
     if (localidad && c.localidad !== localidad) return false
     // El vendedor lee el PROYECTADO (regla del dueño 16/10)
     if (filtro === "con_deuda" && !((c.saldo_proyectado ?? c.saldo_actual) > 0.005)) return false
+    if (filtro === "con_deuda" && !pasaFiltroDeuda(c, deuda)) return false
     if (filtro === "sin_rendir" && !(c.pagos_sin_rendir > 0)) return false
     return true
   })
+}
+
+/** Tercera línea de la fila: lo vencido en rojo o lo a vencer con su fecha; si no debe, la condición de pago. */
+function FilaCondicionDeuda({ c }: { c: Cliente }) {
+  const d = (c.saldo_proyectado ?? c.saldo_actual) > 0.005 ? resumenDeuda(c) : null
+  if (d?.tipo === "vencida") return <p className="truncate text-xs font-bold text-red-600">Vencida {formatCurrency(d.monto)}</p>
+  if (d?.tipo === "a_vencer") return <p className="truncate text-xs font-bold text-amber-700">A vencer {formatCurrency(d.monto)}{d.vence ? ` · vence ${fechaCorta(d.vence)}` : ""}</p>
+  const cond = textoCondicionCliente(c)
+  return cond ? <p className="truncate text-xs text-gray-400">{cond}</p> : null
 }
 
 const Tarjetas = ({ children }: { children: React.ReactNode }) => (
@@ -44,12 +64,13 @@ export function Clientes() {
   const [q, setQ] = useBusqueda("q")
   const [filtro, setFiltro] = useParamEstado("filtro", "todos")
   const [localidad, setLocalidad] = useParamEstado("localidad")
+  const [deuda, setDeuda] = useParamEstado("deuda", "")
   const { toast, mostrar } = useToast()
   useAvisoEntrante(mostrar)
 
   // Localidades disponibles para el filtro (sobre el total sin filtrar)
   const localidades = useMemo(() => [...new Set(clientes.map((c) => c.localidad).filter((l): l is string => !!l))].sort(), [clientes])
-  const visibles = useMemo(() => filtrarClientes(clientes, q, filtro, localidad), [clientes, q, filtro, localidad])
+  const visibles = useMemo(() => filtrarClientes(clientes, q, filtro, localidad, deuda as FiltroDeuda), [clientes, q, filtro, localidad, deuda])
 
   return (
     <Pantalla
@@ -94,6 +115,20 @@ export function Clientes() {
             ))}
           </select>
         </div>
+        {/* Con deuda: a quién cobrarle primero */}
+        {filtro === "con_deuda" && (
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {FILTROS_DEUDA.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setDeuda(f.key)}
+                className={`min-h-10 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-sm font-bold ${deuda === f.key ? (f.key === "vencida" ? "border-red-200 bg-red-50 text-red-700" : "border-white bg-white text-emerald-700") : "border-emerald-500 text-emerald-100"}`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {cargando ? null : clientes.length === 0 && !meta?.generadoAt ? (
@@ -101,7 +136,7 @@ export function Clientes() {
       ) : (
         <ListaVirtual
           items={visibles}
-          alto={96}
+          alto={110}
           clave={(c) => c.id}
           vacio={
             <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
@@ -118,7 +153,8 @@ export function Clientes() {
                       <span className="truncate">{c.nombre}</span>
                       {c.sinEnviar && <SinEnviar />}
                     </p>
-                    <p className="truncate text-sm text-gray-500">{[c.direccion, c.localidad, c.condicion_pago].filter(Boolean).join(" · ") || "—"}</p>
+                    <p className="truncate text-sm text-gray-500">{[c.direccion, c.localidad].filter(Boolean).join(" · ") || "—"}</p>
+                    <FilaCondicionDeuda c={c} />
                   </div>
                   <div className="shrink-0 text-right">
                     <p className={`font-bold ${saldoVisible(c.saldo_actual, c.saldo_proyectado) > 0 ? "text-red-600" : "text-green-600"}`}>{formatCurrency(saldoVisible(c.saldo_actual, c.saldo_proyectado))}</p>
