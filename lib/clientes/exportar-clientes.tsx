@@ -26,6 +26,7 @@ export interface FilaClienteExport {
   lista: string | null
   metodo_facturacion: string | null
   condicion_pago: string | null
+  codigo_postal: string | null
   condicion_entrega: string | null
   canal: string | null
   nivel: string | null
@@ -78,6 +79,7 @@ const COLUMNAS_XLSX: { titulo: string; ancho: number; valor: (f: FilaClienteExpo
   { titulo: "Condición IVA", ancho: 22, valor: (f) => vacio(f.condicion_iva) },
   { titulo: "Dirección", ancho: 32, valor: (f) => vacio(f.direccion) },
   { titulo: "Localidad", ancho: 20, valor: (f) => vacio(f.localidad) },
+  { titulo: "Código postal", ancho: 9, valor: (f) => vacio(f.codigo_postal) },
   { titulo: "Provincia", ancho: 16, valor: (f) => vacio(f.provincia) },
   { titulo: "Zona", ancho: 16, valor: (f) => vacio(f.zona) },
   { titulo: "Vendedor", ancho: 20, valor: (f) => vacio(f.vendedor) },
@@ -85,7 +87,7 @@ const COLUMNAS_XLSX: { titulo: string; ancho: number; valor: (f: FilaClienteExpo
   { titulo: "Email", ancho: 28, valor: (f) => vacio(f.email) },
   { titulo: "Lista de precios", ancho: 18, valor: (f) => vacio(f.lista) },
   { titulo: "Método de facturación", ancho: 14, valor: (f) => vacio(f.metodo_facturacion) },
-  { titulo: "Condición de pago", ancho: 18, valor: (f) => vacio(f.condicion_pago) },
+  { titulo: "Condición de pago", ancho: 34, valor: (f) => vacio(f.condicion_pago) },
   { titulo: "Condición de entrega", ancho: 20, valor: (f) => vacio(f.condicion_entrega) },
   { titulo: "Canal", ancho: 14, valor: (f) => vacio(f.canal) },
   { titulo: "Nivel", ancho: 10, valor: (f) => vacio(f.nivel) },

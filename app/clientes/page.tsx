@@ -26,6 +26,7 @@ import { moneda, entero, formatCuit } from "@/lib/formato"
 import { Download, FileSpreadsheet, Loader2 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { exportarClientesExcel, exportarClientesPdf, type FilaClienteExport, type InfoExport } from "@/lib/clientes/exportar-clientes"
+import { normalizarCondicion, textoCondicionPago } from "@/lib/clientes/condicion-pago"
 
 interface Cliente {
   id: string
@@ -46,6 +47,12 @@ interface Cliente {
   telefono: string | null
   mail: string | null
   condicion_pago: string
+  condicion_pago_tipo?: string | null
+  plazo_dias?: number | null
+  forma_pago?: string | null
+  cheque_dias_desde?: number | null
+  cheque_dias_hasta?: number | null
+  codigo_postal?: string | null
   nro_iibb: string | null
   exento_iibb: boolean
   exento_iva: boolean
@@ -60,6 +67,10 @@ interface Cliente {
   created_at?: string | null
   localidades?: { nombre: string; zonas?: { nombre: string } }
 }
+
+/** "Cuenta corriente 30 días · Efectivo" desde los campos nuevos; si el cliente todavía no los tiene, el texto viejo */
+const condicionPagoDe = (c: Cliente): string | null =>
+  c.condicion_pago_tipo || c.forma_pago ? textoCondicionPago(normalizarCondicion(c as any)) || null : c.condicion_pago || null
 
 const CLAVE_GUARDADO = "clientes:lista"
 function leerGuardado(): { q?: string; filtros?: Filtros; orden?: { col: string; dir: "asc" | "desc" }; estado?: "activos" | "inactivos" | "todos" } {
@@ -279,7 +290,7 @@ export default function ClientesPage() {
     { id: "puntaje", numero: (c) => Number(c.puntaje) },
     { id: "nivel", valor: (c) => c.nivel_puntaje },
     { id: "iva", valor: (c) => c.condicion_iva },
-    { id: "pago", valor: (c) => c.condicion_pago },
+    { id: "pago", valor: (c) => condicionPagoDe(c) },
     { id: "facturacion", valor: (c) => c.metodo_facturacion },
     { id: "lista", valor: (c) => (c.lista_precio_id ? nombreLista.get(c.lista_precio_id) ?? "(lista dada de baja)" : null) },
     { id: "canal", valor: (c) => c.tipo_canal },
@@ -354,7 +365,8 @@ export default function ClientesPage() {
       email: c.mail,
       lista: c.lista_precio_id ? nombreLista.get(c.lista_precio_id) ?? null : null,
       metodo_facturacion: c.metodo_facturacion,
-      condicion_pago: c.condicion_pago,
+      condicion_pago: condicionPagoDe(c),
+      codigo_postal: c.codigo_postal ?? null,
       condicion_entrega: c.condicion_entrega ? ENTREGA[c.condicion_entrega] ?? c.condicion_entrega : null,
       canal: c.tipo_canal,
       nivel: c.nivel_puntaje,
@@ -685,7 +697,7 @@ export default function ClientesPage() {
               </div>
               <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Condición de pago</p>
-                <p className="font-bold text-sm text-slate-800">{selectedCliente?.condicion_pago}</p>
+                <p className={`font-bold text-sm ${selectedCliente && condicionPagoDe(selectedCliente) ? "text-slate-800" : "text-red-600"}`}>{selectedCliente ? condicionPagoDe(selectedCliente) || "Sin cargar" : ""}</p>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {selectedCliente?.condicion_entrega === "entregamos_nosotros" ? "Entregamos nosotros" :
                    selectedCliente?.condicion_entrega === "retira_mostrador" ? "Retira en mostrador" : "Transporte"}

@@ -39,6 +39,14 @@ const CAMPOS_EDITABLES = [
   "telefono",
   "mail",
   "condicion_pago",
+  // Condición y forma de pago nuevas + CP (19/11). Si llega solo "condicion_pago"
+  // (texto viejo), la base lo traduce a estos campos (trg_clientes_condicion_pago).
+  "condicion_pago_tipo",
+  "plazo_dias",
+  "forma_pago",
+  "cheque_dias_desde",
+  "cheque_dias_hasta",
+  "codigo_postal",
   "condicion_entrega",
   "flete_pago", // P2-07: con transporte, flete en origen o destino
   "condicion_iva",

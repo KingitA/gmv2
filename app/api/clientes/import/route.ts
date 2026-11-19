@@ -314,7 +314,8 @@ export async function POST(req: NextRequest) {
                     condicion_iva: cliente.condicion_iva || "Consumidor Final",
                     // Sin dato = vacío (Juan 13/11/2026): antes se grababa "Factura" sin que nadie lo eligiera
                     metodo_facturacion: cliente.metodo_facturacion || null,
-                    condicion_pago: cliente.condicion_pago || "Efectivo",
+                    // Sin dato = vacío (Juan: "No hay valor = vacío"); la base traduce el texto a condición + forma
+                    condicion_pago: cliente.condicion_pago || null,
                     tipo_canal: cliente.tipo_canal || "Minorista",
                     exento_iibb: cliente.exento_iibb || false,
                     exento_iva: cliente.exento_iva || false,

@@ -86,6 +86,7 @@ export async function generarRemitosParaPedido(
   }
 
   const cliente = pedido.cliente as any
+  const codigoPostal = await codigoPostalCliente(supabase, cliente?.id)
   const condicion: string = pedido.condicion_entrega || cliente?.condicion_entrega || ''
   const copias = COPIAS_POR_ENTREGA[condicion]
   if (!copias) {
@@ -243,6 +244,7 @@ export async function generarRemitosParaPedido(
             cuit:                cliente?.cuit ?? null,
             direccion:           cliente?.direccion ?? null,
             localidad:           cliente?.localidad ?? null,
+            codigo_postal:       codigoPostal,
             condicion_iva:       cliente?.condicion_iva ?? null,
           },
           transporte,
@@ -340,4 +342,24 @@ export async function generarYSubirRemitoPDF(
     .eq('id', remitoId)
 
   return { pdfUrl: signed.signedUrl, pdfPath, pdfHash }
+}
+
+/**
+ * CP del cliente para el remito (19/11): el de la ficha o, si falta, el de su localidad.
+ * Consulta aparte y a prueba de fallas: si la columna todavía no existe o algo
+ * falla, el remito sale igual (sin CP).
+ */
+export async function codigoPostalCliente(supabase: SupabaseClient, clienteId: string | null | undefined): Promise<string | null> {
+  if (!clienteId) return null
+  try {
+    const { data, error } = await supabase.from('clientes').select('codigo_postal, localidades(codigo_postal)').eq('id', clienteId).maybeSingle()
+    if (!error && data) {
+      const d = data as any
+      return d.codigo_postal?.trim() || d.localidades?.codigo_postal?.trim() || null
+    }
+    const { data: soloLoc } = await supabase.from('clientes').select('localidades(codigo_postal)').eq('id', clienteId).maybeSingle()
+    return (soloLoc as any)?.localidades?.codigo_postal?.trim() || null
+  } catch {
+    return null
+  }
 }

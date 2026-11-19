@@ -26,6 +26,7 @@ import { InputCUIT } from "@/components/ui/input-cuit"
 import { CuentaEmpleadoFicha } from "@/components/personal/cuenta-empleado-ficha"
 import { limpiarNombreCliente } from "@/lib/clientes/nombre-cliente"
 import { RetenerEntregas } from "@/components/clientes/retener-entregas"
+import { CONDICIONES, FORMAS, desdeTextoViejo, normalizarCondicion, textoCondicionPago, type CondicionPago } from "@/lib/clientes/condicion-pago"
 
 /** Un desplegable sin valor cargado se ve vacío y en rojo (Juan 13/11/2026: "No hay valor = vacío"). */
 const vacioCls = (v: string | null | undefined) => (v ? "" : "text-red-600 border-red-300")
@@ -42,15 +43,17 @@ const IVA_MAP: Record<string, string> = {
   "sujeto exento": "Sujeto Exento",
   "no categorizado": "No Categorizado",
 }
-const PAGO_MAP: Record<string, string> = {
-  "efectivo": "Efectivo",
-  "transferencia": "Transferencia",
-  "cheque al día": "Cheque al día",
-  "cheque al dia": "Cheque al día",
-  "cheque 30 días": "Cheque 30 días",
-  "cheque 30 dias": "Cheque 30 días",
-  "cheque 30/60/90": "Cheque 30/60/90",
-}
+/** Días como texto para el formulario ("" = sin cargar) */
+const diasTxt = (n: number | null | undefined) => (n == null ? "" : String(n))
+/** Condición de pago del formulario (strings) → campos de la base, coherentes (lib/clientes/condicion-pago) */
+const condicionDeFormulario = (f: { condicion_pago_tipo: string; plazo_dias: string; forma_pago: string; cheque_dias_desde: string; cheque_dias_hasta: string }): CondicionPago =>
+  normalizarCondicion({
+    condicion_pago_tipo: (f.condicion_pago_tipo || null) as CondicionPago["condicion_pago_tipo"],
+    plazo_dias: f.plazo_dias === "" ? null : Number(f.plazo_dias),
+    forma_pago: (f.forma_pago || null) as CondicionPago["forma_pago"],
+    cheque_dias_desde: f.cheque_dias_desde === "" ? null : Number(f.cheque_dias_desde),
+    cheque_dias_hasta: f.cheque_dias_hasta === "" ? null : Number(f.cheque_dias_hasta),
+  })
 const FACTURACION_MAP: Record<string, string> = {
   "factura": "Factura",
   "final": "Final",
@@ -126,7 +129,13 @@ export default function ClienteDetailPage() {
     provincia: "",
     telefono: "",
     mail: "",
-    condicion_pago: "Efectivo",
+    codigo_postal: "",
+    // Condición (cuándo paga) + forma (cómo paga): alta = contado en efectivo, como antes "Efectivo"
+    condicion_pago_tipo: "contado",
+    plazo_dias: "",
+    forma_pago: "efectivo",
+    cheque_dias_desde: "",
+    cheque_dias_hasta: "",
     nro_iibb: "",
     exento_iibb: false,
     exento_iva: false,
@@ -212,6 +221,10 @@ export default function ClienteDetailPage() {
 
     if (clienteRes.data) {
       const c = clienteRes.data as any
+      // Condición nueva; si todavía no está (cliente viejo sin pasar), se deduce del texto viejo
+      const cp: CondicionPago = c.condicion_pago_tipo || c.forma_pago
+        ? normalizarCondicion(c)
+        : desdeTextoViejo(c.condicion_pago)
       setRetencion({ retenido: !!c.retener_entregas, motivo: c.retener_motivo ?? null })
       setFormData({
         codigo_cliente: c.codigo_cliente || "",
@@ -228,7 +241,12 @@ export default function ClienteDetailPage() {
         provincia: c.provincia || "",
         telefono: c.telefono || "",
         mail: c.mail || "",
-        condicion_pago: normalizeEnum(c.condicion_pago, PAGO_MAP, ""),
+        codigo_postal: c.codigo_postal || "",
+        condicion_pago_tipo: cp.condicion_pago_tipo ?? "",
+        plazo_dias: cp.condicion_pago_tipo === "cuenta_corriente" ? diasTxt(cp.plazo_dias) : "",
+        forma_pago: cp.forma_pago ?? "",
+        cheque_dias_desde: diasTxt(cp.cheque_dias_desde),
+        cheque_dias_hasta: diasTxt(cp.cheque_dias_hasta),
         nro_iibb: c.nro_iibb || "",
         exento_iibb: c.exento_iibb || false,
         exento_iva: c.exento_iva || false,
@@ -410,7 +428,9 @@ export default function ClienteDetailPage() {
       flete_pago: formData.condicion_entrega === "transporte" ? formData.flete_pago || null : null,
       // Sin cargar = null (no se inventa un valor al guardar)
       condicion_iva: formData.condicion_iva || null,
-      condicion_pago: formData.condicion_pago || null,
+      // Condición y forma de pago: la base arma el texto viejo (condicion_pago) para las APK
+      ...condicionDeFormulario(formData),
+      codigo_postal: formData.codigo_postal.trim() || null,
       tipo_canal: formData.tipo_canal || null,
       condicion_entrega: formData.condicion_entrega || null,
     }
@@ -474,7 +494,11 @@ export default function ClienteDetailPage() {
 
   function handleLocalidadChange(localidadId: string) {
     const loc = localidades.find((l) => l.id === localidadId)
-    setFormData({ ...formData, localidad_id: localidadId, localidad: loc?.nombre || "", provincia: loc?.provincia || "" })
+    setFormData({
+      ...formData, localidad_id: localidadId, localidad: loc?.nombre || "", provincia: loc?.provincia || "",
+      // CP vacío: se propone el de la localidad (se puede cambiar)
+      codigo_postal: formData.codigo_postal.trim() ? formData.codigo_postal : loc?.codigo_postal || "",
+    })
   }
 
   if (loading) {
@@ -630,6 +654,9 @@ export default function ClienteDetailPage() {
                 </SelectContent>
               </Select>
             </Campo>
+            <Campo label="Código postal" nota={!formData.codigo_postal && localidadSel?.codigo_postal ? `el de la localidad: ${localidadSel.codigo_postal}` : undefined}>
+              <Input value={formData.codigo_postal} onChange={(e) => set("codigo_postal", e.target.value)} className={vacioCls(formData.codigo_postal)} placeholder="Sin cargar" maxLength={10} />
+            </Campo>
             <Campo label="Teléfono">
               <Input type="tel" value={formData.telefono} onChange={(e) => set("telefono", e.target.value)} />
             </Campo>
@@ -677,17 +704,41 @@ export default function ClienteDetailPage() {
                 <RetenerEntregas clienteId={id} retenido={retencion.retenido} motivo={retencion.motivo} />
               </Campo>
             )}
-            <Campo label="Condición de pago" nota="obligatorio">
-              <Select value={formData.condicion_pago} onValueChange={(v) => set("condicion_pago", v)}>
-                <SelectTrigger className={vacioCls(formData.condicion_pago)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Efectivo">Efectivo</SelectItem>
-                  <SelectItem value="Transferencia">Transferencia</SelectItem>
-                  <SelectItem value="Cheque al día">Cheque al día</SelectItem>
-                  <SelectItem value="Cheque 30 días">Cheque 30 días</SelectItem>
-                  <SelectItem value="Cheque 30/60/90">Cheque 30/60/90</SelectItem>
-                </SelectContent>
-              </Select>
+            <Campo label="Condición de pago" nota={CONDICIONES.find((c) => c.valor === formData.condicion_pago_tipo)?.ayuda ?? "cuándo paga"}>
+              <div className="flex gap-2">
+                <Select value={formData.condicion_pago_tipo || "__none__"} onValueChange={(v) => setFormData({ ...formData, condicion_pago_tipo: v === "__none__" ? "" : v, plazo_dias: v === "cuenta_corriente" ? formData.plazo_dias : "" })}>
+                  <SelectTrigger className={vacioCls(formData.condicion_pago_tipo)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin cargar</SelectItem>
+                    {CONDICIONES.map((c) => <SelectItem key={c.valor} value={c.valor}>{c.etiqueta}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {formData.condicion_pago_tipo === "cuenta_corriente" && (
+                  <ConUnidad unidad="días">
+                    <InputMonto decimales={0} soloPositivos value={formData.plazo_dias} onChange={(n) => set("plazo_dias", n == null ? "" : String(Math.trunc(n)))} className={cn("w-28", vacioCls(formData.plazo_dias))} />
+                  </ConUnidad>
+                )}
+              </div>
+            </Campo>
+            <Campo label="Forma de pago" nota={formData.condicion_pago_tipo || formData.forma_pago ? textoCondicionPago(condicionDeFormulario(formData)) : "cómo paga"}>
+              <div className="flex flex-wrap gap-2">
+                <Select value={formData.forma_pago || "__none__"} onValueChange={(v) => setFormData({ ...formData, forma_pago: v === "__none__" ? "" : v, ...(v === "cheque" ? {} : { cheque_dias_desde: "", cheque_dias_hasta: "" }) })}>
+                  <SelectTrigger className={vacioCls(formData.forma_pago)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin cargar</SelectItem>
+                    {FORMAS.map((f) => <SelectItem key={f.valor} value={f.valor}>{f.etiqueta}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {formData.forma_pago === "cheque" && (
+                  <div className="flex items-center gap-1.5 text-xs text-neutro-500" title="Días desde el vencimiento de la deuda. Un cheque a 30: 30 a 30. Al día: 0 a 0. Cheques escalonados: 60 a 90.">
+                    de
+                    <InputMonto decimales={0} soloPositivos value={formData.cheque_dias_desde} onChange={(n) => set("cheque_dias_desde", n == null ? "" : String(Math.trunc(n)))} className={cn("w-16", vacioCls(formData.cheque_dias_desde))} />
+                    a
+                    <InputMonto decimales={0} soloPositivos value={formData.cheque_dias_hasta} onChange={(n) => set("cheque_dias_hasta", n == null ? "" : String(Math.trunc(n)))} className={cn("w-16", vacioCls(formData.cheque_dias_hasta))} />
+                    días
+                  </div>
+                )}
+              </div>
             </Campo>
             <Campo label="Tipo de canal">
               <Select value={formData.tipo_canal} onValueChange={(v) => set("tipo_canal", v)}>

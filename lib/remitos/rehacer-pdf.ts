@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { generarYSubirRemitoPDF, type RemitoPDFData } from "@/lib/remitos/generar-remito"
+import { codigoPostalCliente, generarYSubirRemitoPDF, type RemitoPDFData } from "@/lib/remitos/generar-remito"
 import { REQUIERE_CAE } from "@/lib/arca/tipos"
 import { palletsDePedidos } from "@/lib/viajes/bultos"
 
@@ -57,6 +57,7 @@ export async function rehacerPDFRemito(admin: SupabaseClient, remitoId: string) 
       cuit: remito.cliente?.cuit ?? null,
       direccion: remito.cliente?.direccion ?? null,
       localidad: remito.cliente?.localidad ?? null,
+      codigo_postal: await codigoPostalCliente(admin, remito.cliente_id),
       condicion_iva: remito.cliente?.condicion_iva ?? null,
     },
     transporte: remito.transporte_rel

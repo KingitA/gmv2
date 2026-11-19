@@ -94,6 +94,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       "condicion_iva",
       "metodo_facturacion",
       "condicion_pago",
+      // Condición y forma de pago nuevas + CP (19/11). Si llega solo "condicion_pago"
+      // (texto viejo), la base lo traduce a estos campos (trg_clientes_condicion_pago).
+      "condicion_pago_tipo",
+      "plazo_dias",
+      "forma_pago",
+      "cheque_dias_desde",
+      "cheque_dias_hasta",
+      "codigo_postal",
       "tipo_canal",
       "retira_en_deposito",
       // P2-09 / P2-07: la base mantiene sincronizados retira_en_deposito y

@@ -15,6 +15,10 @@ import {
 } from '@react-pdf/renderer'
 import { fecha as fechaAR, numero, entero, formatCuit } from '@/lib/formato'
 
+/** "BAHIA BLANCA (CP 8000)"; sin localidad ni CP = '—' */
+const conCP = (localidad?: string | null, cp?: string | null) =>
+  [localidad?.trim(), cp?.trim() ? `(CP ${cp.trim()})` : ''].filter(Boolean).join(' ') || '—'
+
 const fmtARS = (n: number) => numero(Math.abs(n))
 
 // "AAAA-MM-DD" o instante → dd/mm/aaaa en hora argentina (lib/formato)
@@ -142,6 +146,8 @@ export interface RemitoPDFData {
     cuit?: string | null
     direccion?: string | null
     localidad?: string | null
+    /** CP de la ficha o, si falta, el de la localidad (19/11) */
+    codigo_postal?: string | null
     condicion_iva?: string | null
   }
   /** null → líneas en blanco para completar a mano al despachar */
@@ -194,7 +200,7 @@ function RemitoPagina({ data, copia }: { data: RemitoPDFData; copia: string }) {
             <View style={s.emBlock}>
               <Text style={s.emNombre}>{cliente.nombre_razon_social}</Text>
               <View style={s.emRow}><Text style={s.emLbl}>Dirección:</Text><Text style={s.emVal}>{cliente.direccion ?? '—'}</Text></View>
-              <View style={s.emRow}><Text style={s.emLbl}>Localidad:</Text><Text style={s.emVal}>{cliente.localidad ?? '—'}</Text></View>
+              <View style={s.emRow}><Text style={s.emLbl}>Localidad:</Text><Text style={s.emVal}>{conCP(cliente.localidad, cliente.codigo_postal)}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Entrega:</Text><Text style={s.emVal}>{CONDICION_ENTREGA_LABEL[data.condicion_entrega] ?? data.condicion_entrega}</Text></View>
             </View>
           )}
@@ -245,7 +251,7 @@ function RemitoPagina({ data, copia }: { data: RemitoPDFData; copia: string }) {
             <View style={s.cliCol2}>
               <Text style={s.cliTit}>LUGAR DE ENTREGA</Text>
               <View style={s.cliRow}><Text style={s.cliLbl}>Domicilio:</Text><Text style={s.cliVal}>{cliente.direccion ?? '—'}</Text></View>
-              <View style={s.cliRow}><Text style={s.cliLbl}>Localidad:</Text><Text style={s.cliVal}>{cliente.localidad ?? '—'}</Text></View>
+              <View style={s.cliRow}><Text style={s.cliLbl}>Localidad:</Text><Text style={s.cliVal}>{conCP(cliente.localidad, cliente.codigo_postal)}</Text></View>
               <View style={s.cliRow}><Text style={s.cliLbl}>Entrega:</Text><Text style={s.cliVal}>{CONDICION_ENTREGA_LABEL[data.condicion_entrega] ?? data.condicion_entrega}</Text></View>
             </View>
           </View>

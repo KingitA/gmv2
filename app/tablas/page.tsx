@@ -41,7 +41,7 @@ const GRUPOS: Grupo[] = [
     items: [
       { href: "/tablas/listas-precio", icon: Banknote, title: "Listas de precio", desc: "Bahía, Neco, Viajante y recargos por segmento", soloAdmin: true },
       { href: "/tablas/precios-programados", icon: CalendarClock, title: "Precios programados", desc: "Cambios de precio con fecha de vigencia" },
-      { href: "/tablas/condiciones-pago", icon: CreditCard, title: "Condiciones de pago", desc: "Efectivo, cheque a 30 días, etc." },
+      { href: "/tablas/condiciones-pago", icon: CreditCard, title: "Condiciones de pago", desc: "Opciones de las apps instaladas (efectivo, cheque a 30 días…)" },
       { href: "/tablas/tipos-canal", icon: Tags, title: "Tipos de canal", desc: "Mayorista, minorista, etc." },
     ],
   },
