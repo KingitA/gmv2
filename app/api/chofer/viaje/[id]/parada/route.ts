@@ -4,7 +4,8 @@ import { requireAuth } from "@/lib/auth"
 import { accesoViajeChofer } from "@/lib/viajes/chofer"
 import { armarHojaRuta } from "@/lib/viajes/hoja-ruta"
 import { moneda } from "@/lib/formato"
-import { CODIGO_ENTREGA_BLOQUEADA, TEXTO_ENTREGA_BLOQUEADA } from "@/lib/cobranzas/reglas-cobro"
+import { CODIGO_ANTICIPADO_SIN_COBRO, CODIGO_ENTREGA_BLOQUEADA, TEXTO_ANTICIPADO_SIN_COBRO, TEXTO_ENTREGA_BLOQUEADA } from "@/lib/cobranzas/reglas-cobro"
+import { anticipadosSinCobro } from "@/lib/cobranzas/anticipado"
 
 const ESTADOS = ["pendiente", "entregado", "entregado_parcial", "no_entregado", "solo_cobro"]
 
@@ -17,6 +18,8 @@ const ESTADOS = ["pendiente", "entregado", "entregado_parcial", "no_entregado", 
 //    (incluidos los cobros pendientes de rendición, el 10 % contado y el ajuste) no
 //    llega a lo exigido, NO se puede marcar entregado ni entregado parcial: 409
 //    { codigo: "ENTREGA_BLOQUEADA" }. Solo queda "no entregado".
+//  - Cliente/pedido ANTICIPADO sin un cobro registrado (fase 3 de condiciones de pago):
+//    409 { codigo: "ANTICIPADO_SIN_COBRO" } — "registrá el cobro antes de entregar".
 //  - estado 'pendiente' reabre la parada (corrección) mientras el viaje siga en curso.
 export async function PATCH(
   request: NextRequest,
@@ -62,6 +65,22 @@ export async function PATCH(
 
     if (["no_entregado", "entregado_parcial"].includes(body.estado) && !motivoEntrega) {
       return NextResponse.json({ error: "Contá por qué no se entregó todo", falta: "motivo_no_entrega" }, { status: 400 })
+    }
+    // Anticipado (condiciones de pago, fase 3): sin un cobro registrado no se descarga.
+    // Alcanza con el cobro cargado en la app (pendiente de rendir); no hace falta el ERP.
+    if (["entregado", "entregado_parcial"].includes(body.estado)) {
+      const sinCobro = await anticipadosSinCobro(supabase, parada.pedidos.map((p) => p.id), { viajeId: id })
+      if (sinCobro.length) {
+        return NextResponse.json(
+          {
+            error: `${TEXTO_ANTICIPADO_SIN_COBRO} (pedido ${sinCobro.map((p) => p.numero).join(", ")})`,
+            mensaje: TEXTO_ANTICIPADO_SIN_COBRO,
+            codigo: CODIGO_ANTICIPADO_SIN_COBRO,
+            pedidos: sinCobro.map((p) => p.numero),
+          },
+          { status: 409 },
+        )
+      }
     }
     if (parada.entrega_bloqueada && ["entregado", "entregado_parcial"].includes(body.estado)) {
       return NextResponse.json(

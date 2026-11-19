@@ -16,7 +16,7 @@ import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION } from "@/components/pedidos/SegmentacionCondiciones"
 import { guardarFichaComercial, guardarSegmentacionCliente } from "@/lib/actions/condiciones-cliente"
 import Link from "next/link"
-import { moneda, redondear, formatCuit, errorCuit, normalizarCuit, cuitDigitos } from "@/lib/formato"
+import { moneda, redondear, fecha, formatCuit, errorCuit, normalizarCuit, cuitDigitos } from "@/lib/formato"
 import { describirCliente, type ClienteMismoCuit } from "@/lib/clientes/mismo-cuit"
 import { normalizarCodigo, esCodigoDuplicado } from "@/lib/codigos"
 
@@ -104,6 +104,8 @@ export default function ClienteDetailPage() {
   const [segDescuentos, setSegDescuentos] = useState(false)
   const [ccBalance, setCcBalance] = useState<number | null>(null)
   const [ccProyectado, setCcProyectado] = useState<number | null>(null)
+  // Deuda vencida / a vencer (condiciones de pago, fase 3)
+  const [ccVenc, setCcVenc] = useState<{ vencida: number; aVencer: number; proximo: string | null } | null>(null)
   const [pedidosCliente, setPedidosCliente] = useState<any[]>([])
   // P2-08: retener entregas (va por su ruta, no por el Guardar de la ficha)
   const [retencion, setRetencion] = useState<{ retenido: boolean; motivo: string | null } | null>(null)
@@ -270,6 +272,7 @@ export default function ClienteDetailPage() {
     // Saldo desde la fuente única (lib/cuenta-corriente/saldo.ts): real + proyectado
     setCcBalance(saldos ? redondear(saldos.saldo_real) : null)
     setCcProyectado(saldos ? redondear(saldos.saldo_proyectado) : null)
+    setCcVenc(saldos && saldos.deuda_vencida != null ? { vencida: Number(saldos.deuda_vencida), aVencer: Number(saldos.deuda_a_vencer) || 0, proximo: saldos.proximo_vencimiento ?? null } : null)
     setPedidosCliente(pedRes.data || [])
     if (clienteRes.data) {
       const c = clienteRes.data as any
@@ -931,6 +934,19 @@ export default function ClienteDetailPage() {
                 <>
                   <p className={cn("mt-1 text-2xl font-bold tabular-nums", ccBalance > 0 ? "text-alerta-600" : ccBalance < 0 ? "text-exito-600" : "text-neutro-500")}>{moneda(Math.abs(ccBalance), 0)}</p>
                   <p className="text-xs font-medium text-neutro-500">{ccBalance > 0 ? "Nos debe" : ccBalance < 0 ? "A favor del cliente" : "Al día"}</p>
+                  {ccBalance > 0 && ccVenc && (
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="block text-neutro-500">Vencida</span>
+                        <b className={cn("tabular-nums", ccVenc.vencida > 0.009 ? "text-alerta-600" : "text-neutro-600")}>{moneda(ccVenc.vencida, 0)}</b>
+                      </div>
+                      <div>
+                        <span className="block text-neutro-500">A vencer</span>
+                        <b className="tabular-nums text-neutro-700">{moneda(ccVenc.aVencer, 0)}</b>
+                        {ccVenc.proximo && <span className="block text-neutro-400">próximo {fecha(ccVenc.proximo)}</span>}
+                      </div>
+                    </div>
+                  )}
                   {ccProyectado !== null && Math.abs(ccProyectado - ccBalance) > 0.009 && (
                     <p className="mt-2 text-xs text-neutro-600">
                       {/* P2-23: con deuda real, un proyectado negativo (el 10 % contado) no es "a favor": se ve $0 */}

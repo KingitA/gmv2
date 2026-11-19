@@ -239,3 +239,24 @@ export function devolucionesFueraDelCobro(
   }
   return new Map([...fuera].map(([k, v]) => [k, [...v]]))
 }
+
+// ── ANTICIPADO (condiciones de pago, fase 3 — regla de Juan, 19/11/2026) ──
+// La condición es la del PEDIDO, o la de la ficha si el pedido no tiene. Un pedido
+// anticipado se toma, se prepara y se factura, pero NO se ENTREGA sin un cobro
+// REGISTRADO para él (no hace falta que el ERP lo confirme: el chofer lo registra en
+// la app, aunque esté pendiente de rendir, y ya puede descargar; en mostrador igual).
+// Si después hay diferencia, se ajusta en la cuenta como cualquier deuda. El freno
+// es del servidor (parada del chofer y /api/mostrador/entregar); la toma de pedidos
+// no se frena nunca.
+export const TEXTO_ANTICIPADO_SIN_COBRO = "Este cliente paga por ANTICIPADO: registrá el cobro antes de entregar."
+export const CODIGO_ANTICIPADO_SIN_COBRO = "ANTICIPADO_SIN_COBRO"
+
+/** Condición que manda para un pedido: la suya, o la de la ficha del cliente. */
+export function condicionPagoEfectiva(pedido: string | null | undefined, cliente: string | null | undefined): string | null {
+  return pedido || cliente || null
+}
+
+/** ¿Se frena la entrega? Solo un pedido anticipado sin ningún cobro registrado. */
+export function anticipadoSinCobro(p: { condicionPedido?: string | null; condicionCliente?: string | null; tieneCobro: boolean }): boolean {
+  return condicionPagoEfectiva(p.condicionPedido, p.condicionCliente) === "anticipado" && !p.tieneCobro
+}

@@ -36,7 +36,7 @@ import { PREFIJO_AJUSTE_APERTURA } from "@/lib/apertura/parsear-chr";
 import { armarExtracto, etiquetaMovimiento, type MovimientoCC } from "@/lib/cuenta-corriente/extracto";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
-import { moneda, formatCuit } from "@/lib/formato"
+import { moneda, fecha as fechaAR, formatCuit } from "@/lib/formato"
 import { exportarResumenExcel, exportarResumenPdf, type DatosResumen } from "@/lib/cuenta-corriente/exportar-resumen"
 import { InputMonto } from "@/components/ui/input-monto"
 
@@ -116,6 +116,9 @@ interface CuentaCorrienteData {
         saldo_proyectado?: number;
         pendiente_verificacion?: number;
         devoluciones_en_proceso?: number;
+        deuda_vencida?: number | null;
+        deuda_a_vencer?: number | null;
+        proximo_vencimiento?: string | null;
         condicion_iva?: string | null;
     };
     comprobantes: Comprobante[];
@@ -516,6 +519,13 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                         <p className={`text-3xl font-bold ${data.cliente.saldo_total > 0 ? 'text-red-600' : 'text-green-600'}`}>
                             {moneda(data.cliente.saldo_total)}
                         </p>
+                        {data.cliente.saldo_total > 0.009 && data.cliente.deuda_vencida != null && (
+                            <p className="text-xs text-gray-600 mt-1">
+                                Vencida <b className={(data.cliente.deuda_vencida ?? 0) > 0.009 ? "text-red-600" : ""}>{moneda(data.cliente.deuda_vencida ?? 0)}</b>
+                                {' · '}A vencer <b>{moneda(data.cliente.deuda_a_vencer ?? 0)}</b>
+                                {data.cliente.proximo_vencimiento && <> · próximo {fechaAR(data.cliente.proximo_vencimiento)}</>}
+                            </p>
+                        )}
                         {data.cliente.saldo_proyectado != null && Math.abs(data.cliente.saldo_proyectado - data.cliente.saldo_total) > 0.009 && (
                             <p className="text-xs text-amber-600 mt-1">
                                 {(data.cliente.pendiente_verificacion ?? 0) > 0 && <>Cobros sin verificar: {moneda(data.cliente.pendiente_verificacion ?? 0)}{' · '}</>}
