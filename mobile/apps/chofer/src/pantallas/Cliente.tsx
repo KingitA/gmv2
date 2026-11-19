@@ -10,7 +10,7 @@ import { esIdLocal, keyDeIdLocal } from "../datos/overlay"
 import { rechazosDe, useClienteViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
 import { AvisosAnulacion, AvisosBcra, ESTADO_PARADA, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, RenglonesDevolucion, SinEnviar, TEXTO_PARADA_REABIERTA, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
 import { RenglonesPedido } from "./RenglonesPedido"
-import { textoBultos, useResultadoParada } from "./ResultadoParada"
+import { AvisoAnticipado, textoBultos, useResultadoParada } from "./ResultadoParada"
 
 // Ficha del cliente en el viaje (= app/chofer/[viajeId]/cliente/[clienteId]/page.tsx).
 // P2-35: acá adentro va todo lo que salió de la lista del viaje — bultos, "cobrar sí o sí", nota de
@@ -156,9 +156,10 @@ export function Cliente() {
               ))}
             </div>
           )}
+          {enCurso && <AvisoAnticipado viajeId={viajeId} parada={par} />}
           {enCurso &&
             (par.estado === "pendiente" ? (
-              <button onClick={() => resultado.abrir(par.id)} className="min-h-14 w-full rounded-xl bg-green-600 py-3 text-lg font-bold text-white active:scale-95">✔ Confirmar parada</button>
+              <button onClick={() => resultado.abrir(par.id)} className={`min-h-14 w-full rounded-xl py-3 text-lg font-bold active:scale-95 ${par.anticipado_bloqueado ? "border-2 border-gray-300 bg-white text-gray-500" : "bg-green-600 text-white"}`}>{par.anticipado_bloqueado ? "✕ No se entregó" : "✔ Confirmar parada"}</button>
             ) : (
               <button onClick={() => resultado.abrirReabrir(par.id)} className="min-h-12 w-full rounded-xl border-2 border-gray-300 py-2 text-base font-bold text-gray-600 active:scale-95">Reabrir parada</button>
             ))}

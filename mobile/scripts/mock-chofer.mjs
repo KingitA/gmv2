@@ -131,6 +131,8 @@ function parada(pa) {
     pedidos, bultos: pedidos.reduce((s, p) => s + p.bultos, 0), total_viaje: totalViaje, saldo_anterior: saldoAnterior, total_a_cobrar: r2(saldoAnterior + totalViaje),
     minimo_exigido: minimo, descuentos_cobro: descuentos, cobrado, cobrado_anterior: 0, cobrado_viaje: cobrado, devuelto, cobro_cumplido: cumplido, entrega_bloqueada: !!pa.bloquear_entrega && !cumplido, pagos,
     pallets: pa.orden === 1 ? 2 : null,
+    // Condiciones de pago (fase 4): el cliente 3 paga por ANTICIPADO; sin cobro en el viaje no se entrega
+    anticipado_sin_cobro: pa.cliente_id === S.f.clientes[3].id && !pagos.length ? pedidos.map((p) => p.numero) : [],
   }
 }
 function dinero(viajeId) {
@@ -187,6 +189,8 @@ function filaCliente(viajeId, clienteId) {
       pedidos_facturados: [...new Set(S.comprobantes.filter((k) => k.cliente_id === clienteId && k.pedido_id).map((k) => k.pedido_id))],
       dtos_hechos: [],
     },
+    // Condiciones de pago (fase 4): el cliente 3 es ANTICIPADO; los comprobantes viejos están vencidos
+    condiciones: { cliente: clienteId === S.f.clientes[3].id ? "Anticipado · Transferencia" : "Cuenta corriente 30 días · Cheques de 60 a 90 días", pedidos: Object.fromEntries(pedidosCli.filter((p) => p.viaje_id === null).map((p) => [p.id, "Contado · Efectivo"])), comprobantes: Object.fromEntries(compsDe(clienteId).map((k) => [k.id, { condicion: null, vence: k.fecha < hoy() ? "2026-09-19" : "2026-12-19" }])) },
     // Resumen de cuenta: el mock solo conoce pagos (total − saldo)
     cuenta_comprobantes: Object.fromEntries(compsDe(clienteId).filter((k) => k.total_factura - k.saldo_pendiente > 0.005).map((k) => [k.id, [{ tipo: "devolucion", concepto: "Devolución DEV-00009", fecha: "2026-08-25", monto: 5000 }, { tipo: "pago", concepto: "Pago", fecha: "2026-09-01", monto: r2(k.total_factura - k.saldo_pendiente - 5000) }]])),
     detalle_pedidos: Object.fromEntries(pedidosCli.map((p) => [p.id, p.detalle.map((d) => ({ ...d, pedido_id: p.id, articulos: { sku: artDe(d.articulo_id)?.sku, descripcion: artDe(d.articulo_id)?.descripcion, unidades_por_bulto: artDe(d.articulo_id)?.unidades_por_bulto } }))])),
@@ -246,6 +250,7 @@ const HANDLERS = {
     if (p.estado === "pendiente") { Object.assign(pa, { estado: "pendiente", bultos_entregados: null, motivo_no_entrega: null, motivo_no_cobro: null, resuelto_at: null }); return { replica: [parcheViaje(v.id)] } }
     const calc = parada(pa)
     if (calc.entrega_bloqueada && p.estado !== "no_entregado") throw new Rechazo("Si no salda lo solicitado, retirar el pedido")
+    if (calc.anticipado_sin_cobro.length && ["entregado", "entregado_parcial"].includes(p.estado)) throw new Rechazo("Este cliente paga por ANTICIPADO: registrá el cobro antes de entregar.")
     const mE = String(p.motivo_no_entrega || "").trim(), mC = String(p.motivo_no_cobro || "").trim()
     if (["no_entregado", "entregado_parcial"].includes(p.estado) && !mE) throw new Rechazo("Contá por qué no se entregó todo")
     if (p.estado === "solo_cobro" && calc.pedidos.length) throw new Rechazo("Esta parada tiene mercadería para entregar")

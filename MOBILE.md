@@ -1901,6 +1901,16 @@ Detalle en `docs/PENDIENTES-APPS-SALIDA.md`, sección "Segunda prueba integral (
 - Teclado: lo maneja el core (`instalarTeclado`, `--gm-teclado`); la app no tiene arreglos propios
   aparte de "Enter cierra el teclado" (`useEnterCierraTeclado`), que el core no hace.
 
+### v0.3.12 (19/11/2026): condiciones de pago, fase 4 (freno de anticipado y vencimientos)
+
+- **Anticipado sin cobro** (`anticipado_sin_cobro` de la hoja): la parada muestra "Este cliente paga por ANTICIPADO:
+  registrá el cobro antes de entregar." con un botón directo a Cobrar; solo se puede cerrar como "no entregado". Un cobro
+  del cliente en el viaje, aunque esté en la cola sin enviar, la habilita (`anticipado_bloqueado` en `datos/overlay.ts`,
+  regla `anticipadoSinCobro` de `@gm/cobro`). El 409 `ANTICIPADO_SIN_COBRO` del servidor llega como rechazo con su texto.
+- **Cobro**: condición del cliente arriba ("Cuenta corriente 30 días · Cheques de 60 a 90 días"), la del pedido si es
+  distinta, y el vencimiento de cada comprobante ("Vence 25/11/2026" / "VENCIDO" en rojo, `vencimientoComprobante`).
+  Servidor: `condiciones` en la ficha (`lib/mobile/sync/condiciones-chofer.ts`).
+
 ### v0.3.10 (03/11/2026): resumen de cuenta de cada comprobante en el cobro
 
 - Debajo de cada comprobante con movimientos: total, devoluciones, "Total", 10 % contado (el ya hecho y el de este

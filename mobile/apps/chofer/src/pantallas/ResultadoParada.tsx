@@ -2,7 +2,8 @@ import { useEffect, useState } from "react"
 import { Hoja } from "@gm/core/ui"
 import { useOnline } from "@gm/core"
 import { parseMonto } from "@gm/formato"
-import { TEXTO_ENTREGA_BLOQUEADA } from "@gm/cobro"
+import { TEXTO_ANTICIPADO_SIN_COBRO, TEXTO_ENTREGA_BLOQUEADA } from "@gm/cobro"
+import { useNavigate } from "react-router"
 import type { OpParada } from "../datasets"
 import type { ParadaVista } from "../datos/overlay"
 import { useEncolar } from "../datos/hooks"
@@ -17,6 +18,22 @@ export function textoBultos(bultos: number, pallets?: number | null): string {
   const b = `${bultos} ${bultos === 1 ? "bulto" : "bultos"}`
   const p = Number(pallets) || 0
   return p > 0 ? `${b} + ${p} ${p === 1 ? "pallet" : "pallets"}` : b
+}
+
+/**
+ * Condiciones de pago (19/11/2026, regla de Juan): pedido ANTICIPADO sin cobro registrado → no se
+ * entrega. Cartel y botón directo a Cobrar; con el cobro registrado (aunque esté sin enviar) se habilita.
+ */
+export function AvisoAnticipado({ viajeId, parada }: { viajeId: string; parada: ParadaVista }) {
+  const navigate = useNavigate()
+  if (!parada.anticipado_bloqueado || parada.estado !== "pendiente") return null
+  return (
+    <div className="mt-3 rounded-xl border-2 border-red-500 bg-red-50 px-3 py-2 text-red-800">
+      <p className="text-lg font-bold">💳 {TEXTO_ANTICIPADO_SIN_COBRO}</p>
+      {(parada.anticipado_sin_cobro?.length ?? 0) > 0 && <p className="text-base">Pedido {parada.anticipado_sin_cobro!.map((n) => `#${n}`).join(", ")}</p>}
+      <button onClick={() => navigate(`/viajes/${viajeId}/clientes/${parada.cliente_id}/cobrar`)} className="mt-2 min-h-14 w-full rounded-xl bg-blue-600 py-3 text-lg font-bold text-white active:scale-95">💵 Cobrar</button>
+    </div>
+  )
 }
 
 export function useResultadoParada(viajeId: string, paradas: ParadaVista[], mostrar: (m: string, t?: "ok" | "err") => void) {
@@ -38,7 +55,7 @@ export function useResultadoParada(viajeId: string, paradas: ParadaVista[], most
   const claveHoja = hojaParada.valor
   useEffect(() => {
     if (!claveHoja || !paradaSel) return
-    setEstadoSel(paradaSel.entrega_bloqueada ? "no_entregado" : paradaSel.pedidos.length ? "entregado" : "solo_cobro")
+    setEstadoSel(paradaSel.entrega_bloqueada || paradaSel.anticipado_bloqueado ? "no_entregado" : paradaSel.pedidos.length ? "entregado" : "solo_cobro")
     setBultosEntregados("")
     setMotivoEntrega("")
     setMotivoCobro("")
@@ -54,6 +71,7 @@ export function useResultadoParada(viajeId: string, paradas: ParadaVista[], most
     const mCobro = unSoloTexto ? mEntrega : motivoCobro.trim()
     // #23: bloqueada sin cubrir lo exigido ⇒ solo "no entregado"
     if (p.entrega_bloqueada && estadoSel !== "no_entregado") return setAviso(TEXTO_ENTREGA_BLOQUEADA)
+    if (p.anticipado_bloqueado && estadoSel !== "no_entregado") return setAviso(TEXTO_ANTICIPADO_SIN_COBRO)
     if (["no_entregado", "entregado_parcial"].includes(estadoSel) && !mEntrega) return setAviso(unSoloTexto ? "Contá por qué no se entregó (por ejemplo: No pagó)" : "Contá por qué no se entregó todo")
     if (estadoSel === "solo_cobro" && p.pedidos.length) return setAviso("Esta parada tiene mercadería para entregar")
     if (!p.cobro_cumplido && !mCobro) return setAviso(`Oficina pidió cobrar sí o sí ${formatCurrency(p.minimo_exigido)} y hay cobrado ${formatCurrency(p.cobrado)}: contá por qué no se cobró`)
@@ -89,7 +107,7 @@ export function useResultadoParada(viajeId: string, paradas: ParadaVista[], most
 
   const opciones: string[][] = !paradaSel
     ? []
-    : paradaSel.entrega_bloqueada
+    : paradaSel.entrega_bloqueada || paradaSel.anticipado_bloqueado
       ? [["no_entregado", paradaSel.pedidos.length ? "✕ No entregué (retiro el pedido)" : "✕ No pude cobrar"]]
       : paradaSel.pedidos.length
         ? [["entregado", `✔ Entregué todo (${textoBultos(paradaSel.bultos, paradaSel.pallets)})`], ["entregado_parcial", "◐ Entregué una parte"], ["no_entregado", "✕ No entregué"]]
@@ -100,6 +118,12 @@ export function useResultadoParada(viajeId: string, paradas: ParadaVista[], most
       <Hoja abierta={!!paradaSel} onCerrar={hojaParada.cerrar} titulo={paradaSel ? `Confirmar parada · ${paradaSel.cliente_nombre}` : ""}>
         {paradaSel && (
           <div className="space-y-4">
+            {paradaSel.anticipado_bloqueado && !paradaSel.entrega_bloqueada && (
+              <div className="rounded-xl border-2 border-red-500 bg-red-50 px-4 py-3 text-red-800">
+                <p className="text-lg font-bold">💳 {TEXTO_ANTICIPADO_SIN_COBRO}</p>
+                <p className="mt-1 text-base">Cuando registres el cobro se habilita la entrega.</p>
+              </div>
+            )}
             {paradaSel.entrega_bloqueada && (
               <div className="rounded-xl border-2 border-red-500 bg-red-50 px-4 py-3 text-red-800">
                 <p className="text-lg font-bold">🔒 {TEXTO_ENTREGA_BLOQUEADA}</p>

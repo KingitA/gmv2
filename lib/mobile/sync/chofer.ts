@@ -23,6 +23,7 @@ import { GET as billeteraGET } from "@/app/api/chofer/billetera/route"
 import { GET as cuentasGET } from "@/app/api/chofer/cuentas-bancarias/route"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { cargarComprados } from "@/lib/vendedor/comprados"
+import { condicionesDeCobro } from "./condiciones-chofer"
 import { movimientosDeComprobantes } from "./cuenta-comprobantes"
 import { contextoDevolucion } from "@/lib/cobranzas/origen-devolucion"
 import { HEADER_SIN_INICIAR, viajesDelChofer } from "@/lib/viajes/chofer"
@@ -130,6 +131,11 @@ export async function filaClienteViaje(ctx: CtxSync, viajeId: string, clienteId:
     // 03/11: resumen de cuenta de cada comprobante que se cobra (pagos, devoluciones, 10 %)
     cuenta_comprobantes: await movimientosDeComprobantes(ctx.supabase, cobro.comprobantes.map((c: { id: string }) => c.id)).catch((e) => {
       console.error("[sync/chofer_viaje_clientes] cuenta_comprobantes:", e?.message || e)
+      return null
+    }),
+    // Condiciones de pago, fase 4 (19/11): condición del cliente y de cada pedido, vencimiento de cada comprobante
+    condiciones: await condicionesDeCobro(ctx.supabase, clienteId, cobro).catch((e) => {
+      console.error("[sync/chofer_viaje_clientes] condiciones:", e?.message || e)
       return null
     }),
     // 03/11: el detalle de cada pedido que todavía se cobra (desde el cobro se abre y se devuelve)

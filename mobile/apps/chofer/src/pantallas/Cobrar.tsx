@@ -360,7 +360,11 @@ export function Cobrar() {
     >
       {toast}
       {hojaDescartar}
-      <p className="truncate bg-blue-700 px-5 pb-3 text-sm text-blue-200">{clienteNombre}</p>
+      <div className="bg-blue-700 px-5 pb-3 text-sm text-blue-200">
+        <p className="truncate">{clienteNombre}</p>
+        {/* Condiciones de pago (19/11): qué cobrar y con qué */}
+        {data.condiciones?.cliente && <p className="mt-0.5 text-base font-bold text-white">{data.condiciones.cliente}</p>}
+      </div>
       {restaurado && (
         <div className="flex items-center gap-2 border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-900">
           <span className="flex-1">↩ Se recuperó el cobro que estabas cargando. Revisalo antes de registrar.</span>
@@ -511,6 +515,7 @@ function CuentaAgregada({ viajeId, agregado, online, onEstado, onResumen, onQuit
         <div className="min-w-0">
           <p className="truncate font-bold text-gray-800">➕ {nombre}</p>
           <p className="truncate text-xs text-gray-400">{agregado.cliente.direccion || ""}{agregado.cliente.localidad ? ` · ${agregado.cliente.localidad}` : ""}</p>
+          {datos?.condiciones?.cliente && <p className="text-sm font-semibold text-indigo-700">{datos.condiciones.cliente}</p>}
         </div>
         <button onClick={() => onQuitar(id)} className="min-h-11 shrink-0 px-2 text-xl text-red-500" aria-label={`Quitar a ${nombre}`}>×</button>
       </div>

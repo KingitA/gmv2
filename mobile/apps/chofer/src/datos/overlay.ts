@@ -8,7 +8,7 @@
 // marca "sin enviar"; una operación rechazada por el servidor NO cuenta (se muestra aparte).
 
 import type { ItemOutbox } from "@gm/core"
-import { cobroCumple, efectoAnulacionEnParada } from "@gm/cobro"
+import { anticipadoSinCobro, cobroCumple, efectoAnulacionEnParada } from "@gm/cobro"
 import { redondear } from "@gm/formato"
 import { claveDelCliente, montoDelPrincipal, repartirMetodos } from "@gm/cobro/conjunto"
 import type {
@@ -85,6 +85,8 @@ export interface ParadaVista extends ParadaHoja {
   resultadoSinEnviar?: boolean
   /** R4/C7: volvió a pendiente porque se anuló (sin enviar) el cobro que la cerró estando bloqueada */
   reabiertaPorAnulacion?: boolean
+  /** Condiciones de pago (19/11): pedido ANTICIPADO y ningún cobro registrado en el viaje (ni en el equipo) → no se entrega */
+  anticipado_bloqueado?: boolean
 }
 export interface ViajeVista extends ViajeDetalle {
   paradas: ParadaVista[]
@@ -228,6 +230,12 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
   for (const p of paradas) {
     p.cobro_cumplido = cobroCumple({ minimoExigido: p.minimo_exigido, cobrado: p.cobrado, descuentos: p.descuentos_cobro ?? 0 })
     p.entrega_bloqueada = !!p.bloquear_entrega && !p.cobro_cumplido
+    // Anticipado (= servidor): un cobro del cliente registrado en este viaje alcanza, aunque esté en
+    // la cola sin enviar; no hace falta que la oficina lo confirme.
+    p.anticipado_bloqueado = anticipadoSinCobro({
+      condicionPedido: p.anticipado_sin_cobro?.length ? "anticipado" : null,
+      tieneCobro: p.pagos.some((x) => !["anulado", "rechazado"].includes(x.estado)),
+    })
   }
 
   let estado = v.viaje.estado
