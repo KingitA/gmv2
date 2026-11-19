@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Plus, DollarSign, CheckCircle2, FileText, Landmark, Receipt, Trash2, Undo2 } from "lucide-react"
+import { ArrowLeft, Plus, DollarSign, CheckCircle2, FileText, Landmark, Mail, Receipt, Trash2, Undo2 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { Input } from "@/components/ui/input"
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
 import { formatCurrency } from "@/lib/utils"
-import { fecha, hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
+import { fecha, fechaHora, hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { CredicoopOrdenPago } from "@/components/bancos/credicoop-orden-pago"
@@ -36,6 +36,9 @@ export default function OrdenesPagoPage() {
     const [trabajando, setTrabajando] = useState(false)
     // Tanda 2-A: orden cuyos pagos (transferencia / e-cheq) se están mandando a Credicoop para firmar
     const [credicoopOp, setCredicoopOp] = useState<string | null>(null)
+    // Orden pagada que se está mandando (o volviendo a mandar) al proveedor por mail
+    const [enviando, setEnviando] = useState<string | null>(null)
+    const [aEnviar, setAEnviar] = useState<any>(null)
     // Pagos que pueden pasar por el banco: transferencia, e-cheq propio o cheque de un cliente (si es e-cheq)
     const pasaPorBanco = (op: any) => (op.ordenes_pago_detalle ?? []).some((d: any) => d.medio === "transferencia" || d.es_echeq || (d.medio === "cheque" && d.cheque_id))
     // Si el usuario ya vio y aceptó la retención nueva (se conserva si hay que elegir la cuenta bancaria)
@@ -124,12 +127,37 @@ export default function OrdenesPagoPage() {
             } else {
                 toast.success("Orden de pago confirmada.")
             }
+            avisarEnvio(d.envio)
             loadOrdenes()
         } catch (e: any) {
             console.error(e)
             toast.error(e?.message || "No se pudo confirmar la orden de pago")
         } finally {
             setTrabajando(false)
+        }
+    }
+
+    // Qué pasó con el mail al proveedor (sale solo al confirmar; la orden queda pagada igual)
+    function avisarEnvio(envio: any) {
+        if (!envio?.mensaje) return
+        if (envio.estado === "enviada") toast.success(envio.mensaje, { duration: 10000 })
+        else if (envio.estado === "sin_mail") toast.info(envio.mensaje, { duration: 10000 })
+        else toast.error(`${envio.mensaje} La orden quedó pagada igual: se puede reintentar con el botón del sobre.`, { duration: 15000 })
+    }
+
+    async function enviarAlProveedor(op: any) {
+        setAEnviar(null)
+        setEnviando(op.id)
+        try {
+            const res = await fetch(`/api/ordenes-pago/${op.id}/enviar`, { method: "POST" })
+            const d = await res.json().catch(() => ({}))
+            if (d?.envio) avisarEnvio(d.envio)
+            else toast.error(d?.error || "No se pudo enviar la orden de pago al proveedor")
+            loadOrdenes(true)
+        } catch (e: any) {
+            toast.error(e?.message || "No se pudo enviar la orden de pago al proveedor")
+        } finally {
+            setEnviando(null)
         }
     }
 
@@ -373,6 +401,18 @@ export default function OrdenesPagoPage() {
                                             </TableCell>
                                             <TableCell className="text-center">
                                                 {getBadgeEstado(op.estado)}
+                                                {op.estado === "pagada" && op.confirmada_por_banco_at && (
+                                                    <div className="mt-0.5 text-[11px] text-muted-foreground" title="La confirmó el sistema cuando el banco confirmó la firma">
+                                                        por el banco · {fechaHora(op.confirmada_por_banco_at)}
+                                                    </div>
+                                                )}
+                                                {op.estado === "pagada" && op.envio && (
+                                                    <div title={op.envio.mensaje}
+                                                        className={`mt-0.5 text-[11px] ${op.envio.estado === "fallo" ? "font-semibold text-red-700" : op.envio.estado === "sin_mail" ? "text-amber-700" : "text-green-700"}`}>
+                                                        {op.envio.estado === "enviada" ? (op.envio.modo_prueba ? "enviada (PRUEBA)" : "enviada al proveedor")
+                                                            : op.envio.estado === "sin_mail" ? "sin enviar: no tiene mail" : "no se pudo enviar"}
+                                                    </div>
+                                                )}
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <div className="flex gap-1 justify-end">
@@ -388,6 +428,14 @@ export default function OrdenesPagoPage() {
                                                                 <Receipt className="h-4 w-4" />
                                                             </Button>
                                                         </a>
+                                                    )}
+                                                    {esAdmin && op.estado === "pagada" && (
+                                                        <Button variant="ghost" size="sm" disabled={enviando === op.id}
+                                                            className={op.envio?.estado === "fallo" ? "text-red-600 hover:bg-red-50 gap-1" : "text-sky-700 hover:bg-sky-50"}
+                                                            onClick={() => setAEnviar(op)}
+                                                            title={op.envio?.estado === "fallo" ? "No se pudo enviar al proveedor: reintentar" : op.envio?.estado === "enviada" ? "Volver a mandar la orden de pago al proveedor" : "Mandar la orden de pago al proveedor por mail"}>
+                                                            <Mail className="h-4 w-4" />{op.envio?.estado === "fallo" ? " Reintentar" : ""}
+                                                        </Button>
                                                     )}
                                                     {esAdmin && (op.estado === "pendiente" || op.estado === "pagada") && pasaPorBanco(op) && (
                                                         <Button variant="ghost" size="sm" className="text-azul-700 hover:bg-azul-50"
@@ -432,7 +480,25 @@ export default function OrdenesPagoPage() {
             </main>
 
             {/* Marcar un mes como presentado ante ARCA */}
-            <CredicoopOrdenPago ordenPagoId={credicoopOp} abierto={!!credicoopOp} onCerrar={() => setCredicoopOp(null)} />
+            <CredicoopOrdenPago ordenPagoId={credicoopOp} abierto={!!credicoopOp} onCerrar={() => setCredicoopOp(null)} onCambio={() => loadOrdenes(true)} />
+
+            {/* Mandar (o volver a mandar) la orden pagada al proveedor */}
+            <AlertDialog open={!!aEnviar} onOpenChange={(o) => { if (!o) setAEnviar(null) }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>¿Mandar la orden de pago {aEnviar?.numero_op} al proveedor?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Se le manda por mail a {aEnviar?.proveedores?.nombre || "el proveedor"} el PDF de la orden de pago{Number(aEnviar?.retencion_ganancias || 0) > 0 ? " y el certificado de retención" : ""}.
+                            {aEnviar?.envio?.estado === "enviada" ? ` Ya se había mandado (${aEnviar.envio.enviado_a}).` : ""}
+                            {" "}Si el modo prueba de envíos está encendido, va solo a la dirección de prueba.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Volver</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => aEnviar && enviarAlProveedor(aEnviar)}>Mandar</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             <AlertDialog open={confirmaPresentar} onOpenChange={setConfirmaPresentar}>
                 <AlertDialogContent>

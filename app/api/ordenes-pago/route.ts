@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { requirePermiso, tienePermiso } from '@/lib/auth'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { anotarResponsableOP } from '@/lib/ordenes-pago/responsable'
+import { ultimosEnvios } from '@/lib/ordenes-pago/envio'
 
 // GET /api/ordenes-pago
 export async function GET(request: Request) {
@@ -41,7 +42,9 @@ export async function GET(request: Request) {
             return query
         })
 
-        return NextResponse.json(data)
+        // Si la orden pagada se le mandó al proveedor (o por qué no): el último intento de cada una
+        const envios = await ultimosEnvios(supabase, (data as any[]).filter((o) => o.estado === 'pagada').map((o) => o.id))
+        return NextResponse.json((data as any[]).map((o) => ({ ...o, envio: envios.get(o.id) ?? null })))
     } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 })
     }

@@ -787,3 +787,51 @@ Hoy la orden la confirma una persona. Quedó preparado para las dos: después de
 - **Dudas que siguen** (no se pueden cerrar sin el banco): el significado exacto de "Enviada a proceso" (punto 5 de arriba); si `ACTIVO-PENDIENTE` es efectivamente lo que muestra un e-cheq recién endosado con firma pendiente o ya firmado (la documentación lo define como "endosado pendiente de aceptación"; hasta confirmarlo, un endoso mandado y sin firmar podría verse `ACTIVO`, que el sistema trata como "falta firmar": es el lado seguro); y si hay una consulta de gestiones de e-cheq por `idOrigen` (no figura).
 
 **Probado:** base local — `B1–B10` y `G1–G17` (ninguna guardia deja pasar; sin operaciones del banco todo sigue como antes); 33 pruebas de Credicoop y 897 de `mobile`; `typecheck:movil` OK. **No probado:** contra el banco (sin credenciales) ni en el navegador.
+
+## Tanda 2-A, segunda parte — la orden se confirma sola y se le manda al proveedor (19/11, rama `entrada-t2-bancos2`)
+
+Decisión de Juan (textual, 19/11): «Si, se confirma como pagada cuando el banco confirma la transferencia y se envia la orden de pago en caso de tener alguien a quien mandarselo, sino, queda cerrada sin enviar.»
+
+**SQL a aplicar:** `supabase/migrations/20261119e_bancos_confirmar_y_enviar.sql` (después de `20261119d`; idempotente).
+
+### 1. Confirmación sola
+
+- Después de cada consulta al banco ("Actualizar estado", "vista en la cuenta" y la consulta periódica) se corre `confirmarSiElBancoTermino` (`lib/bancos/confirmar-sola.ts`). La regla es `decidirConfirmacion` (`lib/bancos/credicoop/confirmacion.ts`, pura):
+  - la orden está pendiente;
+  - por cada medio de pago que se mandó al banco, la **última** operación quedó hecha (firmada / vista en la cuenta), del **banco real** y por el mismo importe;
+  - no queda ningún medio de pago que no haya pasado por el banco.
+- Se confirma por el **mismo camino que el tilde verde**: `confirmarOrdenPago` (`lib/ordenes-pago/confirmar.ts`) → guardia del banco → `op_confirmar` con la caja / cuenta de la orden. La ruta del tilde verde ahora usa esa misma función.
+- **Medios que no pasan por el banco** (efectivo, cheque en papel, transferencia de una cuenta no habilitada): no se confirma sola. Aviso: "El banco ya confirmó, pero la orden … tiene pagos que no pasan por el banco (…): falta confirmar el resto a mano".
+- **Retención (E-57):** si la retención cambió desde que se armó la orden, `op_confirmar` corta y la orden queda pendiente con el aviso "no se pudo confirmar sola: … Confirmala a mano". No se ajusta nada solo.
+- **Constancia:** `ordenes_pago.confirmado_por` = quien mandó el pago al banco; `confirmada_por_banco_at` y `confirmada_por_banco_operacion_id` (la operación tiene quién la mandó y cuándo). En la lista, debajo de "Pagada": "por el banco · fecha y hora".
+- **Dos pedidos a la vez** (la consulta periódica y una persona): `op_confirmar` es idempotente (`ya_confirmada`); el segundo no hace nada ni manda otro mail.
+- **Simulador / banco de prueba:** no confirman nada. Se corre la misma regla y la pantalla dice "Prueba: con el banco real, la orden … se habría confirmado sola…".
+- Se apaga poniendo `CONFIRMAR_SOLA = false` en `lib/bancos/operaciones.ts`.
+
+### 2. Envío de la orden al proveedor
+
+- Al confirmar — sola o con el tilde verde — `enviarOrdenAlProveedor` (`lib/ordenes-pago/envio.ts`) manda un mail con el **PDF de la orden** y, si hubo retención, el **certificado**. Son los mismos archivos que se bajan de la pantalla (`lib/ordenes-pago/pdf.ts`; las dos rutas de PDF ahora usan esa librería).
+- **A quién:** el mail de pagos de la ficha si algún día existe ese dato (`proveedores.mail_pagos`, hoy no existe), si no `mail_oficina`, si no `email`, y por último `mail_vendedor`. Sin ninguno: queda pagada **sin enviar** y la pantalla lo dice.
+- **Cuenta y modo prueba:** los de `compras_envio_ajustes` (los mismos de las órdenes de compra). Con el modo prueba encendido todo va solo a la dirección de prueba, con `[PRUEBA]` en el asunto y, en el texto, a quién habría ido. Si el ajuste no se puede leer, no sale nada.
+- **Registro:** tabla `ordenes_pago_envios` — un renglón por intento: estado (`enviada` / `sin_mail` / `fallo`), origen (`banco` / `confirmacion` / `manual`), a quién salió de verdad, a quién habría ido, si fue prueba, cuenta, adjuntos, id del mensaje, error, cuándo y quién. Si la orden se elimina, el registro queda.
+- **Si el mail falla** la orden sigue pagada. En la lista: "no se pudo enviar" y el botón del sobre dice "Reintentar". El mismo botón sirve para volver a mandarla (`POST /api/ordenes-pago/[id]/enviar`, con confirmación).
+- Los envíos automáticos no repiten uno que ya salió o que quedó sin mail; el botón siempre vuelve a intentar.
+
+### 3. Consulta cada 15 minutos
+
+- Ruta `GET /api/cron/bancos-credicoop` (exige `CRON_SECRET`): actualiza hasta 25 operaciones "esperando la firma", "en proceso" o "en duda" de los últimos 15 días, y confirma solas las órdenes que el banco ya terminó. Fuera del horario bancario (lunes a viernes de 8 a 20, hora argentina) no hace nada, salvo `?forzar=1`.
+- **Quién la dispara:** la base, con `pg_cron` cada 15 minutos → `bancos_consulta_periodica()` → `pg_net` llama a la ruta. No se tocó `vercel.json`: los cron que hay ahí son todos diarios y uno cada 15 minutos puede hacer fallar el deploy según el plan de Vercel.
+- **Queda apagada hasta cargar la dirección y la clave**, una sola vez: `UPDATE bancos_consulta_ajustes SET url = 'https://<dominio>/api/cron/bancos-credicoop', secreto = '<CRON_SECRET>' WHERE id;`. La función no llama si no hay nada esperando. Si `pg_cron` o `pg_net` no están instalados, la migración avisa y todo sigue funcionando con "Actualizar estado".
+
+### Probado
+
+- `mobile/packages/core/test/bancos-confirmar-sola.test.ts` (16 pruebas): la regla, de punta a punta contra el simulador (se manda, se firma, recién ahí confirma; rechazada no confirma), que el simulador nunca confirma en el sistema real, el horario bancario, a quién va el mail, el texto y el modo prueba. Total `mobile`: 913 pruebas.
+- Base local: `S1–S11` (camino de la confirmación, segunda confirmación sin efecto, registro de envíos, consulta periódica sin configurar) más todo lo anterior (`B1–B10`, `G1–G17`).
+- `typecheck:movil` OK.
+- **No probado:** el envío real por Gmail, la consulta desde `pg_cron` / `pg_net`, contra el banco, ni en el navegador.
+
+### A confirmar con Juan
+
+- **A qué mail va la orden de pago.** Hoy: oficina → general → vendedor. ¿Hace falta un "mail de pagos" propio en la ficha del proveedor?
+- **Toda orden confirmada manda mail**, también las que se pagan en efectivo o con cheque y se confirman a mano. Si hay pagos que no se le tienen que informar al proveedor por mail, hay que decir cuáles.
+- Una orden **anulada** cuyo pago el banco ya procesó no se puede eliminar (guardia de `20261119d`): queda como registro.

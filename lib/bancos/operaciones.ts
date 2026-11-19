@@ -532,8 +532,7 @@ export async function bloqueoPorBanco(db: SupabaseClient, ordenPagoId: string, a
 
 /**
  * ¿La orden está pendiente y todo lo que se mandó al banco real quedó hecho? Es el momento en que
- * se puede confirmar. Hoy la confirma una persona; si Juan decide que se confirme sola cuando el
- * banco avisa la firma, este es el punto donde se engancha (ver CONFIRMAR_SOLA más abajo).
+ * se puede confirmar. Con CONFIRMAR_SOLA la confirma el sistema (lib/bancos/confirmar-sola.ts).
  */
 export async function ordenListaParaConfirmar(db: SupabaseClient, ordenPagoId: string): Promise<boolean> {
   const [{ data: op }, { data: ops, error }] = await Promise.all([
@@ -545,9 +544,10 @@ export async function ordenListaParaConfirmar(db: SupabaseClient, ordenPagoId: s
 }
 
 /**
- * Decisión pendiente de Juan: ¿la orden se confirma sola cuando el banco confirma la firma, o la
- * confirma él? Hoy NO se confirma sola (false). El día que se decida que sí, se pone en true y se
- * escribe acá la confirmación —que tiene que pasar por op_confirmar con la caja / cuenta de la
- * orden y respetar el control de retención (E-57)—; el resto del circuito ya avisa cuándo está lista.
+ * Decisión de Juan (19/11/2026): «se confirma como pagada cuando el banco confirma la
+ * transferencia y se envía la orden de pago en caso de tener alguien a quien mandárselo, si no,
+ * queda cerrada sin enviar.» La confirmación sola vive en lib/bancos/confirmar-sola.ts
+ * (confirmarSiElBancoTermino): pasa por el mismo camino que el tilde verde. Poner esto en false
+ * la apaga y la orden vuelve a confirmarla una persona.
  */
-export const CONFIRMAR_SOLA = false
+export const CONFIRMAR_SOLA = true
