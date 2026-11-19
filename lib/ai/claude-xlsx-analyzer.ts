@@ -18,6 +18,7 @@ import type {
     XlsxInvoiceAnalysis,
 } from './types'
 import { hojasVisibles } from "@/lib/xlsx/hojas-visibles"
+import { registrarFallaIA } from './fallas-ia'
 
 // ─── Claude Client ─────────────────────────────────────
 
@@ -37,6 +38,8 @@ function getClient(): Anthropic {
 // El modelo se nombra en un solo lugar: lib/ai/modelos-claude.ts (E-82)
 const MODEL = MODELO_CLAUDE.extraccion
 const MAX_TOTAL_CHARS = 50000  // Max chars to send to Claude
+/** Marca que se agrega cuando el archivo no se manda entero (leerJsonCompleto la busca para avisar) */
+const MARCA_TRUNCADO = '[TRUNCADO — archivo demasiado grande]'
 
 // ─── Retry Helper ──────────────────────────────────────
 
@@ -53,6 +56,8 @@ async function withRateLimitRetry<T>(
             const error = err as { status?: number; error?: { type?: string }; headers?: { 'retry-after'?: string } }
             const isRateLimit = error?.status === 429 || error?.error?.type === 'rate_limit_error'
             if (!isRateLimit || attempt === maxRetries) {
+                // E-101: sin crédito siempre; 429 solo cuando ya no queda otro intento (este)
+                await registrarFallaIA('claude', err, `lectura de Excel (${label})`)
                 throw err
             }
             // Get retry-after from headers, default to 30s
@@ -282,7 +287,7 @@ function formatSheetsForClaude(sheets: ParsedSheetData[], filename: string, mode
     const result = parts.join('\n')
     // Hard truncation safeguard
     if (result.length > MAX_TOTAL_CHARS) {
-        return result.substring(0, MAX_TOTAL_CHARS) + '\n\n[TRUNCADO — archivo demasiado grande]'
+        return result.substring(0, MAX_TOTAL_CHARS) + '\n\n' + MARCA_TRUNCADO
     }
     return result
 }
@@ -329,7 +334,8 @@ export async function analyzeXlsxOrder(buffer: Buffer, filename: string): Promis
         throw new Error('Claude no devolvió respuesta de texto para el XLSX de pedido')
     }
 
-    const parsed = parseJsonResponse<XlsxOrderAnalysis>(textBlock.text)
+    const { data: parsed, aviso } = leerJsonCompleto<XlsxOrderAnalysis>(textBlock.text, response.stop_reason, formattedData, 'renglones del pedido')
+    if (aviso) parsed.aviso_incompleto = aviso
     console.log(`[ClaudeXlsx] ✅ Order analysis: ${parsed.items?.length || 0} items, customer: ${parsed.customer || 'no detectado'}`)
     return parsed
 }
@@ -350,8 +356,10 @@ export async function analyzeXlsxPriceList(buffer: Buffer, filename: string): Pr
     const client = getClient()
 
     const totalRows = sheets.reduce((sum, s) => sum + s.totalRows, 0)
-    // antes 4096: el modelo actual cuenta más tokens por el mismo texto y piensa dentro del tope
-    const maxTokens = 16000
+    // Una lista de ~200 renglones ya llenaba 16.000 tokens y se cortaba en silencio (19/11). Con
+    // 64.000 entra lo máximo que se manda (50.000 caracteres de planilla). Va por streaming (regla 25).
+    // Si igual se corta, leerJsonCompleto lo dice: la lista queda con el aviso, nunca partida en silencio.
+    const maxTokens = 64000
 
     console.log(`[ClaudeXlsx] Sending ${formattedData.length} chars to Claude (${totalRows} total rows, max_tokens: ${maxTokens})`)
 
@@ -371,7 +379,8 @@ export async function analyzeXlsxPriceList(buffer: Buffer, filename: string): Pr
         throw new Error('Claude no devolvió respuesta de texto para el XLSX de lista de precios')
     }
 
-    const parsed = parseJsonResponse<XlsxPriceListAnalysis>(textBlock.text)
+    const { data: parsed, aviso } = leerJsonCompleto<XlsxPriceListAnalysis>(textBlock.text, response.stop_reason, formattedData, 'renglones de la lista')
+    if (aviso) parsed.aviso_incompleto = aviso
     console.log(`[ClaudeXlsx] ✅ Price list analysis: ${parsed.items?.length || 0} items, proveedor: ${parsed.proveedor_nombre || 'no detectado'}, vigencia: ${parsed.fecha_vigencia || 'no detectada'}`)
     return parsed
 }
@@ -393,7 +402,7 @@ export async function analyzeXlsxInvoice(buffer: Buffer, filename: string): Prom
 
     const response = await withRateLimitRetry(() => client.messages.stream({
         model: MODEL,
-        max_tokens: 16000, // antes 4096 (ver nota en lib/ai/modelos-claude.ts)
+        max_tokens: 32000, // antes 16000 (y antes 4096); va por streaming (regla 25)
         output_config: { effort: ESFUERZO_SIMPLE },
         system: SYSTEM_PROMPT_XLSX_INVOICE,
         messages: [{
@@ -407,14 +416,36 @@ export async function analyzeXlsxInvoice(buffer: Buffer, filename: string): Prom
         throw new Error('Claude no devolvió respuesta de texto para el XLSX de factura')
     }
 
-    const parsed = parseJsonResponse<XlsxInvoiceAnalysis>(textBlock.text)
+    const { data: parsed, aviso } = leerJsonCompleto<XlsxInvoiceAnalysis>(textBlock.text, response.stop_reason, formattedData, 'renglones de la factura')
+    if (aviso) parsed.aviso_incompleto = aviso
     console.log(`[ClaudeXlsx] ✅ Invoice analysis: ${parsed.tipo_comprobante || '?'} ${parsed.numero_comprobante || '?'} — $${parsed.total || '?'}`)
     return parsed
 }
 
 // ─── JSON Response Parser ──────────────────────────────
 
-function parseJsonResponse<T>(text: string): T {
+/**
+ * Lee el JSON de la respuesta y dice si quedó INCOMPLETO: la respuesta se cortó por el tope
+ * (stop_reason "max_tokens"), hubo que reparar el JSON cortado o el archivo era tan grande que no se
+ * mandó entero. En cualquiera de esos casos devuelve un aviso en castellano para mostrar: lo leído
+ * se usa, pero nunca en silencio.
+ */
+function leerJsonCompleto<T>(text: string, stopReason: string | null | undefined, enviado: string, que: string): { data: T; aviso: string | null } {
+    const { data, reparado } = parseJsonResponse<T>(text)
+    const items = (data as { items?: unknown[] } | null)?.items
+    const n = Array.isArray(items) ? items.length : null
+    const leidos = n != null ? ` Se leyeron ${n} ${que}.` : ''
+    let aviso: string | null = null
+    if (stopReason === 'max_tokens' || reparado) {
+        aviso = `LECTURA INCOMPLETA: el archivo es más largo de lo que la lectura automática pudo devolver de una vez y faltan los últimos ${que}.${leidos} Controlá contra el archivo o cargalo partido en varios.`
+    } else if (enviado.includes(MARCA_TRUNCADO)) {
+        aviso = `LECTURA INCOMPLETA: el archivo es demasiado grande y solo se leyó la primera parte.${leidos} Controlá contra el archivo o cargalo partido en varios.`
+    }
+    if (aviso) console.warn(`[ClaudeXlsx] ⚠️ ${aviso} (stop_reason: ${stopReason})`)
+    return { data, aviso }
+}
+
+function parseJsonResponse<T>(text: string): { data: T; reparado: boolean } {
     let jsonStr = text.trim()
 
     // Handle markdown code blocks — try with closing ``` first, then without (truncated response)
@@ -435,7 +466,7 @@ function parseJsonResponse<T>(text: string): T {
 
     // First attempt: parse as-is
     try {
-        return JSON.parse(jsonStr) as T
+        return { data: JSON.parse(jsonStr) as T, reparado: false }
     } catch { /* continue to repair */ }
 
     // Repair truncated JSON: close any open arrays and objects
@@ -462,7 +493,7 @@ function parseJsonResponse<T>(text: string): T {
     try {
         const result = JSON.parse(fixed) as T
         console.warn('[ClaudeXlsx] ⚠️ JSON was truncated — recovered partial response')
-        return result
+        return { data: result, reparado: true }
     } catch {
         console.error('[ClaudeXlsx] Failed to parse JSON response:', text.substring(0, 500))
         throw new Error('No se pudo parsear la respuesta de Claude para el archivo Excel')

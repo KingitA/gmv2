@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import { parseFecha, parseMonto } from "@/lib/formato";
 
-import { GEMINI_MODEL, GEMINI_MODEL_FALLBACK, avisarFallaGemini } from "@/lib/ai/gemini-model";
+import { GEMINI_MODEL, GEMINI_MODEL_FALLBACK, avisarFallaDoble, avisarFallaGemini } from "@/lib/ai/gemini-model";
 
 // Native fetch to Gemini REST API — no SDK dependency, immune to SDK deprecations.
 // El modelo sale de lib/ai/gemini-model.ts (env GEMINI_MODEL, sin deploy). E-37: si el
@@ -251,7 +251,8 @@ FORMATO JSON:
             try {
                 data = await llamar(GEMINI_MODEL_FALLBACK, "v1beta");
             } catch (e2: any) {
-                await avisarFallaGemini(e, "lectura de comprobante de compra");   // fallaron los dos
+                // fallaron los dos: UNA anotación (y el catch de abajo ya no la repite: queda marcada)
+                await avisarFallaDoble(e, e2, "lectura de comprobante de compra");
                 throw e2;
             }
         }
@@ -290,7 +291,8 @@ FORMATO JSON:
 
     } catch (error: any) {
         console.error("Gemini OCR Error:", error);
-        // E-101: acá ya no queda otro intento: si fue por saldo o cuota (402 / 429), queda anotado y con aviso
+        // E-101: acá ya no queda otro intento: si fue por saldo o cuota (402 / 429), queda anotado y con
+        // aviso. Si ya se anotó arriba (principal y respaldo), avisarFallaGemini no lo repite.
         await avisarFallaGemini(error, "lectura de comprobante de compra");
         return { items: [], error: error.message };
     }

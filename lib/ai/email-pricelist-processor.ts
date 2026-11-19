@@ -1,17 +1,18 @@
 // =====================================================
 // AI Brain — Email Price List Processor
 // Processes price change notifications from emails
-// Deep XLSX analysis: article-by-article matching via Claude
+// Deep XLSX analysis via Claude; el VÍNCULO con nuestros artículos lo decide
+// crearListaProveedor (lib/compras/listas-servidor.ts), en contexto del proveedor.
 // =====================================================
 
 import { downloadAttachment, type ParsedEmail } from './gmail'
 import { getSupabaseAdmin } from './supabase-admin'
 import { analyzeXlsxPriceList } from './claude-xlsx-analyzer'
-import { searchProductsByVector } from '@/lib/actions/embeddings'
 import type { AttachmentContent } from './attachment-content-extractor'
-import type { XlsxPriceListItem } from './types'
+import type { XlsxPriceListAnalysis } from './types'
 import { hoyISO, parseFecha, parseMonto } from '@/lib/formato'
 import { crearListaProveedor } from '@/lib/compras/listas-servidor'
+import { MatchingEngine } from '@/lib/matching/matcher'
 
 export interface PriceChangeProcessingResult {
     processed: boolean
@@ -27,6 +28,8 @@ export interface PriceChangeProcessingResult {
     itemsDetected: number
     itemsLinked: number
     esOferta: boolean
+    /** Avisos para mostrar (lectura incompleta, falta el proveedor). Nunca en silencio. */
+    avisos?: string[]
     error?: string
 }
 
@@ -40,20 +43,24 @@ interface LinkedPriceItem {
     unit?: string
     isOffer?: boolean
     offerValidUntil?: string | null
-    // From DB matching
+    // Solo para el circuito de importaciones (ofertas): sugerencia para la pantalla de revisión
     linkedArticuloId?: string
     linkedArticuloDesc?: string
     linkedArticuloSku?: string
     matchConfidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE'
 }
 
+/** Escapa % y _ (comodines de ILIKE) en un texto que viene de afuera */
+const escaparLike = (s: string) => s.replace(/[\\%_]/g, (m) => `\\${m}`)
+
 /**
  * Procesa un email clasificado como "cambio_precio":
- * 1. Busca el proveedor por sender
- * 2. Si hay adjunto XLSX → Claude analiza artículo por artículo
- * 3. Vincula cada artículo con la DB vía vector search
- * 4. Crea registro en importaciones_articulos con datos vinculados
- * 5. Si es oferta, marca artículos con fecha de vigencia
+ * 1. Busca el proveedor por mail o nombre
+ * 2. Si hay adjunto XLSX → Claude lo lee renglón por renglón
+ * 3. Lista de precios → Listas de proveedores ("pendiente"): crearListaProveedor vincula cada renglón
+ *    con los artículos DEL PROVEEDOR (igual que la carga a mano); uno de otro proveedor o parecido
+ *    queda "por revisar". Sin proveedor identificado, NADA queda para aplicar: la lista pide el proveedor.
+ * 4. Ofertas (o si no se pudo crear la lista): importaciones_articulos, con sugerencias para revisar
  */
 export async function processEmailAsPriceChange(
     emailData: ParsedEmail,
@@ -70,6 +77,16 @@ export async function processEmailAsPriceChange(
     // ── 1. Find supplier ──────────────────────────────
     let proveedorId: string | null = null
     let proveedorName: string | null = null
+    const buscarProveedorPorNombre = async (nombre: string) => {
+        const limpio = nombre.trim()
+        if (limpio.length < 3) return
+        const { data: prov } = await db.from('proveedores').select('id, nombre')
+            .ilike('nombre', `%${escaparLike(limpio)}%`).limit(1).maybeSingle()
+        if (prov) {
+            proveedorId = prov.id
+            proveedorName = prov.nombre
+        }
+    }
 
     if (emailData.from) {
         const { data: prov } = await db.from('proveedores').select('id, nombre')
@@ -79,15 +96,7 @@ export async function processEmailAsPriceChange(
             proveedorName = prov.nombre
         }
     }
-
-    if (!proveedorId && emailData.fromName) {
-        const { data: prov } = await db.from('proveedores').select('id, nombre')
-            .ilike('nombre', `%${emailData.fromName}%`).limit(1).maybeSingle()
-        if (prov) {
-            proveedorId = prov.id
-            proveedorName = prov.nombre
-        }
-    }
+    if (!proveedorId && emailData.fromName) await buscarProveedorPorNombre(emailData.fromName)
 
     // ── 2. Get fecha vigencia ──────────────────────────
     let fechaVigencia: string | null = null
@@ -100,18 +109,42 @@ export async function processEmailAsPriceChange(
 
     // ── 3. Deep XLSX Analysis with Claude ───────────────
     let itemsDetected = 0
-    let itemsLinked = 0
     let esOferta = false
     const linkedItems: LinkedPriceItem[] = []
+    const avisos: string[] = []
     let attachmentSaved = false
-    let attachmentFilenames: string[] = []
+    const attachmentFilenames: string[] = []
     /** Adjuntos guardados (bucket "attachments"), TODOS: para los enlaces desde la lista */
     const adjuntosGuardados: Array<{ nombre: string; ruta: string }> = []
     const guardarAdjunto = async (nombre: string, buffer: Buffer, mimeType: string) => {
         const ruta = `price-lists/${proveedorId || 'unknown'}/${fechaHoy}_${nombre}`
         const { error } = await db.storage.from('attachments').upload(ruta, buffer, { contentType: mimeType, upsert: true })
         if (error) { console.log(`[PriceListProcessor] Storage upload skipped: ${error.message}`); return }
-        if (!adjuntosGuardados.some((a) => a.ruta === ruta)) adjuntosGuardados.push({ nombre, ruta: `attachments:${ruta}` })
+        if (!adjuntosGuardados.some((a) => a.ruta === `attachments:${ruta}`)) adjuntosGuardados.push({ nombre, ruta: `attachments:${ruta}` })
+    }
+
+    /** Lo leído de un Excel: renglones crudos (sin vincular), fecha, proveedor y avisos */
+    const tomarAnalisis = async (analysis: XlsxPriceListAnalysis, archivo: string) => {
+        if (!fechaVigencia && analysis.fecha_vigencia) fechaVigencia = parseFecha(analysis.fecha_vigencia)
+        if (!proveedorId && analysis.proveedor_nombre) await buscarProveedorPorNombre(analysis.proveedor_nombre)
+        if (!proveedorName && analysis.proveedor_nombre) proveedorName = analysis.proveedor_nombre
+        esOferta = analysis.es_oferta || false
+        itemsDetected += analysis.items.length
+        if (analysis.aviso_incompleto) avisos.push(`${archivo}: ${analysis.aviso_incompleto}`)
+        console.log(`[PriceListProcessor] Claude found ${analysis.items.length} items in ${archivo}`)
+        for (const item of analysis.items) {
+            linkedItems.push({
+                originalDescription: item.description,
+                originalCode: item.code,
+                originalBrand: item.brand,
+                originalPrice: parseMonto(item.price as any), // la IA puede devolver "1.234,56"
+                previousPrice: parseMonto(item.previous_price as any),
+                unit: item.unit,
+                isOffer: item.is_offer,
+                offerValidUntil: parseFecha(item.offer_valid_until),
+                matchConfidence: 'NONE',
+            })
+        }
     }
 
     // Find XLSX attachments (either pre-downloaded or from email)
@@ -121,106 +154,16 @@ export async function processEmailAsPriceChange(
     ) || []
 
     if (xlsxAttachments.length > 0) {
-        // Process pre-downloaded XLSX attachments via Claude
         for (const att of xlsxAttachments) {
             try {
                 console.log(`[PriceListProcessor] 🧠 Analyzing XLSX with Claude: ${att.filename}`)
-                const analysis = await analyzeXlsxPriceList(att.rawBuffer, att.filename)
-
-                if (!fechaVigencia && analysis.fecha_vigencia) {
-                    fechaVigencia = parseFecha(analysis.fecha_vigencia)
-                }
-                if (!proveedorName && analysis.proveedor_nombre) {
-                    proveedorName = analysis.proveedor_nombre
-                    // Try to find proveedor in DB by this name
-                    if (!proveedorId) {
-                        const { data: prov } = await db.from('proveedores').select('id, nombre')
-                            .ilike('nombre', `%${analysis.proveedor_nombre}%`).limit(1).maybeSingle()
-                        if (prov) {
-                            proveedorId = prov.id
-                            proveedorName = prov.nombre
-                        }
-                    }
-                }
-                esOferta = analysis.es_oferta || false
-
-                // Link each item via vector search
-                itemsDetected += analysis.items.length
-                console.log(`[PriceListProcessor] Claude found ${analysis.items.length} items in ${att.filename}`)
-
-                const BATCH_SIZE = 10
-                const DELAY_MS = 1000
-
-                for (let i = 0; i < analysis.items.length; i += BATCH_SIZE) {
-                    const batch = analysis.items.slice(i, i + BATCH_SIZE)
-
-                    const batchResults = await Promise.all(batch.map(async (item: XlsxPriceListItem) => {
-                        const linked: LinkedPriceItem = {
-                            originalDescription: item.description,
-                            originalCode: item.code,
-                            originalBrand: item.brand,
-                            originalPrice: parseMonto(item.price as any), // la IA puede devolver "1.234,56"
-                            previousPrice: parseMonto(item.previous_price as any),
-                            unit: item.unit,
-                            isOffer: item.is_offer,
-                            offerValidUntil: parseFecha(item.offer_valid_until),
-                            matchConfidence: 'NONE',
-                        }
-
-                        try {
-                            // Try exact SKU match first
-                            if (item.code) {
-                                const { data: skuMatch } = await db.from('articulos')
-                                    .select('id, descripcion, sku')
-                                    .eq('activo', true)
-                                    .ilike('sku', item.code.trim())
-                                    .limit(1)
-                                    .maybeSingle()
-
-                                if (skuMatch) {
-                                    linked.linkedArticuloId = skuMatch.id
-                                    linked.linkedArticuloDesc = skuMatch.descripcion
-                                    linked.linkedArticuloSku = skuMatch.sku
-                                    linked.matchConfidence = 'HIGH'
-                                    return linked
-                                }
-                            }
-
-                            // Vector search
-                            const searchQuery = `${item.code || ''} ${item.brand || ''} ${item.description}`.trim()
-                            const candidates = await searchProductsByVector(searchQuery, 0.4, 3)
-
-                            if (candidates && candidates.length > 0) {
-                                const best = candidates[0]
-                                linked.linkedArticuloId = best.id
-                                linked.linkedArticuloDesc = best.descripcion
-                                linked.linkedArticuloSku = best.sku
-
-                                if (best.similarity > 0.82) linked.matchConfidence = 'HIGH'
-                                else if (best.similarity > 0.75) linked.matchConfidence = 'MEDIUM'
-                                else linked.matchConfidence = 'LOW'
-                            }
-                        } catch (err) {
-                            console.error(`[PriceListProcessor] Error matching "${item.description}":`, err)
-                        }
-
-                        return linked
-                    }))
-
-                    linkedItems.push(...batchResults)
-                    itemsLinked += batchResults.filter(i => i.matchConfidence !== 'NONE').length
-
-                    // Rate limiting
-                    if (i + BATCH_SIZE < analysis.items.length) {
-                        await new Promise(resolve => setTimeout(resolve, DELAY_MS))
-                    }
-                }
-
+                await tomarAnalisis(await analyzeXlsxPriceList(att.rawBuffer, att.filename), att.filename)
                 attachmentFilenames.push(att.filename)
                 attachmentSaved = true
                 await guardarAdjunto(att.filename, att.rawBuffer, att.mimeType).catch(() => null)
             } catch (err) {
                 console.error(`[PriceListProcessor] Error analyzing ${att.filename}:`, err)
+                avisos.push(`${att.filename}: no se pudo leer (${err instanceof Error ? err.message : String(err)}).`)
             }
         }
     } else if (emailData.attachments.length > 0) {
@@ -243,41 +186,13 @@ export async function processEmailAsPriceChange(
                 const isXlsx = att.filename.match(/\.xlsx?$/i) || att.mimeType.includes('spreadsheet') || att.mimeType.includes('excel')
 
                 if (isXlsx) {
-                    // Deep analysis with Claude
                     console.log(`[PriceListProcessor] 🧠 Analyzing downloaded XLSX with Claude: ${att.filename}`)
-                    const analysis = await analyzeXlsxPriceList(buffer, att.filename)
-
-                    if (!fechaVigencia && analysis.fecha_vigencia) {
-                        fechaVigencia = parseFecha(analysis.fecha_vigencia)
+                    try {
+                        await tomarAnalisis(await analyzeXlsxPriceList(buffer, att.filename), att.filename)
+                    } catch (err) {
+                        console.error(`[PriceListProcessor] Error analyzing ${att.filename}:`, err)
+                        avisos.push(`${att.filename}: no se pudo leer (${err instanceof Error ? err.message : String(err)}).`)
                     }
-                    if (!proveedorName && analysis.proveedor_nombre) {
-                        proveedorName = analysis.proveedor_nombre
-                    }
-                    esOferta = analysis.es_oferta || false
-                    itemsDetected += analysis.items.length
-
-                    // Simplified linking for non-pre-downloaded (same as above but extracted for brevity)
-                    for (const item of analysis.items) {
-                        const linked: LinkedPriceItem = {
-                            originalDescription: item.description,
-                            originalCode: item.code,
-                            originalPrice: parseMonto(item.price as any), // la IA puede devolver "1.234,56"
-                            isOffer: item.is_offer,
-                            offerValidUntil: parseFecha(item.offer_valid_until),
-                            matchConfidence: 'NONE',
-                        }
-                        try {
-                            const searchQuery = `${item.code || ''} ${item.brand || ''} ${item.description}`.trim()
-                            const candidates = await searchProductsByVector(searchQuery, 0.4, 3)
-                            if (candidates?.[0]) {
-                                linked.linkedArticuloId = candidates[0].id
-                                linked.linkedArticuloDesc = candidates[0].descripcion
-                                linked.matchConfidence = candidates[0].similarity > 0.82 ? 'HIGH' : candidates[0].similarity > 0.75 ? 'MEDIUM' : 'LOW'
-                            }
-                        } catch { /* continue */ }
-                        linkedItems.push(linked)
-                    }
-                    itemsLinked = linkedItems.filter(i => i.matchConfidence !== 'NONE').length
                 }
 
                 // Save attachment metadata
@@ -300,20 +215,27 @@ export async function processEmailAsPriceChange(
         }
     }
 
-    console.log(`[PriceListProcessor] Analysis complete: ${itemsDetected} items detected, ${itemsLinked} linked to DB, oferta: ${esOferta}`)
+    console.log(`[PriceListProcessor] Analysis complete: ${itemsDetected} items detected, oferta: ${esOferta}`)
 
     // ── 4. Lista de precios → el MISMO circuito que las que carga la oficina (E-22) ─────────
-    // Antes iban a importaciones_articulos, un circuito paralelo que nadie revisaba junto con las
-    // listas. Ahora queda una lista "pendiente" en Listas de proveedores, con la misma vista previa
-    // (costo actual → nuevo, alertas, aviso de precios de venta): ahí se revisa y se aplica. No cambia
-    // ningún precio sola. Las OFERTAS siguen por el circuito de importaciones (no son costo de lista).
+    // Queda una lista "pendiente" en Listas de proveedores, con la misma vista previa (costo actual →
+    // nuevo, alertas, aviso de precios de venta): ahí se revisa y se aplica. No cambia ningún precio
+    // sola. El procesador del mail NO decide el vínculo: crearListaProveedor busca cada renglón entre
+    // los artículos del proveedor (como la carga a mano) y lo dudoso o de otro proveedor queda "por
+    // revisar". Las OFERTAS siguen por el circuito de importaciones (no son costo de lista).
     if (!esOferta && linkedItems.some((li) => li.originalPrice != null && Number(li.originalPrice) > 0)) {
         try {
+            const notas = [
+                `Llegó por mail de ${emailData.from}. Asunto: ${emailData.subject || '(sin asunto)'}.`,
+                fechaVigencia ? '' : 'El mail no decía desde cuándo rige: se tomó la fecha en que llegó.',
+                proveedorId ? '' : `FALTA EL PROVEEDOR: no se pudo identificar${proveedorName ? ` ("${proveedorName}" no está en Proveedores)` : ''}. Elegilo en la lista antes de aplicarla; hasta entonces ningún renglón se aplica.`,
+                ...avisos,
+            ].filter(Boolean)
             const r = await crearListaProveedor(db, {
                 proveedor_id: proveedorId || null,
-                nombre: `${proveedorName || emailData.fromName || 'Proveedor'} — por mail${attachmentFilenames.length ? ` (${attachmentFilenames[0]})` : ''}`.slice(0, 200),
+                nombre: `${proveedorId ? proveedorName : `SIN PROVEEDOR — ${proveedorName || emailData.fromName || emailData.from || 'mail'}`} — por mail${attachmentFilenames.length ? ` (${attachmentFilenames[0]})` : ''}`.slice(0, 200),
                 fecha_vigencia: fechaVigencia || fechaHoy,
-                observaciones: `Llegó por mail de ${emailData.from}. Asunto: ${emailData.subject || '(sin asunto)'}${fechaVigencia ? '' : '. El mail no decía desde cuándo rige: se tomó la fecha en que llegó.'}`.slice(0, 1000),
+                observaciones: notas.join(' ').slice(0, 1000),
                 storage_path: adjuntosGuardados[0]?.ruta || null,
                 archivos: adjuntosGuardados,
                 origen: 'mail',
@@ -324,9 +246,6 @@ export async function processEmailAsPriceChange(
                     precio_compra: li.originalPrice != null && Number(li.originalPrice) > 0 ? Number(li.originalPrice) : null,
                     // el mail no trae los descuentos por separado: no se tocan
                     descuento1: null, descuento2: null, descuento3: null, descuento4: null,
-                    articulo_id: li.linkedArticuloId || null,
-                    // solo lo que la vinculación dio por seguro se aplica; el resto queda "por revisar"
-                    confianza: li.linkedArticuloId ? (li.matchConfidence === 'HIGH' ? 'segura' as const : 'dudosa' as const) : null,
                 })),
             })
             console.log(`[PriceListProcessor] ✅ Lista de proveedor ${r.lista_id}: ${r.stats.pendientes} para aplicar, ${r.stats.revisar} por revisar, ${r.stats.sin_articulo} sin artículo`)
@@ -341,8 +260,9 @@ export async function processEmailAsPriceChange(
                 fechaVigencia: fechaVigencia || undefined,
                 attachmentSaved,
                 itemsDetected,
-                itemsLinked,
+                itemsLinked: r.stats.pendientes + r.stats.revisar,
                 esOferta,
+                avisos: [...(proveedorId ? [] : ['Falta el proveedor: elegilo en la lista antes de aplicarla.']), ...avisos],
             }
         } catch (e: any) {
             // No se pudo dejar en Listas de proveedores: sigue por el circuito anterior para no perder el mail
@@ -351,6 +271,10 @@ export async function processEmailAsPriceChange(
     }
 
     // ── 4b. Ofertas (o si lo anterior falló): registro en importaciones ─────────
+    // Sugerencias para la pantalla de revisión, con el mismo motor y en contexto del proveedor: el
+    // código del proveedor NO se compara contra nuestro SKU, y un artículo de otro proveedor o sin
+    // proveedor identificado nunca sale "HIGH".
+    const itemsLinked = await sugerirArticulos(linkedItems, proveedorId)
     try {
         const { data: importRec, error: importError } = await db.from('importaciones_articulos').insert({
             archivo_nombre: attachmentFilenames.join(', ') || emailData.subject || 'Email sin adjunto',
@@ -365,6 +289,7 @@ export async function processEmailAsPriceChange(
                 items_detected: itemsDetected,
                 items_linked: itemsLinked,
                 es_oferta: esOferta,
+                avisos,
                 // Store linked items for the review UI
                 linked_items: linkedItems.map(li => ({
                     desc: li.originalDescription,
@@ -409,6 +334,7 @@ export async function processEmailAsPriceChange(
                     items_detected: itemsDetected,
                     items_linked: itemsLinked,
                     es_oferta: esOferta,
+                    avisos,
                     linked_items: linkedItems.slice(0, 100).map(li => ({
                         desc: li.originalDescription,
                         price: li.originalPrice,
@@ -435,6 +361,7 @@ export async function processEmailAsPriceChange(
                 itemsDetected,
                 itemsLinked,
                 esOferta,
+                avisos,
             }
         }
 
@@ -451,6 +378,7 @@ export async function processEmailAsPriceChange(
             itemsDetected,
             itemsLinked,
             esOferta,
+            avisos,
         }
     } catch (err) {
         const msg = err instanceof Error ? err.message : 'Error creating import'
@@ -466,7 +394,39 @@ export async function processEmailAsPriceChange(
             itemsDetected,
             itemsLinked,
             esOferta,
+            avisos,
             error: msg,
         }
     }
+}
+
+/**
+ * Sugerencias de artículo para la pantalla de importaciones (ofertas). Mismo motor que las listas y
+ * las facturas, en contexto de compra del proveedor: HIGH solo si lo encontró con seguridad entre
+ * los suyos; un artículo de otro proveedor, parecido o sin proveedor identificado queda MEDIUM/LOW
+ * (sugerencia). Devuelve cuántos renglones quedaron con alguna sugerencia.
+ */
+async function sugerirArticulos(items: LinkedPriceItem[], proveedorId: string | null): Promise<number> {
+    const engine = new MatchingEngine()
+    const LOTE = 5
+    for (let i = 0; i < items.length; i += LOTE) {
+        await Promise.all(items.slice(i, i + LOTE).map(async (li) => {
+            if (!li.originalCode && !li.originalDescription) return
+            try {
+                const m = await engine.resolveItem(
+                    { description: li.originalDescription || '', code: li.originalCode || undefined, price: li.originalPrice ?? undefined },
+                    proveedorId || '', proveedorId ? {} : null)
+                const best = m.bestCandidate
+                if (!best?.sku_id) return
+                li.linkedArticuloId = best.sku_id
+                li.linkedArticuloDesc = best.sku_name
+                li.linkedArticuloSku = best.sku_code
+                li.matchConfidence = proveedorId && m.status === 'matched' && !best.otro_proveedor ? 'HIGH'
+                    : best.confidence_level === 'suggestion' || best.confidence_level === 'auto_approve' ? 'MEDIUM' : 'LOW'
+            } catch (err) {
+                console.error(`[PriceListProcessor] Error matching "${li.originalDescription}":`, err)
+            }
+        }))
+    }
+    return items.filter((li) => li.matchConfidence !== 'NONE').length
 }

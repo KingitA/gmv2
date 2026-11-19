@@ -64,12 +64,36 @@ export async function conRespaldoGemini<T>(fn: (modelo: string) => Promise<T>, e
     try {
       return await fn(GEMINI_MODEL_FALLBACK)
     } catch (e2) {
-      // Fallaron los dos: ahora sí cuenta también la cuota (la del principal o la del respaldo)
-      await avisarFallaGemini(e2, etiqueta)
-      await avisarFallaGemini(e, etiqueta)
+      // Fallaron los dos: ahora sí cuenta también la cuota (la del principal o la del respaldo),
+      // pero UNA sola anotación por lectura
+      await avisarFallaDoble(e, e2, etiqueta)
       throw e2
     }
   }
+}
+
+// Marca en el error que la falla ya se anotó: quien lo vuelva a atrapar más arriba (p. ej. el
+// catch general de lib/services/ocr.ts) no la anota otra vez.
+const AVISADA = Symbol.for("gm.falla_ia_avisada")
+const marcarAvisada = (e: unknown) => {
+  if (e && typeof e === "object") { try { (e as Record<symbol, unknown>)[AVISADA] = true } catch { /* objeto congelado */ } }
+}
+export const fallaYaAvisada = (e: unknown): boolean => !!e && typeof e === "object" && (e as Record<symbol, unknown>)[AVISADA] === true
+
+/**
+ * Fallaron el modelo principal y el de respaldo en la MISMA lectura: se anota una sola vez.
+ * Si el principal ya se anotó (sin crédito), no se repite; si no, se anota el del respaldo si es
+ * por saldo o cuota, y si no el del principal. Los dos errores quedan marcados como avisados.
+ */
+export async function avisarFallaDoble(principal: unknown, respaldo: unknown, origen: string): Promise<void> {
+  try {
+    if (!fallaYaAvisada(principal)) {
+      const { esFallaDeSaldoOCuota } = await import("./fallas-ia")
+      await avisarFallaGemini(esFallaDeSaldoOCuota(respaldo) ? respaldo : principal, origen)
+    }
+  } catch { /* nunca rompe la lectura */ }
+  marcarAvisada(principal)
+  marcarAvisada(respaldo)
 }
 
 /**
@@ -80,8 +104,11 @@ export async function conRespaldoGemini<T>(fn: (modelo: string) => Promise<T>, e
  * cuota (429): usarlo así solo cuando ya no queda otro intento.
  */
 export async function avisarFallaGemini(e: unknown, origen: string, opciones: { soloSaldo?: boolean } = {}): Promise<void> {
+  if (fallaYaAvisada(e)) return // ya anotada más abajo: una falla, una anotación
   try {
-    const { registrarFallaIA } = await import("./fallas-ia")
+    const { registrarFallaIA, esFallaDeSaldo, esFallaDeSaldoOCuota } = await import("./fallas-ia")
+    const corresponde = opciones.soloSaldo === true ? esFallaDeSaldo(e) : esFallaDeSaldoOCuota(e)
     await registrarFallaIA("gemini", e, origen, opciones.soloSaldo === true)
+    if (corresponde) marcarAvisada(e)
   } catch { /* nunca rompe la lectura */ }
 }

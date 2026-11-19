@@ -6,7 +6,7 @@
 
 import { downloadAttachment, type ParsedEmail } from './gmail'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { GEMINI_MODEL } from './gemini-model'
+import { conRespaldoGemini } from './gemini-model'
 import { getSupabaseAdmin } from './supabase-admin'
 import { hojasVisibles } from "@/lib/xlsx/hojas-visibles"
 
@@ -30,6 +30,12 @@ export interface ExtractionResult {
     attachments: AttachmentContent[]
     combinedText: string     // All attachment texts joined for classification
     errors: string[]
+    /**
+     * Adjuntos que la lectura automática (Gemini) NO pudo leer: "archivo: motivo". El adjunto sigue
+     * en `attachments` (con una marca en el texto) para que se guarde y se pueda reprocesar; quien
+     * clasifica el mail deja un aviso (un fallo de la IA no es "el mail no trae nada").
+     */
+    fallasLectura: string[]
 }
 
 // ─── MIME type classification ──────────────────────────
@@ -78,6 +84,7 @@ export async function extractAttachmentContents(
         attachments: [],
         combinedText: '',
         errors: [],
+        fallasLectura: [],
     }
 
     const validAttachments = emailData.attachments.filter(att => isDocumentAttachment(att))
@@ -101,18 +108,26 @@ export async function extractAttachmentContents(
             const category = getFileCategory(att.mimeType, att.filename)
             let extractedText = ''
 
+            // Una falla de la lectura automática deja una marca VISIBLE para la clasificación y queda
+            // anotada (fallasLectura): no se confunde con un adjunto que "no es una factura".
+            const marcarFalla = (err: unknown) => {
+                const motivo = err instanceof Error ? err.message : String(err)
+                console.error(`[AttachmentExtractor] La lectura automática falló en ${att.filename}:`, motivo)
+                result.fallasLectura.push(`${att.filename}: ${motivo.slice(0, 200)}`)
+                return `[NO SE PUDO LEER EL ADJUNTO ${att.filename}: falló la lectura automática. No se sabe qué contiene (puede ser una factura); no lo des por vacío ni por "no es comprobante".]`
+            }
             switch (category) {
                 case 'image':
-                    extractedText = await extractTextFromImage(buffer, att.mimeType)
+                    try { extractedText = await extractTextFromImage(buffer, att.mimeType) } catch (e) { extractedText = marcarFalla(e) }
                     break
                 case 'pdf':
-                    extractedText = await extractTextFromPDF(buffer)
+                    try { extractedText = await extractTextFromPDF(buffer) } catch (e) { extractedText = marcarFalla(e) }
                     break
                 case 'excel':
                     extractedText = await extractTextFromExcel(buffer, att.filename)
                     break
                 default:
-                    // Try image OCR as fallback for unknown types
+                    // Try image OCR as fallback for unknown types (un tipo raro que no se lee no es una falla de la IA)
                     try {
                         extractedText = await extractTextFromImage(buffer, att.mimeType)
                     } catch {
@@ -159,7 +174,6 @@ export async function extractAttachmentContents(
 // ─── Image OCR with Gemini ─────────────────────────────
 
 async function extractTextFromImage(buffer: Buffer, mimeType: string): Promise<string> {
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
     const base64Data = buffer.toString('base64')
 
     const prompt = `Extraé TODO el texto visible en esta imagen. 
@@ -168,27 +182,23 @@ async function extractTextFromImage(buffer: Buffer, mimeType: string): Promise<s
     Si hay una tabla, representala como texto con separadores.
     Respondé SOLO con el texto extraído, sin explicaciones ni comentarios.`
 
-    try {
-        const result = await model.generateContent([
-            prompt,
-            {
-                inlineData: {
-                    data: base64Data,
-                    mimeType: mimeType.startsWith('image/') ? mimeType : 'image/jpeg',
-                }
+    // Con respaldo y aviso de falla por saldo o cuota (E-101). Si falla, LANZA: quien llama deja
+    // una marca visible ("no se pudo leer"), no un texto vacío que parezca "no es nada".
+    const result = await conRespaldoGemini((modelo) => genAI.getGenerativeModel({ model: modelo }).generateContent([
+        prompt,
+        {
+            inlineData: {
+                data: base64Data,
+                mimeType: mimeType.startsWith('image/') ? mimeType : 'image/jpeg',
             }
-        ])
-        return result.response.text().trim()
-    } catch (err) {
-        console.error('[AttachmentExtractor] Gemini OCR error:', err)
-        return '[Error extrayendo texto de imagen]'
-    }
+        }
+    ]), 'lectura de adjunto de mail (imagen)')
+    return result.response.text().trim()
 }
 
 // ─── PDF Text Extraction with Gemini ───────────────────
 
 async function extractTextFromPDF(buffer: Buffer): Promise<string> {
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
     const base64Data = buffer.toString('base64')
 
     const prompt = `Extraé TODO el texto de este documento PDF.
@@ -196,21 +206,17 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string> {
     Si hay tablas, representalas como texto con separadores (|).
     Respondé SOLO con el texto extraído, sin explicaciones.`
 
-    try {
-        const result = await model.generateContent([
-            prompt,
-            {
-                inlineData: {
-                    data: base64Data,
-                    mimeType: 'application/pdf',
-                }
+    // Igual que la imagen: con respaldo, aviso de falla y, si falla, lanza
+    const result = await conRespaldoGemini((modelo) => genAI.getGenerativeModel({ model: modelo }).generateContent([
+        prompt,
+        {
+            inlineData: {
+                data: base64Data,
+                mimeType: 'application/pdf',
             }
-        ])
-        return result.response.text().trim()
-    } catch (err) {
-        console.error('[AttachmentExtractor] Gemini PDF error:', err)
-        return '[Error extrayendo texto de PDF]'
-    }
+        }
+    ]), 'lectura de adjunto de mail (PDF)')
+    return result.response.text().trim()
 }
 
 // ─── Excel/CSV Text Extraction ─────────────────────────

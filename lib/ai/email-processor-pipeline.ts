@@ -120,6 +120,8 @@ export async function processIncomingEmail(
     // 2. Extract TEXT content from ALL attachments (no upload yet — we don't have savedEmailId)
     let extractedAttachments: AttachmentContent[] = []
     let combinedAttachmentText = ''
+    /** Adjuntos que la lectura automática no pudo leer (Gemini caído, sin crédito, …) */
+    let fallasLectura: string[] = []
 
     if (emailData.attachments.length > 0) {
         traceLog(traceId, 'EXTRACTING', `Extracting content from ${emailData.attachments.length} attachment(s)...`)
@@ -127,6 +129,7 @@ export async function processIncomingEmail(
             const extraction = await extractAttachmentContents(emailData, targetEmail)
             extractedAttachments = extraction.attachments
             combinedAttachmentText = extraction.combinedText
+            fallasLectura = extraction.fallasLectura
 
             if (extraction.errors.length > 0) {
                 traceLog(traceId, 'EXTRACTING', `Extraction warnings: ${extraction.errors.join('; ')}`, { warnings: extraction.errors })
@@ -297,6 +300,25 @@ export async function processIncomingEmail(
 
     // 6. Process based on classification
     const fechaHoy = hoyISO()
+
+    // Un adjunto que la IA no pudo leer NO es "un mail sin factura": queda una tarea para revisarlo
+    // a mano, diga lo que diga la clasificación (que se hizo sin ese contenido).
+    if (fallasLectura.length > 0) {
+        const { error: fallaErr } = await db.from('ai_agenda_events').insert({
+            title: `⚠️ No se pudo leer un adjunto — ${emailData.fromName || emailData.from}`,
+            description: `La lectura automática falló en ${fallasLectura.length === 1 ? 'un adjunto' : `${fallasLectura.length} adjuntos`} del mail "${emailData.subject || '(sin asunto)'}": ${fallasLectura.join(' · ')}. `
+                + `El mail se clasificó como "${classification.classification}" SIN ese contenido: puede ser una factura u otro documento que no se cargó. Revisalo a mano.`,
+            event_type: 'tarea_general',
+            priority: 'alta',
+            status: 'pendiente',
+            due_date: fechaHoy,
+            source: 'gmail',
+            source_ref_id: savedEmail.id,
+            metadata: { email_subject: emailData.subject, email_from: emailData.from, fallas_lectura: fallasLectura, clasificacion: classification.classification },
+        })
+        if (fallaErr) traceError(traceId, 'EXTRACTING', `No se pudo dejar el aviso de adjunto sin leer: ${fallaErr.message}`)
+        else result.eventsCreated++
+    }
 
     try {
         if (classification.classification === 'pedido') {
@@ -575,9 +597,11 @@ async function processAsPriceChange(db: any, emailData: ParsedEmail, targetEmail
             await db.from('ai_agenda_events').insert({
                 title: `📊 Cambio de precios — ${priceResult.proveedorName || emailData.fromName || emailData.from}`,
                 // Las listas quedan en Listas de precios (mismo lugar que las que carga la oficina); las ofertas, en importaciones
-                description: priceResult.listaProveedorId
-                    ? `Se recibió una nueva lista de precios${priceResult.proveedorName ? ` de ${priceResult.proveedorName}` : ''}.${priceResult.fechaVigencia ? ` Vigencia: ${priceResult.fechaVigencia}.` : ''} Todavía no cambió ningún precio: ir a Listas de precios para ver la vista previa y aplicarla.`
-                    : `Se recibió una nueva lista de precios${priceResult.proveedorName ? ` de ${priceResult.proveedorName}` : ''}.${priceResult.fechaVigencia ? ` Vigencia: ${priceResult.fechaVigencia}.` : ''} Importación pendiente — ir a /articulos para aplicar.`,
+                // avisos: falta el proveedor, lectura incompleta (nunca en silencio)
+                description: (priceResult.listaProveedorId
+                    ? `Se recibió una nueva lista de precios${priceResult.proveedorName ? ` de ${priceResult.proveedorName}` : ''}.${priceResult.fechaVigencia ? ` Vigencia: ${fecha(priceResult.fechaVigencia)}.` : ''} Todavía no cambió ningún precio: ir a Listas de precios para ver la vista previa y aplicarla.`
+                    : `Se recibió una nueva lista de precios${priceResult.proveedorName ? ` de ${priceResult.proveedorName}` : ''}.${priceResult.fechaVigencia ? ` Vigencia: ${fecha(priceResult.fechaVigencia)}.` : ''} Importación pendiente — ir a /articulos para aplicar.`)
+                    + (priceResult.avisos?.length ? ` ATENCIÓN: ${priceResult.avisos.join(' ')}` : ''),
                 event_type: 'cambio_precio',
                 priority: 'alta',
                 status: 'pendiente',

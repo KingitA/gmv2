@@ -114,6 +114,8 @@ export interface XlsxOrderItem {
 export interface XlsxOrderAnalysis {
   customer: string | null
   items: XlsxOrderItem[]
+  /** La lectura quedó incompleta (respuesta cortada o archivo demasiado grande): texto para mostrar */
+  aviso_incompleto?: string
 }
 
 export interface XlsxPriceListItem {
@@ -133,6 +135,8 @@ export interface XlsxPriceListAnalysis {
   es_lista_completa: boolean
   es_oferta: boolean
   items: XlsxPriceListItem[]
+  /** La lectura quedó incompleta (respuesta cortada o archivo demasiado grande): texto para mostrar */
+  aviso_incompleto?: string
 }
 
 export interface XlsxInvoiceLineItem {
@@ -156,6 +160,8 @@ export interface XlsxInvoiceAnalysis {
   percepciones: number | null
   concepto: 'producto' | 'servicio' | 'transporte' | 'mixto' | null
   items: XlsxInvoiceLineItem[]
+  /** La lectura quedó incompleta (respuesta cortada o archivo demasiado grande): texto para mostrar */
+  aviso_incompleto?: string
 }
 
 export interface EnrichedClassificationResult extends ClassificationResult {

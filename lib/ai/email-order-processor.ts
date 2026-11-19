@@ -6,7 +6,8 @@
 import { downloadAttachment, downloadDriveFileAndExport, downloadPublicDriveFile, type ParsedEmail } from './gmail'
 import { getSupabaseAdmin } from './supabase-admin'
 import { processOrder, processOrderText, processOrderTextMulti, type ParseResult } from '@/lib/actions/ai-order-import'
-import { GEMINI_MODEL } from './gemini-model'
+import { conRespaldoGemini } from './gemini-model'
+import { registrarFallaIA } from './fallas-ia'
 import Anthropic from '@anthropic-ai/sdk'
 import { MODELO_CLAUDE, ESFUERZO_SIMPLE, TOPE_RESPUESTA_CORTA, textoDeRespuesta } from './modelos-claude'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
@@ -537,6 +538,8 @@ Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificar
                 }
             } catch (aiErr) {
                 console.error(`[EmailOrderProcessor] AI client identification error:`, aiErr)
+                // E-101: si fue por saldo o cuota, queda anotado y con aviso en la bandeja de Jarvis
+                await registrarFallaIA('claude', aiErr, 'identificar el cliente de un pedido por mail')
             }
         }
 
@@ -558,7 +561,7 @@ Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificar
                 const geminiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ''
                 if (geminiKey) {
                     const genAI = new GoogleGenerativeAI(geminiKey)
-                    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { temperature: 0.1, responseMimeType: 'application/json', maxOutputTokens: 2048 } }) // antes 64: el modelo piensa dentro del tope (lib/ai/gemini-model.ts)
+                    const crearModelo = (modelo: string) => genAI.getGenerativeModel({ model: modelo, generationConfig: { temperature: 0.1, responseMimeType: 'application/json', maxOutputTokens: 2048 } }) // antes 64: el modelo piensa dentro del tope (lib/ai/gemini-model.ts)
                     const prompt = `Analizá si el viajante está pidiendo una forma de facturación ESPECÍFICA para este pedido.
 Mensaje: "${fullTextContext}"
 
@@ -569,7 +572,8 @@ Reglas:
 - Si el mensaje NO HACE REFERENCIA CLARA a cómo facturar (solo manda el pedido, saluda, o dice 'viamonte') -> devuelve null.
 
 Devolvé UNICAMENTE un JSON con este formato: { "facturacion": "Presupuesto" | "Factura" | "Final" | null }`
-                    const response = await model.generateContent(prompt)
+                    // con respaldo y aviso de falla por saldo o cuota (E-101)
+                    const response = await conRespaldoGemini((modelo) => crearModelo(modelo).generateContent(prompt), 'forma de facturación de un pedido por mail')
                     let textObj = response.response.text().trim()
                     if (textObj.startsWith('\`\`\`json')) textObj = textObj.replace(/^\`\`\`json/, '').replace(/\`\`\`$/, '').trim()
                     else if (textObj.startsWith('\`\`\`')) textObj = textObj.replace(/^\`\`\`/, '').replace(/\`\`\`$/, '').trim()

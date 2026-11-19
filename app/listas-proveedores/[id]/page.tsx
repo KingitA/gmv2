@@ -23,6 +23,7 @@ import { fecha, hoyISO, moneda, porcentaje } from "@/lib/formato"
 import { cant } from "@/lib/deposito/unidades"
 import { esVigenciaFutura } from "@/lib/compras/lista-proveedor"
 import type { FiltroLista, ItemVistaPrevia, VistaPreviaLista } from "@/lib/compras/listas-servidor"
+import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 
 const ESTADO_LISTA: Record<string, { texto: string; clase: string }> = {
     pendiente: { texto: "Pendiente", clase: "bg-blue-100 text-blue-800" },
@@ -125,6 +126,17 @@ export default function DetalleListaPage() {
             confirmar: "Sí, cambiar",
         })
         if (ok) patch({ accion: "precio_por", valor }, "Listo: la vista previa se recalculó")
+    }
+
+    const elegirProveedor = async (proveedorId: string, nombre?: string) => {
+        const ok = await confirmar({
+            titulo: `¿La lista es de ${nombre || "este proveedor"}?`,
+            detalle: "Los renglones se vuelven a buscar entre los artículos de ese proveedor: lo que se encuentre con seguridad queda para aplicar y lo dudoso, por revisar. No cambia ningún precio.",
+            confirmar: "Sí, es de ese proveedor",
+        })
+        if (!ok) return
+        setTrabajando(true)
+        try { await patch({ accion: "proveedor", proveedor_id: proveedorId }, "Listo: la lista ya tiene proveedor") } finally { setTrabajando(false) }
     }
 
     const aplicar = async (aplicarHoy: boolean) => {
@@ -233,12 +245,12 @@ export default function DetalleListaPage() {
                         </Button>
                     )}
                     {editable && lista.estado !== "programada" && futura && (
-                        <Button onClick={() => aplicar(false)} disabled={trabajando || resumen.se_aplican === 0} className="gap-2 bg-violet-600 hover:bg-violet-700">
+                        <Button onClick={() => aplicar(false)} disabled={trabajando || !lista.proveedor_id || resumen.se_aplican === 0} className="gap-2 bg-violet-600 hover:bg-violet-700">
                             {trabajando ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />} Programar para el {fecha(lista.fecha_vigencia)}
                         </Button>
                     )}
                     {editable && (
-                        <Button onClick={() => aplicar(true)} disabled={trabajando || resumen.se_aplican + resumen.frenados === 0} variant={futura ? "outline" : "default"} className="gap-2">
+                        <Button onClick={() => aplicar(true)} disabled={trabajando || !lista.proveedor_id || resumen.se_aplican + resumen.frenados === 0} variant={futura ? "outline" : "default"} className="gap-2">
                             {trabajando ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />} {futura ? "Aplicar hoy igual" : "Aplicar la lista"}
                         </Button>
                     )}
@@ -271,6 +283,19 @@ export default function DetalleListaPage() {
                 </div>
             </div>
 
+            {!lista.proveedor_id && editable && (
+                <div className="p-3 border-2 border-red-400 bg-red-50 rounded-lg text-sm text-red-900 space-y-2">
+                    <p><strong>Falta el proveedor.</strong> No se pudo saber de quién es esta lista{lista.origen === "mail" ? " (llegó por mail)" : ""}. Hasta que lo elijas no se aplica ningún renglón: los artículos se buscan entre los suyos y los descuentos se aplican como dice su ficha.</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <EntitySearchSelect entity="proveedores" className="w-72" placeholder="Elegí el proveedor..." value={null} disabled={trabajando}
+                            onSelect={(p: any) => { if (p?.id) elegirProveedor(p.id, p.nombre) }} />
+                        {trabajando && <span className="flex items-center gap-1"><Loader2 className="h-4 w-4 animate-spin" /> Buscando los artículos del proveedor…</span>}
+                    </div>
+                </div>
+            )}
+            {lista.observaciones && (
+                <p className={`text-sm ${/LECTURA INCOMPLETA|FALTA EL PROVEEDOR/.test(lista.observaciones) ? "p-3 border-2 border-amber-400 bg-amber-50 rounded-lg text-amber-900" : "text-muted-foreground"}`}>{lista.observaciones}</p>
+            )}
             {lista.estado === "aplicada" && (
                 <div className="p-3 border rounded-lg bg-muted/40 text-sm">
                     Lista aplicada: {resumen.aplicados_con_cambio} artículo(s) cambiaron de costo y {resumen.aplicados_sin_cambio} ya estaban igual.
