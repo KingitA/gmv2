@@ -59,7 +59,7 @@ describe("Credicoop: formatos del banco", () => {
 describe("Credicoop: siempre con firma", () => {
   it("las rutas que mueven plata son las de ConFirma, y los permisos también", () => {
     for (const r of [RUTAS.transferir, RUTAS.emitirEcheq, RUTAS.gestionEcheq, RUTAS.pagarVep]) expect(r).toContain("/ConFirma/")
-    expect(SCOPES).toEqual({ cuentas: "cuentas", transferencias: "transferenciasConFirma", echeq: "echeqConFirma", vep: "vepConFirma" })
+    expect(SCOPES).toEqual({ cuentas: "cuentas", transferencias: "transferenciasConFirma", echeq: "echeqConFirma", vep: "vepConFirma", beneficiarioEcheq: "beneficiarioEcheq" })
   })
 })
 
@@ -307,6 +307,17 @@ describe("Credicoop: estados y errores", () => {
     const desconocido = errorDelBanco(400, { codigo: 9999, descripcion: "Algo raro del banco" })
     expect(desconocido.clase).toBe("RECHAZO")
     expect(desconocido.message).toContain("Algo raro del banco")
+  })
+  it("lee el error envuelto como lo manda el banco real ({ error: { codigo, descripcion } })", () => {
+    // Respuesta real de homologación (19/11/2026) al emitir un e-cheq con otro nombre
+    const nombre = errorDelBanco(400, { error: { codigo: "APIE-1013", descripcion: "Nombre de beneficiario no valido" } })
+    expect(nombre.clase).toBe("RECHAZO")
+    expect(nombre.codigo).toBe("APIE-1013")
+    expect(nombre.message).toMatch(/no coincide con el que Credicoop tiene registrado/)
+    const cuenta = errorDelBanco(400, { error: { codigo: "APIE-1006", descripcion: "Cuenta de debito no habilitada para emision" } })
+    expect(cuenta.clase).toBe("RECHAZO")
+    expect(cuenta.message).toMatch(/no está habilitada para emitir e-cheq/)
+    expect(errorDelBanco(400, { error: { codigo: "APIE-8014", descripcion: "El beneficiario no existe en su Agenda" } }).codigo).toBe("APIE-8014")
   })
 })
 

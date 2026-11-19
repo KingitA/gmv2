@@ -176,6 +176,21 @@ export function crearClienteCredicoop(config: ConfigCredicoop, deps: Dependencia
     /** Aceptar, endosar, depositar o poner en custodia e-cheq recibidos */
     gestionarEcheq: envio("echeq", RUTAS.gestionEcheq),
     async listarEcheqs(pedido: unknown) { return leerEcheqs(await api("echeq", "POST", RUTAS.listarEcheqs, { body: pedido })) },
+    /**
+     * Nombre con que Credicoop tiene agendado a un beneficiario de e-cheq (por CUIT). El banco
+     * rechaza la emisión si el nombre no coincide (APIE-1013), y en el sistema los proveedores
+     * figuran "como los conocemos". null = no está en la agenda (APIE-8014).
+     */
+    async nombreBeneficiarioEcheq(cuit: string): Promise<string | null> {
+      try {
+        const r = await api("beneficiarioEcheq", "GET", RUTAS.beneficiarioEcheq(config.numeroAdherente), { query: { documento: String(cuit).replace(/[^0-9]/g, ""), documentoTipo: "CUIT" } })
+        const nombre = String((r as { data?: { nombre?: unknown } })?.data?.nombre ?? "").trim()
+        return nombre || null
+      } catch (e) {
+        if (e instanceof ErrorCredicoop && e.codigo === "APIE-8014") return null
+        throw e
+      }
+    },
 
     async listarVeps(pedido: unknown) { return leerVeps(await api("vep", "POST", RUTAS.listarVeps, { body: pedido })) },
     pagarVep: envio("vep", RUTAS.pagarVep),
