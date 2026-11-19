@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse } from "next/server"
 
 export async function GET(request: Request) {
@@ -12,7 +12,8 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
         }
 
-        const supabase = await createClient()
+        // Corre sin sesión (cron de Vercel): con la clave pública no tiene permisos (20261119m)
+        const supabase = createAdminClient()
 
         // Find orders that were soft-deleted more than 45 days ago
         const cutoffDate = new Date()
