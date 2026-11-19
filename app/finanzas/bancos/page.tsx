@@ -17,7 +17,7 @@ import {
 import { AlertTriangle, ArrowLeft, Ban, CheckCircle2, Landmark, RefreshCw, Send } from "lucide-react"
 import { toast } from "sonner"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
-import { CartelSimuladorReal, EstadoOperacionBanco, RechazarOperacionBanco, SIN_TERMINAR, type OperacionBanco } from "@/components/bancos/credicoop-orden-pago"
+import { avisarConfirmacion, CartelSimuladorReal, EstadoOperacionBanco, RechazarOperacionBanco, SIN_TERMINAR, type OperacionBanco } from "@/components/bancos/credicoop-orden-pago"
 import { fecha, fechaHora, formatCuit, hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
 import { cn } from "@/lib/utils"
 
@@ -114,6 +114,7 @@ export default function BancosPage() {
     try {
       const j = await pedir(`/api/bancos/credicoop/operaciones/${id}`, { accion })
       toast.info(`Credicoop: ${j.operacion?.estado_nombre ?? "sin cambios"}`)
+      avisarConfirmacion(j.confirmacion)
     } catch (e: any) { toast.error(e?.message || "No se pudo consultar a Credicoop", { duration: 12000 }) } finally { setTrabajando(null); await cargar() }
   }
 

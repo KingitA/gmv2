@@ -1,19 +1,26 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requirePermiso } from '@/lib/auth'
-import { anotarResponsableOP } from '@/lib/ordenes-pago/responsable'
-import { bloqueoPorBanco } from '@/lib/bancos/operaciones'
+import { confirmarOrdenPago } from '@/lib/ordenes-pago/confirmar'
+import { enviarOrdenAlProveedor } from '@/lib/ordenes-pago/envio'
+
+export const maxDuration = 60
 
 /**
  * POST /api/ordenes-pago/[id]/confirmar — confirma la OP vía RPC atómica
  * op_confirmar (migración 20260726_i1): CC proveedor + retenciones +
  * imputaciones + vencimientos + kardex (baja saldos de caja/banco) +
  * cheques ENTREGADO_A_PROVEEDOR, todo en una transacción con guards
- * de idempotencia.
+ * de idempotencia. El camino es confirmarOrdenPago (lib/ordenes-pago/confirmar.ts),
+ * el mismo que usa la confirmación sola cuando el banco confirma la firma.
  *
- * Body opcional: { caja_id?, cuenta_bancaria_id? } — de dónde sale la plata.
+ * Body opcional: { caja_id?, cuenta_bancaria_id?, aceptar_retencion? } — de dónde sale la plata.
  *   caja_id: origen del efectivo (default Caja Grande)
  *   cuenta_bancaria_id: origen de transferencias (obligatorio si la OP incluye alguna)
+ *
+ * Después de confirmar, la orden se le manda al proveedor por mail si tiene a quién (decisión de
+ * Juan, 19/11/2026). Si no tiene mail queda pagada sin enviar; si el mail falla, la orden sigue
+ * pagada y se reintenta desde la pantalla. La respuesta trae `envio` con lo que pasó.
  */
 export async function POST(
     request: Request,
@@ -27,42 +34,16 @@ export async function POST(
         const body = await request.json().catch(() => ({}))
         const supabase = createAdminClient()
 
-        // Tanda 2-A: si un pago de esta orden se mandó a Credicoop y todavía no está firmado y
-        // procesado, la orden no se confirma: el pago no se da por hecho hasta que el banco lo diga.
-        const esperaBanco = await bloqueoPorBanco(supabase, opId)
-        if (esperaBanco) return NextResponse.json({ error: esperaBanco, error_code: 'ESPERA_BANCO' }, { status: 409 })
+        const r = await confirmarOrdenPago(supabase, opId, auth.user?.id ?? null, {
+            cajaId: body.caja_id ?? null, cuentaBancoId: body.cuenta_bancaria_id ?? null, aceptarRetencion: body.aceptar_retencion === true,
+        })
+        if (!r.ok) return NextResponse.json({ error: r.error, ...(r.error_code ? { error_code: r.error_code } : {}) }, { status: r.status })
 
-        // Si la OP guardó el origen de fondos al crearse (cuenta_origen_* en el
-        // detalle), usarlo sin volver a preguntar. El body explícito gana.
-        let cajaId = body.caja_id ?? null
-        let cuentaBancoId = body.cuenta_bancaria_id ?? null
-        if (!cajaId || !cuentaBancoId) {
-            const { data: det } = await supabase
-                .from('ordenes_pago_detalle')
-                .select('cuenta_origen_tipo, cuenta_origen_id')
-                .eq('orden_pago_id', opId)
-            if (!cajaId) cajaId = det?.find(d => d.cuenta_origen_tipo === 'CAJA' && d.cuenta_origen_id)?.cuenta_origen_id ?? null
-            if (!cuentaBancoId) cuentaBancoId = det?.find(d => d.cuenta_origen_tipo === 'BANCO' && d.cuenta_origen_id)?.cuenta_origen_id ?? null
-        }
-
-        const args = { p_op_id: opId, p_usuario_id: auth.user?.id ?? null, p_caja_id: cajaId, p_cuenta_banco_id: cuentaBancoId }
-        // E-57: la retención se calcula con el día de la confirmación. Si cambió desde que se armó
-        // la orden y la pantalla ya lo mostró y se aceptó (aceptar_retencion), se actualiza y se
-        // confirma en la misma transacción. Sin la migración 20261117p_ordenes_pago_t1d.sql, o sin
-        // aceptar, se confirma como siempre (y si cambió, la base corta con el motivo).
-        let res = body.aceptar_retencion === true
-            ? await supabase.rpc('op_confirmar_ajustando', args)
-            : await supabase.rpc('op_confirmar', args)
-        if (res.error && body.aceptar_retencion === true
-            && (res.error.code === 'PGRST202' || res.error.code === '42883') && /op_confirmar_ajustando/.test(res.error.message || '')) {
-            res = await supabase.rpc('op_confirmar', args)
-        }
-        const { data, error } = res
-        if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-
-        // Quién hizo salir la plata (Jarvis: "¿quién pagó / autorizó este pago?")
-        await anotarResponsableOP(supabase, opId, 'confirmado', auth.user?.id)
-        return NextResponse.json(data)
+        // Ya estaba confirmada (doble clic, o la confirmó el banco recién): no se manda otro mail
+        if (r.data?.ya_confirmada === true) return NextResponse.json(r.data)
+        // La orden ya está pagada: el envío nunca la hace fallar
+        const envio = await enviarOrdenAlProveedor(supabase, opId, { usuarioId: auth.user?.id ?? null, origen: 'confirmacion' })
+        return NextResponse.json({ ...r.data, envio })
     } catch (error: any) {
         console.error('Error confirming OP:', error)
         return NextResponse.json({ error: error.message }, { status: 500 })

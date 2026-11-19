@@ -3,3 +3,4 @@
 export * from "./nucleo"
 export * from "./cliente"
 export * from "./simulador"
+export * from "./confirmacion"

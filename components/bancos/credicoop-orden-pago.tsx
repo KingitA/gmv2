@@ -3,7 +3,8 @@
 // Orden de pago → Credicoop (Tanda 2-A). Por cada pago de la orden que es transferencia, e-cheq
 // a emitir o e-cheq de un cliente a endosar: mandarlo a Credicoop para FIRMAR con token y ver
 // en qué estado está. Mandar NO confirma la orden: el pago se da por hecho recién cuando el
-// banco dice que lo procesó, y la orden se confirma después, como siempre.
+// banco dice que lo procesó. En ese momento la orden se confirma SOLA y se le manda al proveedor
+// (decisión de Juan, 19/11/2026); si tiene pagos que no pasan por el banco, se confirma a mano.
 // Solo admin (el servidor lo vuelve a controlar).
 
 import { useCallback, useEffect, useState } from "react"
@@ -35,6 +36,16 @@ interface Datos {
   orden: { id: string; numero_op: string; estado: string; proveedor: string }
   conexion: { conectado: boolean; ambiente: string | null; falta: string[]; simulador_en_produccion?: boolean }
   pagos: Pago[]
+}
+
+/** Aviso de lo que pasó con la orden cuando el banco terminó (confirmada sola, falta el resto, no se pudo, o prueba). */
+export function avisarConfirmacion(c: { estado: string; mensaje: string | null; envio?: { estado: string } | null } | null | undefined) {
+  if (!c?.mensaje) return
+  const o = { duration: 20000 }
+  if (c.estado === "confirmada") { if (c.envio?.estado === "fallo") toast.warning(c.mensaje, o); else toast.success(c.mensaje, o) }
+  else if (c.estado === "no_se_pudo") toast.error(c.mensaje, o)
+  else if (c.estado === "falta_resto") toast.warning(c.mensaje, o)
+  else toast.info(c.mensaje, o)
 }
 
 /** Estados en los que una operación todavía no terminó (se puede actualizar o, verificando en el banco, marcar como rechazada). */
@@ -156,7 +167,7 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) toast.error(j?.error || "No se pudo mandar a Credicoop", { duration: 15000 })
-      else toast.success("Quedó en Credicoop esperando la firma con token. Cuando esté firmada, tocá “Actualizar estado”.", { duration: 10000 })
+      else toast.success("Quedó en Credicoop esperando la firma con token. Cuando el banco la procese, la orden se confirma sola (el sistema consulta cada 15 minutos; también podés tocar “Actualizar estado”).", { duration: 12000 })
     } catch (e: any) {
       toast.error(`${e?.message || "Se cortó la comunicación"}. No se sabe si llegó a Credicoop: tocá “Actualizar estado” antes de volver a mandarlo.`, { duration: 15000 })
     } finally { setTrabajando(null); await cargar(); onCambio?.() }
@@ -171,7 +182,10 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) toast.error(j?.error || "No se pudo consultar a Credicoop", { duration: 12000 })
-      else toast.info(`Credicoop: ${j.operacion?.estado_nombre ?? "sin cambios"}${j.operacion?.estado_banco ? ` (${j.operacion.estado_banco})` : ""}`)
+      else {
+        toast.info(`Credicoop: ${j.operacion?.estado_nombre ?? "sin cambios"}${j.operacion?.estado_banco ? ` (${j.operacion.estado_banco})` : ""}`)
+        avisarConfirmacion(j.confirmacion)
+      }
     } catch (e: any) { toast.error(e?.message || "No se pudo consultar a Credicoop") } finally { setTrabajando(null); await cargar(); onCambio?.() }
   }
 
@@ -188,7 +202,7 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Landmark className="h-5 w-5" /> Credicoop — orden de pago {datos?.orden.numero_op ?? ""}</DialogTitle>
             <DialogDescription>
-              {datos ? `${datos.orden.proveedor}. ` : ""}Mandar un pago lo deja en Banca Internet Empresa esperando la firma con token. No confirma la orden.
+              {datos ? `${datos.orden.proveedor}. ` : ""}Mandar un pago lo deja en Banca Internet Empresa esperando la firma con token. Cuando el banco lo procesa, la orden se confirma sola y se le manda al proveedor.
             </DialogDescription>
           </DialogHeader>
 
@@ -293,7 +307,7 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
               {todosHechos && datos.orden.estado === "pendiente" && (
                 <div className="flex gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  <span><b>El banco ya procesó todo.</b> Ahora confirmá la orden de pago (el tilde verde de la lista) para que quede registrada como pagada.</span>
+                  <span><b>El banco ya procesó todo, pero la orden sigue pendiente.</b> Tocá “Actualizar estado” para que se confirme sola; si no se puede (por ejemplo, cambió la retención), confirmala con el tilde verde de la lista.</span>
                 </div>
               )}
             </div>
@@ -319,7 +333,7 @@ export function CredicoopOrdenPago({ ordenPagoId, abierto, onCerrar, onCambio }:
                     <dt className="text-neutro-500">Importe</dt><dd className="text-base font-bold">{moneda(aConfirmar.monto)}</dd>
                     <dt className="text-neutro-500">{aConfirmar.tipo === "transferencia" ? "Fecha" : "Fecha de pago"}</dt><dd>{aConfirmar.fecha ? fecha(aConfirmar.fecha) : "—"}</dd>
                   </dl>
-                  <p>Queda en Banca Internet Empresa <b>esperando la firma con token</b>. La plata no sale hasta que se firme, y la orden no queda pagada hasta que la confirmes.</p>
+                  <p>Queda en Banca Internet Empresa <b>esperando la firma con token</b>. La plata no sale hasta que se firme. Cuando el banco la procese, la orden queda pagada sola y se le manda al proveedor si tiene mail.</p>
                 </div>
               ) : <span />}
             </AlertDialogDescription>

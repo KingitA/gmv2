@@ -1,21 +1,12 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requirePermiso } from '@/lib/auth'
-import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
-import React, { type JSXElementConstructor, type ReactElement } from 'react'
-import { RetencionPDF, type RetencionPDFData } from '@/lib/pdf/retencion-template'
-
-function etiquetaTipoComp(tc?: string | null): string | null {
-  if (!tc) return null
-  if (tc.startsWith('NC')) return `NOTA CRÉDITO ${tc.slice(2)}`.trim()
-  if (tc.startsWith('ND')) return `NOTA DÉBITO ${tc.slice(2)}`.trim()
-  if (tc.startsWith('F')) return `FACTURA ${tc.slice(1)}`.trim()
-  return tc.toUpperCase()
-}
+import { pdfCertificadoRetencion } from '@/lib/ordenes-pago/pdf'
 
 /**
  * GET /api/ordenes-pago/[id]/certificado — PDF del certificado de retención
  * de Ganancias RG 830 emitido al confirmar la OP (retenciones_emitidas).
+ * Lo arma lib/ordenes-pago/pdf.ts: el mismo archivo que se le manda al proveedor.
  */
 export async function GET(
   request: Request,
@@ -25,76 +16,14 @@ export async function GET(
   if (auth.error) return auth.error
   const { id } = await params
   try {
-    const supabase = createAdminClient()
-
-    const { data: cert } = await supabase
-      .from('retenciones_emitidas')
-      .select('*, retencion_regimenes(descripcion), proveedores(nombre, cuit, direccion, localidad), ordenes_pago(numero_op, fecha, ordenes_pago_imputaciones(*))')
-      .eq('orden_pago_id', id)
-      .eq('estado', 'emitida')
-      .limit(1)
-      .maybeSingle()
-    if (!cert) {
+    const pdf = await pdfCertificadoRetencion(createAdminClient(), id)
+    if (!pdf) {
       return NextResponse.json({ error: 'Esta OP no tiene certificado de retención emitido (¿está confirmada y con retención > 0?)' }, { status: 404 })
     }
-
-    const { data: empresa } = await supabase.from('configuracion_empresa').select('*').limit(1).single()
-
-    const { data: bases } = await supabase.rpc('op_ganancias_bases', {
-      p_imputaciones: (cert.ordenes_pago?.ordenes_pago_imputaciones || []).map((i: any) => ({
-        movimiento_cc_id: i.movimiento_cc_id,
-        vencimiento_id: i.vencimiento_id,
-        comprobante_compra_id: i.comprobante_compra_id,
-        monto_imputado: i.monto_imputado,
-        retiene_ganancias: i.retiene_ganancias ?? null,
-      })),
-    })
-
-    const data: RetencionPDFData = {
-      empresa: {
-        razon_social: empresa?.razon_social ?? '—',
-        cuit: empresa?.cuit ?? '—',
-        direccion: empresa?.direccion,
-        logo_url: empresa?.logo_url,
-      },
-      cert: {
-        numero_certificado: cert.numero_certificado,
-        fecha: cert.fecha,
-        base_calculo: Number(cert.base_calculo ?? 0),
-        alicuota: Number(cert.alicuota ?? 0),
-        monto: Number(cert.monto ?? 0),
-        regimen_descripcion: cert.retencion_regimenes?.descripcion,
-        ajuste_manual: cert.ajuste_manual,
-      },
-      op: {
-        numero_op: cert.ordenes_pago?.numero_op ?? '—',
-        fecha: cert.ordenes_pago?.fecha ?? cert.fecha,
-      },
-      proveedor: {
-        nombre: cert.proveedores?.nombre ?? '—',
-        cuit: cert.proveedores?.cuit,
-        direccion: cert.proveedores?.direccion,
-        localidad: cert.proveedores?.localidad,
-      },
-      // SOLO comprobantes FISCALES (facturas/ND que integran la base y NC que
-      // la restan). Adquisiciones, reversas y pagos a cuenta JAMÁS figuran en
-      // el certificado.
-      comprobantes: ((bases as any)?.detalle ?? [])
-        .filter((b: any) => b.tipo === 'factura' || b.tipo === 'nota_credito')
-        .map((b: any) => ({
-          etiqueta: [etiquetaTipoComp(b.tipo_comprobante), b.numero ?? b.etiqueta].filter(Boolean).join(' '),
-          fecha: b.fecha_comprobante ?? cert.ordenes_pago?.fecha,
-          monto: Number(b.monto_imputado ?? 0),
-        })),
-    }
-
-    const element = React.createElement(RetencionPDF, { data }) as unknown as ReactElement<DocumentProps, JSXElementConstructor<DocumentProps>>
-    const buffer = await renderToBuffer(element)
-
-    return new NextResponse(new Uint8Array(buffer), {
+    return new NextResponse(new Uint8Array(pdf.buffer), {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="RET_${cert.numero_certificado}.pdf"`,
+        'Content-Disposition': `inline; filename="${pdf.nombre}"`,
       },
     })
   } catch (error: any) {
