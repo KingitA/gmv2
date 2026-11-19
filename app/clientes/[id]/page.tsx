@@ -699,47 +699,6 @@ export default function ClienteDetailPage() {
                 </Select>
               </Campo>
             )}
-            {!esNuevo && retencion && (
-              <Campo label="Retener entregas" ancho={2}>
-                <RetenerEntregas clienteId={id} retenido={retencion.retenido} motivo={retencion.motivo} />
-              </Campo>
-            )}
-            <Campo label="Condición de pago" nota={CONDICIONES.find((c) => c.valor === formData.condicion_pago_tipo)?.ayuda ?? "cuándo paga"}>
-              <div className="flex gap-2">
-                <Select value={formData.condicion_pago_tipo || "__none__"} onValueChange={(v) => setFormData({ ...formData, condicion_pago_tipo: v === "__none__" ? "" : v, plazo_dias: v === "cuenta_corriente" ? formData.plazo_dias : "" })}>
-                  <SelectTrigger className={vacioCls(formData.condicion_pago_tipo)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Sin cargar</SelectItem>
-                    {CONDICIONES.map((c) => <SelectItem key={c.valor} value={c.valor}>{c.etiqueta}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                {formData.condicion_pago_tipo === "cuenta_corriente" && (
-                  <ConUnidad unidad="días">
-                    <InputMonto decimales={0} soloPositivos value={formData.plazo_dias} onChange={(n) => set("plazo_dias", n == null ? "" : String(Math.trunc(n)))} className={cn("w-28", vacioCls(formData.plazo_dias))} />
-                  </ConUnidad>
-                )}
-              </div>
-            </Campo>
-            <Campo label="Forma de pago" nota={formData.condicion_pago_tipo || formData.forma_pago ? textoCondicionPago(condicionDeFormulario(formData)) : "cómo paga"}>
-              <div className="flex flex-wrap gap-2">
-                <Select value={formData.forma_pago || "__none__"} onValueChange={(v) => setFormData({ ...formData, forma_pago: v === "__none__" ? "" : v, ...(v === "cheque" ? {} : { cheque_dias_desde: "", cheque_dias_hasta: "" }) })}>
-                  <SelectTrigger className={vacioCls(formData.forma_pago)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Sin cargar</SelectItem>
-                    {FORMAS.map((f) => <SelectItem key={f.valor} value={f.valor}>{f.etiqueta}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                {formData.forma_pago === "cheque" && (
-                  <div className="flex items-center gap-1.5 text-xs text-neutro-500" title="Días desde el vencimiento de la deuda. Un cheque a 30: 30 a 30. Al día: 0 a 0. Cheques escalonados: 60 a 90.">
-                    de
-                    <InputMonto decimales={0} soloPositivos value={formData.cheque_dias_desde} onChange={(n) => set("cheque_dias_desde", n == null ? "" : String(Math.trunc(n)))} className={cn("w-16", vacioCls(formData.cheque_dias_desde))} />
-                    a
-                    <InputMonto decimales={0} soloPositivos value={formData.cheque_dias_hasta} onChange={(n) => set("cheque_dias_hasta", n == null ? "" : String(Math.trunc(n)))} className={cn("w-16", vacioCls(formData.cheque_dias_hasta))} />
-                    días
-                  </div>
-                )}
-              </div>
-            </Campo>
             <Campo label="Tipo de canal">
               <Select value={formData.tipo_canal} onValueChange={(v) => set("tipo_canal", v)}>
                 <SelectTrigger className={vacioCls(formData.tipo_canal)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
@@ -749,6 +708,56 @@ export default function ClienteDetailPage() {
                   <SelectItem value="Consumidor Final">Consumidor final</SelectItem>
                 </SelectContent>
               </Select>
+            </Campo>
+            {!esNuevo && retencion && (
+              <Campo label="Retener entregas" ancho={2}>
+                <RetenerEntregas clienteId={id} retenido={retencion.retenido} motivo={retencion.motivo} />
+              </Campo>
+            )}
+          </Campos>
+
+          {/* Cómo y cuándo paga: cada dato en su columna (condición · plazo · forma · cheque) */}
+          <Campos className="mt-5 border-t border-neutro-100 pt-5">
+            <Campo label="Condición de pago" nota="cuándo paga">
+              <Select value={formData.condicion_pago_tipo || "__none__"} onValueChange={(v) => setFormData({ ...formData, condicion_pago_tipo: v === "__none__" ? "" : v, plazo_dias: v === "cuenta_corriente" ? formData.plazo_dias : "" })}>
+                <SelectTrigger className={vacioCls(formData.condicion_pago_tipo)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sin cargar</SelectItem>
+                  {CONDICIONES.map((c) => <SelectItem key={c.valor} value={c.valor}>{c.etiqueta}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Campo>
+            {formData.condicion_pago_tipo === "cuenta_corriente" && (
+              <Campo label="Plazo" nota="desde la factura">
+                <ConUnidad unidad="días">
+                  <InputMonto decimales={0} soloPositivos value={formData.plazo_dias} onChange={(n) => set("plazo_dias", n == null ? "" : String(Math.trunc(n)))} className={vacioCls(formData.plazo_dias)} />
+                </ConUnidad>
+              </Campo>
+            )}
+            <Campo label="Forma de pago" nota="cómo paga">
+              <Select value={formData.forma_pago || "__none__"} onValueChange={(v) => setFormData({ ...formData, forma_pago: v === "__none__" ? "" : v, ...(v === "cheque" ? {} : { cheque_dias_desde: "", cheque_dias_hasta: "" }) })}>
+                <SelectTrigger className={vacioCls(formData.forma_pago)}><SelectValue placeholder="Sin cargar" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sin cargar</SelectItem>
+                  {FORMAS.map((f) => <SelectItem key={f.valor} value={f.valor}>{f.etiqueta}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Campo>
+            {formData.forma_pago === "cheque" && (
+              <Campo label="Cheques" nota="días desde el vencimiento">
+                <div className="flex items-center gap-2 text-sm text-neutro-500" title="Un cheque a 30: de 30 a 30. Al día: de 0 a 0. Cheques escalonados: de 60 a 90.">
+                  <span>de</span>
+                  <InputMonto decimales={0} soloPositivos value={formData.cheque_dias_desde} onChange={(n) => set("cheque_dias_desde", n == null ? "" : String(Math.trunc(n)))} className={cn("w-20", vacioCls(formData.cheque_dias_desde))} />
+                  <span>a</span>
+                  <InputMonto decimales={0} soloPositivos value={formData.cheque_dias_hasta} onChange={(n) => set("cheque_dias_hasta", n == null ? "" : String(Math.trunc(n)))} className={cn("w-20", vacioCls(formData.cheque_dias_hasta))} />
+                  <span>días</span>
+                </div>
+              </Campo>
+            )}
+            <Campo label="Así queda" ancho={4}>
+              <p className={cn("text-sm font-semibold", formData.condicion_pago_tipo || formData.forma_pago ? "text-azul-900" : "text-alerta-600")}>
+                {formData.condicion_pago_tipo || formData.forma_pago ? textoCondicionPago(condicionDeFormulario(formData)) : "Sin condición de pago cargada"}
+              </p>
             </Campo>
           </Campos>
         </FichaSeccion>
