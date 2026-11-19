@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     await supabase.rpc('listas_proveedores_aplicar_programadas').then(() => null, () => null);
     let query = supabase
         .from('listas_proveedores')
-        .select(`*, proveedor:proveedores(nombre, razon_social)`)
+        .select(`*, proveedor:proveedores(nombre)`)
         .order('fecha_vigencia', { ascending: false });
 
     if (proveedor_id) query = query.eq('proveedor_id', proveedor_id);
