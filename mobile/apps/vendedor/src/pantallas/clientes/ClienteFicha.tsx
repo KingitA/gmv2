@@ -12,6 +12,11 @@ import { usePdfComprobantes } from "../../datos/comprobantes-pdf"
 import { BarraCompartir, MarcaPdf, TituloCompartible, useSeleccionCompartir } from "./comprobantes-ui"
 import { CuadroSegmentos } from "../segmentos-ui"
 import { saldoVisible } from "../../datos/saldo"
+import { EditorCondicionPago } from "./EditorCondicionPago"
+import { condicionDeCliente, resumenDeuda, textoCondicionCliente } from "../../datos/condicion-pago"
+import { normalizarCondicion, textoViejo, type CondicionPago } from "@gm/condicion-pago"
+
+const COLS_CONDICION = ["condicion_pago_tipo", "plazo_dias", "forma_pago", "cheque_dias_desde", "cheque_dias_hasta"] as const
 
 // Port de app/vendedor/clientes/[id]/page.tsx. Lee la cuenta del cliente de la réplica
 // (+ lo hecho acá sin enviar) y ENCOLA: cliente.editar (compare-and-set por campo),
@@ -77,6 +82,9 @@ export function ClienteFicha() {
   const [form, setForm] = useState<Record<string, string> | null>(null)
   // Lista y método (general o por segmento) que se editan; null = sin editar
   const [fichaEdit, setFichaEdit] = useState<FichaListas | null>(null)
+  // Condición y forma de pago + CP que se editan (fase 4, 19/11/2026); null = sin editar
+  const [condEdit, setCondEdit] = useState<CondicionPago | null>(null)
+  const [cpEdit, setCpEdit] = useState("")
   // edición: { "viajante.limpieza_bazar": "10", ... }
   const [bonifEdit, setBonifEdit] = useState<Record<string, string> | null>(null)
   const [guardando, setGuardando] = useState(false)
@@ -119,7 +127,6 @@ export function ClienteFicha() {
     inicial.localidad_id = c.localidad_id || ""
     inicial.localidad = c.localidad || ""
     inicial.provincia = c.provincia || ""
-    inicial.condicion_pago = c.condicion_pago || ""
     inicial.condicion_entrega = c.condicion_entrega || ""
     inicial.condicion_iva = c.condicion_iva || ""
     return inicial
@@ -135,7 +142,7 @@ export function ClienteFicha() {
 
   // Se entró directo con el overlay abierto (recarga): armar el formulario con lo que se ve
   useEffect(() => {
-    if (edicion.abierto && !form && cliente) { setForm(formInicial()); setFichaEdit(conListaDelViajante(fichaActual)) }
+    if (edicion.abierto && !form && cliente) { setForm(formInicial()); setFichaEdit(conListaDelViajante(fichaActual)); empezarCondicion() }
     if (edicionBonif.abierto && !bonifEdit && enCartera) setBonifEdit(bonifInicial())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edicion.abierto, edicionBonif.abierto, !!cliente, !!enCartera])
@@ -175,9 +182,16 @@ export function ClienteFicha() {
     ? cat?.listas_precio.find((l) => l.id === cliente.lista_precio_id)?.nombre || cliente.lista?.nombre || "—"
     : "Estándar"
 
+  // Condición y CP: de la cartera (trae los campos nuevos aunque la cuenta replicada sea vieja)
+  const baseCondicion = (enCartera ?? cliente) as unknown as Record<string, unknown> | null
+  function empezarCondicion() {
+    setCondEdit(condicionDeCliente(baseCondicion as never))
+    setCpEdit(String(baseCondicion?.codigo_postal ?? ""))
+  }
   const empezarEdicion = () => {
     setForm(formInicial())
     setFichaEdit(conListaDelViajante(fichaActual))
+    empezarCondicion()
     edicion.abrir()
   }
 
@@ -185,6 +199,9 @@ export function ClienteFicha() {
   const elegirLocalidad = (localidadId: string) => {
     const loc = localidades.find((l) => l.id === localidadId)
     setForm((prev) => ({ ...(prev || {}), localidad_id: localidadId, localidad: loc?.nombre || "", provincia: loc?.provincia || "" }))
+    // CP: se precarga con el de la localidad nueva si estaba vacío o era el de la anterior
+    const cpAnterior = localidades.find((l) => l.id === form?.localidad_id)?.codigo_postal?.trim() || ""
+    if (loc?.codigo_postal && (!cpEdit.trim() || cpEdit.trim() === cpAnterior)) setCpEdit(loc.codigo_postal.trim())
   }
 
   const guardarFicha = async () => {
@@ -212,6 +229,21 @@ export function ClienteFicha() {
       const despues = normal(valor)
       if (antes !== despues) cambios[campo] = { antes, despues }
     }
+    // Condición y forma de pago (mismo compare-and-set). Viaja también el texto viejo equivalente
+    // (lo leen las APK viejas). Nunca obligatoria: vacío queda vacío.
+    if (condEdit) {
+      const antesC = condicionDeCliente(baseCondicion as never)
+      const despuesC = normalizarCondicion(condEdit)
+      let cambio = false
+      for (const k of COLS_CONDICION) {
+        if ((antesC[k] ?? null) !== (despuesC[k] ?? null)) {
+          cambios[k] = { antes: (baseCondicion?.[k] as string | number | null | undefined) ?? null, despues: despuesC[k] ?? null }
+          cambio = true
+        }
+      }
+      if (cambio) cambios.condicion_pago = { antes: normal(baseCondicion?.condicion_pago), despues: textoViejo(despuesC) }
+    }
+    if (normal(baseCondicion?.codigo_postal) !== normal(cpEdit)) cambios.codigo_postal = { antes: normal(baseCondicion?.codigo_postal), despues: normal(cpEdit) }
     // Lista y método, general o por segmento (mismo compare-and-set, contra lo que había en la ficha)
     if (fichaEdit && fichaActual) {
       if (!fichaCompleta(fichaEdit)) {
@@ -467,6 +499,11 @@ export function ClienteFicha() {
               </div>
 
               <div>
+                <label className="mb-1 block text-sm text-gray-500">Código postal</label>
+                <input value={cpEdit} onChange={(e) => setCpEdit(e.target.value)} inputMode="numeric" placeholder="Código postal" className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900" />
+              </div>
+
+              <div>
                 <div>
                   <label className="mb-1 block text-sm text-gray-500">Condición IVA</label>
                   <select value={form.condicion_iva || ""} onChange={(e) => setForm((prev) => ({ ...(prev || {}), condicion_iva: e.target.value }))} className="w-full rounded-xl border border-gray-300 bg-white px-3 py-3 text-gray-900">
@@ -494,13 +531,12 @@ export function ClienteFicha() {
               </div>
 
 
-              <div>
-                <label className="mb-1 block text-sm text-gray-500">Condición de pago</label>
-                <select value={form.condicion_pago || ""} onChange={(e) => setForm((prev) => ({ ...(prev || {}), condicion_pago: e.target.value }))} className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900">
-                  <option value="">Sin definir</option>
-                  {(cat?.condiciones_pago ?? []).map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
-                </select>
-              </div>
+              {condEdit && (
+                <div className="rounded-xl border border-gray-200 p-3">
+                  <EditorCondicionPago valor={condEdit} onCambiar={setCondEdit} />
+                  <p className="mt-2 text-xs text-gray-400">Rige para los próximos pedidos. Para cambiarla en un solo pedido, hacelo desde el pedido.</p>
+                </div>
+              )}
 
               <div>
                 <label className="mb-1 block text-sm text-gray-500">Condición de entrega</label>
@@ -539,9 +575,16 @@ export function ClienteFicha() {
                 // Sin la réplica de precios todavía: NO mostrar solo lo general (engaña si va por segmento)
                 <Dato label="Lista y facturación" valor="se ven al descargar los precios" />
               )}
-              <Dato label="Condición de pago" valor={cliente.condicion_pago} />
+              <Dato label="Condición de pago" valor={textoCondicionCliente((enCartera ?? cliente) as never) || null} />
+              {(() => {
+                const d = enCartera && saldoVisible(enCartera.saldo_actual, enCartera.saldo_proyectado) > 0.005 ? resumenDeuda(enCartera) : null
+                return d ? <Dato label={d.tipo === "vencida" ? "Deuda vencida" : "A vencer"} valor={`${formatCurrency(d.monto)}${d.vence ? ` · vence ${fecha(d.vence)}` : ""}`} /> : null
+              })()}
               <Dato label="Condición de entrega" valor={nombreEntrega(cliente.condicion_entrega)} />
               <Dato label="Dirección" valor={[cliente.direccion, cliente.localidad, cliente.provincia].filter(Boolean).join(", ")} />
+              {(enCartera?.codigo_postal || (cliente as { codigo_postal?: string | null }).codigo_postal) && (
+                <Dato label="Código postal" valor={enCartera?.codigo_postal || (cliente as { codigo_postal?: string | null }).codigo_postal || null} />
+              )}
               {cliente.telefono && (
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm text-gray-500">Teléfono</span>
