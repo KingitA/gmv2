@@ -169,6 +169,8 @@ export function buildPDFData(params: {
       observaciones:    comprobante.observaciones    ?? null,
       motivo_ajuste:    comprobante.motivo_ajuste    ?? null,
       qr_data_url:      qrDataUrl ?? null,
+      condicion_pago_texto: comprobante.condicion_pago_texto ?? null,
+      fecha_vencimiento:    comprobante.fecha_vencimiento    ?? null,
     },
     cliente: {
       nombre_razon_social: cliente?.nombre_razon_social ?? cliente?.nombre ?? '—',

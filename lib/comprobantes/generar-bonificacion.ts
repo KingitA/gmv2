@@ -290,6 +290,8 @@ async function generarPDFNC(
         cae:                params.cae,
         vencimiento_cae:    params.vencimiento_cae,
         observaciones:      params.observaciones,
+        // Condición de pago y vencimiento guardados al emitir (fase 2)
+        ...(await supabase.from("comprobantes_venta").select("condicion_pago_texto, fecha_vencimiento").eq("id", params.comprobante_id).maybeSingle()).data,
       },
       cliente: params.cliente,
       empresa: empresaData,

@@ -127,7 +127,7 @@ export async function generarRemitosParaPedido(
   const { data: comprobantes, error: compErr } = await supabase
     .from('comprobantes_venta')
     .select(`
-      id, tipo_comprobante, numero_comprobante, total_factura, fecha,
+      id, tipo_comprobante, numero_comprobante, total_factura, fecha, condicion_pago_texto, fecha_vencimiento,
       comprobantes_venta_detalle(articulo_id, descripcion, cantidad, articulos(sku))
     `)
     .eq('pedido_id', pedidoId)
@@ -237,6 +237,9 @@ export async function generarRemitosParaPedido(
             pallets:            palletsPedido || null,
             comprobante_numero: comp.numero_comprobante,
             comprobante_tipo:   comp.tipo_comprobante,
+            // Fase 2 (19/11/2026): la condición y el vencimiento del comprobante
+            condicion_pago_texto: (comp as any).condicion_pago_texto ?? null,
+            fecha_vencimiento:    (comp as any).fecha_vencimiento ?? null,
           },
           empresa: esFiscal ? (empresa ?? null) : null,
           cliente: {

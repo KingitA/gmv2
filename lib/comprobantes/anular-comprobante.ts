@@ -589,6 +589,8 @@ async function anularComprobanteEnTurno(
         cae,
         vencimiento_cae:     vencimientoCae,
         observaciones:       leyenda,
+        condicion_pago_texto: (inversoInsert as any).condicion_pago_texto ?? null,
+        fecha_vencimiento:    (inversoInsert as any).fecha_vencimiento ?? null,
       },
       cliente:        original.cliente,
       empresa:        empresaData,

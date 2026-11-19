@@ -475,7 +475,7 @@ export async function POST(request: Request) {
       const { data: comprobante, error: comprobanteError } = await supabase
         .from("comprobantes_venta")
         .insert(comprobanteInsert)
-        .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones, motivo_ajuste')
+        .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones, motivo_ajuste, condicion_pago_texto, fecha_vencimiento')
         .single()
 
       if (comprobanteError) {
