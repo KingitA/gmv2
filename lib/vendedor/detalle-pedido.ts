@@ -10,6 +10,7 @@ export async function cargarDetallePedido(supabase: any, vendedorIds: string[], 
     .from("pedidos")
     .select(
       `id, numero_pedido, fecha, estado, total, observaciones, metodo_facturacion_pedido, lista_precio_pedido_id, bonif_pedido, bonif_mercaderia_pct, vendedor_id, cliente_id, created_at,
+       condicion_pago_tipo_pedido, plazo_dias_pedido, forma_pago_pedido, cheque_dias_desde_pedido, cheque_dias_hasta_pedido,
        clientes:cliente_id(id, nombre, localidad, metodo_facturacion, lista_precio_id, lista:lista_precio_id(nombre)),
        pedidos_detalle(id, articulo_id, cantidad, precio_base, precio_final, subtotal, es_bonificado, estado_item,
          precio_lista, descuento_propio_pct, bonif_general_pct, bonif_viajante_pct, metodo_facturacion_item,
