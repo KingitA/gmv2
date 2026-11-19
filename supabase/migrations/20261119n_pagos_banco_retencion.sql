@@ -793,3 +793,22 @@ BEGIN
   RETURN jsonb_build_object('success', true, 'kardex_reversas', v_revs, 'certificados_anulados', v_certs);
 END;
 $function$;
+
+-- ── Permisos (revisión del orquestador, 19/11) ──────────────────────────────────────────
+-- Todas las llama el servidor con el cliente de servicio. Las nuevas nacerían ejecutables por
+-- cualquier usuario logueado (privilegios por defecto); las reemplazadas se dejan igual de cerradas.
+DO $$
+DECLARE f text;
+BEGIN
+  FOREACH f IN ARRAY ARRAY[
+    'public.op_banco_pago_hecho(uuid)',
+    'public.op_retencion_al_confirmar(uuid)',
+    'public.op_retencion_actualizar(uuid, numeric)',
+    'public.op_confirmar(uuid, uuid, uuid, uuid)',
+    'public.bancos_bloqueo_orden(uuid, text)',
+    'public.op_anular(uuid, uuid, text)'
+  ] LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated', f);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', f);
+  END LOOP;
+END $$;
