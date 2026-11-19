@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.15 (versionCode 24) — 2026-11-19
+
+- Condiciones de pago: deuda vencida / a vencer en Mis clientes; condición, forma de pago y código postal en la ficha y el alta; condición de pago solo este pedido
+
 ## v0.4.14 (versionCode 23) — 2026-11-18
 
 - Prueba del botón de actualizar

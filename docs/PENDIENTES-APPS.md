@@ -298,6 +298,12 @@ Cambio solo de servidor, compatible con la APK instalada (los rechazos de negoci
 
 Lo hizo cuentas corrientes (servidor y ERP). La parte visual de las apps es la **fase 4**. Migración `supabase/migrations/20261119q_deuda_vencida.sql` (**sin aplicar**; sin ella las respuestas traen `null` en los campos nuevos y nada se rompe).
 
+### App Vendedor — fase 4 HECHA (19/11/2026, rama `vendedor-condiciones-pago`, APK v0.4.15 compilada sin instalar ni publicar)
+- **Mis clientes → Con deuda → Toda / Deuda vencida / Deuda a vencer.** En cada fila: "Vencida $X" (rojo) o "A vencer $X · vence dd/mm". El dato viene en la réplica `vendedor_clientes` (`deuda_vencida`, `deuda_a_vencer`, `proximo_vencimiento`, una consulta por lote a `v_deuda_vencimiento`). Sin el dato el cliente no entra en "vencida" ni en "a vencer".
+- **Ficha y alta:** condición (Contado / Cuenta corriente + días / Anticipado), forma (Efectivo / Transferencia / Cheque de N a M días), "Así queda: …" y código postal (se precarga con el de la localidad). Viajan los campos nuevos y además el texto viejo equivalente (`textoViejo`). Nada es obligatorio: el alta ya no exige condición de pago.
+- **Pedido:** "Confirmar pedido" muestra la condición y deja cambiarla **solo para este pedido** (`cond.condPago` → `condicion_pago_pedido` en el payload → el outbox actualiza las columnas `*_pedido` con `columnasPedido`; si falla, el pedido igual queda con la de la ficha). El detalle del pedido la muestra.
+- Código: `datos/condicion-pago.ts`, `pantallas/clientes/EditorCondicionPago.tsx`, `pantallas/pedido-nuevo/CondicionPagoPedido.tsx`; alias `@gm/condicion-pago` = `lib/clientes/condicion-pago.ts`.
+
 ### Deuda vencida / a vencer (App Vendedor: filtro "Deuda vencida / Deuda a vencer" en Mis clientes)
 - **Fuente única en la base:** `v_deuda_vencimiento` (todos) y `cc_deuda_vencimiento(p_cliente_id)` (uno) → `cliente_id, saldo, vencida, a_vencer, vencimiento_mas_viejo, proximo_vencimiento`. Desde TS: `deudaVencidaClientes(supabase, ids)` / `deudaVencidaCliente(supabase, id)` en `lib/cuenta-corriente/deuda-vencida.ts`.
 - **Regla:** cada débito vence en su `fecha_vencimiento` (o su fecha si no tiene); los créditos y pagos a cuenta sin imputar se aplican a lo más viejo; la deuda sin comprobante (ajustes de la apertura) cuenta como vencida. **Vencida** = vencimiento anterior a hoy; **a vencer** = el resto; `vencida + a_vencer = saldo`. Saldo ≤ 0: 0 y 0.

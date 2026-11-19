@@ -1,4 +1,5 @@
 import type { DefDataset } from "@gm/core"
+import type { CondicionPago, CondicionPagoTipo, FormaPago } from "@gm/condicion-pago"
 
 // Datasets que replica la app Vendedor (servidor: lib/mobile/sync/vendedor.ts y,
 // para los insumos de precio, lib/mobile/sync/datasets.ts). MOBILE.md → "Vendedor".
@@ -86,7 +87,7 @@ export interface CatalogosFicha {
   condiciones_pago: Array<{ id: string; nombre: string }>
   condiciones_entrega: Array<{ id: string; codigo: string; nombre: string }>
   zonas: Array<{ id: string; nombre: string }>
-  localidades: Array<{ id: string; nombre: string; provincia: string | null }>
+  localidades: Array<{ id: string; nombre: string; provincia: string | null; codigo_postal?: string | null }>
   listas_precio: ListaPrecio[]
   vendedores: Array<{ id: string; nombre: string; lista_precio_id?: string | null; lista_nombre?: string | null }>
   segmentos: Array<{ key: Segmento; label: string }>
@@ -119,7 +120,19 @@ export interface Cliente {
   telefono: string | null
   mail: string | null
   condicion_iva: string | null
+  /** Texto viejo (lo traduce la base); lo nuevo va en los campos de abajo */
   condicion_pago: string | null
+  // Condición y forma de pago (condiciones de pago, fase 4 — 19/11/2026). null = sin cargar
+  condicion_pago_tipo?: CondicionPagoTipo | null
+  plazo_dias?: number | null
+  forma_pago?: FormaPago | null
+  cheque_dias_desde?: number | null
+  cheque_dias_hasta?: number | null
+  codigo_postal?: string | null
+  /** Deuda vencida / a vencer (v_deuda_vencimiento del servidor; null = sin el dato) */
+  deuda_vencida?: number | null
+  deuda_a_vencer?: number | null
+  proximo_vencimiento?: string | null
   condicion_entrega: string | null
   metodo_facturacion: string | null
   vendedor_id: string | null
@@ -237,6 +250,12 @@ export interface PedidoVendedor {
     metodo_facturacion_pedido: string | null
     lista_precio_pedido_id: string | null
     bonif_pedido: BonifPedido | null
+    /** Condición de pago congelada en el pedido (fase 2/4 de condiciones de pago) */
+    condicion_pago_tipo_pedido?: CondicionPagoTipo | null
+    plazo_dias_pedido?: number | null
+    forma_pago_pedido?: FormaPago | null
+    cheque_dias_desde_pedido?: number | null
+    cheque_dias_hasta_pedido?: number | null
     cliente_id: string
     created_at: string
     clientes: { id: string; nombre: string; localidad: string | null; metodo_facturacion: string | null; lista_precio_id: string | null; lista?: { nombre: string } | null } | null
@@ -276,6 +295,8 @@ export interface CondPedido {
    * Le gana a lo general del pedido (metodo/lista) y a la ficha, igual que el motor.
    */
   segs?: SegsPedido | null
+  /** Condición y forma de pago SOLO este pedido (fase 4, 19/11/2026). Ausente = la de la ficha */
+  condPago?: CondicionPago | null
 }
 export type SegsPedido = Partial<Record<"limpieza" | "perf0" | "perf_plus", { lista?: string; metodo?: string }>>
 export const COND_VACIA: CondPedido = { metodo: "", lista: "", bonif: null }
@@ -307,6 +328,7 @@ export interface OpPedido {
     lista_limpieza_pedido_id?: string | null; metodo_limpieza_pedido?: string | null
     lista_perf0_pedido_id?: string | null; metodo_perf0_pedido?: string | null
     lista_perf_plus_pedido_id?: string | null; metodo_perf_plus_pedido?: string | null
+    condicion_pago_pedido?: CondicionPago | null
   } | null
   observaciones: string | null
   precios_al: string | null

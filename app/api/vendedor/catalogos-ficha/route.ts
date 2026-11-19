@@ -19,7 +19,7 @@ export async function GET() {
       await Promise.all([
         supabase.from("condiciones_pago").select("id, nombre").eq("activo", true).order("nombre"),
         supabase.from("condiciones_entrega").select("id, codigo, nombre").eq("activo", true).order("nombre"),
-        supabase.from("localidades").select("id, nombre, provincia").order("provincia").order("nombre"),
+        supabase.from("localidades").select("id, nombre, provincia, codigo_postal").order("provincia").order("nombre"),
         // Sin "Especial": esa lista es por proveedor puntual y elegirla como
         // lista general del cliente rompería el resto de los precios. Solo ERP.
         supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).neq("codigo", "especial").order("nombre"),

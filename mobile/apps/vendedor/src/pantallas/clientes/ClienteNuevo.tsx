@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react"
 import { useNavigate } from "react-router"
 import { ErrorHttp, useOnline, useOverlay, useRuntime } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
@@ -8,6 +8,8 @@ import { useCatalogosFicha, useClientes, useEncolar, uuidv4 } from "../../datos/
 import { CuitInput, HojaConfirmar, Pantalla, useToast } from "../../ui"
 import { CAMPOS_FICHA_LISTAS, COLS_SEGMENTO, type FichaListas } from "../../datos/segmentos"
 import { EditorListaMetodo, fichaCompleta } from "./EditorListaMetodo"
+import { EditorCondicionPago } from "./EditorCondicionPago"
+import { CONDICION_VACIA, normalizarCondicion, textoViejo, type CondicionPago } from "@gm/condicion-pago"
 
 // Port de app/vendedor/clientes/nuevo/page.tsx + components/vendedor/NuevaLocalidadSheet.tsx.
 // Alta de cliente desde la calle: se ENCOLA (`cliente.crear`) con el id generado en el
@@ -17,6 +19,7 @@ export interface LocalidadCreada {
   id: string
   nombre: string
   provincia: string | null
+  codigo_postal?: string | null
 }
 
 const PROVINCIAS = [
@@ -232,7 +235,7 @@ function faltanDatos(f: Record<string, string>, ficha: FichaListas): string | nu
   if (!f.direccion.trim()) return "la dirección"
   if (!f.localidad_id) return "la localidad"
   if (!f.telefono.trim()) return "el teléfono"
-  if (!f.condicion_pago) return "la condición de pago"
+  // La condición de pago NO es obligatoria (fase 4, 19/11/2026: nunca frena un alta)
   return null
 }
 
@@ -256,7 +259,10 @@ export function ClienteNuevo({ prospecto }: { prospecto?: ModoProspecto } = {}) 
     telefono: "",
     mail: "",
     vendedor_id: "",
+    codigo_postal: "",
   })
+  // Condición y forma de pago (contado / CC N días / anticipado · efectivo / transferencia / cheque)
+  const [cond, setCond] = useState<CondicionPago>(CONDICION_VACIA)
   // Lista y método, general o por segmento (como la ficha del ERP)
   const [ficha, setFicha] = useState<FichaListas>(() => prospecto?.ficha ?? {
     lista_precio_id: "", metodo_facturacion: "Factura",
@@ -281,6 +287,14 @@ export function ClienteNuevo({ prospecto }: { prospecto?: ModoProspecto } = {}) 
   const set = (k: keyof typeof f) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((p) => ({ ...p, [k]: e.target.value }))
 
   const localidades = [...(cat?.localidades ?? []), ...localidadesNuevas.filter((n) => !(cat?.localidades ?? []).some((l) => l.id === n.id))]
+
+  // CP: se precarga con el de la localidad (si el vendedor no escribió otro)
+  const cpLocalidad = localidades.find((l) => l.id === f.localidad_id)?.codigo_postal?.trim() || ""
+  const cpPrevio = useRef("")
+  useEffect(() => {
+    setF((p) => (!p.codigo_postal || p.codigo_postal === cpPrevio.current ? { ...p, codigo_postal: cpLocalidad } : p))
+    cpPrevio.current = cpLocalidad
+  }, [cpLocalidad])
 
   // Lista impuesta por el viajante elegido (o el único del usuario)
   const viajanteSel = vendedores.find((v) => v.id === f.vendedor_id) || (vendedores.length === 1 ? vendedores[0]! : null)
@@ -333,11 +347,16 @@ export function ClienteNuevo({ prospecto }: { prospecto?: ModoProspecto } = {}) 
       const listasYMetodos: Record<string, string | null> = {}
       for (const k of CAMPOS_FICHA_LISTAS) listasYMetodos[k] = ficha[k] || null
       const nombre = f.nombre.trim() || f.razon_social.trim()
+      // Condición nueva + el texto viejo equivalente (lo leen las APK y pantallas viejas)
+      const condicion = normalizarCondicion(cond)
       await encolar(
         "cliente.crear",
         {
           ...f,
           ...listasYMetodos,
+          ...condicion,
+          condicion_pago: textoViejo(condicion) || "",
+          codigo_postal: f.codigo_postal.trim(),
           id,
           nombre,
           cuit,
@@ -422,13 +441,10 @@ export function ClienteNuevo({ prospecto }: { prospecto?: ModoProspecto } = {}) 
             puedeLista={!!cat?.puede_cambiar_lista}
             listaImpuesta={listaImpuesta}
           />
-          <div className="grid grid-cols-2 gap-2">
-            <Campo label={prospecto ? "Condición de pago *" : "Condición de pago"}>
-              <select value={f.condicion_pago} onChange={set("condicion_pago")} className={inputCls}>
-                <option value="">Elegir...</option>
-                {(cat?.condiciones_pago ?? []).map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
-              </select>
-            </Campo>
+          <div className="rounded-xl border border-gray-200 p-3">
+            <EditorCondicionPago valor={cond} onCambiar={setCond} />
+          </div>
+          <div className="grid grid-cols-1 gap-2">
             <Campo label="Condición de entrega">
               <select value={f.condicion_entrega} onChange={set("condicion_entrega")} className={inputCls}>
                 <option value="">Elegir...</option>
@@ -470,6 +486,9 @@ export function ClienteNuevo({ prospecto }: { prospecto?: ModoProspecto } = {}) 
               </button>
             </div>
           </Campo>
+          <Campo label="Código postal">
+            <input value={f.codigo_postal} onChange={set("codigo_postal")} inputMode="numeric" className={inputCls} placeholder="Se completa con el de la localidad" />
+          </Campo>
           <div className="grid grid-cols-2 gap-2">
             <Campo label={prospecto ? "Teléfono *" : "Teléfono"}>
               <input value={f.telefono} onChange={set("telefono")} type="tel" className={inputCls} />
@@ -486,7 +505,7 @@ export function ClienteNuevo({ prospecto }: { prospecto?: ModoProspecto } = {}) 
         zonas={cat?.zonas ?? []}
         onCerrar={hojaLocalidad.cerrar}
         onCreada={(l) => {
-          setLocalidadesNuevas((prev) => [...prev.filter((x) => x.id !== l.id), { id: l.id, nombre: l.nombre, provincia: l.provincia }])
+          setLocalidadesNuevas((prev) => [...prev.filter((x) => x.id !== l.id), { id: l.id, nombre: l.nombre, provincia: l.provincia, codigo_postal: l.codigo_postal ?? null }])
           setF((prev) => ({ ...prev, localidad_id: l.id }))
           hojaLocalidad.cerrar()
         }}

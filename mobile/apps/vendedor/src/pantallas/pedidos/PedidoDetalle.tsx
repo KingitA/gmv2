@@ -1,3 +1,4 @@
+import { normalizarCondicion, textoCondicionPago } from "@gm/condicion-pago"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOnline, useOverlay, useRuntime, useSesion } from "@gm/core"
@@ -90,6 +91,11 @@ function PedidoLocal({ vista }: { vista: Vista }) {
           {p.items.map((i) => <RenglonLectura key={i.articulo_id} i={i} />)}
         </div>
         {p.observaciones && <p className="rounded-xl border border-gray-200 bg-white p-3 text-sm text-gray-600">📝 {p.observaciones}</p>}
+        {p.cond?.condicion_pago_pedido && textoCondicionPago(normalizarCondicion(p.cond.condicion_pago_pedido)) && (
+          <p className="rounded-xl border border-gray-200 bg-white p-3 text-sm text-gray-600">
+            💳 Condición de pago: <b className="text-gray-900">{textoCondicionPago(normalizarCondicion(p.cond.condicion_pago_pedido))}</b> <span className="text-amber-700">(solo este pedido)</span>
+          </p>
+        )}
 
         <div className="flex items-center justify-between rounded-2xl bg-white p-4 text-lg">
           <span className="text-gray-500">Total</span>
@@ -234,6 +240,14 @@ function PedidoServidor({ vista }: { vista: Vista }) {
           </div>
           <p className="text-sm text-gray-500">{fechaAR(pedido.fecha)}</p>
           {pedido.observaciones && <p className="mt-2 text-sm text-gray-600">📝 {pedido.observaciones}</p>}
+          {/* Condición de pago congelada en el pedido (fase 4 de condiciones de pago) */}
+          {(() => {
+            const t = textoCondicionPago(normalizarCondicion({
+              condicion_pago_tipo: pedido.condicion_pago_tipo_pedido ?? null, plazo_dias: pedido.plazo_dias_pedido ?? null, forma_pago: pedido.forma_pago_pedido ?? null,
+              cheque_dias_desde: pedido.cheque_dias_desde_pedido ?? null, cheque_dias_hasta: pedido.cheque_dias_hasta_pedido ?? null,
+            }))
+            return <p className="mt-2 text-sm text-gray-600">💳 Condición de pago: <b className={t ? "text-gray-900" : "text-amber-700"}>{t || "sin cargar"}</b></p>
+          })()}
           {cliente && (
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button onClick={() => navigate(`/clientes/${cliente.id}/cobrar`)} className="min-h-11 rounded-xl bg-emerald-600 text-sm font-bold text-white">💵 Cobrar</button>

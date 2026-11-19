@@ -36,6 +36,7 @@ import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
 import { hoyISO, sumarDiasISO } from "@/lib/formato"
 import { ARTICULO_SELECT, mapArticuloVendedor } from "@/lib/vendedor/articulos-select"
 import { bonificacionesDesdeFilas } from "@/lib/vendedor/bonificaciones"
+import { deudaVencidaClientes } from "@/lib/cuenta-corriente/deuda-vencida"
 import { cargarMovimientosCliente, cargarMovimientosClientes } from "@/lib/cuenta-corriente/extracto-servidor"
 import type { MovimientoCC } from "@/lib/cuenta-corriente/extracto"
 import { cargarComprados } from "@/lib/vendedor/comprados"
@@ -155,7 +156,9 @@ const catalogos: DatasetDef = {
 // ─── Cartera ─────────────────────────────────────────────────────────────────
 
 const CLIENTE_FICHA_COLS =
-  "id, nombre, razon_social, cuit, direccion, localidad, localidad_id, provincia, telefono, mail, condicion_iva, condicion_pago, condicion_entrega, metodo_facturacion, vendedor_id, codigo_cliente, lista_precio_id, lista:lista_precio_id(nombre)"
+  "id, nombre, razon_social, cuit, direccion, localidad, localidad_id, provincia, telefono, mail, condicion_iva, condicion_pago, condicion_entrega, metodo_facturacion, vendedor_id, codigo_cliente, lista_precio_id, lista:lista_precio_id(nombre), " +
+  // Condición y forma de pago + CP (condiciones de pago, fase 4 — 19/11/2026)
+  "condicion_pago_tipo, plazo_dias, forma_pago, cheque_dias_desde, cheque_dias_hasta, codigo_postal"
 
 /**
  * Cartera del vendedor. Cada fila = la del listado web (saldos, sin rendir) + los
@@ -167,12 +170,14 @@ export async function cargarClientesVendedor(ctx: CtxSync, ids?: string[]): Prom
   let filas: any[] = lista.clientes || []
   if (ids) filas = filas.filter((c) => ids.includes(c.id))
   const cids = filas.map((c) => c.id)
-  const [fichas, bonifs] = await Promise.all([
+  const [fichas, bonifs, deuda] = await Promise.all([
     fetchByIds((ch) => ctx.supabase.from("clientes").select(CLIENTE_FICHA_COLS).in("id", ch), cids),
     fetchByIds(
       (ch) => ctx.supabase.from("bonificaciones").select("cliente_id, tipo, segmento, porcentaje").eq("activo", true).in("tipo", ["viajante", "mercaderia"]).in("cliente_id", ch),
       cids,
     ),
+    // Deuda vencida / a vencer (v_deuda_vencimiento, una consulta por lote; sin la vista: vacío)
+    deudaVencidaClientes(ctx.supabase, cids),
   ])
   const fichaPorId = new Map(fichas.map((f: any) => [f.id, f]))
   const bonifPorCliente = new Map<string, any[]>()
@@ -183,7 +188,15 @@ export async function cargarClientesVendedor(ctx: CtxSync, ids?: string[]): Prom
   }
   return filas.map((c) => {
     const b = bonificacionesDesdeFilas(bonifPorCliente.get(c.id) || [])
-    return { ...(fichaPorId.get(c.id) || {}), ...c, bonificaciones: { viajante: b.viajante, mercaderia: b.mercaderia } }
+    const d = deuda.get(c.id)
+    return {
+      ...(fichaPorId.get(c.id) || {}),
+      ...c,
+      bonificaciones: { viajante: b.viajante, mercaderia: b.mercaderia },
+      deuda_vencida: d ? d.vencida : null,
+      deuda_a_vencer: d ? d.a_vencer : null,
+      proximo_vencimiento: d?.proximo_vencimiento ?? null,
+    }
   })
 }
 

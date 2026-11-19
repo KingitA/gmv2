@@ -26,7 +26,9 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
   const { data: cliente } = await supabase
     .from("clientes")
     .select(
-      "id, nombre, razon_social, cuit, direccion, localidad, localidad_id, provincia, telefono, mail, condicion_iva, condicion_pago, condicion_entrega, metodo_facturacion, vendedor_id, codigo_cliente, lista_precio_id, lista:lista_precio_id(nombre), lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus"
+      "id, nombre, razon_social, cuit, direccion, localidad, localidad_id, provincia, telefono, mail, condicion_iva, condicion_pago, condicion_entrega, metodo_facturacion, vendedor_id, codigo_cliente, lista_precio_id, lista:lista_precio_id(nombre), lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, " +
+      // Condición y forma de pago + CP (condiciones de pago, fase 4 — 19/11/2026)
+      "condicion_pago_tipo, plazo_dias, forma_pago, cheque_dias_desde, cheque_dias_hasta, codigo_postal"
     )
     .eq("id", id)
     .in("vendedor_id", session.vendedorIds)

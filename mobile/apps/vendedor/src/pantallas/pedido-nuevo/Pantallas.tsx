@@ -18,6 +18,7 @@ import { haySegsPedido } from "../../datos/segmentos"
 import { BarraComparar, CeldasComparar } from "./VentaNueva"
 import { MercaderiaCupo } from "./MercaderiaCupo"
 import { ListaMetodoPedido } from "./ListaMetodoPedido"
+import { CondicionPagoPedido } from "./CondicionPagoPedido"
 import { agruparEnArbol, BuscadorLocal, CatalogoArbol, claveSubcategoria, FilaArticulo, OrdenSelector, posicionSubcategorias } from "./piezas"
 
 type Filtro = "novedades" | "ofertas" | "habituales"
@@ -581,7 +582,11 @@ export function Carrito() {
                 </>
               ) : (
                 // Lista y método SOLO este pedido, general o por segmento (03/11/2026)
-                <ListaMetodoPedido />
+                // + condición de pago de la ficha o solo este pedido (19/11/2026)
+                <>
+                  <ListaMetodoPedido />
+                  <div className="mt-3"><CondicionPagoPedido /></div>
+                </>
               )}
               {((bonif && (["general", "viajante", "mercaderia", "contado"] as const).some((k) => Object.keys(bonif[k] || {}).length))) ? (
                 <p className="mt-2 text-xs font-medium text-amber-700">

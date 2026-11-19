@@ -10,6 +10,7 @@ import { useCatalogosFicha, useEncolar, usePedidos, useViajes } from "../../dato
 import { formatCurrency, useFotoZoom, useToast, ZoomFoto } from "../../ui"
 import { ProveedorPedido, usePedidoEnCurso, useVer } from "./contexto"
 import { haySegsPedido, segsDesdeServidor, segsParaServidor } from "../../datos/segmentos"
+import { normalizarCondicion } from "@gm/condicion-pago"
 import { CuadroSegmentos } from "../segmentos-ui"
 import { HojaListaPedido } from "./ListaMetodoPedido"
 import { PanelProspecto } from "./VentaNueva"
@@ -372,6 +373,7 @@ function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
     ...(esNuevo && !marcaIgualFicha ? { condMarca: condMarcaSel } : {}),
     ...(cond.mercaderia ? { mercaderia: cond.mercaderia } : {}),
     ...(cond.segs !== undefined ? { segs: cond.segs } : {}),
+    ...(cond.condPago ? { condPago: cond.condPago } : {}),
   }
   const hayCambios = JSON.stringify(nuevaCond) !== JSON.stringify({ ...cond, bonif: bonifVacia(cond.bonif) && ctdoTodo === undefined ? null : cond.bonif })
   const hayOverride = !!cond.metodo || !!cond.lista || haySegsPedido(cond.segs) || !bonifVacia(cond.bonif) || !!cond.condProv || !!cond.condMarca
@@ -646,6 +648,7 @@ export function condDesdePayload(c: OpPedido["cond"] | null | undefined): CondPe
     ...(Array.isArray(c?.condiciones_marca) ? { condMarca: c!.condiciones_marca } : {}),
     ...(Object.keys(merc).length ? { mercaderia: merc } : {}),
     ...(segsDesdeServidor(c) ? { segs: segsDesdeServidor(c) } : {}),
+    ...(c?.condicion_pago_pedido ? { condPago: c.condicion_pago_pedido } : {}),
   }
 }
 
@@ -663,5 +666,7 @@ export function condParaServidor(cond: CondPedido) {
     ...(merc.length ? { mercaderia_bonificada: merc } : {}),
     // Lista/método por segmento solo este pedido (03/11/2026): viajan si se tocaron
     ...segsParaServidor(cond.segs),
+    // Condición de pago solo este pedido (fase 4): solo si se cambió
+    ...(cond.condPago ? { condicion_pago_pedido: normalizarCondicion(cond.condPago) } : {}),
   }
 }
