@@ -3,6 +3,9 @@
 import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { CondicionPagoPedido } from "@/components/pedidos/CondicionPagoPedido"
+import { CONDICION_VACIA, textoCondicionPago, type CondicionPago } from "@/lib/clientes/condicion-pago"
+import { columnasPedido, condicionDeFicha, condicionDePedido } from "@/lib/pedidos/condicion-pago-pedido"
 import { agregarItemPedido, eliminarItemPedido, guardarItemsPedido, actualizarEncabezadoPedido, guardarCondicionesPedido } from "@/lib/actions/pedidos"
 import { MercaderiaCuposPedido } from "@/components/pedidos/MercaderiaCuposPedido"
 import { SegmentacionCondiciones, condRowsToProveedor, condRowsToMarca, EMPTY_SEGMENTACION, type SegmentacionValue } from "@/components/pedidos/SegmentacionCondiciones"
@@ -85,6 +88,9 @@ export default function PedidoEditPage() {
     observaciones: "",
   })
 
+  // Condición de pago solo para este pedido (fase 2, 19/11/2026)
+  const [condPago, setCondPago] = useState<CondicionPago>(CONDICION_VACIA)
+
   useEffect(() => { loadAll() }, [id])
 
   async function loadAll() {
@@ -96,8 +102,10 @@ export default function PedidoEditPage() {
         lista_precio_pedido_id, lista_limpieza_pedido_id, metodo_limpieza_pedido,
         lista_perf0_pedido_id, metodo_perf0_pedido,
         lista_perf_plus_pedido_id, metodo_perf_plus_pedido,
+        condicion_pago_tipo_pedido, plazo_dias_pedido, forma_pago_pedido, cheque_dias_desde_pedido, cheque_dias_hasta_pedido,
         vendedor_id,
-        clientes (nombre_razon_social, cuit, direccion, metodo_facturacion, lista_precio_id, condicion_entrega, vendedor_id, lista_limpieza_id, lista_perf0_id, lista_perf_plus_id),
+        clientes (nombre_razon_social, cuit, direccion, metodo_facturacion, lista_precio_id, condicion_entrega, vendedor_id, lista_limpieza_id, lista_perf0_id, lista_perf_plus_id,
+          condicion_pago_tipo, plazo_dias, forma_pago, cheque_dias_desde, cheque_dias_hasta),
         vendedores (nombre)
       `).eq("id", id).single(),
       supabase.from("pedidos_detalle").select(`
@@ -186,6 +194,7 @@ export default function PedidoEditPage() {
       setSegPedidoInicial(segCargado)
     }
     if (p) {
+      setCondPago(condicionDePedido(p))
       setHeaderForm({
         estado: p.estado || "pendiente",
         metodo_facturacion_pedido: p.metodo_facturacion_pedido || "",
@@ -259,6 +268,8 @@ export default function PedidoEditPage() {
         observaciones: headerForm.observaciones || null,
         bonif_pedido: bonifPedidoDesdeForm(),
       }
+      // Condición de pago: solo mientras el pedido es editable (el servidor la ignora después)
+      if (esPedidoEditable(pedido?.estado)) Object.assign(headerUpdate, columnasPedido(condPago))
       // Mercadería "todo el pedido": solo si se tocó ("" = hereda; 0 = sin mercadería en este pedido)
       if (mercTodo.trim() !== mercTodoInicial.trim()) {
         const n = parseMonto(mercTodo)
@@ -512,6 +523,13 @@ export default function PedidoEditPage() {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              {/* Condición de pago (solo para este pedido) */}
+              <div>
+                <Label className="text-xs text-slate-500 mb-1 block">Condición de pago (solo este pedido)</Label>
+                <CondicionPagoPedido value={condPago} onChange={setCondPago} disabled={!editable}
+                  ficha={textoCondicionPago(condicionDeFicha((pedido as any)?.clientes))} />
               </div>
 
               {/* Row 2 */}

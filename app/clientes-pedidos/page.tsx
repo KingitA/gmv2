@@ -53,6 +53,8 @@ import { Label } from "@/components/ui/label"
 import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import { NuevoPedidoDialog } from "@/components/pedidos/NuevoPedidoDialog"
 import { FacturarVariosDialog } from "@/components/pedidos/FacturarVariosDialog"
+import { textoCondicionPago } from "@/lib/clientes/condicion-pago"
+import { condicionDePedido, condicionParaComprobante, condicionVacia } from "@/lib/pedidos/condicion-pago-pedido"
 import { ETIQUETA_CARGADO_EN_DEPOSITO, esCargadoEnDeposito, facturableEnLote } from "@/lib/pedidos/origen-deposito"
 import { ReviewPedidoDialog } from "@/components/pedidos/ReviewPedidoDialog"
 import { useOrderQueue } from "@/hooks/use-order-queue"
@@ -433,7 +435,7 @@ export default function ClientesPedidosPage() {
           .from("pedidos")
           .select(`
           *,
-          clientes (nombre_razon_social, cuit, codigo_cliente, direccion, localidad, metodo_facturacion, lista_precio_id, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, listas_precio:lista_precio_id (nombre), localidades (zonas (id, nombre))),
+          clientes (nombre_razon_social, cuit, codigo_cliente, direccion, localidad, metodo_facturacion, condicion_pago_tipo, plazo_dias, forma_pago, cheque_dias_desde, cheque_dias_hasta, lista_precio_id, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, listas_precio:lista_precio_id (nombre), localidades (zonas (id, nombre))),
           vendedores (nombre),
           viajes (nombre, fecha)
         `)
@@ -1938,6 +1940,18 @@ export default function ClientesPedidosPage() {
                   <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-2">Facturación y Precios</p>
                   <p className="font-bold text-slate-800 text-sm">{getMetodoDisplay(pedidoSeleccionado)}</p>
                   <p className="text-xs text-slate-700 mt-1.5 font-semibold">{getListaDisplay(pedidoSeleccionado)}</p>
+                  {/* Condición de pago (fase 2): la del pedido; un pedido anterior sin condición propia, la de la ficha */}
+                  {(() => {
+                    const propia = condicionDePedido(pedidoSeleccionado as any)
+                    const c = condicionParaComprobante(pedidoSeleccionado as any, pedidoSeleccionado.clientes as any)
+                    const txt = textoCondicionPago(c)
+                    return (
+                      <p className={`text-xs mt-1.5 font-semibold ${txt ? "text-slate-700" : "text-red-600"}`}>
+                        Pago: {txt || "sin condición de pago"}
+                        {txt && condicionVacia(propia) && <span className="font-normal text-slate-500"> (de la ficha)</span>}
+                      </p>
+                    )
+                  })()}
                   {/* Descuentos efectivos: por segmento (ficha + "solo este pedido") y condiciones aparte */}
                   {descPedido && (() => {
                     const conDesc = descPedido.segs.filter(s => s.lineas.length > 0)
