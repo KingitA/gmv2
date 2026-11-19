@@ -128,6 +128,9 @@ export interface RemitoPDFData {
     observaciones?: string | null
     comprobante_numero?: string | null   // "s/ Factura A 0007-00000123" (solo REM)
     comprobante_tipo?: string | null
+    /** Fase 2 (19/11/2026): condición de pago y vencimiento del comprobante (vacío = "—") */
+    condicion_pago_texto?: string | null
+    fecha_vencimiento?: string | null
   }
   /** null para REMX: el remito de presupuesto no lleva ningún dato de la empresa */
   empresa: {
@@ -202,6 +205,8 @@ function RemitoPagina({ data, copia }: { data: RemitoPDFData; copia: string }) {
               <View style={s.emRow}><Text style={s.emLbl}>Dirección:</Text><Text style={s.emVal}>{cliente.direccion ?? '—'}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Localidad:</Text><Text style={s.emVal}>{conCP(cliente.localidad, cliente.codigo_postal)}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Entrega:</Text><Text style={s.emVal}>{CONDICION_ENTREGA_LABEL[data.condicion_entrega] ?? data.condicion_entrega}</Text></View>
+              <View style={s.emRow}><Text style={[s.emLbl, { width: 92 }]}>Condición de pago:</Text><Text style={s.emVal}>{remito.condicion_pago_texto || '—'}</Text></View>
+              <View style={s.emRow}><Text style={[s.emLbl, { width: 92 }]}>Vencimiento:</Text><Text style={s.emVal}>{fmtFechaISO(remito.fecha_vencimiento)}</Text></View>
             </View>
           )}
 
@@ -247,6 +252,8 @@ function RemitoPagina({ data, copia }: { data: RemitoPDFData; copia: string }) {
               <Text style={s.cliRazon}>{cliente.nombre_razon_social}</Text>
               <View style={s.cliRow}><Text style={s.cliLbl}>CUIT:</Text><Text style={s.cliVal}>{formatCuit(cliente.cuit) || '—'}</Text></View>
               <View style={s.cliRow}><Text style={s.cliLbl}>Cond. IVA:</Text><Text style={s.cliVal}>{cliente.condicion_iva ?? '—'}</Text></View>
+              <View style={s.cliRow}><Text style={[s.cliLbl, { width: 88 }]}>Condición de pago:</Text><Text style={s.cliVal}>{remito.condicion_pago_texto || '—'}</Text></View>
+              <View style={s.cliRow}><Text style={[s.cliLbl, { width: 88 }]}>Vencimiento:</Text><Text style={s.cliVal}>{fmtFechaISO(remito.fecha_vencimiento)}</Text></View>
             </View>
             <View style={s.cliCol2}>
               <Text style={s.cliTit}>LUGAR DE ENTREGA</Text>

@@ -23,6 +23,7 @@ import { ComprobantesPreviewPDF } from '@/lib/pdf/comprobante-template'
 import { buildPDFData } from '@/lib/pdf/generar'
 import { armarComprobantesPreview } from '@/lib/comprobantes/armar-comprobantes-preview'
 import { todayArgentina } from '@/lib/utils'
+import { pagoDelComprobante } from '@/lib/comprobantes/condicion-pago-comprobante'
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -52,6 +53,8 @@ export async function GET(request: NextRequest) {
     const pvFiscal = String(empresaConfig?.arca_punto_venta ?? 7).padStart(4, '0')
     const fecha = todayArgentina()
     const pedidoPDF = { numero_pedido: pedido.numero_pedido, condicion_entrega: pedido.condicion_entrega }
+    // Condición de pago y vencimiento que va a llevar (fase 2, 19/11/2026)
+    const pago = await pagoDelComprobante(supabase, { pedidoId, clienteId: pedido.cliente_id ?? cliente?.id, fecha })
 
     const dataPorComprobante = comprobantes.map((c) => {
       const pv = c.tipo === 'PRES' ? '0001' : pvFiscal
@@ -62,6 +65,7 @@ export async function GET(request: NextRequest) {
           percepcion_iva: c.percepcion_iva, percepcion_iibb: c.percepcion_iibb, total_factura: c.total_factura,
           cae: null, vencimiento_cae: null,
           observaciones: 'Vista previa — no es un comprobante emitido.', motivo_ajuste: null, qr_data_url: null,
+          ...pago,
         },
         cliente, empresa: empresaConfig, detalle: c.detalle, pedido: pedidoPDF, marcaDesc,
       })

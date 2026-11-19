@@ -1,4 +1,5 @@
 import { todayArgentina } from '@/lib/utils'
+import { pagoDelComprobante } from '@/lib/comprobantes/condicion-pago-comprobante'
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from '@/lib/arca/tipos'
 import { TASA_PERCEPCION_IVA } from '@/lib/comprobantes/calcular-percepciones'
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from '@/lib/arca/registro-cae'
@@ -150,7 +151,10 @@ async function emitirEnTurno(supabase: any, a: AjusteAEmitir, ctx: { turno: Turn
   }
   const numero = formatoNumeroComprobante(puntoVenta, nuevoNumero)
 
+  // Condición de pago y vencimiento (fase 2, 19/11/2026): la de la ficha del cliente
+  const pago = await pagoDelComprobante(supabase, { clienteId: a.clienteId, fecha: todayArgentina() })
   const insert = {
+    ...pago,
     tipo_comprobante: a.tipo,
     numero_comprobante: numero,
     punto_venta: puntoVenta,

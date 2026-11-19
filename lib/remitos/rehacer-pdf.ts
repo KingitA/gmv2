@@ -19,7 +19,7 @@ export async function rehacerPDFRemito(admin: SupabaseClient, remitoId: string) 
       *,
       cliente:clientes(nombre_razon_social, cuit, direccion, localidad, condicion_iva),
       transporte_rel:transportes(nombre, cuit),
-      comprobante:comprobantes_venta(tipo_comprobante, numero_comprobante),
+      comprobante:comprobantes_venta(tipo_comprobante, numero_comprobante, condicion_pago_texto, fecha_vencimiento),
       pedido:pedidos(numero_pedido),
       remitos_detalle(articulo_id, descripcion, cantidad, articulos(sku))
     `)
@@ -50,6 +50,8 @@ export async function rehacerPDFRemito(admin: SupabaseClient, remitoId: string) 
       observaciones: remito.observaciones ?? null,
       comprobante_numero: remito.comprobante?.numero_comprobante ?? null,
       comprobante_tipo: remito.comprobante?.tipo_comprobante ?? null,
+      condicion_pago_texto: remito.comprobante?.condicion_pago_texto ?? null,
+      fecha_vencimiento: remito.comprobante?.fecha_vencimiento ?? null,
     },
     empresa,
     cliente: {

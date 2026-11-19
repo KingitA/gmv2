@@ -12,6 +12,8 @@ import { TIPO_ARRASTRE_PEDIDOS } from '@/components/viajes/calendario-viajes'
 import { formatDateAR } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { moneda } from "@/lib/formato"
+import { textoCondicionPago } from "@/lib/clientes/condicion-pago"
+import { condicionParaComprobante, etiquetaCortaCondicion } from "@/lib/pedidos/condicion-pago-pedido"
 
 export type PedidoFila = {
   id: string
@@ -67,6 +69,18 @@ interface Props {
 }
 
 const diaMes = (f: string) => `${Number(f.slice(8))}/${Number(f.slice(5, 7))}`
+
+/**
+ * Condición de pago en el listado (fase 2, 19/11/2026): la del pedido; un pedido
+ * anterior a la fase 2 (sin condición propia) muestra la de la ficha. Sin ninguna: en rojo.
+ */
+function CondicionCorta({ pedido, pill }: { pedido: PedidoFila; pill?: boolean }) {
+  const c = condicionParaComprobante(pedido, pedido.clientes)
+  const txt = etiquetaCortaCondicion(c)
+  const titulo = textoCondicionPago(c) || 'Sin condición de pago'
+  if (pill) return <span title={titulo} className={cn('rounded-full px-2 py-0.5', txt ? 'bg-neutro-100 text-neutro-600' : 'bg-error-50 font-semibold text-error-600')}>{txt || 'Sin cond. de pago'}</span>
+  return <div title={titulo} className={cn('text-[11px] font-medium', txt ? 'text-neutro-500' : 'text-error-600')}>{txt || 'Sin cond. de pago'}</div>
+}
 
 export function TablaPedidos(p: Props) {
   const todos = p.pedidos.length > 0 && p.pedidos.every(x => p.seleccion.has(x.id))
@@ -172,7 +186,10 @@ export function TablaPedidos(p: Props) {
                           </span>
                         : <span className="text-neutro-300">—</span>}
                   </td>
-                  <td className="px-2 text-right font-semibold whitespace-nowrap tabular-nums text-azul-900">{x.total > 0 ? moneda(x.total || 0, 0) : '—'}</td>
+                  <td className="px-2 text-right font-semibold whitespace-nowrap tabular-nums text-azul-900">
+                    {x.total > 0 ? moneda(x.total || 0, 0) : '—'}
+                    <CondicionCorta pedido={x} />
+                  </td>
                   <td className="pr-2 text-right" onClick={e => e.stopPropagation()}>
                     {p.onEliminar && p.puedeEliminar(x.estado) && (
                       <button type="button" onClick={() => p.onEliminar!(x)} aria-label={`Eliminar pedido ${x.numero_pedido}`}
@@ -211,6 +228,7 @@ export function TablaPedidos(p: Props) {
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
                   {p.estadoBadge(x.estado, x as { origen?: string | null })}
+                  <CondicionCorta pedido={x} pill />
                   {(x.prioridad || 3) < 3 && <span className={cn('rounded-full px-2 py-0.5 font-semibold', pr.fondo, pr.texto)}>{pr.label}</span>}
                   {x.zona?.nombre && <span className="rounded-full bg-neutro-100 px-2 py-0.5 uppercase text-neutro-600">{x.zona.nombre}</span>}
                   {x.viajes?.nombre && <span className="inline-flex items-center gap-1 rounded-full bg-azul-50 px-2 py-0.5 font-medium uppercase text-azul-600"><Truck className="size-3" />{x.viajes.nombre}</span>}

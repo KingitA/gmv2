@@ -156,6 +156,9 @@ export interface ComprobantePDFData {
     motivo_ajuste?: string | null
     anulado_en?: string | null
     qr_data_url?: string | null
+    /** Fase 2 (19/11/2026): "Cuenta corriente 30 días · Efectivo" y fecha + plazo */
+    condicion_pago_texto?: string | null
+    fecha_vencimiento?: string | null
   }
   cliente: {
     nombre_razon_social: string
@@ -220,6 +223,10 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
   const fmtFechaISO = (s?: string | null) => fechaAR(s) || '—'
   const fecha  = fmtFechaISO(comp.fecha)
   const caeVto = comp.vencimiento_cae ? fmtFechaISO(comp.vencimiento_cae) : ''
+  // Condición de pago del comprobante (fase 2). Sin dato: "—" (nunca un valor supuesto:
+  // antes decía "Cuenta Corriente" cuando el cliente no tenía nada cargado)
+  const condPago = comp.condicion_pago_texto || '—'
+  const vtoDeuda = comp.fecha_vencimiento ? fmtFechaISO(comp.fecha_vencimiento) : '—'
 
   // D1/D2 para los chips del encabezado: se derivan del desglose por línea
   // (la cascada ya está en el neto). Fallback al param bonificaciones (legacy).
@@ -265,7 +272,8 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
                 <Text style={s.emNombre}>{cliente.nombre_razon_social ?? cliente.nombre ?? '—'}</Text>
                 <View style={s.emRow}><Text style={s.emLbl}>Dirección:</Text><Text style={s.emVal}>{cliente.direccion ?? '—'}</Text></View>
                 <View style={s.emRow}><Text style={s.emLbl}>Localidad:</Text><Text style={s.emVal}>{cliente.localidad ?? '—'}</Text></View>
-                <View style={s.emRow}><Text style={s.emLbl}>Forma pago:</Text><Text style={s.emVal}>{cliente.condicion_pago ?? 'Cuenta Corriente'}</Text></View>
+                <View style={s.emRow}><Text style={[s.emLbl, { width: 92 }]}>Condición de pago:</Text><Text style={s.emVal}>{condPago}</Text></View>
+                <View style={s.emRow}><Text style={[s.emLbl, { width: 92 }]}>Vencimiento:</Text><Text style={s.emVal}>{vtoDeuda}</Text></View>
                 {pedido?.condicion_entrega && (
                   <View style={s.emRow}><Text style={s.emLbl}>Entrega:</Text><Text style={s.emVal}>{condEntregaMap[pedido.condicion_entrega] ?? pedido.condicion_entrega}</Text></View>
                 )}
@@ -345,7 +353,8 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
             <View style={s.cliCol2}>
               <Text style={s.cliTit}>DATOS DE GESTIÓN</Text>
               {pedido?.vendedor && <View style={s.cliRow}><Text style={s.cliLbl}>Vendedor:</Text><Text style={s.cliVal}>{pedido.vendedor}</Text></View>}
-              <View style={s.cliRow}><Text style={s.cliLbl}>Forma pago:</Text><Text style={s.cliVal}>{cliente.condicion_pago ?? 'Cuenta Corriente'}</Text></View>
+              <View style={s.cliRow}><Text style={[s.cliLbl, { width: 88 }]}>Condición de pago:</Text><Text style={s.cliVal}>{condPago}</Text></View>
+              <View style={s.cliRow}><Text style={[s.cliLbl, { width: 88 }]}>Vencimiento:</Text><Text style={s.cliVal}>{vtoDeuda}</Text></View>
               {pedido?.condicion_entrega && (
                 <View style={s.cliRow}><Text style={s.cliLbl}>Entrega:</Text><Text style={s.cliVal}>{condEntregaMap[pedido.condicion_entrega] ?? pedido.condicion_entrega}</Text></View>
               )}

@@ -52,6 +52,7 @@ import {
 import { conPreciosDelPedido, leerFichaComercial, TIPOS_BONIF_FICHA } from "@/lib/pedidos/condiciones-pedido"
 import { recalcularBonificadosPedido } from "@/lib/pedidos/mercaderia-bonificada"
 import { ErrorReglaPedido, MSG_SIN_LISTA, MSG_SIN_METODO } from "@/lib/pedidos/errores"
+import { columnasPedido, condicionDeFicha, condicionDePedido, COLS_CONDICION_PEDIDO } from "@/lib/pedidos/condicion-pago-pedido"
 export type { CondicionSegmento, CondicionProveedor, CondicionMarca } from "@/lib/pricing/resolver"
 import { prepararMotorCliente, precioArticuloParaCliente, descuentosPorArticulo, formulasReglasDesdeFilas, datosListaDesdeFila, type ArticuloMotor } from "@/lib/pricing/motor"
 // Pedidos tomados en un dispositivo: insumos de precio vigentes a la captura
@@ -708,7 +709,7 @@ export async function createPedido(data: {
 
   const { data: clienteInfo, error: clienteError } = await supabase
     .from("clientes")
-    .select("id, vendedor_id, provincia")
+    .select("id, vendedor_id, provincia, condicion_pago_tipo, plazo_dias, forma_pago, cheque_dias_desde, cheque_dias_hasta")
     .eq("id", data.cliente_id)
     .single()
   if (clienteError || !clienteInfo) throw new Error(`Cliente no encontrado: ${clienteError?.message || data.cliente_id}`)
@@ -866,6 +867,9 @@ export async function createPedido(data: {
       precios_al: captura?.vigenciaAt || new Date().toISOString(),
       total_flete: 0,
       total_impuestos: percepciones,
+      // Condición de pago de la ficha, congelada en el pedido (fase 2, 19/11/2026). Vacía
+      // si la ficha no la tiene: no frena nada, el ERP la muestra en rojo.
+      ...columnasPedido(condicionDeFicha(clienteInfo)),
       total: Math.round((total + percepciones) * 100) / 100,
       observaciones: data.observaciones,
       creado_por: user.id,
@@ -1277,6 +1281,9 @@ const CAMPOS_ENCABEZADO = [
   // Descuentos por segmento "solo este pedido" (viajante/mercadería), mismo
   // jsonb que usa la app del vendedor — el ERP los ve y edita en la misma columna.
   "bonif_pedido",
+  // Condición de pago solo para este pedido (fase 2, 19/11/2026): mientras sea editable,
+  // no reprecia (no cambia precios, solo cuándo y cómo paga).
+  ...COLS_CONDICION_PEDIDO,
 ] as const
 
 /** Condiciones del pedido: se pueden cambiar hasta facturar (#16) y reprecian. */
@@ -1294,7 +1301,7 @@ export async function actualizarEncabezadoPedido(
 ) {
   const supabase = await createClient()
   const { data: pedido, error } = await supabase
-    .from("pedidos").select("id, estado, " + CAMPOS_CONDICIONES.join(", ")).eq("id", pedidoId).single<Record<string, any>>()
+    .from("pedidos").select("id, estado, " + [...CAMPOS_CONDICIONES, ...COLS_CONDICION_PEDIDO].join(", ")).eq("id", pedidoId).single<Record<string, any>>()
   if (error || !pedido) throw new Error("Pedido no encontrado")
 
   const editable = esPedidoEditable(pedido.estado)
@@ -1327,6 +1334,8 @@ export async function actualizarEncabezadoPedido(
     if ("condicion_entrega" in patch) update.condicion_entrega = patch.condicion_entrega
   }
   if ("bonif_pedido" in update) update.bonif_pedido = normalizarBonifPedido(update.bonif_pedido)
+  // Condición de pago coherente (plazo solo en cuenta corriente, etc.) sin rechazar nada
+  if (COLS_CONDICION_PEDIDO.some((k) => k in update)) Object.assign(update, columnasPedido(condicionDePedido({ ...pedido, ...update })))
   // ¿Cambió alguna condición? (solo lo que de verdad cambia dispara el reprecio)
   const cambioCondicion = CAMPOS_CONDICIONES.some((k) =>
     k in update && JSON.stringify(update[k] ?? null) !== JSON.stringify(k === "bonif_pedido" ? normalizarBonifPedido((pedido as any)[k]) : (pedido as any)[k] ?? null),

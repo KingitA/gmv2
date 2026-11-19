@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     .select(`
       id, tipo_comprobante, numero_comprobante, punto_venta, fecha,
       total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura,
-      cae, vencimiento_cae, observaciones, motivo_ajuste, anulado_en,
+      cae, vencimiento_cae, observaciones, motivo_ajuste, anulado_en, condicion_pago_texto, fecha_vencimiento,
       clientes!inner(
         id, nombre_razon_social, cuit, condicion_iva, condicion_pago,
         direccion, localidad, telefono

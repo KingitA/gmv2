@@ -14,6 +14,7 @@ import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { importePorOrigen, TASA_PERCEPCION_IVA_DEVOLUCION, valorDevolucionConOrigen } from "@/lib/cobranzas/valor-devolucion"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { renglonAplicado } from "@/lib/pedidos/ajuste-devoluciones"
+import { pagoDelComprobante } from "@/lib/comprobantes/condicion-pago-comprobante"
 import { cuitDigitos, cuitValido, ahoraISO } from "@/lib/formato"
 import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from "@/lib/comprobantes/numeracion"
 
@@ -438,6 +439,8 @@ export async function POST(request: Request) {
         observaciones:      `${prefijoObs}${aplica10 ? " (renglones bonificados 10% contado — la factura original fue cobrada con el descuento)" : ""}${periodoAsoc ? ` (sin comprobante asociado: período ${periodoAsoc.desde.slice(6, 8)}/${periodoAsoc.desde.slice(4, 6)}/${periodoAsoc.desde.slice(0, 4)} al ${periodoAsoc.hasta.slice(6, 8)}/${periodoAsoc.hasta.slice(4, 6)}/${periodoAsoc.hasta.slice(0, 4)} informado a ARCA)` : ""}`,
         ...(cae            ? { cae }                             : {}),
         ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
+        // Condición de pago y vencimiento (fase 2, 19/11/2026): la del pedido o la de la ficha
+        ...(await pagoDelComprobante(supabase, { pedidoId: devolucion.pedido_id || null, clienteId: devolucion.cliente_id, fecha: todayArgentina() })),
       }
 
       // P2-48: en los renglones de precio FINAL (factura sin renglón: sistema viejo) el
@@ -472,7 +475,7 @@ export async function POST(request: Request) {
       const { data: comprobante, error: comprobanteError } = await supabase
         .from("comprobantes_venta")
         .insert(comprobanteInsert)
-        .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones, motivo_ajuste')
+        .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones, motivo_ajuste, condicion_pago_texto, fecha_vencimiento')
         .single()
 
       if (comprobanteError) {
