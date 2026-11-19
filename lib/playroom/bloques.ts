@@ -3,9 +3,14 @@
 // tanto el chat (/api/playroom/chat → bloques) como el tablero (/api/playroom/tablero),
 // así una respuesta del chat se puede "fijar" como una tarjeta más.
 // Documentado para la sesión del cerebro en docs/rediseno-frontend/PEDIDO-agente-cerebro-playroom.md
-import { numero } from "@/lib/formato"
+import { moneda, numero } from "@/lib/formato"
 
-export type Formato = "pesos" | "numero" | "porcentaje" | "fecha" | "texto"
+/**
+ * "pesos" = importe para mirar de un vistazo (sin centavos, abreviado en los títulos grandes).
+ * "moneda" = importe EXACTO, como lo pide docs/FORMATOS.md: $1.234.567,89. Es el de las deudas,
+ * los pagos, las retenciones y todo lo que alguien va a comparar con un comprobante.
+ */
+export type Formato = "pesos" | "moneda" | "numero" | "porcentaje" | "fecha" | "texto"
 
 /** Cómo volver a pedir el mismo dato con información fresca (tarjetas fijadas desde el chat) */
 export type Recalcular = { herramienta: string; parametros: Record<string, unknown> }
@@ -80,6 +85,7 @@ export function formatear(v: unknown, formato: Formato = "texto", corto = false)
   }
   const n = typeof v === "number" ? v : Number(v)
   if (!isFinite(n)) return String(v)
+  if (formato === "moneda") return moneda(n)
   if (formato === "pesos") return corto ? pesosCorto(n) : `$ ${es(n, Math.abs(n) < 1000 && n % 1 !== 0 ? 2 : 0)}`
   if (formato === "porcentaje") return `${es(n, 1)}%`
   return es(n, n % 1 === 0 ? 0 : 1)

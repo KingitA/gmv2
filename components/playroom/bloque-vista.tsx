@@ -42,7 +42,7 @@ function NumeroVista({ bloque }: { bloque: Extract<Bloque, { tipo: "numero" }> }
 }
 
 function TablaVista({ bloque }: { bloque: Extract<Bloque, { tipo: "tabla" }> }) {
-  const derecha = (f?: Formato) => f === "pesos" || f === "numero" || f === "porcentaje"
+  const derecha = (f?: Formato) => f === "pesos" || f === "moneda" || f === "numero" || f === "porcentaje"
   return (
     <div>
       <div className="overflow-x-auto">

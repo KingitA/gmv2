@@ -83,7 +83,7 @@ export default function ReportesCompras() {
   useEffect(() => { cargar() }, [cargar])
 
   const columnas: Column<Record<string, any>>[] = useMemo(() => (datos?.columnas ?? []).map((c) => {
-    const numerica = c.formato === 'pesos' || c.formato === 'numero' || c.formato === 'porcentaje'
+    const numerica = c.formato === 'pesos' || c.formato === 'moneda' || c.formato === 'numero' || c.formato === 'porcentaje'
     return {
       key: c.clave, label: c.titulo, sortable: true, align: numerica ? 'right' as const : 'left' as const,
       render: (v: any) => <span className={numerica ? 'tabular-nums' : undefined}>{formatear(v, c.formato ?? 'texto')}</span>,
