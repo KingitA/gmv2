@@ -62,12 +62,14 @@ const ENCABEZADOS = [
   "NEGRO: desde (factura / recepcion)", "NEGRO: plazo máx. del cheque (días)", "NEGRO: cómo se entrega",
   "Acepta cheques de terceros (si / no)", "Acepta e-cheq (si / no)", "Retención Ganancias (mercaderia 2% / transporte 0,25% / exento)",
   "Exento: vence certificado (dd/mm/aaaa)", "Transporte habitual", "Días que tarda en entregar", "Observaciones",
+  "Mail para órdenes de pago",
 ]
 const CLAVES = [
   "codigo", "nombre", "cuit", "tipo", "mail_oc", "mail_admin", "telefono_vendedor", "banco", "cbu", "alias", "titular",
   "blanco_medio", "blanco_dias", "blanco_desde", "blanco_plazo_cheque", "blanco_entrega",
   "negro_medio", "negro_dias", "negro_desde", "negro_plazo_cheque", "negro_entrega",
   "acepta_cheques_terceros", "acepta_echeq", "ganancias", "exento_hasta", "transporte_habitual", "dias_entrega", "observaciones",
+  "mail_op",
 ]
 
 /** Proveedor como viene de la base (todo lo importable vacío salvo lo que se pise). */
@@ -314,7 +316,7 @@ if (!excel) {
     igual(lectura.error, null)
     igual(lectura.columnasDesconocidas, [], "columnas desconocidas:")
     // plantilla anterior: se acepta; lo que no trae se informa y no se modifica
-    igual(lectura.columnasFaltantes, ["Mixto: % con factura", "Descuentos: cómo se aplican", "Percepción IVA %", "Percepción IIBB %"], "columnas faltantes:")
+    igual(lectura.columnasFaltantes, ["Mail para órdenes de pago", "Mixto: % con factura", "Descuentos: cómo se aplican", "Percepción IVA %", "Percepción IIBB %"], "columnas faltantes:")
     // Sin base: se compara contra proveedores "vacíos" con los mismos códigos, para ver qué traería cada fila
     const vacios = [...new Set(lectura.filas.map((f) => validarFila(f).codigo).filter(Boolean))]
       .map((codigo, i) => proveedor({ id: `id-${i}`, codigo_proveedor: codigo, nombre: lectura.filas.find((f) => validarFila(f).codigo === codigo)?.nombre ?? "" }))

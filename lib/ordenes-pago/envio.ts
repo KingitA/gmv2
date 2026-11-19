@@ -18,7 +18,8 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { enviarMailGmail, estadoCuentaGmail } from "@/lib/ai/gmail"
 import { comoConectarCuenta, leerAjustesEnvio } from "@/lib/compras/envio-ajustes"
 import { armarMime, mailADespachar, rawParaGmail, type AdjuntoMail } from "@/lib/compras/mail-orden"
-import { asuntoOrdenPago, cuerpoOrdenPago, mailsParaOrdenPago } from "./mail-orden-pago"
+import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
+import { asuntoOrdenPago, cuerpoOrdenPago, mailsParaOrdenPago, porQueEseMail } from "./mail-orden-pago"
 import { pdfCertificadoRetencion, pdfOrdenPago } from "./pdf"
 
 export const MIGRACION_ENVIO_OP = "20261119e_bancos_confirmar_y_enviar.sql"
@@ -43,11 +44,14 @@ const faltaTabla = (e: unknown) => {
   return err?.code === "42P01" || err?.code === "PGRST205" || /ordenes_pago_envios/.test(String(err?.message ?? "")) && /does not exist|could not find/i.test(String(err?.message ?? ""))
 }
 
-export function mensajeDeEnvio(f: { estado: string; enviado_a?: string | null; habria_ido_a?: string | null; modo_prueba?: boolean | null; error?: string | null }): string {
+export function mensajeDeEnvio(f: { estado: string; enviado_a?: string | null; habria_ido_a?: string | null; modo_prueba?: boolean | null; error?: string | null; mail_origen?: string | null }): string {
   if (f.estado === "enviada") {
-    return f.modo_prueba
+    // A cuál mail fue y por qué (si no fue al mail para órdenes de pago de la ficha)
+    const porQue = porQueEseMail(f.mail_origen)
+    const base = f.modo_prueba
       ? `MODO PRUEBA: la orden de pago se mandó a ${f.enviado_a}, NO al proveedor (habría ido a ${f.habria_ido_a || "—"}).`
       : `La orden de pago se le mandó al proveedor (${f.enviado_a}).`
+    return porQue ? `${base} ${porQue.replace(/^Fue/, f.modo_prueba ? "Habría ido" : "Fue")}` : base
   }
   if (f.estado === "sin_mail") return "El proveedor no tiene ningún mail cargado en su ficha: la orden quedó pagada sin enviar."
   return `No se pudo enviar la orden de pago al proveedor: ${f.error || "error desconocido"}`
@@ -103,12 +107,17 @@ export async function enviarOrdenAlProveedor(supabase: SupabaseClient, opId: str
 
     const anotar = async (f: Record<string, any>): Promise<ResumenEnvio> => {
       const fila = { orden_pago_id: opId, orden_pago_numero: op.numero_op, proveedor_id: op.proveedor_id, origen: o.origen, creado_por: o.usuarioId, modo_prueba: false, ...f }
-      const { data, error: e } = await supabase.from("ordenes_pago_envios").insert(fila).select("*").single()
+      let { data, error: e } = await supabase.from("ordenes_pago_envios").insert(fila).select("*").single()
+      // Sin la migración 20261119f (columna mail_origen): se registra igual, sin ese dato
+      if (e && faltaLaColumna(e) && "mail_origen" in fila) {
+        const { mail_origen: _sin, ...sinOrigen } = fila as Record<string, any>
+        ;({ data, error: e } = await supabase.from("ordenes_pago_envios").insert(sinOrigen).select("*").single())
+      }
       if (e) console.error("[ordenes-pago] no se pudo registrar el envío:", e.message)
-      return resumen(data ?? { ...fila, creado_at: new Date().toISOString() })
+      return resumen({ ...fila, creado_at: new Date().toISOString(), ...(data ?? {}) })
     }
 
-    const { para } = mailsParaOrdenPago(prov)
+    const { para, origen: mailOrigen } = mailsParaOrdenPago(prov)
     if (para.length === 0) return anotar({ estado: "sin_mail" })
     const seria = para.join(", ")
 
@@ -142,7 +151,7 @@ export async function enviarOrdenAlProveedor(supabase: SupabaseClient, opId: str
     }
     // A quién sale de verdad: en modo prueba, SOLO a la dirección de prueba
     const despacho = mailADespachar(ajustes, { para, cc: [], asunto: asuntoOrdenPago(datos), texto: cuerpoOrdenPago(datos) })
-    const base = { habria_ido_a: seria, modo_prueba: despacho.prueba, cuenta_envio: cuenta.cuenta, adjuntos: adjuntos.map((a) => a.nombre) }
+    const base = { habria_ido_a: seria, modo_prueba: despacho.prueba, cuenta_envio: cuenta.cuenta, adjuntos: adjuntos.map((a) => a.nombre), mail_origen: mailOrigen }
 
     let enviado: { id: string; threadId: string | null }
     try {

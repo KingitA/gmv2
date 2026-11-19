@@ -6,7 +6,7 @@ import {
   armarTransferencia, crearClienteCredicoop, crearSimuladorCredicoop, decidirConfirmacion, esHorarioBancario,
   type ConfigCredicoop, type MedioDeOrden, type OperacionDeOrden,
 } from "@gm/credicoop"
-import { asuntoOrdenPago, cuerpoOrdenPago, mailsParaOrdenPago } from "../../../../lib/ordenes-pago/mail-orden-pago"
+import { asuntoOrdenPago, cuerpoOrdenPago, mailsParaOrdenPago, porQueEseMail } from "../../../../lib/ordenes-pago/mail-orden-pago"
 import { mailADespachar } from "../../../../lib/compras/mail-orden"
 
 const HOY = "2026-11-19"
@@ -126,8 +126,14 @@ describe("Consulta periódica: horario bancario (hora de la Argentina)", () => {
 })
 
 describe("Mail de la orden de pago al proveedor", () => {
-  it("a quién va: el mail de pagos si existe; si no, oficina, general y por último el vendedor", () => {
-    expect(mailsParaOrdenPago({ mail_pagos: "Pagos@Hornal.com.ar", mail_oficina: "adm@hornal.com.ar" })).toEqual({ para: ["pagos@hornal.com.ar"], origen: "pagos" })
+  it("a quién va: primero el mail para órdenes de pago de la ficha; si está vacío, oficina, general y por último el vendedor", () => {
+    expect(mailsParaOrdenPago({ mail_ordenes_pago: "Pagos@Hornal.com.ar; tesoreria@hornal.com.ar", mail_oficina: "adm@hornal.com.ar" })).toEqual({ para: ["pagos@hornal.com.ar", "tesoreria@hornal.com.ar"], origen: "ordenes_pago" })
+    expect(mailsParaOrdenPago({ mail_ordenes_pago: "  ", mail_oficina: "adm@hornal.com.ar" }).origen).toBe("oficina")
+    // la pantalla dice a cuál fue y por qué (nada que aclarar si fue al mail para órdenes de pago)
+    expect(porQueEseMail("ordenes_pago")).toBe("")
+    expect(porQueEseMail("oficina")).toBe("Fue al mail de la oficina porque el proveedor no tiene cargado un mail para órdenes de pago.")
+    expect(porQueEseMail("vendedor")).toContain("al mail del vendedor")
+    expect(porQueEseMail(null)).toBe("")
     expect(mailsParaOrdenPago({ mail_oficina: "adm@hornal.com.ar; cobranzas@hornal.com.ar", email: "info@hornal.com.ar" })).toEqual({ para: ["adm@hornal.com.ar", "cobranzas@hornal.com.ar"], origen: "oficina" })
     expect(mailsParaOrdenPago({ mail_oficina: "no es un mail", email: "info@hornal.com.ar" })).toEqual({ para: ["info@hornal.com.ar"], origen: "general" })
     expect(mailsParaOrdenPago({ mail_vendedor: "vendedor@hornal.com.ar" }).origen).toBe("vendedor")

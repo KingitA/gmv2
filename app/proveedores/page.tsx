@@ -56,6 +56,7 @@ export default function ProveedoresPage() {
     mail_vendedor: "",
     mail_oficina: "",
     mail_ordenes_compra: "",
+    mail_ordenes_pago: "",
     mixto_pct_factura: null as number | null,
     cuit: "",
     tipo_iva: 2,
@@ -120,6 +121,8 @@ export default function ProveedoresPage() {
     if (errCuit) { toast.error(errCuit); return }
     const mailsMalos = mailsInvalidos(formData.mail_ordenes_compra)
     if (mailsMalos.length > 0) { toast.error(`El mail para órdenes de compra está mal escrito: ${mailsMalos.join(", ")}`); return }
+    const mailsPagoMalos = mailsInvalidos(formData.mail_ordenes_pago)
+    if (mailsPagoMalos.length > 0) { toast.error(`El mail para órdenes de pago está mal escrito: ${mailsPagoMalos.join(", ")}`); return }
     // Código de proveedor: NUNCA repetido (se vuelve a consultar al guardar)
     const codigo = normalizarCodigo(formData.codigo_proveedor)
     if (codigo) {
@@ -133,7 +136,17 @@ export default function ProveedoresPage() {
     // Código vacío = la base asigna el primer número libre (trigger de 20261014_codigos_unicos)
     // El mail para órdenes de compra es una columna nueva (migración 20261117m). Va aparte: si la
     // migración todavía no está, el resto de la ficha se guarda igual y se avisa.
-    const { mail_ordenes_compra: mailOC, mixto_pct_factura: mixtoPct, ...resto } = formData
+    const { mail_ordenes_compra: mailOC, mail_ordenes_pago: mailOP, mixto_pct_factura: mixtoPct, ...resto } = formData
+    // El mail para órdenes de pago es otra columna nueva (migración 20261119f): también va aparte
+    const mailOPLimpio = separarMails(mailOP).join(", ") || null
+    const guardarMailOP = async (id: string) => {
+      const antes: any = editingProveedor || {}
+      if ((mailOPLimpio ?? null) === (antes.mail_ordenes_pago ?? null)) return
+      const { error } = await createClient().from("proveedores").update({ mail_ordenes_pago: mailOPLimpio }).eq("id", id)
+      if (error) toast.warning(faltaLaColumna(error)
+        ? "La ficha se guardó, pero el mail para órdenes de pago todavía no se puede guardar: falta aplicar la migración 20261119f_proveedores_mail_ordenes_pago.sql."
+        : `La ficha se guardó, pero no el mail para órdenes de pago: ${error.message}`, { duration: 12000 })
+    }
     const mailOCLimpio = separarMails(mailOC).join(", ") || null
     const datos = { ...resto, codigo_proveedor: codigo, cuit: normalizarCuit(formData.cuit) }
     const guardarMailOC = async (id: string) => {
@@ -158,6 +171,7 @@ export default function ProveedoresPage() {
         return
       }
       await guardarMailOC(editingProveedor.id)
+      await guardarMailOP(editingProveedor.id)
       fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "proveedores", id: editingProveedor.id }) }).catch(() => {})
     } else {
       const { data: newProv, error } = await supabase.from("proveedores").insert(datos).select("id").single()
@@ -168,6 +182,7 @@ export default function ProveedoresPage() {
         return
       }
       if (newProv?.id) await guardarMailOC(newProv.id)
+      if (newProv?.id) await guardarMailOP(newProv.id)
       if (newProv?.id) fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "proveedores", id: newProv.id }) }).catch(() => {})
     }
 
@@ -206,6 +221,7 @@ export default function ProveedoresPage() {
       mail_vendedor: "",
       mail_oficina: "",
       mail_ordenes_compra: "",
+      mail_ordenes_pago: "",
       mixto_pct_factura: null,
       cuit: "",
       tipo_iva: 2,
@@ -246,6 +262,7 @@ export default function ProveedoresPage() {
       mail_vendedor: proveedor.mail_vendedor || "",
       mail_oficina: proveedor.mail_oficina || "",
       mail_ordenes_compra: (proveedor as any).mail_ordenes_compra || "",
+      mail_ordenes_pago: (proveedor as any).mail_ordenes_pago || "",
       mixto_pct_factura: (proveedor as any).mixto_pct_factura != null ? Number((proveedor as any).mixto_pct_factura) : null,
       cuit: proveedor.cuit || "",
       tipo_iva: proveedor.tipo_iva || 2,
