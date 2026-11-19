@@ -835,3 +835,15 @@ Decisión de Juan (textual, 19/11): «Si, se confirma como pagada cuando el banc
 - **A qué mail va la orden de pago.** Hoy: oficina → general → vendedor. ¿Hace falta un "mail de pagos" propio en la ficha del proveedor?
 - **Toda orden confirmada manda mail**, también las que se pagan en efectivo o con cheque y se confirman a mano. Si hay pagos que no se le tienen que informar al proveedor por mail, hay que decir cuáles.
 - Una orden **anulada** cuyo pago el banco ya procesó no se puede eliminar (guardia de `20261119d`): queda como registro.
+
+### Mail propio para órdenes de pago (19/11, rama `entrada-t2-mail-pagos`)
+
+Respuesta de Juan a "¿mail propio para órdenes de pago?": «Sí, campo propio».
+
+**SQL a aplicar:** `supabase/migrations/20261119f_proveedores_mail_ordenes_pago.sql` (columna `proveedores.mail_ordenes_pago` y `ordenes_pago_envios.mail_origen`; idempotente).
+
+- **Ficha del proveedor:** campo "Mail para órdenes de pago" junto a los otros mails. Admite varios separados por coma o punto y coma; se validan al guardar.
+- **Importador de proveedores (Excel):** columna nueva "Mail para órdenes de pago" en la plantilla y en la importación, al lado de la de órdenes de compra. Vacío = no se toca.
+- **Envío de la orden de pago:** primero ese mail. Si está vacío, el orden anterior (oficina → general → vendedor) y el aviso dice a cuál fue y por qué ("Fue al mail de la oficina porque el proveedor no tiene cargado un mail para órdenes de pago"). El modo prueba no cambia.
+- **Sin la migración:** la ficha guarda todo lo demás y avisa que ese mail todavía no se puede guardar; el importador importa el resto de la fila y avisa en la fila; el envío sigue con oficina → general → vendedor y se registra igual.
+- Probado: `scripts/test-importar-proveedores.mjs` (26), pruebas de `mobile` (913), `typecheck:movil`, migración dos veces en la base local. No probado en el navegador.

@@ -19,7 +19,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
 import { guardarHistorialImportacion } from "@/lib/import/guardar-historial"
 import {
-  COLUMNAS_PLANTILLA, COLUMNAS_PROVEEDOR, analizarImportacion, ayudaPlantilla, filaPlantilla, limpiarFilaCruda, textoValor, updateDeCambios,
+  CAMPO_MAIL_PAGOS, COLUMNAS_PLANTILLA, COLUMNAS_PROVEEDOR, MIGRACION_MAIL_PAGOS, analizarImportacion, ayudaPlantilla, filaPlantilla, limpiarFilaCruda, textoValor, updateDeCambios,
   type FilaAnalizada, type ProveedorActual,
 } from "@/lib/proveedores/importar-datos"
 
@@ -80,15 +80,20 @@ async function plantilla() {
 }
 
 /** Todos los proveedores con las columnas que se comparan (de a 1000). */
-async function leerProveedores(sb: ReturnType<typeof createAdminClient>): Promise<{ proveedores: ProveedorActual[]; error: any }> {
+async function leerProveedores(sb: ReturnType<typeof createAdminClient>): Promise<{ proveedores: ProveedorActual[]; error: any; sinMailPagos: boolean }> {
+  // ¿Está la columna del mail para órdenes de pago (migración 20261119f)? Si no, se lee y se
+  // importa todo lo demás como siempre, sin esa columna.
+  const prueba = await sb.from("proveedores").select(CAMPO_MAIL_PAGOS).limit(1)
+  const sinMailPagos = !!prueba.error && faltaLaColumna(prueba.error)
+  const columnas = (sinMailPagos ? COLUMNAS_PROVEEDOR.filter((c) => c !== CAMPO_MAIL_PAGOS) : COLUMNAS_PROVEEDOR).join(", ")
   const proveedores: ProveedorActual[] = []
   for (let desde = 0; ; desde += 1000) {
-    const { data, error } = await sb.from("proveedores").select(COLUMNAS_PROVEEDOR.join(", ")).order("id").range(desde, desde + 999)
-    if (error) return { proveedores: [], error }
+    const { data, error } = await sb.from("proveedores").select(columnas).order("id").range(desde, desde + 999)
+    if (error) return { proveedores: [], error, sinMailPagos }
     proveedores.push(...((data || []) as unknown as ProveedorActual[]))
     if (!data || data.length < 1000) break
   }
-  return { proveedores, error: null }
+  return { proveedores, error: null, sinMailPagos }
 }
 
 /** Fila para la pantalla: los valores ya vienen en texto (formato argentino). */
@@ -130,7 +135,17 @@ export async function POST(request: NextRequest) {
       if (faltaLaColumna(leido.error)) return NextResponse.json({ error: FALTA_MIGRACION, error_code: "FALTA_MIGRACION" }, { status: 409 })
       throw leido.error
     }
+    // Sin la migración 20261119f: la columna "Mail para órdenes de pago" no se guarda (el resto sí) y se avisa
+    const conMailPagos = new Set<number>()
+    if (leido.sinMailPagos) {
+      for (const c of crudas) {
+        if (String((c as Record<string, unknown>).mail_op ?? "").trim()) { conMailPagos.add(c.fila); delete (c as Record<string, unknown>).mail_op }
+      }
+    }
     const { filas, resumen } = analizarImportacion(crudas, leido.proveedores)
+    for (const f of filas) {
+      if (conMailPagos.has(f.fila)) f.avisos.push(`El mail para órdenes de pago de esta fila NO se guarda todavía: falta aplicar la migración ${MIGRACION_MAIL_PAGOS}. El resto de la fila se importa igual.`)
+    }
 
     if (accion === "previsualizar") {
       return NextResponse.json({ resumen, filas: filas.map(filaParaPantalla) })

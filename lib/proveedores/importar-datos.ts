@@ -21,7 +21,7 @@ import type { DesdePago, EntregaPago, MedioPago } from "@/lib/compras/acuerdo-pa
 
 /** Claves de la fila cruda (una por columna del Excel). */
 export const CLAVES_EXCEL = [
-  "codigo", "nombre", "cuit", "tipo", "mail_oc", "mail_admin", "telefono_vendedor",
+  "codigo", "nombre", "cuit", "tipo", "mail_oc", "mail_op", "mail_admin", "telefono_vendedor",
   "banco", "cbu", "alias", "titular",
   "blanco_medio", "blanco_dias", "blanco_desde", "blanco_plazo_cheque", "blanco_entrega",
   "negro_medio", "negro_dias", "negro_desde", "negro_plazo_cheque", "negro_entrega",
@@ -38,6 +38,7 @@ export const NOMBRE_COLUMNA: Record<ClaveExcel, string> = {
   cuit: "CUIT",
   tipo: "Tipo",
   mail_oc: "Mail para enviar la orden de compra",
+  mail_op: "Mail para órdenes de pago",
   mail_admin: "Mail de administración / cobranzas",
   telefono_vendedor: "Teléfono del vendedor",
   banco: "Banco del proveedor",
@@ -102,6 +103,8 @@ export function claveDeEncabezado(encabezado: unknown): ClaveExcel | null {
   if (tiene("cuit")) return "cuit"
   if (n.startsWith("tipo")) return "tipo"
   if (tiene("mail", "correo")) {
+    // "Mail para órdenes de pago" también dice "orden": se mira primero
+    if (tiene("pago")) return "mail_op"
     if (tiene("orden", "compra")) return "mail_oc"
     if (tiene("administracion", "cobranza", "oficina")) return "mail_admin"
     return null
@@ -202,6 +205,7 @@ export interface ValoresProveedor {
   cuit?: string
   tipo_proveedor?: "mercaderia_general" | "transporte" | "servicios"
   mail_ordenes_compra?: string
+  mail_ordenes_pago?: string
   mail_oficina?: string
   telefono_vendedor?: string
   banco_nombre?: string
@@ -240,6 +244,7 @@ export const ETIQUETA_CAMPO: Record<CampoProveedor, string> = {
   cuit: "CUIT",
   tipo_proveedor: "Tipo",
   mail_ordenes_compra: "Mail para la orden de compra",
+  mail_ordenes_pago: "Mail para órdenes de pago",
   mail_oficina: "Mail de administración",
   telefono_vendedor: "Teléfono del vendedor",
   banco_nombre: "Banco",
@@ -272,6 +277,13 @@ export const ETIQUETA_CAMPO: Record<CampoProveedor, string> = {
   percepcion_iibb: "Percepción IIBB %",
 }
 export const CAMPOS_IMPORTABLES = Object.keys(ETIQUETA_CAMPO) as CampoProveedor[]
+
+/**
+ * Columna de la migración 20261119f_proveedores_mail_ordenes_pago.sql. Mientras no esté aplicada,
+ * el importador sigue andando como antes: esa columna del Excel no se guarda y se avisa.
+ */
+export const CAMPO_MAIL_PAGOS: CampoProveedor = "mail_ordenes_pago"
+export const MIGRACION_MAIL_PAGOS = "20261119f_proveedores_mail_ordenes_pago.sql"
 
 /** Columnas de `proveedores` que hay que leer para comparar (las importables + identificación). */
 export const COLUMNAS_PROVEEDOR: string[] = ["id", "codigo_proveedor", "nombre", "activo", ...CAMPOS_IMPORTABLES]
@@ -366,6 +378,12 @@ export function validarFila(cruda: FilaCruda): FilaValidada {
     const malos = partes.filter((m) => !RE_MAIL.test(m))
     if (partes.length === 0 || malos.length > 0) error("mail_oc", `no es un mail válido: "${malos.join('", "') || dato("mail_oc")}" (si son varios, separalos con coma)`)
     else valores.mail_ordenes_compra = [...new Set(partes)].join(", ")
+  }
+  if (dato("mail_op")) {
+    const partes = dato("mail_op").split(/[;,]/).map((m) => m.trim().toLowerCase()).filter(Boolean)
+    const malos = partes.filter((m) => !RE_MAIL.test(m))
+    if (partes.length === 0 || malos.length > 0) error("mail_op", `no es un mail válido: "${malos.join('", "') || dato("mail_op")}" (si son varios, separalos con coma)`)
+    else valores.mail_ordenes_pago = [...new Set(partes)].join(", ")
   }
   if (dato("mail_admin")) {
     const m = dato("mail_admin").toLowerCase()
@@ -719,6 +737,7 @@ export const COLUMNAS_PLANTILLA: { clave: ClaveExcel; encabezado: string; ancho:
   { clave: "cuit", encabezado: "CUIT (xx-xxxxxxxx-x)", ancho: 16, ayuda: "Con guiones: 30-12345678-9" },
   { clave: "tipo", encabezado: "Tipo (mercaderia / transporte / servicios)", ancho: 14, ayuda: "mercaderia / transporte / servicios" },
   { clave: "mail_oc", encabezado: "Mail para enviar la orden de compra", ancho: 30, ayuda: "A esta casilla se le manda la orden. Varios separados por coma." },
+  { clave: "mail_op", encabezado: "Mail para órdenes de pago", ancho: 30, ayuda: "A esta casilla se le manda la orden de pago cuando queda pagada. Varios separados por coma. Vacío = va al de administración." },
   { clave: "mail_admin", encabezado: "Mail de administración / cobranzas", ancho: 30, ayuda: "Un solo mail." },
   { clave: "telefono_vendedor", encabezado: "Teléfono del vendedor", ancho: 20, ayuda: "Texto libre." },
   { clave: "tipo_descuento", encabezado: "Descuentos: cómo se aplican (cascada / sobre_lista)", ancho: 16, ayuda: "cascada = uno sobre otro · sobre_lista = se suman y se aplican sobre el precio de lista" },
@@ -768,6 +787,7 @@ export function filaPlantilla(p: ProveedorActual): Record<ClaveExcel, string> {
     cuit: cuit && !errorCuit(cuit) ? formatCuit(cuit) : "",
     tipo: TIPO_A_TEXTO[t(p.tipo_proveedor)] ?? "",
     mail_oc: t(p.mail_ordenes_compra),
+    mail_op: t(p.mail_ordenes_pago),
     mail_admin: t(p.mail_oficina),
     telefono_vendedor: t(p.telefono_vendedor),
     tipo_descuento: t(p.tipo_descuento) === "sobre_lista" ? "sobre_lista" : t(p.tipo_descuento) === "cascada" ? "cascada" : "",

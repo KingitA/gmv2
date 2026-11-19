@@ -141,6 +141,9 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
             <Campo label="Mail para órdenes de compra" nota="a esta casilla se le envía la orden; varios separados por coma" ancho={2}>
               <Input id="mail_ordenes_compra" value={formData.mail_ordenes_compra ?? ''} onChange={e => set('mail_ordenes_compra', e.target.value)} placeholder="pedidos@proveedor.com" autoComplete="off" />
             </Campo>
+            <Campo label="Mail para órdenes de pago" nota="a esta casilla se le envía la orden de pago cuando queda pagada; varios separados por coma. Vacío: va al de oficina" ancho={2}>
+              <Input id="mail_ordenes_pago" value={formData.mail_ordenes_pago ?? ''} onChange={e => set('mail_ordenes_pago', e.target.value)} placeholder="pagos@proveedor.com" autoComplete="off" />
+            </Campo>
           </Campos>
         </FichaSeccion>
 
