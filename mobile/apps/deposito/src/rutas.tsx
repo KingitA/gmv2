@@ -1,5 +1,6 @@
 import type { RouteObject } from "react-router"
 import { Inicio } from "./pantallas/Inicio"
+import { BuscarEquipo } from "./pantallas/BuscarEquipo"
 import { Cola } from "./pantallas/picking/Cola"
 import { Pedido, PedidoBuscar, PedidoFaltantes, PedidoItem } from "./pantallas/picking/Pedido"
 import { Recepcion, RecepcionBuscar, RecepcionDocumentos, Recepciones, RecepcionFaltantes, RecepcionItem } from "./pantallas/recepcion/Recepcion"
@@ -44,4 +45,7 @@ export const rutas: RouteObject[] = [
   { path: "/cargar/pedido/buscar", element: <CargarBuscar /> },
   { path: "/cargar/pedido/item/:artId", element: <CargarItem /> },
   { path: "/cargar/listo", element: <CargarListo /> },
+
+  // Buscar el equipo de un compañero (20/11): hacerlo sonar
+  { path: "/buscar-equipo", element: <BuscarEquipo /> },
 ]

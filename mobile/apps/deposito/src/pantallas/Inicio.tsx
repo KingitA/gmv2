@@ -88,6 +88,11 @@ export function Inicio() {
           {terciario("/cargar", "🛒", "Cargar pedido", borrador ? `En curso · ${borrador.items.length} art.` : undefined)}
         </div>
 
+        {/* Abajo de todo y chico (20/11): los NuStar se pierden entre la mercadería */}
+        <Link to="/buscar-equipo" style={{ textDecoration: "none", textAlign: "center", color: C.sub, fontSize: 14, fontWeight: 700, padding: "10px 0", border: `1px dashed ${C.border}`, borderRadius: 14, background: C.white }}>
+          🔔 Buscar el equipo de un compañero
+        </Link>
+
         <div style={{ marginTop: 4, textAlign: "center", color: C.light, fontSize: 12 }}>GM Distribuidora · Depósito v{rt.config.version}</div>
       </div>
 
