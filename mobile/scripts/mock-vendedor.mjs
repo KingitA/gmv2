@@ -65,6 +65,8 @@ const FIX = existsSync(RUTA_FIXTURE) ? JSON.parse(readFileSync(RUTA_FIXTURE, "ut
 let S
 function reset() {
   const f = structuredClone(FIX)
+  // Fixtures viejos sin CP en las localidades (condiciones de pago, fase 4): uno de prueba
+  if (f.ficha?.localidades) f.ficha.localidades = f.ficha.localidades.map((l, k) => ({ codigo_postal: String(8100 + k), ...l }))
   const bonifDe = (id) => {
     const b = { viajante: { limpieza_bazar: 0, perf0: 0, perf_plus: 0 }, mercaderia: { limpieza_bazar: 0, perf0: 0, perf_plus: 0 } }
     for (const x of f.bonificaciones[id] || []) if (b[x.tipo]) for (const s of x.segmento ? [x.segmento] : Object.keys(b[x.tipo])) b[x.tipo][s] = Number(x.porcentaje)
@@ -72,7 +74,11 @@ function reset() {
   }
   // Sin deuda real en el fixture no se puede probar Cobrar: se les inventa a algunos
   if (!f.clientes.some((c) => c.saldo_actual > 0)) f.clientes.forEach((c, k) => { if (k % 9 === 0) c.saldo_actual = r2(48000 + k * 1234.56) })
-  const clientes = f.clientes.map((c) => ({ razon_social: null, cuit: null, codigo_cliente: null, ...c, saldo_proyectado: c.saldo_actual, pagos_sin_rendir: 0, bonificaciones: bonifDe(c.id) }))
+  // Deuda vencida / a vencer (= v_deuda_vencimiento): uno sí y uno no tiene algo vencido
+  const deudaDe = (c, k) => !(c.saldo_actual > 0) ? { deuda_vencida: 0, deuda_a_vencer: 0, proximo_vencimiento: null }
+    : k % 2 === 0 ? { deuda_vencida: r2(c.saldo_actual * 0.6), deuda_a_vencer: r2(c.saldo_actual * 0.4), proximo_vencimiento: masDias(hoy(), 5) }
+    : { deuda_vencida: 0, deuda_a_vencer: c.saldo_actual, proximo_vencimiento: masDias(hoy(), 12) }
+  const clientes = f.clientes.map((c, k) => ({ razon_social: null, cuit: null, codigo_cliente: null, ...c, ...deudaDe(c, k), saldo_proyectado: c.saldo_actual, pagos_sin_rendir: 0, bonificaciones: bonifDe(c.id) }))
   // Cuenta corriente sintética: a los clientes con saldo se les arma una factura por ese saldo
   const cc = new Map(clientes.map((c, k) => [c.id, {
     comprobantes: c.saldo_actual > 0 ? [{ id: uid(40000 + k), tipo_comprobante: "FA", numero_comprobante: `0001-${String(1000 + k).padStart(8, "0")}`, fecha: "2026-09-01", total_factura: r2(c.saldo_actual), saldo_pendiente: r2(c.saldo_actual), estado_pago: "pendiente", pedido_id: null, en_cobro: 0, en_cobro_contado: 0, nc_contado: r2(c.saldo_actual * 0.1) }] : [],
@@ -273,7 +279,9 @@ const HANDLERS = {
       // = POST /api/vendedor/clientes (MOBILE.md §20 regla 4): CUIT repetido es válido, se crea igual
       const nombre = String(p.nombre || p.razon_social).trim()
       const lista = S.f.ficha.listas_precio.find((l) => l.id === p.lista_precio_id)
-      S.clientes.push({ id: p.id, nombre, razon_social: p.razon_social || null, cuit: p.cuit || null, codigo_cliente: null, direccion: p.direccion || null, localidad: p.localidad || null, localidad_id: p.localidad_id || null, provincia: null, telefono: p.telefono || null, mail: p.mail || null, condicion_iva: p.condicion_iva || null, condicion_pago: p.condicion_pago || null, condicion_entrega: p.condicion_entrega || null, metodo_facturacion: p.metodo_facturacion || null, vendedor_id: S.f.vendedor.id, lista_precio_id: p.lista_precio_id || null, lista: lista ? { nombre: lista.nombre } : null, saldo_actual: 0, saldo_proyectado: 0, pagos_sin_rendir: 0, bonificaciones: { viajante: {}, mercaderia: {} } })
+      S.clientes.push({ id: p.id, nombre, razon_social: p.razon_social || null, cuit: p.cuit || null, codigo_cliente: null, direccion: p.direccion || null, localidad: p.localidad || null, localidad_id: p.localidad_id || null, provincia: null, telefono: p.telefono || null, mail: p.mail || null, condicion_iva: p.condicion_iva || null, condicion_pago: p.condicion_pago || null, condicion_entrega: p.condicion_entrega || null, metodo_facturacion: p.metodo_facturacion || null, vendedor_id: S.f.vendedor.id, lista_precio_id: p.lista_precio_id || null, lista: lista ? { nombre: lista.nombre } : null, saldo_actual: 0, saldo_proyectado: 0, pagos_sin_rendir: 0, bonificaciones: { viajante: {}, mercaderia: {} },
+        // Condición y forma de pago + CP (condiciones de pago, fase 4)
+        ...Object.fromEntries(["condicion_pago_tipo", "plazo_dias", "forma_pago", "cheque_dias_desde", "cheque_dias_hasta", "codigo_postal"].map((k) => [k, p[k] ?? null])) })
       S.cc.set(p.id, { comprobantes: [], pagos: [], devoluciones: [], comprados: [], habituales: [] })
       S.f.precios_clientes.push({ id: p.id, cliente: { id: p.id, vendedor_id: S.f.vendedor.id, ...Object.fromEntries(COLS_LISTAS.map((k) => [k, p[k] || null])) }, condicionesProveedor: [], condicionesMarca: [], bonificaciones: [] })
     }

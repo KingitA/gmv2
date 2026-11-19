@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useOverlay } from "@gm/core"
 import { normalizarCondicion, textoCondicionPago, type CondicionPago } from "@gm/condicion-pago"
-import { condicionDeCliente } from "../../datos/condicion-pago"
+import { condicionDeCliente, textoCondicionCliente } from "../../datos/condicion-pago"
 import { EditorCondicionPago } from "../clientes/EditorCondicionPago"
 import { usePedidoEnCurso } from "./contexto"
 
@@ -16,7 +16,8 @@ export function CondicionPagoPedido() {
   const hoja = useOverlay("cond-pago")
   const ficha = condicionDeCliente(p.cliente)
   const vigente = p.cond.condPago ?? ficha
-  const texto = textoCondicionPago(normalizarCondicion(vigente))
+  // Sin cambio para este pedido: el texto de la ficha (nuevo, o el viejo si la réplica es anterior)
+  const texto = p.cond.condPago ? textoCondicionPago(normalizarCondicion(vigente)) : textoCondicionCliente(p.cliente)
   const soloEste = !!p.cond.condPago && !igual(p.cond.condPago, ficha)
 
   return (
@@ -29,15 +30,14 @@ export function CondicionPagoPedido() {
       <button onClick={hoja.abrir} className="min-h-11 w-full rounded-xl border border-emerald-600 bg-white px-3 text-sm font-bold text-emerald-700">
         ✏️ Condición de pago solo este pedido
       </button>
-      {hoja.abierto && <HojaCondicionPago inicial={vigente} ficha={ficha} onCerrar={hoja.cerrar} />}
+      {hoja.abierto && <HojaCondicionPago inicial={vigente} ficha={ficha} textoFicha={textoCondicionCliente(p.cliente) || "sin cargar"} onCerrar={hoja.cerrar} />}
     </div>
   )
 }
 
-function HojaCondicionPago({ inicial, ficha, onCerrar }: { inicial: CondicionPago; ficha: CondicionPago; onCerrar: () => void }) {
+function HojaCondicionPago({ inicial, ficha, textoFicha, onCerrar }: { inicial: CondicionPago; ficha: CondicionPago; textoFicha: string; onCerrar: () => void }) {
   const p = usePedidoEnCurso()
   const [valor, setValor] = useState<CondicionPago>(inicial)
-  const textoFicha = textoCondicionPago(ficha) || "sin cargar"
 
   const aplicar = () => {
     // Igual a la ficha = no es un cambio "solo este pedido"

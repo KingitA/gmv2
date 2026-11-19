@@ -47,7 +47,7 @@ function filtrarClientes(clientes: Cliente[], q: string, filtro: string, localid
 function FilaCondicionDeuda({ c }: { c: Cliente }) {
   const d = (c.saldo_proyectado ?? c.saldo_actual) > 0.005 ? resumenDeuda(c) : null
   if (d?.tipo === "vencida") return <p className="truncate text-xs font-bold text-red-600">Vencida {formatCurrency(d.monto)}</p>
-  if (d?.tipo === "a_vencer") return <p className="truncate text-xs font-bold text-amber-700">A vencer {formatCurrency(d.monto)}{d.vence ? ` · vence ${fechaCorta(d.vence)}` : ""}</p>
+  if (d?.tipo === "a_vencer") return <p className="text-xs font-bold leading-tight text-amber-700">A vencer {formatCurrency(d.monto)}{d.vence ? <span className="whitespace-nowrap"> · vence {fechaCorta(d.vence)}</span> : null}</p>
   const cond = textoCondicionCliente(c)
   return cond ? <p className="truncate text-xs text-gray-400">{cond}</p> : null
 }
@@ -136,7 +136,7 @@ export function Clientes() {
       ) : (
         <ListaVirtual
           items={visibles}
-          alto={110}
+          alto={122}
           clave={(c) => c.id}
           vacio={
             <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">
