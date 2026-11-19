@@ -154,7 +154,24 @@ export default function ProveedoresPage() {
         : `La ficha se guardó, pero no el mail para órdenes de pago: ${error.message}`, { duration: 12000 })
     }
     const mailOCLimpio = separarMails(mailOC).join(", ") || null
-    const datos = { ...resto, codigo_proveedor: codigo, cuit: normalizarCuit(formData.cuit) }
+    // "CBU o alias" → cbu (22 dígitos) o cbu_alias: son las columnas que lee el pago por banco.
+    const cuentaTxt = String(formData.banco_cuenta ?? "").trim()
+    const cuentaDig = cuentaTxt.replace(/[\s.-]/g, "")
+    let cbu: string | null = null
+    let cbuAlias: string | null = null
+    if (cuentaTxt) {
+      if (/^\d+$/.test(cuentaDig)) {
+        if (cuentaDig.length !== 22) { toast.error(`El CBU tiene que tener 22 números (tiene ${cuentaDig.length}).`); return }
+        cbu = cuentaDig
+      } else if (/^[a-zA-Z0-9.-]{6,20}$/.test(cuentaTxt)) {
+        cbuAlias = cuentaTxt.toLowerCase()
+      } else {
+        toast.error("El alias tiene que tener entre 6 y 20 letras, números, puntos o guiones."); return
+      }
+    }
+    // Se toca solo la columna escrita (si el Excel cargó CBU y alias, editar uno no borra el otro); vacío = se borran los dos.
+    const cuentaCampos = cbu ? { cbu } : cbuAlias ? { cbu_alias: cbuAlias } : { cbu: null, cbu_alias: null }
+    const datos = { ...resto, ...cuentaCampos, banco_cuenta: cbu ?? cbuAlias ?? "", codigo_proveedor: codigo, cuit: normalizarCuit(formData.cuit) }
     const guardarMailOC = async (id: string) => {
       const antes: any = editingProveedor || {}
       const sinCambios = (mailOCLimpio ?? null) === (antes.mail_ordenes_compra ?? null)
@@ -277,7 +294,8 @@ export default function ProveedoresPage() {
       plazo_desde: proveedor.plazo_desde || "fecha_factura",
       tipo_proveedor: proveedor.tipo_proveedor || "mercaderia_general",
       banco_nombre: proveedor.banco_nombre || "",
-      banco_cuenta: proveedor.banco_cuenta || "",
+      // "CBU o alias": lo que usa el banco son las columnas cbu / cbu_alias (las carga también el Excel)
+      banco_cuenta: (proveedor as any).cbu || (proveedor as any).cbu_alias || proveedor.banco_cuenta || "",
       banco_numero_cuenta: proveedor.banco_numero_cuenta || "",
       banco_tipo_cuenta: proveedor.banco_tipo_cuenta || "",
       tipo_pago: proveedor.tipo_pago || [],
