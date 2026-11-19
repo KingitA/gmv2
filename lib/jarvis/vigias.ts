@@ -61,13 +61,18 @@ async function rpc(db: SupabaseClient, fn: string, args: Fila): Promise<Fila[]> 
   }
 }
 
+/** Deuda vencida de una fila de jarvis_deuda_antiguedad. Sin la columna `vencida`
+ *  (migración 20261119r sin aplicar), la regla vieja: más de 30 días. */
+export const vencidaDeFila = (f: Fila): number =>
+  f.vencida == null ? n0(f.d30_59) + n0(f.d60_89) + n0(f.d90_mas) : n0(f.vencida)
+
 export type Vigia = (db: SupabaseClient, hoy: string, r: Reglas) => Promise<Candidato[]>
 
 /** Cliente con deuda vencida que volvió a comprar. "Vencida" = la de cc_deuda_vencimiento
  *  (vencimiento anterior a hoy, columna vencida de jarvis_deuda_antiguedad), no "más de 30 días". */
 const deudaYCompra: Vigia = async (db, hoy, r) => {
   const deuda = (await rpc(db, "jarvis_deuda_antiguedad", { p_zona_id: null, p_vendedor_id: null, p_cliente_id: null }))
-    .map((f): Fila & { vencida: number } => ({ ...f, vencida: n0(f.vencida) }))
+    .map((f): Fila & { vencida: number } => ({ ...f, vencida: vencidaDeFila(f) }))
     .filter((f) => f.vencida >= r.regla_deuda_vencida_minima)
   if (!deuda.length) return []
   const { data: ret } = await db.from("clientes").select("id").in("id", deuda.map((d) => d.cliente_id as string)).eq("retener_entregas", true)
@@ -201,7 +206,7 @@ const retenidoAlDia: Vigia = async (db, _hoy, r) => {
   const { data, error } = await db.from("clientes").select("id, nombre, retener_desde").eq("retener_entregas", true)
   if (error || !data?.length) return []
   const deuda = await rpc(db, "jarvis_deuda_antiguedad", { p_zona_id: null, p_vendedor_id: null, p_cliente_id: null })
-  const vencida = new Map(deuda.map((d) => [String(d.cliente_id), n0(d.vencida)]))
+  const vencida = new Map(deuda.map((d) => [String(d.cliente_id), vencidaDeFila(d)]))
   return (data as { id: string; nombre: string; retener_desde: string | null }[])
     .filter((c) => (vencida.get(c.id) ?? 0) < r.regla_deuda_vencida_minima)
     .map((c): Candidato => ({

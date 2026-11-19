@@ -24,6 +24,7 @@ import { PERIODOS, resolverPeriodo, type Rango } from "./periodos"
 import { ACCIONES, ACCION_PIDE } from "./acciones"
 import { agendaPendiente, crearPropuesta, crearRecordatorio, ErrorAgenda, historialDecisiones, nombresDeUsuarios, usuariosOficina } from "./agenda"
 import { estadoIndicadores } from "./exterior"
+import { vencidaDeFila } from "./vigias"
 import { cobertura } from "./clasificador"
 import { estadoPlanMes, mesSiguiente } from "@/lib/viajes/plan-mes"
 import { ausenciasEntre } from "@/lib/viajes/calendario-laboral"
@@ -290,7 +291,7 @@ const deudaClientes: Herramienta = {
       .filter((f) => (num(f.dias_mas_vieja) ?? 0) >= minDias)
       .map((f) => ({
         cliente: String(f.cliente), zona: (f.zona as string) ?? null, vendedor: (f.vendedor as string) ?? null,
-        saldo: red(n0(f.saldo)), vencida: red(n0(f.vencida)), d0_29: red(n0(f.d0_29)), d30_59: red(n0(f.d30_59)), d60_89: red(n0(f.d60_89)), d90_mas: red(n0(f.d90_mas)),
+        saldo: red(n0(f.saldo)), vencida: red(vencidaDeFila(f)), d0_29: red(n0(f.d0_29)), d30_59: red(n0(f.d30_59)), d60_89: red(n0(f.d60_89)), d90_mas: red(n0(f.d90_mas)),
         dias_mas_vieja: num(f.dias_mas_vieja), ultima_compra: fechaSola(f.ultima_compra), ultimo_pago: fechaSola(f.ultimo_pago),
       }))
     const lim = limite(p.limite, 20)
@@ -420,7 +421,7 @@ const fichaCliente: Herramienta = {
         cliente: c.nombre, razon_social: i.nombre_razon_social, codigo: i.codigo_cliente, activo: i.activo,
         zona: i.localidades?.zonas?.nombre ?? null, localidad: i.localidades?.nombre ?? null, viajante: i.vendedores?.nombre ?? null,
         condicion_pago: i.condicion_pago, facturacion: i.metodo_facturacion, lista: i.listas_precio?.nombre ?? null,
-        deuda: d ? { saldo: red(n0(d.saldo)), vencida: red(n0(d.vencida)), d0_29: red(n0(d.d0_29)), d30_59: red(n0(d.d30_59)), d60_89: red(n0(d.d60_89)), d90_mas: red(n0(d.d90_mas)), ultimo_pago: fechaSola(d.ultimo_pago) } : "sin deuda",
+        deuda: d ? { saldo: red(n0(d.saldo)), vencida: red(vencidaDeFila(d)), d0_29: red(n0(d.d0_29)), d30_59: red(n0(d.d30_59)), d60_89: red(n0(d.d60_89)), d90_mas: red(n0(d.d90_mas)), ultimo_pago: fechaSola(d.ultimo_pago) } : "sin deuda",
         habitos: h ? { compra_cada_dias: num(h.dias_entre_compras), venta_mensual: red(n0(h.venta_mensual_promedio)), ultima_compra: fechaSola(h.ultima_compra), dias_sin_comprar: num(h.dias_sin_comprar) } : "sin compras en 6 meses",
         compras_por_mes: serie, articulos_top: top,
         pedidos_abiertos: (abiertos.data ?? []).map((x: any) => ({ numero: x.numero_pedido, fecha: x.fecha, estado: x.estado, total: red(n0(x.total)) })),
@@ -901,7 +902,7 @@ const clientesRetenidos: Herramienta = {
     const nom = new Map(((us ?? []) as { id: string; nombre: string }[]).map((u) => [u.id, u.nombre]))
     const filas = cs.map((c) => {
       const d = saldo.get(c.id)
-      return { cliente_id: c.id, cliente: c.nombre, desde: fechaSola(c.retener_desde), motivo: c.retener_motivo, decidio: c.retener_por ? nom.get(c.retener_por) ?? "—" : "—", debe: red(n0(d?.saldo)), vencida: red(n0(d?.vencida)) }
+      return { cliente_id: c.id, cliente: c.nombre, desde: fechaSola(c.retener_desde), motivo: c.retener_motivo, decidio: c.retener_por ? nom.get(c.retener_por) ?? "—" : "—", debe: red(n0(d?.saldo)), vencida: red(d ? vencidaDeFila(d) : 0) }
     })
     return {
       consultado: "Clientes con entregas retenidas y su deuda",
