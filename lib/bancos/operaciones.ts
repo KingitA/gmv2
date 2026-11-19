@@ -379,9 +379,17 @@ export async function enviarPagoDeOrden(db: SupabaseClient, ordenPagoId: string,
   }
   if (pago.tipo === "echeq_emision") {
     const cuenta = cuentaDe.get(d.cuenta_origen_id)!
+    // El banco exige el nombre con que tiene agendado al beneficiario (APIE-1013); en el sistema
+    // el proveedor figura "como lo conocemos". Se pide a la agenda de Credicoop antes de emitir.
+    let nombreBanco = prov!.nombre as string
+    if (ambiente !== "simulador") {
+      const agendado = await cliente.nombreBeneficiarioEcheq(String(prov!.cuit ?? ""))
+      if (!agendado) throw new ErrorOperacion(`${prov!.nombre} (CUIT ${prov!.cuit}) no está en la agenda de beneficiarios de e-cheq de Credicoop. Hay que darlo de alta en Banca Internet Empresa y volver a mandarlo. No se mandó nada al banco.`)
+      nombreBanco = agendado
+    }
     return enviar(db, usuarioId, { ...base, cuenta_bancaria_id: cuenta.id },
       (idOrigen, empresa) => armarEmisionEcheq(empresa, { idOrigen, cbuCuentaDebito: String(cuenta.cbu), hoy, echeqs: [{
-        monto: pago.monto, fechaPago: pago.fecha, beneficiarioNombre: prov!.nombre, beneficiarioCuit: prov!.cuit, concepto: "FAC", motivo: `Orden de pago ${info.orden.numero_op}`,
+        monto: pago.monto, fechaPago: pago.fecha, beneficiarioNombre: nombreBanco, beneficiarioCuit: prov!.cuit, concepto: "FAC", motivo: `Orden de pago ${info.orden.numero_op}`,
       }] }), cliente.emitirEcheq, ambiente, cliente.empresa)
   }
   // Endoso de un e-cheq que nos dio un cliente. La cuenta: la única habilitada, o la que se eligió.

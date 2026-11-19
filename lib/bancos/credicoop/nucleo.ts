@@ -18,6 +18,8 @@ export const SCOPES = {
   transferencias: "transferenciasConFirma",
   echeq: "echeqConFirma",
   vep: "vepConFirma",
+  /** Agenda de beneficiarios de e-cheq (de ahí sale el nombre que el banco acepta) */
+  beneficiarioEcheq: "beneficiarioEcheq",
 } as const
 export type AmbitoCredicoop = keyof typeof SCOPES
 
@@ -33,6 +35,7 @@ export const RUTAS = {
   consultaEcheq: "/api/echeq/v1/emision",
   gestionEcheq: "/api/echeq/v1/ConFirma/gestion",
   listarEcheqs: "/api/echeq/v1/lista-cheques",
+  beneficiarioEcheq: (numeroAdherente: number | string) => `/api/echeq/v1/beneficiario/${encodeURIComponent(String(numeroAdherente))}`,
   listarVeps: "/api/vep/v1/consulta",
   pagarVep: "/api/vep/v1/ConFirma/pago",
   consultaPagoVep: "/api/vep/v1/pago",
@@ -142,7 +145,9 @@ const MENSAJES: Record<string, string> = {
   "APIE-1004": "La empresa no está activa en Credicoop.",
   "APIE-1005": "Falta aceptar los términos y condiciones de e-cheq en Banca Internet Empresa.",
   "APIE-1006": "Esa cuenta no está habilitada para emitir e-cheq.",
+  "APIE-1013": "El nombre del beneficiario del e-cheq no coincide con el que Credicoop tiene registrado para ese CUIT.",
   "APIE-1015": "El CUIT del beneficiario del e-cheq no es válido.",
+  "APIE-8014": "El proveedor no está en la agenda de beneficiarios de Credicoop: hay que darlo de alta en Banca Internet Empresa.",
   "APIE-1020": "El beneficiario no está en la lista de beneficiarios de e-cheq de Credicoop: hay que darlo de alta en Banca Internet Empresa.",
   "APIE-1022": "La fecha de pago del e-cheq no es válida: un e-cheq común va con fecha de hoy y uno diferido, con fecha posterior.",
   "APIE-1024": "No hay ningún firmante habilitado en Credicoop para emitir e-cheq desde esa cuenta.",
@@ -170,7 +175,10 @@ interface ErrorDelBanco { codigo?: unknown; descripcion?: unknown; errores?: Arr
  * `estadoHttp` ≥ 500 o sin cuerpo entendible ⇒ INCIERTO (no se sabe si la operación entró).
  */
 export function errorDelBanco(estadoHttp: number, cuerpo: unknown): ErrorCredicoop {
-  const c = (cuerpo && typeof cuerpo === "object" ? cuerpo : {}) as ErrorDelBanco
+  // El banco contesta los errores envueltos: {"error":{"codigo":"APIE-1013","descripcion":"…"}}
+  const envuelto = cuerpo && typeof cuerpo === "object" ? (cuerpo as { error?: unknown }).error : undefined
+  const raiz = envuelto && typeof envuelto === "object" ? envuelto : cuerpo
+  const c = (raiz && typeof raiz === "object" ? raiz : {}) as ErrorDelBanco
   const lista = Array.isArray(c.errores) ? c.errores : []
   const codigos = [...lista.map((e) => String(e?.codigo ?? "")), String(c.codigo ?? "")]
     .map((x) => (/^\d+$/.test(x) ? `APIE-${x.padStart(4, "0")}` : x)).filter((x) => /^APIE-\d{4}$/.test(x))
