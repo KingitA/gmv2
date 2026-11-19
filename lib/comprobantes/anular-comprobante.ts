@@ -4,6 +4,7 @@ import {
   CC_MOVIMIENTO,
   leyendaAnulacion,
 } from '@/lib/comprobantes/anular'
+import { pagoDelComprobante } from '@/lib/comprobantes/condicion-pago-comprobante'
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from '@/lib/pdf/generar'
 import { todayArgentina, nowArgentina } from '@/lib/utils'
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from '@/lib/arca/tipos'
@@ -385,6 +386,8 @@ async function anularComprobanteEnTurno(
     creado_por:                   usuarioId,
     ...(cae            ? { cae }                             : {}),
     ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
+    // Condición de pago y vencimiento (fase 2, 19/11/2026): la del pedido o la de la ficha
+    ...(await pagoDelComprobante(supabase, { pedidoId: original.pedido_id ?? null, clienteId: original.cliente_id, fecha: todayArgentina() })),
   }
 
   // ─── 8. Detalle espejo (armado antes del insert, para el registro de CAE) ───

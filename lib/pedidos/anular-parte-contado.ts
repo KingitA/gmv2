@@ -7,6 +7,7 @@
 // lib/pedidos/refacturar.ts (listas de precios).
 
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
+import { pagoDelComprobante } from "@/lib/comprobantes/condicion-pago-comprobante"
 import { todayArgentina } from "@/lib/utils"
 import { moneda } from "@/lib/formato"
 import { reservarNumero, formatoNumeroComprobante } from "@/lib/comprobantes/numeracion"
@@ -52,6 +53,8 @@ export async function anularParteContado(
       observaciones: obs,
       comprobantes_relacionados_ids: [nota.id],
       creado_por: usuarioId,
+      // Condición de pago y vencimiento (fase 2, 19/11/2026): la del pedido
+      ...(await pagoDelComprobante(supabase, { pedidoId: pedido.id, clienteId: orig.cliente_id, fecha: todayArgentina() })),
     })
     .select("id")
     .single()

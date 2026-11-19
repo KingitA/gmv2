@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
+import { pagoDelComprobante } from "@/lib/comprobantes/condicion-pago-comprobante"
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { nowArgentina, todayArgentina } from '@/lib/utils'
@@ -257,6 +258,8 @@ export async function POST(request: Request) {
       observaciones:      concepto,
       cae:                respCAE.cae,
       vencimiento_cae:    respCAE.vencimientoCae,
+      // Condición de pago y vencimiento (fase 2, 19/11/2026): la del pedido o la de la ficha
+      ...(await pagoDelComprobante(supabase, { pedidoId: pedido_id ?? null, clienteId: cliente_id, fecha: todayArgentina() })),
     }
 
     const detallePayload = itemsCalculados.map((item: any) => ({

@@ -21,6 +21,7 @@
  */
 
 import { SupabaseClient } from "@supabase/supabase-js"
+import { pagoDelComprobante } from "@/lib/comprobantes/condicion-pago-comprobante"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { marcaPagoBonif } from "@/lib/cobranzas/marca-pago"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
@@ -134,6 +135,8 @@ async function crearComprobante(
       observaciones: params.observaciones || "Bonificación pago contado 10%",
       ...(params.cae ? { cae: params.cae } : {}),
       ...(params.vencimiento_cae ? { vencimiento_cae: params.vencimiento_cae } : {}),
+      // Condición de pago y vencimiento (fase 2, 19/11/2026): la de la ficha del cliente
+      ...(await pagoDelComprobante(supabase, { clienteId: params.cliente_id, fecha: todayArgentina() })),
     })
     .select("id")
     .single()

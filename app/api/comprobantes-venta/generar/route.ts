@@ -30,6 +30,7 @@ import { limpiarCentinela, resolverListaSegmentoDefinido, type ClienteListas, ty
 import { detectarSegmento as segmentoDePrecio } from "@/lib/pricing/segmento"
 import { estadoAlFacturar } from "@/lib/pedidos/estados"
 import { esCargadoEnDeposito } from "@/lib/pedidos/origen-deposito"
+import { pagoDelComprobante } from "@/lib/comprobantes/condicion-pago-comprobante"
 import { aplicarPagosDelPedidoRefacturado } from "@/lib/pedidos/refacturar"
 import { aplicarDevueltoAlDetalle } from "@/lib/pedidos/ajuste-devoluciones-refacturado"
 import { cuitDigitos, cuitValido, normalizarCuit } from "@/lib/formato"
@@ -1005,6 +1006,8 @@ async function generarComprobante(
       ...(cae            ? { cae }                                  : {}),
       ...(vencimientoCae ? { vencimiento_cae: vencimientoCae }      : {}),
       ...(creadoPor      ? { creado_por: creadoPor }                : {}),
+      // Condición de pago y vencimiento (fase 2, 19/11/2026): la del pedido o la de la ficha
+      ...(await pagoDelComprobante(supabase, { pedidoId: pedido.id, clienteId: pedido.cliente_id, fecha: todayArgentina() })),
     }
 
     // Detalle: una línea por ítem. Los descuentos general/viajante ya están en el
