@@ -313,5 +313,5 @@ Lo hizo cuentas corrientes (servidor y ERP). La parte visual de las apps es la *
   - con algo ahí, "Confirmar parada" (entregado / parcial) deshabilitado con el texto `TEXTO_ANTICIPADO_SIN_COBRO` y el botón de cobrar a mano;
   - sin señal: si se registró un cobro local para ese cliente en el viaje, ya se puede confirmar (es lo mismo que acepta el servidor).
   - Texto, código y regla en `@gm/cobro`: `TEXTO_ANTICIPADO_SIN_COBRO`, `CODIGO_ANTICIPADO_SIN_COBRO`, `anticipadoSinCobro`, `condicionPagoEfectiva`.
-- **App Chofer: HECHO (19/11/2026, rama `chofer-condiciones`, v0.3.11)** — cartel + botón a Cobrar, cierre solo como "no entregado", habilita con un cobro local; condición y vencimientos en el cobro.
+- **App Chofer: HECHO (19/11/2026, rama `chofer-condiciones`, v0.3.12)** — cartel + botón a Cobrar, cierre solo como "no entregado", habilita con un cobro local; condición y vencimientos en el cobro.
 - **Mostrador** (`/api/mostrador/entregar`, web): anticipado sin cobro → 409 `ANTICIPADO_SIN_COBRO`; con el cobro registrado se entrega aunque quede pendiente de confirmar en /caja.

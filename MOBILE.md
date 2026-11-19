@@ -1901,7 +1901,7 @@ Detalle en `docs/PENDIENTES-APPS-SALIDA.md`, sección "Segunda prueba integral (
 - Teclado: lo maneja el core (`instalarTeclado`, `--gm-teclado`); la app no tiene arreglos propios
   aparte de "Enter cierra el teclado" (`useEnterCierraTeclado`), que el core no hace.
 
-### v0.3.11 (19/11/2026): condiciones de pago, fase 4 (freno de anticipado y vencimientos)
+### v0.3.12 (19/11/2026): condiciones de pago, fase 4 (freno de anticipado y vencimientos)
 
 - **Anticipado sin cobro** (`anticipado_sin_cobro` de la hoja): la parada muestra "Este cliente paga por ANTICIPADO:
   registrá el cobro antes de entregar." con un botón directo a Cobrar; solo se puede cerrar como "no entregado". Un cobro
