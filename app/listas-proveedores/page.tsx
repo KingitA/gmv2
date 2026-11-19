@@ -35,6 +35,8 @@ export default function ListasProveedoresPage() {
     const [fechaVigencia, setFechaVigencia] = useState("")
     const [fechaFin, setFechaFin] = useState("")
     const [observaciones, setObservaciones] = useState("")
+    // En qué viene el precio del archivo: "" = lo que digan los títulos del archivo o, si no dicen, como manda siempre ese proveedor
+    const [precioPor, setPrecioPor] = useState<"" | "unidad" | "bulto">("")
     const [importando, setImportando] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -67,6 +69,7 @@ export default function ListasProveedoresPage() {
             if (nombre) formData.append('nombre', nombre)
             if (fechaFin) formData.append('fecha_fin', fechaFin)
             if (observaciones) formData.append('observaciones', observaciones)
+            if (precioPor) formData.append('precio_por', precioPor)
 
             const res = await fetch('/api/listas-proveedores/importar', { method: 'POST', body: formData })
             const data = await res.json()
@@ -83,6 +86,7 @@ export default function ListasProveedoresPage() {
             setFechaFin('')
             setObservaciones('')
             setProveedorId('')
+            setPrecioPor('')
             loadListas()
         } catch (err: any) {
             toast({ variant: 'destructive', title: 'Error', description: err.message })
@@ -177,9 +181,9 @@ export default function ListasProveedoresPage() {
                     </DialogHeader>
                     <div className="space-y-4">
                         <div>
-                            <Label>Proveedor</Label>
+                            <Label>Proveedor *</Label>
                             <Select value={proveedorId} onValueChange={setProveedorId}>
-                                <SelectTrigger><SelectValue placeholder="Seleccionar (opcional)" /></SelectTrigger>
+                                <SelectTrigger><SelectValue placeholder="Elegí el proveedor" /></SelectTrigger>
                                 <SelectContent>
                                     {proveedores.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
                                 </SelectContent>
@@ -221,12 +225,25 @@ export default function ListasProveedoresPage() {
                             </div>
                         </div>
                         <div>
+                            <Label>El precio del archivo es</Label>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                                <Button type="button" size="sm" variant={precioPor === "" ? "default" : "outline"} onClick={() => setPrecioPor("")}>Como lo manda siempre</Button>
+                                <Button type="button" size="sm" variant={precioPor === "unidad" ? "default" : "outline"} onClick={() => setPrecioPor("unidad")}>Por unidad</Button>
+                                <Button type="button" size="sm" variant={precioPor === "bulto" ? "default" : "outline"} onClick={() => setPrecioPor("bulto")}>Por bulto / caja</Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">
+                                {precioPor === "bulto" ? "Cada precio se divide por las unidades por bulto del artículo."
+                                    : precioPor === "unidad" ? "Cada precio se toma tal cual como costo por unidad."
+                                    : "Se usa lo que digan los títulos del archivo; si no dicen, lo guardado para ese proveedor (por unidad si nunca se eligió). Se puede cambiar después, en la vista previa."}
+                            </p>
+                        </div>
+                        <div>
                             <Label>Observaciones</Label>
                             <Input value={observaciones} onChange={e => setObservaciones(e.target.value)} placeholder="Opcional" />
                         </div>
                         <div className="flex justify-end gap-2">
                             <Button variant="outline" onClick={() => setShowImportar(false)}>Cancelar</Button>
-                            <Button onClick={handleImportar} disabled={importando || !file || !fechaVigencia}>
+                            <Button onClick={handleImportar} disabled={importando || !file || !fechaVigencia || !proveedorId}>
                                 {importando ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                                 Importar y procesar
                             </Button>
