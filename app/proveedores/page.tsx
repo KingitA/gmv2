@@ -42,7 +42,9 @@ export default function ProveedoresPage() {
   const [fichaFiscal, setFichaFiscal] = useState<{ id: string; nombre: string } | null>(null)
   // Revisión 19/11: la ficha fiscal y la cuenta corriente del proveedor son del permiso de órdenes
   // de pago (solo admin; el servidor lo controla). A otro rol no se le ofrecen los botones.
-  const { esAdmin } = useMisRoles()
+  const { esAdmin, roles: misRoles } = useMisRoles()
+  // La cuenta corriente la ve administración (admin + administrativo, permiso "compras")
+  const veCuentaCorriente = esAdmin || misRoles.includes("administrativo")
   const [paraBaja, setParaBaja] = useState<Proveedor | null>(null)
   const [formData, setFormData] = useState({
     nombre: "",
@@ -485,7 +487,7 @@ export default function ProveedoresPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex gap-2 justify-end">
-                            {esAdmin && (
+                            {veCuentaCorriente && (
                               <Link href={`/proveedores/${proveedor.id}/cuenta-corriente`}>
                                 <Button variant="outline" size="sm" className="gap-2 bg-transparent">
                                   <FileText className="h-4 w-4" />

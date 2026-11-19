@@ -23,13 +23,13 @@ export async function GET(
     { params }: { params: Promise<{ id: string }> }
 ) {
     // Revisión 19/11: la cuenta corriente del proveedor muestra órdenes de pago, medios (CBU,
-    // cheques) y certificados de retención: permiso de órdenes de pago (solo admin), no cualquier rol.
-    const auth = await requirePermiso('ordenes_pago')
+    // cheques) y certificados de retención: administración (permiso compras: admin + administrativo), no cualquier rol.
+    const auth = await requirePermiso('compras')
     if (auth.error) {
         if (auth.error.status !== 403) return auth.error
         return NextResponse.json({
-            error: 'La cuenta corriente del proveedor (pagos, órdenes de pago, cheques y certificados de retención) la ven solo los administradores.',
-            error_code: 'SIN_PERMISO', permiso: 'ordenes_pago',
+            error: 'La cuenta corriente del proveedor (pagos, órdenes de pago, cheques y certificados de retención) la ve solo administración (usuarios admin o administrativo).',
+            error_code: 'SIN_PERMISO', permiso: 'compras',
         }, { status: 403 })
     }
     const { id: proveedorId } = await params;
