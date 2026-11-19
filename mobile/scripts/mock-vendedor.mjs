@@ -23,6 +23,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { createServer } from "node:http"
 import { atenderActualizacion } from "./mock-actualizacion.mjs"
+import { atenderSonar } from "./mock-sonar.mjs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -405,6 +406,8 @@ createServer(async (req, res) => {
 
   // Actualización con un botón (/__mock/actualizacion, /__mock/apk, /api/mobile/actualizacion)
   if ((url.pathname.startsWith("/__mock/") || S.red) && (await atenderActualizacion(url, req, res, json, cors))) return
+  // Hacer sonar un equipo (/api/mobile/dispositivos…, /__mock/sonar)
+  if ((url.pathname.startsWith("/__mock/") || S.red) && atenderSonar(url, req, json, body)) return
   if (url.pathname.startsWith("/__mock/")) {
     if (url.pathname === "/__mock/red") S.red = url.searchParams.get("on") !== "0"
     if (url.pathname === "/__mock/reset") reset()

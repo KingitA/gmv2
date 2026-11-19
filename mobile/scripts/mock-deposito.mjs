@@ -20,6 +20,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { createServer } from "node:http"
 import { atenderActualizacion } from "./mock-actualizacion.mjs"
+import { atenderSonar } from "./mock-sonar.mjs"
 
 const PUERTO = Number(process.env.PORT || 3999)
 const N_ARTICULOS = Number(process.env.ARTICULOS || 6000)
@@ -301,6 +302,8 @@ createServer(async (req, res) => {
 
   // Actualización con un botón (/__mock/actualizacion, /__mock/apk, /api/mobile/actualizacion)
   if ((url.pathname.startsWith("/__mock/") || S.red) && (await atenderActualizacion(url, req, res, json, cors))) return
+  // Hacer sonar un equipo (/api/mobile/dispositivos…, /__mock/sonar)
+  if ((url.pathname.startsWith("/__mock/") || S.red) && atenderSonar(url, req, json, body)) return
   if (url.pathname.startsWith("/__mock/")) {
     if (url.pathname === "/__mock/red") {
       const on = url.searchParams.get("on") !== "0"
