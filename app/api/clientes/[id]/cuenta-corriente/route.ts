@@ -4,6 +4,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from '@/lib/auth';
 import { getSaldosCliente } from '@/lib/cuenta-corriente/saldo';
+import { deudaVencidaCliente } from '@/lib/cuenta-corriente/deuda-vencida';
 import { fetchAllRows } from '@/lib/supabase/fetch-all';
 import { comprobantesAplicados } from '@/lib/pedidos/ajuste-devoluciones';
 
@@ -151,7 +152,7 @@ export async function GET(
         allComprobantes.sort((a: any, b: any) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
 
         // 5. Saldo total = fuente única: libro mayor. Doble saldo: real vs proyectado.
-        const saldos = await getSaldosCliente(supabase, cliente_id);
+        const [saldos, venc] = await Promise.all([getSaldosCliente(supabase, cliente_id), deudaVencidaCliente(supabase, cliente_id)]);
         const saldo_total = saldos.saldo_real;
 
         // Extracto (libro mayor), enriquecido con el tipo real del comprobante: MISMA carga
@@ -166,6 +167,10 @@ export async function GET(
                 saldo_proyectado: saldos.saldo_proyectado,
                 pendiente_verificacion: saldos.pendiente_verificacion,
                 devoluciones_en_proceso: saldos.devoluciones_en_proceso,
+                // Condiciones de pago, fase 3 (null sin la migración 20261119q)
+                deuda_vencida: venc?.vencida ?? null,
+                deuda_a_vencer: venc?.a_vencer ?? null,
+                proximo_vencimiento: venc?.proximo_vencimiento ?? null,
                 condicion_iva: cliente.condicion_iva || null,
             },
             comprobantes: allComprobantes.map((comp: any) => ({

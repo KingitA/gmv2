@@ -22,7 +22,7 @@ import { HistorialImportacionesDialog } from "@/components/import/HistorialImpor
 import { History } from "lucide-react"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
-import { moneda, entero, formatCuit } from "@/lib/formato"
+import { moneda, entero, fecha, formatCuit } from "@/lib/formato"
 import { Download, FileSpreadsheet, Loader2 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { exportarClientesExcel, exportarClientesPdf, type FilaClienteExport, type InfoExport } from "@/lib/clientes/exportar-clientes"
@@ -106,6 +106,7 @@ export default function ClientesPage() {
   const [sheetBonifs, setSheetBonifs] = useState<any[]>([])
   const [sheetCC, setSheetCC] = useState<number | null>(null)
   const [sheetProy, setSheetProy] = useState<number | null>(null)
+  const [sheetVenc, setSheetVenc] = useState<{ vencida: number; aVencer: number; proximo: string | null } | null>(null)
   const [sheetPedidos, setSheetPedidos] = useState<any[]>([])
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isHistorialOpen, setIsHistorialOpen] = useState(false)
@@ -169,13 +170,13 @@ export default function ClientesPage() {
 
   // Saldo de cada cliente (fuente única, real + proyectado) para la columna Saldo.
   // Antes la lista no mostraba cuánto debe nadie (auditoría 21/10).
-  const [saldos, setSaldos] = useState<Map<string, { real: number; proy: number }>>(new Map())
+  const [saldos, setSaldos] = useState<Map<string, { real: number; proy: number; vencida: number | null }>>(new Map())
   async function loadSaldos() {
     try {
       const r = await fetch("/api/clientes/saldos?todos=1")
       if (!r.ok) return
       const j = await r.json()
-      setSaldos(new Map(Object.entries(j.saldos || {}).map(([id, s]: [string, any]) => [id, { real: Number(s.saldo_real) || 0, proy: Number(s.saldo_proyectado) || 0 }])))
+      setSaldos(new Map(Object.entries(j.saldos || {}).map(([id, s]: [string, any]) => [id, { real: Number(s.saldo_real) || 0, proy: Number(s.saldo_proyectado) || 0, vencida: s.deuda_vencida == null ? null : Number(s.deuda_vencida) }])))
     } catch { /* la columna queda vacía; el resto de la lista anda igual */ }
   }
 
@@ -260,6 +261,7 @@ export default function ClientesPage() {
     setSelectedCliente(cliente)
     setSheetBonifs([])
     setSheetCC(null)
+    setSheetVenc(null)
     setSheetProy(null)
     setSheetPedidos([])
     const sb = createClient()
@@ -272,6 +274,7 @@ export default function ClientesPage() {
     // Saldo desde la fuente única (lib/cuenta-corriente/saldo.ts): real + proyectado
     setSheetCC(saldos ? saldos.saldo_real : null)
     setSheetProy(saldos ? saldos.saldo_proyectado : null)
+    setSheetVenc(saldos && saldos.deuda_vencida != null ? { vencida: Number(saldos.deuda_vencida), aVencer: Number(saldos.deuda_a_vencer) || 0, proximo: saldos.proximo_vencimiento ?? null } : null)
     setSheetPedidos(pedidosRes.data || [])
   }
 
@@ -573,6 +576,11 @@ export default function ClientesPage() {
                                   {moneda(Math.abs(s.real))}
                                   {s.real < -0.009 && <span className="ml-1 text-[10px] font-semibold">a favor</span>}
                                 </div>
+                                {s.vencida != null && s.vencida > 0.009 && (
+                                  <div className="text-[10px] font-semibold text-red-700" title="Deuda con vencimiento anterior a hoy">
+                                    vencida {moneda(s.vencida)}
+                                  </div>
+                                )}
                                 {Math.abs(s.proy - s.real) > 0.009 && (
                                   <div className="text-[10px] text-amber-700" title="Si se confirma lo pendiente (cobros sin verificar, devoluciones)">
                                     proyectado {moneda(s.proy)}
@@ -675,6 +683,13 @@ export default function ClientesPage() {
                   {sheetCC === null ? "cargando" : sheetCC > 0 ? "debe" : sheetCC < 0 ? "a favor" : "al día ✓"}
                 </span>
               </div>
+              {sheetCC !== null && sheetCC > 0.009 && sheetVenc && (
+                <p className="mt-1.5 text-xs text-white/70">
+                  Vencida <b className={sheetVenc.vencida > 0.009 ? "text-red-200" : "text-white/90"}>{moneda(sheetVenc.vencida, 0)}</b>
+                  {" · "}A vencer <b className="text-white/90">{moneda(sheetVenc.aVencer, 0)}</b>
+                  {sheetVenc.proximo && <span className="text-white/50"> · próximo {fecha(sheetVenc.proximo)}</span>}
+                </p>
+              )}
               {sheetCC !== null && sheetProy !== null && Math.abs(sheetProy - sheetCC) > 0.009 && (
                 <p className="mt-1.5 text-xs text-white/60">
                   Proyectado: <b className="text-white/90">{sheetProy < 0 ? "a favor " : ""}{moneda(Math.abs(sheetProy), 0)}</b> · si se confirma lo pendiente

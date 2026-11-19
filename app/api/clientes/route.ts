@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth'
 import { normalizarCondicionIva, NIVEL_INICIAL } from "@/lib/clientes/normalizar"
 import { errorCuit, normalizarCuit } from "@/lib/formato"
 import { limpiarNombreCliente } from "@/lib/clientes/nombre-cliente"
+import { deudaVencidaClientes } from "@/lib/cuenta-corriente/deuda-vencida"
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -45,22 +46,30 @@ export async function GET(request: NextRequest) {
       .select("cliente_id, saldo_actual")
       .in("cliente_id", clienteIds)
     const saldoMap = new Map((saldosRows || []).map((r: any) => [r.cliente_id, Number(r.saldo_actual)]))
+    // Deuda vencida / a vencer (condiciones de pago, fase 3): una sola consulta y la
+    // misma regla que la ficha y las apps (créditos sin imputar a lo más viejo)
+    const vencimientos = await deudaVencidaClientes(supabase, clienteIds)
 
     // Para cada cliente, calcular estado de cuenta
     const clientesConEstado = await Promise.all(
       clientes.map(async (cliente) => {
-        // Comprobantes pendientes (solo para detectar vencidos por fecha)
-        const { data: comprobantes } = await supabase
-          .from("comprobantes_venta")
-          .select("saldo_pendiente, fecha_vencimiento")
-          .eq("cliente_id", cliente.id)
-          .gt("saldo_pendiente", 0)
-
         const saldoTotal = saldoMap.get(cliente.id) ?? 0
+        const venc = vencimientos.get(cliente.id)
 
-        // Verificar si hay pagos vencidos
-        const hoy = todayArgentina()
-        const tieneVencidos = comprobantes?.some((c) => c.fecha_vencimiento && c.fecha_vencimiento < hoy) || false
+        // Vencido = tiene deuda con vencimiento anterior a hoy. Sin la migración
+        // aplicada, como antes: algún comprobante pendiente con vencimiento pasado.
+        let tieneVencidos: boolean
+        if (venc) {
+          tieneVencidos = venc.vencida > 0.005
+        } else {
+          const { data: comprobantes } = await supabase
+            .from("comprobantes_venta")
+            .select("saldo_pendiente, fecha_vencimiento")
+            .eq("cliente_id", cliente.id)
+            .gt("saldo_pendiente", 0)
+          const hoy = todayArgentina()
+          tieneVencidos = comprobantes?.some((c) => c.fecha_vencimiento && c.fecha_vencimiento < hoy) || false
+        }
 
         let estadoCuenta: "libre" | "pendiente" | "vencido"
         if (saldoTotal === 0) {
@@ -77,6 +86,8 @@ export async function GET(request: NextRequest) {
             estado: estadoCuenta,
             saldo_total: saldoTotal,
             tiene_vencidos: tieneVencidos,
+            deuda_vencida: venc?.vencida ?? null,
+            deuda_a_vencer: venc?.a_vencer ?? null,
           },
         }
       }),
