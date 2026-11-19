@@ -293,3 +293,24 @@ Cambio solo de servidor, compatible con la APK instalada (los rechazos de negoci
 - El primer conteo sobre una entrega "borrador" (la crea la oficina al subir la factura antes de que llegue la mercadería) la pasa a "en proceso" y la orden a "recibida en parte": desde ahí la oficina ya no puede cancelar ni editar la orden.
 - La oficina ya no puede finalizar la orden mientras una entrega con conteos sigue abierta (409 "el depósito todavía está contando la entrega N").
 - Para una próxima APK (opcional): al recibir `orden_cerrada`, sacar la orden de la lista local sin esperar la próxima sincronización.
+
+## Condiciones de pago, fase 4 — lo que deja listo el servidor (fase 3, 19/11/2026, rama `cc-condiciones`)
+
+Lo hizo cuentas corrientes (servidor y ERP). La parte visual de las apps es la **fase 4**. Migración `supabase/migrations/20261119q_deuda_vencida.sql` (**sin aplicar**; sin ella las respuestas traen `null` en los campos nuevos y nada se rompe).
+
+### Deuda vencida / a vencer (App Vendedor: filtro "Deuda vencida / Deuda a vencer" en Mis clientes)
+- **Fuente única en la base:** `v_deuda_vencimiento` (todos) y `cc_deuda_vencimiento(p_cliente_id)` (uno) → `cliente_id, saldo, vencida, a_vencer, vencimiento_mas_viejo, proximo_vencimiento`. Desde TS: `deudaVencidaClientes(supabase, ids)` / `deudaVencidaCliente(supabase, id)` en `lib/cuenta-corriente/deuda-vencida.ts`.
+- **Regla:** cada débito vence en su `fecha_vencimiento` (o su fecha si no tiene); los créditos y pagos a cuenta sin imputar se aplican a lo más viejo; la deuda sin comprobante (ajustes de la apertura) cuenta como vencida. **Vencida** = vencimiento anterior a hoy; **a vencer** = el resto; `vencida + a_vencer = saldo`. Saldo ≤ 0: 0 y 0.
+- **Sin señal:** la misma regla en `repartirVencimientos(saldo, debitos, hoy)` (`lib/cuenta-corriente/vencimientos.ts`, puro). Usar la del servidor cuando haya.
+- **Para la réplica del vendedor:** agregar `v_deuda_vencimiento` al dataset de clientes (`lib/mobile/sync/vendedor.ts`) — el servidor de la sync es de la fase 4.
+- `/api/clientes/saldos` y `/api/clientes` ya devuelven `deuda_vencida`, `deuda_a_vencer` y `proximo_vencimiento` junto al saldo.
+
+### Freno de entrega para ANTICIPADO (App Chofer)
+- **Regla de Juan:** la condición es la del pedido (`condicion_pago_tipo_pedido`) o la de la ficha. Si es **anticipado**, el pedido se toma, prepara y factura, pero **no se entrega sin un cobro registrado** para él. Alcanza con el cobro cargado en la app (pendiente de rendir); no hace falta que el ERP lo confirme. Nada frena la toma de pedidos.
+- **Servidor:** `PATCH /api/chofer/viaje/[id]/parada` (y el outbox `viaje.parada`, que usa la misma ruta) responde **409** `{ codigo: "ANTICIPADO_SIN_COBRO", error, mensaje: "Este cliente paga por ANTICIPADO: registrá el cobro antes de entregar.", pedidos: [números] }` a "entregado" / "entregado parcial". Por la cola llega como rechazo definitivo con ese texto: **mostrarlo tal cual**.
+- **Cuenta como cobro registrado:** un anticipo del pedido, un cobro (no rechazado ni anulado) imputado a sus comprobantes, comprobantes ya en $0, o **un cobro del cliente registrado en ese mismo viaje**.
+- **La hoja del viaje** (`paradas[]`) trae `anticipado_sin_cobro: string[]` (números de pedido). Qué tiene que hacer la app:
+  - con algo ahí, "Confirmar parada" (entregado / parcial) deshabilitado con el texto `TEXTO_ANTICIPADO_SIN_COBRO` y el botón de cobrar a mano;
+  - sin señal: si se registró un cobro local para ese cliente en el viaje, ya se puede confirmar (es lo mismo que acepta el servidor).
+  - Texto, código y regla en `@gm/cobro`: `TEXTO_ANTICIPADO_SIN_COBRO`, `CODIGO_ANTICIPADO_SIN_COBRO`, `anticipadoSinCobro`, `condicionPagoEfectiva`.
+- **Mostrador** (`/api/mostrador/entregar`, web): anticipado sin cobro → 409 `ANTICIPADO_SIN_COBRO`; con el cobro registrado se entrega aunque quede pendiente de confirmar en /caja.

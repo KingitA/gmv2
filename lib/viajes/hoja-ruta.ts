@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { creditosAplicadosA, getSaldosClientes, saldoDeParada, valorDevolucionesDeViaje } from "@/lib/cuenta-corriente/saldo"
 import { palletsDePedidos } from "./bultos"
+import { anticipadosSinCobro } from "@/lib/cobranzas/anticipado"
 import { fechaCorta, sumarDiasISO } from "@/lib/formato"
 
 /**
@@ -83,6 +84,9 @@ export interface ParadaHoja {
   cobro_cumplido: boolean  // cobrado + descuentos_cobro >= minimo_exigido
   /** #23: bloqueada y sin cumplir lo exigido → solo se puede marcar "no entregado" */
   entrega_bloqueada: boolean
+  /** Condiciones de pago, fase 3: pedidos ANTICIPADO de la parada sin cobro registrado
+   *  (números). Con alguno, el servidor rechaza "entregado" (ANTICIPADO_SIN_COBRO). */
+  anticipado_sin_cobro: string[]
   pagos: PagoHoja[]
 }
 
@@ -267,6 +271,10 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
 
   // P2-28: créditos ya aplicados a cada comprobante (10 % contado, NC de devolución)
   const creditosDe = await creditosAplicadosA(supabase, (comprobantes || []).map((c: any) => c.id))
+  // Fase 3: anticipados sin cobro registrado (freno de entrega)
+  const sinCobro = await anticipadosSinCobro(supabase, pedidoIds, { viajeId })
+  const sinCobroDe = new Map<string, string[]>()
+  for (const p of sinCobro) sinCobroDe.set(p.cliente_id, [...(sinCobroDe.get(p.cliente_id) || []), p.numero])
   const compsPorPedido = new Map<string, any[]>()
   for (const c of comprobantes || []) {
     if (!compsPorPedido.has(c.pedido_id)) compsPorPedido.set(c.pedido_id, [])
@@ -419,6 +427,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       devuelto,
       cobro_cumplido: cumplido,
       entrega_bloqueada: !!pa.bloquear_entrega && !cumplido,
+      anticipado_sin_cobro: sinCobroDe.get(pa.cliente_id) || [],
       pagos: pagosCli,
     }
   })
