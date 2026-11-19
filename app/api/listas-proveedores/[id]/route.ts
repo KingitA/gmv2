@@ -1,7 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { vistaPreviaLista, type FiltroLista } from '@/lib/compras/listas-servidor';
+import { cambiosDeCostoDeLista, vistaPreviaLista, type FiltroLista } from '@/lib/compras/listas-servidor';
 
 // GET /api/listas-proveedores/[id]?umbral=15&filtro=cambian&pagina=1
 // (las cuentas del resumen son de toda la lista; los renglones vienen de a 200 y ya filtrados)
@@ -123,5 +123,53 @@ export async function PATCH(
     } catch (error: any) {
         console.error('[Lista PATCH] Error:', error);
         return NextResponse.json({ error: `No se pudo guardar el cambio. Detalle para sistemas: ${error.message || error}` }, { status: 500 });
+    }
+}
+
+// DELETE /api/listas-proveedores/[id]
+// Elimina una lista (con sus renglones y su archivo) SOLO si no cambió ningún costo: una pendiente,
+// una programada, o una aplicada en la que todos los renglones ya estaban igual (una de prueba).
+// Si cambió el costo de algún artículo NO se elimina: es el respaldo de ese cambio en el historial.
+export async function DELETE(
+    _request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const auth = await requireAuth();
+    if (auth.error) return auth.error;
+    try {
+        const { id } = await params;
+        const supabase = createAdminClient();
+        const { data: lista } = await supabase.from('listas_proveedores').select('*').eq('id', id).maybeSingle();
+        if (!lista) return NextResponse.json({ success: true, ya_eliminada: true });
+
+        const cambios = await cambiosDeCostoDeLista(supabase, id);
+        if (cambios === null) {
+            return NextResponse.json({ error: 'No se pudo comprobar si la lista cambió algún costo (falta la migración 20261119a o falló la consulta). No se eliminó.', codigo: 'no_se_pudo_comprobar' }, { status: 409 });
+        }
+        if (cambios > 0) {
+            return NextResponse.json({ error: `Esta lista cambió el costo de ${cambios} artículo(s): no se puede eliminar, es el respaldo de esos cambios en el historial de costo.`, codigo: 'cambio_costos' }, { status: 409 });
+        }
+
+        // Los renglones se van con la lista (ON DELETE CASCADE). Si justo otra persona la estaba aplicando,
+        // la comprobación de abajo lo deja en el registro del servidor.
+        const { data: borradas, error } = await supabase.from('listas_proveedores').delete().eq('id', id).select('id');
+        if (error) throw error;
+        if (!borradas?.length) return NextResponse.json({ success: true, ya_eliminada: true });
+        const despues = await cambiosDeCostoDeLista(supabase, id);
+        if (despues && despues > 0) console.error(`[Lista DELETE] la lista ${id} se eliminó pero quedó historial de costo con su id (${despues})`);
+
+        // El archivo original (bucket privado)
+        const rutas: string[] = [];
+        if (Array.isArray(lista.archivos)) for (const a of lista.archivos) if (a?.ruta) rutas.push(String(a.ruta));
+        if (rutas.length === 0 && lista.storage_path) rutas.push(String(lista.storage_path));
+        for (const r of rutas) {
+            const enAdjuntos = r.startsWith('attachments:');
+            // los adjuntos de un mail no se borran: son del mail, no de la lista
+            if (!enAdjuntos) await supabase.storage.from('comprobantes').remove([r]).then(() => null, () => null);
+        }
+        return NextResponse.json({ success: true });
+    } catch (error: any) {
+        console.error('[Lista DELETE] Error:', error);
+        return NextResponse.json({ error: `No se pudo eliminar la lista. Detalle para sistemas: ${error.message || error}` }, { status: 500 });
     }
 }

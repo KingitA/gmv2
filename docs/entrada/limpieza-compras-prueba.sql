@@ -23,7 +23,8 @@
 --   · Órdenes de pago: NO se borran (tienen numeración, caja, cheques y retenciones). Las de prueba
 --     hay que ANULARLAS antes desde la pantalla (usa op_anular, que deshace todo). El PASO 2 corta
 --     con un mensaje si queda alguna orden de pago confirmada que pagó algo de prueba.
---   · Artículos, proveedores, listas de precios y precios de venta.
+--   · Artículos, proveedores y precios de venta. De las listas de precios de proveedor solo las de
+--     prueba: las que se llaman "PRUEBA…" (nombre ILIKE 'PRUEBA%'), con sus renglones.
 --
 -- Los VENCIMIENTOS de prueba (los estimados de las órdenes, las cuotas de sus comprobantes; entre
 -- ellos HORNAL $218.969,34 al 17/12/2026 y las cuotas de OC-000012 y OC-000013) se CANCELAN
@@ -120,6 +121,13 @@ SELECT '12 PARA DECIDIR A MANO: órdenes de compra anteriores (OC-000001 a 00000
        (SELECT nombre FROM proveedores p WHERE p.id = o.proveedor_id), NULL, o.estado, to_char(o.fecha_orden AT TIME ZONE 'America/Argentina/Buenos_Aires', 'DD/MM/YYYY')
   FROM ordenes_compra o
  WHERE o.id NOT IN (SELECT id FROM oc_prueba) AND o.estado NOT IN ('finalizada', 'cancelada')
+UNION ALL
+SELECT '13 listas de precios de proveedor de PRUEBA (se borran con sus renglones)', l.nombre || ' — ' || (SELECT count(*) FROM listas_proveedores_items i WHERE i.lista_id = l.id) || ' renglones',
+       (SELECT nombre FROM proveedores p WHERE p.id = l.proveedor_id),
+       (SELECT count(*) FROM precios_compra_historial h WHERE h.lista_proveedor_id = l.id)::numeric,
+       l.estado || ' (importe = cambios de costo que dejó; si no es 0, esos costos NO se devuelven)', to_char(l.fecha_vigencia, 'DD/MM/YYYY')
+  FROM listas_proveedores l
+ WHERE l.nombre ILIKE 'PRUEBA%'
 ORDER BY 1, 2;
 
 -- Totales del PASO 1 (correr aparte si se quiere el resumen):
@@ -256,6 +264,18 @@ WITH x AS (DELETE FROM ordenes_compra_detalle d WHERE d.orden_compra_id IN (SELE
 INSERT INTO _resumen SELECT 9, 'renglones de órdenes de compra borrados', count(*) FROM x;
 WITH x AS (DELETE FROM ordenes_compra o WHERE o.id IN (SELECT id FROM _oc) RETURNING 1)
 INSERT INTO _resumen SELECT 9, 'órdenes de compra borradas', count(*) FROM x;
+
+-- 10. Listas de precios de proveedor de PRUEBA (nombre "PRUEBA…"), con sus renglones.
+--     Si alguna cambió costos, su historial se borra pero los costos de los artículos NO se
+--     devuelven (igual que en el punto 4): la sección 13 del PASO 1 dice cuántos cambios dejó.
+CREATE TEMP TABLE _listas ON COMMIT DROP AS
+  SELECT l.id FROM listas_proveedores l WHERE l.nombre ILIKE 'PRUEBA%';
+WITH x AS (DELETE FROM precios_compra_historial h WHERE h.lista_proveedor_id IN (SELECT id FROM _listas) RETURNING 1)
+INSERT INTO _resumen SELECT 10, 'historial de costo de listas de prueba borrado', count(*) FROM x;
+WITH x AS (DELETE FROM listas_proveedores_items i WHERE i.lista_id IN (SELECT id FROM _listas) RETURNING 1)
+INSERT INTO _resumen SELECT 10, 'renglones de listas de prueba borrados', count(*) FROM x;
+WITH x AS (DELETE FROM listas_proveedores l WHERE l.id IN (SELECT id FROM _listas) RETURNING 1)
+INSERT INTO _resumen SELECT 10, 'listas de precios de prueba borradas — los archivos quedan en el almacenamiento', count(*) FROM x;
 
 -- Lo que se hizo (tiene que coincidir con lo que listó el PASO 1)
 SELECT paso, que, filas FROM _resumen ORDER BY paso, que;

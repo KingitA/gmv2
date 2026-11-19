@@ -412,6 +412,14 @@ Sin migración: la cuenta está en `lib/compras/diferencias.ts` (`faltante_de`, 
 - **F. Mail:** el evento de agenda dice "ir a Listas de precios" y trae el enlace a la lista; se guardan todos los adjuntos (antes solo el último, y en una de las dos ramas ninguno).
 - **Sin la migración `20261119a` no se aplica ninguna lista** (la pantalla dice que falta y no cambia ningún precio): la forma anterior ignoraba la vigencia, escondía errores y escribía el precio por bulto como precio por unidad.
 
+### Pulido después de la prueba en producción (19/11, rama `entrada-t2-listas-pulido`)
+
+- **Importar lista:** el proveedor es obligatorio (el botón no se habilita sin él) y se elige en qué viene el precio: como lo manda siempre ese proveedor, por unidad o por bulto.
+- **Vista previa:** de los descuentos del archivo se muestran solo los que vienen.
+- **Lista aplicada:** los contadores dicen cuántos artículos cambiaron de costo y cuántos ya estaban igual.
+- **Eliminar lista:** se puede eliminar una lista (con sus renglones y su archivo) solo si no cambió ningún costo, es decir, si no dejó filas en `precios_compra_historial`: una pendiente, una programada o una aplicada "sin cambios". Si cambió algún costo no se elimina. Los adjuntos de un mail no se borran.
+- **Limpieza de prueba:** `docs/entrada/limpieza-compras-prueba.sql` suma las listas llamadas "PRUEBA…" con sus renglones.
+
 ### Cómo probarlo (Tanda 2-C)
 
 1. Aplicar `20261119a` y `20261119b` (en ese orden; la b necesita la `20261118e`).

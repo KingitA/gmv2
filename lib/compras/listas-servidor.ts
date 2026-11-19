@@ -180,6 +180,11 @@ export interface VistaPreviaLista {
   tope_pct: number
   archivos: Array<{ nombre: string; enlace: string }>
   umbral_pct: number
+  /**
+   * Cambios de costo que esta lista dejó en el historial (precios_compra_historial). 0 = no cambió
+   * ningún costo: se puede eliminar. null = no se pudo saber (falta la migración 20261119a).
+   */
+  cambios_de_costo: number | null
   /** Solo una página de renglones (los que pasan el filtro); `total_filtrados` dice cuántos hay */
   items: ItemVistaPrevia[]
   pagina: number
@@ -200,6 +205,9 @@ export interface VistaPreviaLista {
     sin_articulo: number
     con_error: number
     aplicados: number
+    /** De los ya aplicados: cuántos cambiaron el costo del artículo y cuántos ya estaban igual */
+    aplicados_con_cambio: number
+    aplicados_sin_cambio: number
     venta_desactualizados: number
     venta_cambian_solos: number
   }
@@ -315,6 +323,7 @@ export async function vistaPreviaLista(supabase: any, listaId: string, op: { umb
     tope_pct: tope,
     archivos: await enlacesArchivosLista(supabase, lista),
     umbral_pct: umbral,
+    cambios_de_costo: await cambiosDeCostoDeLista(supabase, listaId),
     items: op.todos ? filtrados : filtrados.slice((pagina - 1) * porPagina, pagina * porPagina),
     pagina,
     por_pagina: porPagina,
@@ -332,8 +341,17 @@ export async function vistaPreviaLista(supabase: any, listaId: string, op: { umb
       sin_articulo: todos.filter((i) => i.estado_item === "ignorado").length,
       con_error: todos.filter((i) => i.estado_item === "error").length,
       aplicados: todos.filter((i) => i.estado_item === "aplicado").length,
+      aplicados_con_cambio: todos.filter((i) => i.estado_item === "aplicado" && cambia(i)).length,
+      aplicados_sin_cambio: todos.filter((i) => i.estado_item === "aplicado" && !cambia(i)).length,
       venta_desactualizados: conCambio.filter((i) => i.venta?.tipo === "desactualizado").length,
       venta_cambian_solos: conCambio.filter((i) => i.venta?.tipo === "cambia_solo").length,
     },
   }
+}
+
+/** Cuántos cambios de costo dejó una lista en el historial. null si no se puede saber. */
+export async function cambiosDeCostoDeLista(supabase: any, listaId: string): Promise<number | null> {
+  const { count, error } = await supabase.from("precios_compra_historial").select("id", { count: "exact", head: true }).eq("lista_proveedor_id", listaId)
+  if (error) { console.warn("[listas] no se pudo contar el historial de la lista:", error.message); return null }
+  return count ?? 0
 }

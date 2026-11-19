@@ -8,7 +8,7 @@
 // Aplicar no toca precios de venta. Con vigencia futura la lista queda programada.
 
 import { useCallback, useEffect, useState } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import { InputMonto } from "@/components/ui/input-monto"
 import { useConfirmar } from "@/components/ui/confirmar"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
-import { ArrowLeft, CalendarClock, CheckCircle, FileText, Loader2, TrendingDown, TrendingUp, TriangleAlert } from "lucide-react"
+import { ArrowLeft, CalendarClock, CheckCircle, FileText, Loader2, Trash2, TrendingDown, TrendingUp, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { fecha, hoyISO, moneda, porcentaje } from "@/lib/formato"
 import { cant } from "@/lib/deposito/unidades"
@@ -33,12 +33,17 @@ const ESTADO_LISTA: Record<string, { texto: string; clase: string }> = {
 }
 const ESTADO_ITEM: Record<string, string> = { pendiente: "se aplica", revisar: "por revisar", ignorado: "no se aplica", aplicado: "aplicado", error: "con error" }
 
-const descuentos = (d: Array<number | null>) => d.map((x) => (x == null ? "·" : `${cant(x)} %`)).join(" + ")
+// Solo los descuentos que vienen en el archivo (los vacíos no se tocan y no se muestran)
+const descuentos = (d: Array<number | null>) => {
+    const vienen = d.filter((x): x is number => x != null)
+    return vienen.length > 0 ? vienen.map((x) => `${cant(x)} %`).join(" + ") : "sin dato (no se tocan)"
+}
 const descuentosDe = (d: number[]) => (d.some((x) => x > 0) ? d.filter((x) => x > 0).map((x) => `${cant(x)} %`).join(" + ") : "sin descuento")
 
 export default function DetalleListaPage() {
     const params = useParams()
     const listaId = params.id as string
+    const router = useRouter()
     const { confirmar, dialogo } = useConfirmar()
     const [vista, setVista] = useState<VistaPreviaLista | null>(null)
     const [items, setItems] = useState<ItemVistaPrevia[]>([])
@@ -179,6 +184,21 @@ export default function DetalleListaPage() {
         }
     }
 
+    // Una lista que no cambió ningún costo se puede eliminar (pendiente, programada, o aplicada "sin cambios")
+    const eliminar = async () => {
+        const ok = await confirmar({
+            titulo: "¿Eliminar esta lista?",
+            detalle: `${lista.nombre || "Lista de precios"} — ${vista.proveedor_nombre || "sin proveedor"}\n\nSe borran la lista, sus ${resumen.total} renglón(es) y el archivo. No cambió el costo de ningún artículo, así que no queda nada que deshacer. No se puede recuperar.`,
+            confirmar: "Eliminar lista", peligro: true,
+        })
+        if (!ok) return
+        const res = await fetch(`/api/listas-proveedores/${listaId}`, { method: "DELETE" })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) { toast.error(data.error || "No se pudo eliminar la lista", { duration: 12000 }); return }
+        toast.success("Lista eliminada")
+        router.push("/listas-proveedores")
+    }
+
     const chip = (f: FiltroLista, texto: string, n: number, clase = "") => (
         <Button key={f} size="sm" variant={filtro === f ? "default" : "outline"} className={`h-7 ${filtro === f ? "" : clase}`} onClick={() => cambiarFiltro(f)}>{texto} ({n})</Button>
     )
@@ -207,6 +227,11 @@ export default function DetalleListaPage() {
                         </a>
                     ))}
                     {lista.estado === "programada" && <Button variant="outline" onClick={() => patch({ accion: "desprogramar" }, "La lista volvió a pendiente")}>Sacar de programada</Button>}
+                    {vista.cambios_de_costo === 0 && !trabajando && (
+                        <Button variant="outline" className="gap-2 text-red-700 border-red-300 hover:bg-red-50" onClick={eliminar} title="Esta lista no cambió ningún costo: se puede eliminar">
+                            <Trash2 className="h-4 w-4" /> Eliminar lista
+                        </Button>
+                    )}
                     {editable && lista.estado !== "programada" && futura && (
                         <Button onClick={() => aplicar(false)} disabled={trabajando || resumen.se_aplican === 0} className="gap-2 bg-violet-600 hover:bg-violet-700">
                             {trabajando ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />} Programar para el {fecha(lista.fecha_vigencia)}
@@ -246,6 +271,12 @@ export default function DetalleListaPage() {
                 </div>
             </div>
 
+            {lista.estado === "aplicada" && (
+                <div className="p-3 border rounded-lg bg-muted/40 text-sm">
+                    Lista aplicada: {resumen.aplicados_con_cambio} artículo(s) cambiaron de costo y {resumen.aplicados_sin_cambio} ya estaban igual.
+                    {vista.cambios_de_costo != null && vista.cambios_de_costo > 0 ? " No se puede eliminar: es el respaldo de esos cambios en el historial de costo." : ""}
+                </div>
+            )}
             {lista.estado === "programada" && (
                 <div className="p-3 border border-violet-300 bg-violet-50 rounded-lg text-sm text-violet-900">
                     Esta lista está <strong>programada</strong>: se aplica sola el {fecha(lista.fecha_vigencia)}, con los mismos controles (lo que supere el tope queda por revisar, no se aplica). Hasta ese día no cambia ningún precio.
@@ -278,7 +309,13 @@ export default function DetalleListaPage() {
 
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <Card><CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground">Renglones</CardTitle></CardHeader><CardContent><div className="text-xl font-bold">{resumen.total}</div><div className="text-xs text-muted-foreground">{resumen.aplicados} ya aplicados</div></CardContent></Card>
-                <Card><CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground">Cambian el costo</CardTitle></CardHeader><CardContent><div className="text-xl font-bold">{resumen.con_cambio}</div><div className="text-xs text-muted-foreground">{resumen.sin_cambio} ya estaban igual</div></CardContent></Card>
+                <Card><CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground">Cambian el costo</CardTitle></CardHeader><CardContent>
+                    {resumen.aplicados > 0 && resumen.se_aplican === 0 ? (
+                        <><div className="text-xl font-bold">{resumen.aplicados_con_cambio}</div><div className="text-xs text-muted-foreground">cambiaron al aplicar · {resumen.aplicados_sin_cambio} ya estaban igual</div></>
+                    ) : (
+                        <><div className="text-xl font-bold">{resumen.con_cambio}</div><div className="text-xs text-muted-foreground">{resumen.sin_cambio} ya estaban igual{resumen.aplicados > 0 ? ` · ya aplicados: ${resumen.aplicados_con_cambio} cambiaron, ${resumen.aplicados_sin_cambio} igual` : ""}</div></>
+                    )}
+                </CardContent></Card>
                 <Card><CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground">Subas / bajas de más de {cant(vista.umbral_pct)} %</CardTitle></CardHeader><CardContent><div className={`text-xl font-bold ${resumen.subas_grandes + resumen.bajas_grandes > 0 ? "text-orange-600" : ""}`}>{resumen.subas_grandes} / {resumen.bajas_grandes}</div></CardContent></Card>
                 <Card><CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground">No se aplican solos / por revisar</CardTitle></CardHeader><CardContent><div className={`text-xl font-bold ${resumen.frenados + resumen.por_revisar > 0 ? "text-orange-600" : ""}`}>{resumen.frenados + resumen.lista_posterior} / {resumen.por_revisar}</div><div className="text-xs text-muted-foreground">{resumen.sin_articulo} sin artículo</div></CardContent></Card>
                 <Card><CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground">Precio de venta a revisar</CardTitle></CardHeader><CardContent><div className={`text-xl font-bold ${resumen.venta_desactualizados > 0 ? "text-amber-600" : ""}`}>{resumen.venta_desactualizados}</div><div className="text-xs text-muted-foreground">{resumen.venta_cambian_solos} cambian solos</div></CardContent></Card>
@@ -326,7 +363,7 @@ export default function DetalleListaPage() {
                                         <TableCell className="text-sm">
                                             <div className="font-medium">{i.codigo_proveedor ? `${i.codigo_proveedor} — ` : ""}{i.descripcion_proveedor || "(sin descripción)"}</div>
                                             <div className="text-xs text-muted-foreground">
-                                                precio {i.archivo.precio_compra != null ? `${moneda(i.archivo.precio_compra)}${c && c.factor > 1 ? ` por bulto de ${cant(c.factor)} u` : ""}` : "sin dato (no se toca)"} · desc. {descuentos(i.archivo.descuentos)} <span title="· = vacío en el archivo: ese descuento no se toca">ⓘ</span>
+                                                precio {i.archivo.precio_compra != null ? `${moneda(i.archivo.precio_compra)}${c && c.factor > 1 ? ` por bulto de ${cant(c.factor)} u` : ""}` : "sin dato (no se toca)"} · desc. {descuentos(i.archivo.descuentos)}
                                             </div>
                                         </TableCell>
                                         <TableCell className="text-sm">
