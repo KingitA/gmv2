@@ -46,6 +46,8 @@ import { ErrorRetiro, registrarRetiro } from "@/lib/cuenta-corriente/retiro"
 import { asignarPedidoAlViaje } from "@/lib/vendedor/viajes-reparto"
 import { llamarRuta } from "./rutas"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
+import { columnasPedido } from "@/lib/pedidos/condicion-pago-pedido"
+import type { CondicionPago } from "@/lib/clientes/condicion-pago"
 
 const ROLES = ["vendedor"]
 
@@ -140,6 +142,11 @@ interface CondPedido {
   lista_limpieza_pedido_id?: string | null; metodo_limpieza_pedido?: string | null
   lista_perf0_pedido_id?: string | null; metodo_perf0_pedido?: string | null
   lista_perf_plus_pedido_id?: string | null; metodo_perf_plus_pedido?: string | null
+  /**
+   * Condición y forma de pago SOLO este pedido (condiciones de pago, fase 4 — 19/11/2026).
+   * Ausente = la de la ficha (la copia createPedido). Nunca frena el pedido.
+   */
+  condicion_pago_pedido?: Partial<CondicionPago> | null
 }
 
 /** Columnas de lista/método por segmento del pedido (mismo nombre en el payload y en la tabla) */
@@ -414,6 +421,13 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
     throw e
    }
   })
+
+  // Condición de pago solo este pedido (fase 4): pisa la copiada de la ficha. Best effort:
+  // si algo falla el pedido igual queda tomado (con la condición de la ficha).
+  if (p.cond?.condicion_pago_pedido && typeof p.cond.condicion_pago_pedido === "object") {
+    const { error: eCond } = await ctx.supabase.from("pedidos").update(columnasPedido(p.cond.condicion_pago_pedido)).eq("id", pedidoId!)
+    if (eCond) console.error("[outbox vendedor] condición de pago del pedido:", eCond.message)
+  }
 
   // Levantado desde un viaje del calendario: queda en ese viaje. Si ya no se puede (salió,
   // está en otro), el pedido queda suelto (la oficina lo asigna) y se avisa el motivo.
