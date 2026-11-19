@@ -3,6 +3,8 @@ import { requirePermiso } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { moneda } from "@/lib/formato"
 import { POST as registrarCobro } from "@/app/api/pagos-clientes/route"
+import { CODIGO_ANTICIPADO_SIN_COBRO, TEXTO_ANTICIPADO_SIN_COBRO } from "@/lib/cobranzas/reglas-cobro"
+import { anticipadosSinCobro } from "@/lib/cobranzas/anticipado"
 
 // POST /api/mostrador/entregar — entregar un pedido en mostrador (P2-40).
 //
@@ -15,6 +17,9 @@ import { POST as registrarCobro } from "@/app/api/pagos-clientes/route"
 //    queda pendiente hasta que se confirme en /caja, y recién ahí se entrega.
 //  - La entrega la hace el servidor y queda quién (pedidos.actualizado_por) y
 //    cuándo (historial de estados, P2-20).
+//  - ANTICIPADO (condiciones de pago, fase 3): sin cobro registrado no se entrega
+//    (409 ANTICIPADO_SIN_COBRO); con el cobro registrado se entrega aunque quede
+//    pendiente de confirmar en /caja (regla de Juan: "se registra el cobro y se entrega").
 
 const ESTADOS_PARA_RETIRAR = ["listo_para_retirar", "facturado"]
 
@@ -28,6 +33,11 @@ async function saldoDelPedido(sb: any, pedidoId: string) {
   if (error) throw error
   const comps: { id: string; saldo: number }[] = (data || []).map((c: any) => ({ id: c.id as string, saldo: Math.max(0, Number(c.saldo_pendiente) || 0) }))
   return { comps, total: Math.round(comps.reduce((s, c) => s + c.saldo, 0) * 100) / 100 }
+}
+
+async function esAnticipado(sb: any, pedidoId: string): Promise<boolean> {
+  const { data } = await sb.from("pedidos").select("condicion_pago_tipo_pedido, clientes(condicion_pago_tipo)").eq("id", pedidoId).maybeSingle()
+  return (data?.condicion_pago_tipo_pedido || (data as any)?.clientes?.condicion_pago_tipo) === "anticipado"
 }
 
 export async function POST(request: NextRequest) {
@@ -69,9 +79,10 @@ export async function POST(request: NextRequest) {
     if (saldo.total > 0.009) {
       const metodos = Array.isArray(body?.cobro?.metodos) ? body.cobro.metodos : []
       if (!metodos.length) {
+        const anticipado = (await anticipadosSinCobro(sb, [pedidoId])).length > 0
         return NextResponse.json({
-          error: `Tiene saldo de ${moneda(saldo.total)}: cobralo antes de entregar.`,
-          error_code: "PEDIDO_CON_SALDO",
+          error: anticipado ? TEXTO_ANTICIPADO_SIN_COBRO : `Tiene saldo de ${moneda(saldo.total)}: cobralo antes de entregar.`,
+          error_code: anticipado ? CODIGO_ANTICIPADO_SIN_COBRO : "PEDIDO_CON_SALDO",
           saldo: saldo.total,
         }, { status: 409 })
       }
@@ -92,7 +103,9 @@ export async function POST(request: NextRequest) {
       if (!res.ok) return NextResponse.json({ error: cobro?.error || "No se pudo registrar el cobro" }, { status: res.status })
 
       saldo = await saldoDelPedido(sb, pedidoId)
-      if (saldo.total > 0.009) {
+      // Anticipado: con el cobro registrado (aunque esté pendiente) ya se entrega
+      const anticipadoConCobro = !(await anticipadosSinCobro(sb, [pedidoId])).length && (await esAnticipado(sb, pedidoId))
+      if (saldo.total > 0.009 && !anticipadoConCobro) {
         return NextResponse.json({
           success: true,
           entregado: false,
