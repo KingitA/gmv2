@@ -118,6 +118,8 @@ export interface ParadaHoja {
   cobro_cumplido: boolean
   /** #23: "NO ENTREGAR SIN COBRAR" y todavía no cubrió lo exigido → solo se puede marcar "no entregado". Falta en réplicas viejas. */
   entrega_bloqueada?: boolean
+  /** Condiciones de pago (19/11): números de pedido ANTICIPADO sin ningún cobro registrado (el servidor frena entregarlos). Falta en réplicas viejas. */
+  anticipado_sin_cobro?: string[]
   pagos: PagoHoja[]
 }
 export interface GastoHoja {
@@ -269,6 +271,13 @@ export interface ClienteViajeRow {
   detalle_pedidos?: Record<string, DetallePedido[]> | null
   /** 03/11: lo que ya le restó al total de cada comprobante que se cobra (= lib/mobile/sync/cuenta-comprobantes.ts). Ausente = réplica vieja */
   cuenta_comprobantes?: Record<string, MovimientoComprobante[]> | null
+  /** Condiciones de pago (19/11): texto del cliente y de cada pedido, condición y vencimiento de cada comprobante. Ausente = réplica vieja */
+  condiciones?: CondicionesCobro | null
+}
+export interface CondicionesCobro {
+  cliente: string
+  pedidos: Record<string, string>
+  comprobantes: Record<string, { condicion: string | null; vence: string | null }>
 }
 export interface MovimientoComprobante { tipo: "pago" | "devolucion" | "contado" | "credito"; concepto: string; fecha: string | null; monto: number }
 export interface ComprobanteRef { id: string; tipo_comprobante: string; numero_comprobante: string }

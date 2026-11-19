@@ -7,7 +7,7 @@ import { paradasSinResolver, type ParadaVista } from "../datos/overlay"
 import { rechazosDe, useDescargaViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
 import { AvisosAnulacion, AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, Linea, MontoInput, Pantalla, Rechazos, round2, SinDescargar, SinEnviar, useAvisoEntrante, useToast } from "../ui"
 import { GastoHoja } from "./GastoHoja"
-import { textoBultos, useResultadoParada } from "./ResultadoParada"
+import { AvisoAnticipado, textoBultos, useResultadoParada } from "./ResultadoParada"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
 
 // Hoja de ruta del chofer (= app/chofer/[viajeId]/page.tsx): paradas en el orden que armó
@@ -161,9 +161,11 @@ export function Viaje() {
             {p.bloquear_entrega ? "🔒 " : ""}COBRAR SÍ O SÍ {formatCurrency(Math.max(0, p.minimo_exigido - p.cobrado - (p.descuentos_cobro ?? 0)))}
           </p>
         )}
+        {enCurso && <AvisoAnticipado viajeId={viajeId} parada={p} />}
         {enCurso && (
-          <button onClick={() => resultado.abrir(p.id)} className="mt-3 min-h-14 w-full rounded-xl bg-green-600 py-3 text-lg font-bold text-white active:scale-95">
-            ✔ Confirmar parada
+          // Anticipado sin cobro: la parada solo se puede cerrar como "no entregado" (el servidor frena entregar)
+          <button onClick={() => resultado.abrir(p.id)} className={`mt-3 min-h-14 w-full rounded-xl py-3 text-lg font-bold active:scale-95 ${p.anticipado_bloqueado ? "border-2 border-gray-300 bg-white text-gray-500" : "bg-green-600 text-white"}`}>
+            {p.anticipado_bloqueado ? "✕ No se entregó" : "✔ Confirmar parada"}
           </button>
         )}
       </div>

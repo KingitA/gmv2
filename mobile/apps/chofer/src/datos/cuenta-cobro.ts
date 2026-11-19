@@ -4,9 +4,9 @@
 // sirve para el cliente de la parada y para cada cliente AGREGADO a un cobro conjunto.
 
 import { anticiposDeSeleccion, PEDIDO_PREFIX, pedidosContadoAEnviar, pedidosContadoAlAplicarTodo } from "@gm/cobro"
-import { fecha, redondear } from "@gm/formato"
+import { fecha, hoyISO, redondear } from "@gm/formato"
 import { origenDesdeComprado, valorDevolucionConOrigen, type CompradoConOrigen, type OrigenDevolucion } from "@gm/vendedor"
-import type { ComprobanteCobro, ComprobanteRef, CuentaCobro, MovimientoComprobante, PedidoCobro } from "../datasets"
+import type { ComprobanteCobro, ComprobanteRef, CondicionesCobro, CuentaCobro, MovimientoComprobante, PedidoCobro } from "../datasets"
 
 const r2 = (n: number) => redondear(n)
 const TIPOS_BONIFICABLES = ["FA", "FB", "FC", "PRES"]
@@ -31,6 +31,8 @@ export interface DatosCuenta {
   comprobantes_ref?: ComprobanteRef[] | null
   /** 03/11: lo que ya le restó al total de cada comprobante (ausente = réplica vieja) */
   cuenta_comprobantes?: Record<string, MovimientoComprobante[]> | null
+  /** Condiciones de pago (19/11): ausente = réplica vieja */
+  condiciones?: CondicionesCobro | null
   devoluciones: Array<{
     id: string
     monto_total: number
@@ -321,4 +323,15 @@ export function resumenComprobante(cp: ComprobanteCobro, movs: MovimientoComprob
   if (enCobro > 0.005) out.push({ concepto: "En otro cobro sin confirmar", monto: -enCobro })
   out.push({ concepto: "Debe", monto: r2(Math.max(0, saldoCobrable(cp) - contadoEsteCobro)), total: true })
   return out
+}
+
+/**
+ * Condiciones de pago, fase 4 (19/11/2026): vencimiento de un comprobante para el cobro.
+ * "Vence 25/11/2026" o "VENCIDO 10/11/2026" (vencido = antes de hoy, hora argentina). null = no se sabe.
+ */
+export function vencimientoComprobante(vence: string | null | undefined, hoy = hoyISO()): { texto: string; vencido: boolean } | null {
+  if (!vence) return null
+  const v = vence.slice(0, 10)
+  const vencido = v < hoy
+  return { texto: `${vencido ? "VENCIDO" : "Vence"} ${fecha(v)}`, vencido }
 }

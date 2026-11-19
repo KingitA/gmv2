@@ -4,7 +4,7 @@ import { ESTADO_LABEL } from "@gm/vendedor"
 import type { ComprobanteCobro, PedidoCobro } from "../datasets"
 import {
   agruparCuenta, alternarAnticipo, comprobantesDeDevolucion, devolucionAplica, etiquetaComprobante, alternarComprobante, alternarContadoPedido, alternarContadoTodo, alternarGrupo, alternarTodo, clavesDeLaCuenta,
-  fijarMonto, montoAnticipo, resumenComprobante, resumenCuenta, saldoCobrable, separarPorViaje, valorDeDevolucion, type DatosCuenta, type EstadoCuenta,
+  fijarMonto, montoAnticipo, resumenComprobante, resumenCuenta, saldoCobrable, vencimientoComprobante, separarPorViaje, valorDeDevolucion, type DatosCuenta, type EstadoCuenta,
 } from "../datos/cuenta-cobro"
 import { moneda, redondear } from "@gm/formato"
 const r2 = (n: number) => redondear(n)
@@ -54,6 +54,8 @@ export function SelectorCuenta({ datos, estado, onChange, pedidosViaje = [], onA
   // Fila de comprobante (función de render, no componente: los inputs no pierden el foco)
   const filaComprobante = (cp: ComprobanteCobro) => {
     const checked = sel[cp.id] !== undefined
+    // Condiciones de pago (19/11): cuándo vence (VENCIDO en rojo)
+    const venc = vencimientoComprobante(datos.condiciones?.comprobantes[cp.id]?.vence)
     // 03/11 (Juan): la cuenta del comprobante, no un saldo suelto
     const resumen = resumenComprobante(cp, datos.cuenta_comprobantes?.[cp.id], checked ? r.bonificacionPorComprobante[cp.id] ?? 0 : 0, `${tipoComprobanteLargo(cp.tipo_comprobante)} ${cp.numero_comprobante}`)
     return (
@@ -62,6 +64,7 @@ export function SelectorCuenta({ datos, estado, onChange, pedidosViaje = [], onA
         <input type="checkbox" checked={checked} onChange={() => onChange(alternarComprobante(estado, cp))} className="h-5 w-5 shrink-0" aria-label={`Cobrar ${cp.tipo_comprobante} ${cp.numero_comprobante}`} />
         <button onClick={() => onAbrirComprobante?.(cp)} className="flex min-h-11 min-w-0 flex-1 flex-wrap items-center gap-x-2 text-left">
           <span className="text-sky-700">📄 {cp.tipo_comprobante} <span className="font-mono text-xs underline">{cp.numero_comprobante}</span></span>
+          {venc && <span className={`text-xs ${venc.vencido ? "rounded bg-red-600 px-1.5 font-bold text-white" : "text-gray-500"}`}>{venc.texto}</span>}
           {dtosHechos.has(cp.id) && <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">Dto. ctdo</span>}
           {(cp.en_cobro || 0) > 0.005 && <span className="text-[10px] font-bold text-sky-600">🔒 {moneda(cp.en_cobro!)} en otro cobro</span>}
           <span className="ml-auto font-mono text-orange-600">{moneda(saldoCobrable(cp))}</span>
@@ -96,6 +99,7 @@ export function SelectorCuenta({ datos, estado, onChange, pedidosViaje = [], onA
     const todosCompsSel = facturado && comps.every((c) => sel[c.id] !== undefined)
     const algunoSel = comps.some((c) => sel[c.id] !== undefined)
     const conContado = estado.contadoPedidos.includes(ped.id)
+    const condPedido = datos.condiciones?.pedidos[ped.id]
     return (
       <div key={ped.id} className={`rounded-lg border ${anticipoSel || algunoSel ? "border-blue-300 bg-blue-50/40" : "border-gray-200 bg-white"}`}>
         <div className="flex items-center gap-2 px-3 py-1.5">
@@ -106,6 +110,8 @@ export function SelectorCuenta({ datos, estado, onChange, pedidosViaje = [], onA
             {!facturado && <span className="rounded border border-amber-200 bg-amber-50 px-1.5 text-[10px] text-amber-700">Sin facturar</span>}
             {ped.anticipo_pago_id && !facturado && <span className="rounded border border-gray-200 bg-gray-100 px-1.5 text-[10px] text-gray-600">ya anticipado</span>}
             {ped.estado === "sistema_viejo" && <span className="rounded border border-gray-200 bg-gray-100 px-1.5 text-[10px] text-gray-600">{ESTADO_LABEL.sistema_viejo}</span>}
+            {/* La del pedido, si no es la de la ficha (la de la ficha va arriba, en el cobro) */}
+            {condPedido && condPedido !== datos.condiciones?.cliente && <span className="w-full text-xs font-semibold text-indigo-700">{condPedido}</span>}
           </button>
           {!facturado && (
             <label className="flex min-h-11 items-center gap-1 text-xs text-amber-700"><input type="checkbox" checked={conContado} onChange={() => onChange(alternarContadoPedido(estado, ped))} className="h-5 w-5" /> 10%</label>
