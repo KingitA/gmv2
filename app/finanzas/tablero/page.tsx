@@ -215,7 +215,7 @@ export default function TableroTesoreriaPage() {
               <Card>
                 <CardContent className="pt-5">
                   <p className="text-sm font-semibold mb-3 flex items-center gap-2">
-                    <Wallet className="h-4 w-4 text-muted-foreground" /> Deuda de clientes por antigüedad
+                    <Wallet className="h-4 w-4 text-muted-foreground" /> Deuda de clientes por días de atraso
                     <span className="text-muted-foreground font-normal">· total {fmt(aging?.saldo_total ?? 0)}</span>
                   </p>
                   <div className="space-y-2">
