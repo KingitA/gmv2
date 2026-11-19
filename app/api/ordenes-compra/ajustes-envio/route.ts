@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserRoles, requireAuth } from '@/lib/auth';
+import { getUserRoles, requireAuth, requirePermiso } from '@/lib/auth';
 import { estadoCuentaGmail } from '@/lib/ai/gmail';
 import { CONFIRMACION_APAGAR_PRUEBA, comoConectarCuenta, leerAjustesEnvio } from '@/lib/compras/envio-ajustes';
 import { mailValido } from '@/lib/compras/mail-orden';
@@ -48,7 +48,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
     try {
         const roles = await getUserRoles(auth.user.id);

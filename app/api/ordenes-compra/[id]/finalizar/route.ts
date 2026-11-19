@@ -1,11 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, requirePermiso } from '@/lib/auth';
 import { cargarVerificacionOC } from '@/lib/compras/cargar-verificacion';
 import { cant } from '@/lib/deposito/unidades';
-import { moneda } from '@/lib/formato';
+import { ahoraISO, fechaHora, moneda } from '@/lib/formato';
 import { sincronizarKardexEnCamino } from '@/lib/compras/costo-y-kardex';
-import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
+import { faltaLaColumna, faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 
 // Finalizar (cerrar) una orden de compra. El control se hace ACÁ, en el servidor:
 //   · sin una factura validada que cubra lo recibido la orden queda abierta; con solo remitos
@@ -18,7 +18,10 @@ import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 //   · si la orden tiene parte con factura y parte sin factura, cada parte necesita su comprobante
 //     validado; cerrarla sin él cancela lo estimado de esa parte y hay que decirlo expresamente
 //     (`aceptar_canal_sin_comprobante: true`).
-//   POST → { aceptar_faltantes?: boolean, aceptar_canal_sin_comprobante?: boolean } · finaliza, o 409 con los mismos datos y `error`.
+//   · con diferencias de precio / cantidad sin resolver tampoco: `aceptar_diferencias: true` (queda
+//     anotado quién y cuándo en ordenes_compra.diferencias_aceptadas_*, migración 20261119o).
+//   · con una entrega que el depósito todavía está contando: 409 `recepcion_abierta`.
+//   POST → { aceptar_faltantes?, aceptar_canal_sin_comprobante?, aceptar_diferencias? } · finaliza, o 409 con los mismos datos y `error`.
 
 export async function GET(
     _request: NextRequest,
@@ -41,7 +44,7 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     try {
@@ -54,6 +57,30 @@ export async function POST(
         const { orden, control } = datos;
         if (orden.estado === 'finalizada') return NextResponse.json({ success: true, ya_finalizada: true });
         if (orden.estado === 'cancelada') return NextResponse.json({ error: 'La orden está cancelada: no se puede finalizar.', codigo: 'orden_cancelada' }, { status: 409 });
+
+        // El depósito todavía está contando una entrega (revisión 19/11): cerrar ahora dejaría ese
+        // conteo afuera del stock. Una entrega abierta sin nada contado (p. ej. el borrador que crea la oficina al subir la
+        // factura antes de que llegue la mercadería) no frena: si después cuentan, el conteo se rechaza (orden cerrada).
+        const abiertas = (datos.recepciones || []).filter((r) => r.estado === 'en_proceso' || r.estado === 'borrador');
+        if (abiertas.length > 0) {
+            const { data: contados, error: contErr } = await supabase
+                .from('recepciones_items')
+                .select('recepcion_id, cantidad_fisica, estado_linea')
+                .in('recepcion_id', abiertas.map((r) => r.id));
+            if (contErr) throw contErr;
+            const conConteo = new Set((contados || [])
+                .filter((i: any) => Number(i.cantidad_fisica || 0) > 0 || (i.estado_linea && i.estado_linea !== 'pendiente'))
+                .map((i: any) => i.recepcion_id));
+            const contando = abiertas.filter((r) => conConteo.has(r.id));
+            if (contando.length > 0) {
+                const entregas = contando.map((r) => r.numero_tanda || 1).join(', ');
+                return NextResponse.json({
+                    error: `La orden ${orden.numero_orden} no se finalizó: el depósito todavía está contando la entrega ${entregas}. Que la cierre primero (en la app o en Depósito → Recibir mercadería) y después finalizá la orden.`,
+                    codigo: 'recepcion_abierta',
+                    ...control,
+                }, { status: 409 });
+            }
+        }
 
         if (!control.puede) {
             return NextResponse.json({
@@ -86,13 +113,40 @@ export async function POST(
             }, { status: 409 });
         }
 
+        // Diferencias de precio o cantidad (o mercadería no pedida) sin resolver (revisión 19/11): una
+        // orden finalizada queda en solo lectura y ya no se pueden resolver. No se cierra sin que
+        // alguien lo acepte expresamente (`aceptar_diferencias: true`), y queda anotado quién y cuándo.
+        const conDiferencias = (datos.verificacion.filas || []).filter((f) => f.banderas.some((b) => b !== 'pendiente'));
+        if (conDiferencias.length > 0 && body?.aceptar_diferencias !== true) {
+            const lista = conDiferencias.slice(0, 5).map((f) => f.sku || f.descripcion || 'artículo').join(', ');
+            return NextResponse.json({
+                error: `La orden ${orden.numero_orden} no se finalizó: hay ${conDiferencias.length} artículo(s) con diferencias de precio o cantidad sin resolver (${lista}${conDiferencias.length > 5 ? '…' : ''}). Resolvelas en la verificación, o finalizá aceptándolas expresamente: después la orden queda en solo lectura.`,
+                codigo: 'diferencias_sin_resolver',
+                diferencias: conDiferencias.length,
+                ...control,
+            }, { status: 409 });
+        }
+        const aceptadas = conDiferencias.length > 0
+            ? {
+                diferencias_aceptadas_at: ahoraISO(),
+                diferencias_aceptadas_por: auth.user.id,
+                diferencias_aceptadas: conDiferencias.map((f) => ({ articulo_id: f.articulo_id, sku: f.sku, descripcion: f.descripcion, diferencias: f.banderas.filter((b) => b !== 'pendiente') })),
+            }
+            : {};
+
         // Solo si sigue en el estado que se leyó (dos personas finalizando a la vez: una sola escribe)
-        const { data: cambiada, error: updErr } = await supabase
+        const finalizar = (extra: Record<string, unknown>) => supabase
             .from('ordenes_compra')
-            .update({ estado: 'finalizada' })
+            .update({ estado: 'finalizada', ...extra })
             .eq('id', id)
             .eq('estado', orden.estado)
             .select('id');
+        let { data: cambiada, error: updErr } = await finalizar(aceptadas);
+        if (updErr && conDiferencias.length > 0 && faltaLaColumna(updErr)) {
+            // Migración 20261119o sin aplicar: lo aceptado queda anotado en las observaciones de la orden
+            const nota = `[${fechaHora(ahoraISO())}] Finalizada aceptando diferencias sin resolver en ${conDiferencias.length} artículo(s): ${conDiferencias.map((f) => f.sku || f.descripcion).join(', ')} (usuario ${auth.user.email || auth.user.id}).`;
+            ({ data: cambiada, error: updErr } = await finalizar({ observaciones: [orden.observaciones, nota].filter(Boolean).join('\n') }));
+        }
         if (updErr) {
             return NextResponse.json({ error: `La orden NO pasó a "finalizada": ${updErr.message}`, codigo: 'error_estado' }, { status: 500 });
         }

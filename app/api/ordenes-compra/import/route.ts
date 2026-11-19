@@ -2,10 +2,10 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from "next/server";
 import { processWithGemini, parseExcel } from "@/lib/services/ocr";
 import { matchItems } from "@/lib/services/matching";
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 
 export async function POST(request: NextRequest) {
-    const auth = await requireAuth()
+    const auth = await requirePermiso('compras')
     if (auth.error) return auth.error
     try {
         const formData = await request.formData();

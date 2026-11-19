@@ -32,7 +32,9 @@ export function CorregirRecibido({ fila, onCerrar, onHecho }: { fila: FilaVerifi
             })
             const data = await res.json().catch(() => ({}))
             if (!res.ok) { toast.error(data.error || `No se corrigió (error ${res.status})`, { duration: 12000 }); return }
-            toast.success(data.mensaje || "Cantidad recibida corregida", { duration: 8000 })
+            // El stock se movió pero el kardex no se anotó: aviso que no se va solo
+            if (data.aviso_kardex) toast.warning(data.mensaje, { duration: 30000 })
+            else toast.success(data.mensaje || "Cantidad recibida corregida", { duration: 8000 })
             onHecho()
         } finally {
             setGuardando(false)

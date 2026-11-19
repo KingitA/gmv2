@@ -117,9 +117,21 @@ export const PERMISOS = {
   equipos_moviles: ["admin"],
   /** Documentos de una recepción (fotos de remito / factura): subir, leer y borrar — depósito y oficina (18/11/2026) */
   documentos_recepcion: ["admin", "administrativo", "deposito"],
+  /**
+   * Compras de OFICINA (19/11/2026): crear, editar, enviar, cancelar y finalizar órdenes de compra;
+   * cargar, corregir, validar y eliminar comprobantes de compra; resolver diferencias y corregir lo
+   * recibido. El depósito NO: cuenta y finaliza la recepción por /api/deposito y la app (outbox), y
+   * sube fotos por /api/recepciones/[id]/ocr (permiso documentos_recepcion).
+   */
+  compras: ["admin", "administrativo"],
 } as const satisfies Record<string, readonly string[]>
 
 export type Permiso = keyof typeof PERMISOS
+
+/** Mensaje del 403 cuando el genérico no alcanza para entender qué pasó (lo muestran las pantallas tal cual) */
+const MENSAJE_SIN_PERMISO: Partial<Record<Permiso, string>> = {
+  compras: "No tenés permiso para esta operación de compras: la hace administración (usuarios admin o administrativo). No se cambió nada.",
+}
 
 interface RolesSuccess { user: User; roles: string[]; error: null }
 type RolesResult = RolesSuccess | AuthFailure
@@ -138,7 +150,7 @@ export async function requirePermiso(permiso: Permiso): Promise<RolesResult> {
     return {
       user: null,
       error: NextResponse.json(
-        { error: "No tenés permiso para esta operación.", error_code: "SIN_PERMISO", permiso },
+        { error: MENSAJE_SIN_PERMISO[permiso] ?? "No tenés permiso para esta operación.", error_code: "SIN_PERMISO", permiso },
         { status: 403 },
       ),
     }

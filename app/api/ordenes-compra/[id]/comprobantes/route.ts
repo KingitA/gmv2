@@ -1,7 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { formatearNumeroComprobante } from '@/lib/services/numero-comprobante';
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requirePermiso } from '@/lib/auth';
 import { parseFecha } from '@/lib/formato';
 import { buscarComprobanteDuplicado, mensajeDuplicado } from '@/lib/services/documento-compra';
 
@@ -18,7 +18,7 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     try {

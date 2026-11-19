@@ -283,3 +283,13 @@ Cambio solo de servidor (rama `entrada-t1b-diferencias`), compatible con la v0.5
 - `recepcion.cerrar` puede devolver `falta_recibir: N` (cantidad de artículos con pendiente).
 
 Para la próxima APK (T1-C): mostrar "2ª entrega" en la tarjeta (`entrega_numero`), avisar al finalizar que la orden queda abierta con N artículos pendientes, y E-93 (confirmación con resumen al finalizar; cargar cantidad tocando el renglón).
+
+## App Depósito → rechazos nuevos en la recepción (19/11/2026, rama `salida-compras`) — sin cambios en la app
+
+Cambio solo de servidor, compatible con la APK instalada (los rechazos de negocio ya se le muestran al operario y no se reintentan):
+
+- `recepcion.iniciar` / `recepcion.documento` sobre una orden **cancelada o finalizada** que todavía no tenía entrega: rechazo `orden_cerrada` ("La orden OC-… fue cancelada por la oficina: ya no se puede recibir mercadería…"). Antes se creaba la entrega y la orden cancelada volvía a "recibida en parte".
+- `recepcion.item`, `recepcion.conformidad` y `recepcion.cerrar` sobre una entrega cuya orden la oficina ya cerró o canceló: rechazo `orden_cerrada`. Sobre una entrega cancelada: `recepcion_cancelada`.
+- El primer conteo sobre una entrega "borrador" (la crea la oficina al subir la factura antes de que llegue la mercadería) la pasa a "en proceso" y la orden a "recibida en parte": desde ahí la oficina ya no puede cancelar ni editar la orden.
+- La oficina ya no puede finalizar la orden mientras una entrega con conteos sigue abierta (409 "el depósito todavía está contando la entrega N").
+- Para una próxima APK (opcional): al recibir `orden_cerrada`, sacar la orden de la lista local sin esperar la próxima sincronización.

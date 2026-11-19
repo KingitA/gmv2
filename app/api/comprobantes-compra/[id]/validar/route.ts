@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requirePermiso } from '@/lib/auth';
 import { nowArgentina } from '@/lib/utils';
 import { fechaISO, mediodiaAR, moneda, sumarDiasISO } from '@/lib/formato';
 import { aplicarCostoDeFactura, sincronizarKardexEnCamino } from '@/lib/compras/costo-y-kardex';
@@ -167,9 +167,22 @@ async function buscarMovimientoPrevio(supabase: any, comprobante: any, proveedor
         .select('id, tipo_movimiento, monto, numero_comprobante, referencia_tipo, referencia_id, descripcion')
         .eq('proveedor_id', proveedorId)
         .in('tipo_movimiento', TIPOS_DEUDA_CC)
-        .in('referencia_tipo', ['orden_compra', 'gmail']);
+        .in('referencia_tipo', ['orden_compra', 'gmail', 'comprobante_compra']);
     if (error) throw error;
-    const sueltos: any[] = movs || [];
+    // 'comprobante_compra' solo si es HUÉRFANO: el comprobante al que apunta ya no existe (se eliminó
+    // sin deshacer su deuda, antes del 19/11). Si se vuelve a cargar, es su deuda: se adopta, no se duplica.
+    const deComprobante = (movs || []).filter((m: any) => m.referencia_tipo === 'comprobante_compra' && m.referencia_id);
+    const existentes = new Set<string>();
+    if (deComprobante.length > 0) {
+        const ids = [...new Set(deComprobante.map((m: any) => String(m.referencia_id)))];
+        for (let i = 0; i < ids.length; i += 200) {
+            const { data: comps, error: compErr } = await supabase.from('comprobantes_compra').select('id').in('id', ids.slice(i, i + 200));
+            if (compErr) throw compErr;
+            for (const c of comps || []) existentes.add(c.id);
+        }
+    }
+    const huerfano = (m: any) => m.referencia_tipo === 'comprobante_compra' && !existentes.has(String(m.referencia_id));
+    const sueltos: any[] = (movs || []).filter((m: any) => m.referencia_tipo !== 'comprobante_compra' || huerfano(m));
     if (sueltos.length === 0) return null;
 
     const pesos = (m: any) => `$${Math.abs(Number(m.monto || 0))}`;
@@ -201,6 +214,8 @@ async function buscarMovimientoPrevio(supabase: any, comprobante: any, proveedor
         const k = normalizarNumeroComprobante(m.numero_comprobante);
         if (k && clavesAjenas.has(k)) return false;
         if (m.referencia_tipo === 'orden_compra') return !!ocId && m.referencia_id === ocId;
+        // huérfano de un comprobante eliminado: el número pudo leerse distinto al volver a cargarlo
+        if (m.referencia_tipo === 'comprobante_compra') return mismoImporte(m);
         return !k && mismoImporte(m); // 'gmail' sin número
     });
     if (candidatos.length === 0) return null;
@@ -431,7 +446,7 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     try {

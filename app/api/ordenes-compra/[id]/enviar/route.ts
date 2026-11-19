@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, requirePermiso } from '@/lib/auth';
 import { enviarMailGmail, estadoCuentaGmail } from '@/lib/ai/gmail';
 import { cargarOrdenCompleta, type OrdenCompleta } from '@/lib/compras/orden-completa';
 import { datosEmpresa, excelDeOrden, lineasCondicion, nombreArchivoOrden, pdfDeOrden } from '@/lib/compras/orden-archivos';
@@ -113,7 +113,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
  * `simular: true` arma todo (adjuntos y mensaje) y NO envía ni registra nada: sirve para probar.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     try {

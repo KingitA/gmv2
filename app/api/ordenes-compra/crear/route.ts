@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requirePermiso } from '@/lib/auth';
 import { hoyISO, parseFecha } from '@/lib/formato';
 import { acuerdoDeProveedorConLegado, normalizarAcuerdo, textoCondicionPago } from '@/lib/compras/acuerdo-pago';
 import { regimenDe } from '@/lib/compras/oc-totales';
@@ -32,7 +32,7 @@ const pctValido = (v: unknown): number | null => {
  * nada de eso se le cree al navegador (E-13).
  */
 export async function POST(request: NextRequest) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     try {

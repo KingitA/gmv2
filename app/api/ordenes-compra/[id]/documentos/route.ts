@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, requirePermiso } from '@/lib/auth';
 import { processWithGemini , inferirTipoComprobante } from '@/lib/services/ocr';
 import { AVISO_NO_LEIDO, buscarComprobanteDuplicado, comprobanteDesdeOCR, datosNoLeido, mensajeDuplicado, motivoNoLeido } from '@/lib/services/documento-compra';
 
@@ -57,7 +57,7 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     const { id: ordenId } = await params;
@@ -72,11 +72,19 @@ export async function POST(
     // Cargar OC (no FK defined → separate queries)
     const { data: oc } = await supabase
         .from('ordenes_compra')
-        .select('id, proveedor_id, numero_orden')
+        .select('id, proveedor_id, numero_orden, estado')
         .eq('id', ordenId)
         .maybeSingle();
 
     if (!oc) return NextResponse.json({ error: 'Orden de compra no encontrada' }, { status: 404 });
+    // Una orden cerrada o cancelada queda en solo lectura (revisión 19/11): no se le cuelgan
+    // documentos ni comprobantes nuevos (la factura de lo recibido se carga antes de finalizar).
+    if (oc.estado === 'finalizada' || oc.estado === 'cancelada') {
+        return NextResponse.json({
+            error: `La orden ${oc.numero_orden} está ${oc.estado}: no se le pueden subir documentos nuevos (una orden ${oc.estado} queda en solo lectura).`,
+            codigo: 'orden_cerrada',
+        }, { status: 409 });
+    }
 
     const { data: proveedorData } = await supabase
         .from('proveedores')
@@ -84,14 +92,25 @@ export async function POST(
         .eq('id', oc.proveedor_id)
         .maybeSingle();
 
-    // Obtener o crear recepción draft
-    let { data: recepcion } = await supabase
+    // ¿De qué entrega es el documento? (revisión 19/11: antes se colgaba de "la última", aunque
+    // estuviera cancelada)
+    //   1. La entrega ABIERTA (el depósito está contando, o el borrador de un documento anterior).
+    //   2. Si no hay abierta, la última FINALIZADA: la factura suele llegar después de recibir, y es
+    //      de esa mercadería. No se abre una entrega nueva vacía: quedaría "en curso" para el
+    //      depósito y frenaría finalizar la orden. Si llega más mercadería, la entrega siguiente la
+    //      abre el depósito al iniciar la recepción.
+    //   3. Sin ninguna (la factura llegó antes que la mercadería): un borrador con lo pedido.
+    const { data: entregas, error: entErr } = await supabase
         .from('recepciones')
-        .select('id, proveedor_id')
+        .select('id, proveedor_id, estado')
         .eq('orden_compra_id', ordenId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .neq('estado', 'cancelada')
+        .order('created_at', { ascending: false });
+    if (entErr) return NextResponse.json({ error: entErr.message }, { status: 500 });
+    let recepcion: { id: string; proveedor_id: string | null } | null =
+        (entregas || []).find((r: any) => r.estado === 'en_proceso' || r.estado === 'borrador')
+        ?? (entregas || []).find((r: any) => r.estado === 'finalizada')
+        ?? null;
 
     if (!recepcion) {
         const { data: nueva, error: createErr } = await supabase
@@ -241,7 +260,7 @@ export async function DELETE(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     const body = await request.json();
@@ -261,7 +280,7 @@ export async function DELETE(
     // Revertir lo que el OCR de este documento aplicó (detalle + cantidades documentadas)
     if (doc.comprobante_id) {
         const { revertirComprobanteOCR } = await import('@/lib/services/detalle');
-        const { error: revertError } = await revertirComprobanteOCR(supabase, doc.comprobante_id);
+        const { error: revertError } = await revertirComprobanteOCR(supabase, doc.comprobante_id, { usuarioId: auth.user.id });
         if (revertError) {
             return NextResponse.json({ error: revertError }, { status: 409 });
         }
@@ -285,7 +304,7 @@ export async function PATCH(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth();
+    const auth = await requirePermiso('compras');
     if (auth.error) return auth.error;
 
     try {
@@ -294,8 +313,12 @@ export async function PATCH(
         if (!documento_id) return NextResponse.json({ error: 'documento_id requerido' }, { status: 400 });
 
         const supabase = createAdminClient();
-        const { data: oc } = await supabase.from('ordenes_compra').select('id, proveedor_id').eq('id', ordenId).maybeSingle();
+        const { data: oc } = await supabase.from('ordenes_compra').select('id, proveedor_id, numero_orden, estado').eq('id', ordenId).maybeSingle();
         if (!oc) return NextResponse.json({ error: 'Orden de compra no encontrada' }, { status: 404 });
+        // Igual que al subir: una orden cerrada o cancelada no recibe comprobantes nuevos (19/11)
+        if (oc.estado === 'finalizada' || oc.estado === 'cancelada') {
+            return NextResponse.json({ error: `La orden ${oc.numero_orden} está ${oc.estado}: no se puede volver a leer un documento (crearía un comprobante nuevo en una orden en solo lectura).`, codigo: 'orden_cerrada' }, { status: 409 });
+        }
 
         const { data: doc } = await supabase
             .from('recepciones_documentos')
