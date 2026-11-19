@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Link } from "react-router"
 import { useContadoresOutbox, useOverlay, useRuntime } from "@gm/core"
-import { FranjaActualizacion, Hoja } from "@gm/core/ui"
+import { AvisoPermisoAvisos, FranjaActualizacion, Hoja } from "@gm/core/ui"
 import { useBorradorCarga } from "../datos/borradorCarga"
 import { useDevoluciones, usePedidos, useRecepciones, useYo } from "../datos/hooks"
 import { C, Marco } from "../ui"
@@ -57,6 +57,7 @@ export function Inicio() {
         <div style={{ fontSize: 19, fontWeight: 700, color: C.text }}>Hola, {yo.nombre} 👋</div>
         {/* Actualización con un botón: solo acá, nunca en medio de un picking */}
         <FranjaActualizacion />
+        <AvisoPermisoAvisos />
 
         {/* PREPARAR PEDIDOS: lo que se usa casi siempre */}
         <Link to="/preparar" style={{ textDecoration: "none", background: C.orange, borderRadius: 24, padding: "20px 20px 18px", display: "flex", flexDirection: "column", gap: 14, minHeight: 260, justifyContent: "space-between", boxShadow: "0 4px 14px rgba(234,88,12,0.35)" }}>

@@ -7,6 +7,7 @@ import { crearAlmacenSeguro } from "./platform/almacen-seguro"
 import { alCambiarPrimerPlano } from "./platform/ciclo-vida"
 import { plataformaActualizacion } from "./platform/archivos"
 import { Actualizador } from "./actualizacion/actualizador"
+import { RegistroAlarma } from "./platform/alarma"
 import { crearConectividad, type Conectividad } from "./platform/conectividad"
 import { Outbox } from "./sync/outbox"
 import { Reloj } from "./sync/reloj"
@@ -43,6 +44,8 @@ export interface Runtime {
   red: Conectividad
   /** Actualización de la app con un botón (franja del inicio) */
   actualizacion: Actualizador
+  /** Hacer sonar un equipo perdido: token de Firebase + permiso de avisos */
+  alarma: RegistroAlarma
   /** Cierra sesión. Falla si hay operaciones sin enviar (nunca se pierden datos). */
   salir(): Promise<void>
   /**
@@ -160,8 +163,22 @@ export async function crearRuntime(config: ConfigApp): Promise<Runtime> {
     alCambiarPrimerPlano((activo) => void (activo && actualizacion.alVolver()))
   }
 
+  // Hacer sonar un equipo perdido: el token de Firebase va al servidor al iniciar sesión y cuando cambia
+  const alarma = new RegistroAlarma({
+    app: config.app,
+    post: (path, body) => api.post(path, body),
+    online: () => red.online,
+    usuario: () => (auth.estado === "autenticado" ? auth.sesion?.user.id ?? null : null),
+    leer: (k) => kvGet<string>(db, k),
+    guardar: (k, v) => kvSet(db, k, v),
+  })
+  alarma.iniciar()
+  auth.suscribir(() => void alarma.enviarToken())
+  red.suscribir(() => void alarma.enviarToken())
+  alCambiarPrimerPlano((activo) => void (activo && alarma.revisarPermiso()))
+
   return {
-    config, db, deviceId, api, auth, replica, outbox, sync, reloj, red, actualizacion,
+    config, db, deviceId, api, auth, replica, outbox, sync, reloj, red, actualizacion, alarma,
     async salir() {
       if (outbox.contadores.pendientes > 0) {
         throw new Error(`Hay ${outbox.contadores.pendientes} operación(es) sin enviar. Conectate a internet y esperá a que se envíen antes de salir.`)
