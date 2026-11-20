@@ -751,7 +751,10 @@ equipos de depósito). Funciona con la app CERRADA y la pantalla APAGADA.
 (`{ tipo: "sonar", mensaje: "Te busca <nombre>" }` / `{ tipo: "detener" }`). Lo recibe el
 servicio nativo `GmAlarmaMensajes` (plugin propio `mobile/packages/capacitor-alarma`, en las
 tres apps), sin el WebView. `AlarmaServicio` (servicio en primer plano, tipo mediaPlayback)
-suena con `USAGE_ALARM` a todo volumen del canal de alarma (sale aunque el equipo esté en
+suena con `USAGE_ALARM` a todo volumen del canal de alarma un sonido PROPIO
+(`res/raw/gm_alarma.wav`, sirena de 2 tonos sintetizada por `capacitor-alarma/scripts/generar-sonido.mjs`:
+el NuStar no tiene tono de alarma que se pueda abrir; si falla, alarma → llamada → notificación
+del sistema, log `GmAlarma: sonido: …`) (sale aunque el equipo esté en
 silencio; con "no molestar" si Android deja pasar alarmas), vibra, prende la pantalla con
 `AlarmaActivity` ("¡Te están buscando! — TOCÁ PARA APAGAR", encima del bloqueo) y corta a
 los 60 s, al tocar, con APAGAR en la notificación o con "detener". Restaura el volumen.
