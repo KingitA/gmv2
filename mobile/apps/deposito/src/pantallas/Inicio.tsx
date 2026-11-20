@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Link } from "react-router"
 import { useContadoresOutbox, useOverlay, useRuntime } from "@gm/core"
-import { FranjaActualizacion, Hoja } from "@gm/core/ui"
+import { AvisoPermisoAvisos, FranjaActualizacion, Hoja } from "@gm/core/ui"
 import { useBorradorCarga } from "../datos/borradorCarga"
 import { useDevoluciones, usePedidos, useRecepciones, useYo } from "../datos/hooks"
 import { C, Marco } from "../ui"
@@ -57,6 +57,7 @@ export function Inicio() {
         <div style={{ fontSize: 19, fontWeight: 700, color: C.text }}>Hola, {yo.nombre} 👋</div>
         {/* Actualización con un botón: solo acá, nunca en medio de un picking */}
         <FranjaActualizacion />
+        <AvisoPermisoAvisos />
 
         {/* PREPARAR PEDIDOS: lo que se usa casi siempre */}
         <Link to="/preparar" style={{ textDecoration: "none", background: C.orange, borderRadius: 24, padding: "20px 20px 18px", display: "flex", flexDirection: "column", gap: 14, minHeight: 260, justifyContent: "space-between", boxShadow: "0 4px 14px rgba(234,88,12,0.35)" }}>
@@ -86,6 +87,11 @@ export function Inicio() {
           {terciario("/articulos", "🔧", "Modificar artículos")}
           {terciario("/cargar", "🛒", "Cargar pedido", borrador ? `En curso · ${borrador.items.length} art.` : undefined)}
         </div>
+
+        {/* Abajo de todo y chico (20/11): los NuStar se pierden entre la mercadería */}
+        <Link to="/buscar-equipo" style={{ textDecoration: "none", textAlign: "center", color: C.sub, fontSize: 14, fontWeight: 700, padding: "10px 0", border: `1px dashed ${C.border}`, borderRadius: 14, background: C.white }}>
+          🔔 Buscar el equipo de un compañero
+        </Link>
 
         <div style={{ marginTop: 4, textAlign: "center", color: C.light, fontSize: 12 }}>GM Distribuidora · Depósito v{rt.config.version}</div>
       </div>

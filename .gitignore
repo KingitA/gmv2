@@ -93,3 +93,7 @@ dist-apks/
 
 # Fixture del mock de la app Vendedor (datos reales de clientes: nunca al repo)
 mobile/scripts/.fixture-vendedor.json
+
+# Firebase (hacer sonar un equipo): fuera del repo, lo copia build-apks al compilar
+mobile/firebase/
+mobile/apps/*/android/app/google-services.json

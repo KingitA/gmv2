@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.16 (versionCode 25) — 2026-11-20
+
+- Hacer sonar un equipo perdido: la oficina (o un compañero de depósito) lo hace sonar fuerte aunque la app esté cerrada; la app pide permiso de avisos
+
 ## v0.4.15 (versionCode 24) — 2026-11-19
 
 - Condiciones de pago: deuda vencida / a vencer en Mis clientes; condición, forma de pago y código postal en la ficha y el alta; condición de pago solo este pedido

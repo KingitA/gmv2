@@ -22,6 +22,10 @@ const MOBILE = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const REPO = resolve(MOBILE, "..")
 const SALIDA = join(REPO, "dist-apks")
 const TODAS = ["vendedor", "chofer", "deposito"]
+// Firebase (hacer sonar un equipo, 20/11/2026): google-services.json FUERA del repo
+// (.gitignore). Se copia a android/app/ de cada app al compilar. Sin él el APK sale igual,
+// pero no puede sonar (la app no obtiene token). Otra ruta: GM_GOOGLE_SERVICES_JSON.
+const GOOGLE_SERVICES = process.env.GM_GOOGLE_SERVICES_JSON || join(MOBILE, "firebase", "google-services.json")
 
 // ─── Argumentos ─────────────────────────────────────────────────────────────
 const args = process.argv.slice(2)
@@ -84,6 +88,8 @@ for (const app of apps) {
     run("npx", ["tsc", "--noEmit", "-p", "."], dir)
     run("npx", ["vite", "build"], dir)
     run("npx", ["cap", "sync", "android"], dir)
+    if (existsSync(GOOGLE_SERVICES)) copyFileSync(GOOGLE_SERVICES, join(android, "app", "google-services.json"))
+    else console.warn(`  ⚠ Sin ${GOOGLE_SERVICES}: el APK no va a poder sonar (Firebase sin configurar)`)
     const gradlew = join(android, ES_WINDOWS ? "gradlew.bat" : "gradlew")
     run(gradlew, [debug ? "assembleDebug" : "assembleRelease", "--no-daemon", "-q"], android)
 

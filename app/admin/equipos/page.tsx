@@ -18,13 +18,32 @@ type Equipo = {
   app_version_code: number | null
   ultimo_contacto_at: string | null
   revocado: boolean
+  motivo_no_suena: string | null
 }
 type Ultima = { app: string; version_name: string; version_code: number; obligatoria: boolean; publicada_at: string }
 
 const APPS: Record<string, string> = { vendedor: "Vendedor", chofer: "Chofer", deposito: "Depósito" }
 
 export default function EquiposPage() {
-  const [datos, setDatos] = useState<{ equipos: Equipo[]; ultimas: Record<string, Ultima> } | null>(null)
+  const [datos, setDatos] = useState<{ equipos: Equipo[]; ultimas: Record<string, Ultima>; firebase_configurado?: boolean } | null>(null)
+  // Hacer sonar un equipo perdido (20/11/2026): aviso por equipo tras tocar el botón
+  const [avisos, setAvisos] = useState<Record<string, { ok: boolean; texto: string }>>({})
+  const [enviando, setEnviando] = useState<string | null>(null)
+  const accion = async (e: Equipo, que: "sonar" | "detener") => {
+    const k = `${e.device_id}-${e.app}`
+    setEnviando(k + que)
+    try {
+      const r = await fetch(`/api/mobile/dispositivos/${encodeURIComponent(e.device_id)}/${que}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ app: e.app }),
+      })
+      const b = await r.json().catch(() => null)
+      setAvisos((p) => ({ ...p, [k]: { ok: !!b?.ok, texto: b?.mensaje || b?.error || "No se pudo avisar al equipo." } }))
+    } catch {
+      setAvisos((p) => ({ ...p, [k]: { ok: false, texto: "Sin conexión con el servidor." } }))
+    } finally {
+      setEnviando(null)
+    }
+  }
   const [error, setError] = useState<string | null>(null)
   const [app, setApp] = useState<string>("")
 
@@ -97,11 +116,12 @@ export default function EquiposPage() {
                   <th className="px-4 py-2.5">Usuario</th>
                   <th className="px-4 py-2.5">Versión</th>
                   <th className="px-4 py-2.5">Última conexión</th>
+                  <th className="px-4 py-2.5">Buscar</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filas.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">Todavía no se conectó ningún equipo.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">Todavía no se conectó ningún equipo.</td></tr>
                 )}
                 {filas.map((e) => {
                   const ok = alDia(e)
@@ -116,6 +136,27 @@ export default function EquiposPage() {
                         {ok === false && <Badge className="ml-2 bg-amber-100 text-amber-800 hover:bg-amber-100">sin actualizar</Badge>}
                       </td>
                       <td className="px-4 py-2.5 text-slate-600">{e.ultimo_contacto_at ? fechaHora(e.ultimo_contacto_at) : "—"}</td>
+                      <td className="px-4 py-2.5">
+                        {e.motivo_no_suena ? (
+                          <span className="text-xs text-muted-foreground">{e.motivo_no_suena}</span>
+                        ) : datos.firebase_configurado === false ? (
+                          <span className="text-xs text-amber-700">Falta configurar Firebase</span>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button onClick={() => void accion(e, "sonar")} disabled={!!enviando}
+                              className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50">
+                              {enviando === `${e.device_id}-${e.app}sonar` ? "Enviando…" : "🔔 HACER SONAR"}
+                            </button>
+                            <button onClick={() => void accion(e, "detener")} disabled={!!enviando}
+                              className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                              DETENER
+                            </button>
+                          </div>
+                        )}
+                        {avisos[`${e.device_id}-${e.app}`] && (
+                          <p className={`mt-1 text-xs ${avisos[`${e.device_id}-${e.app}`]!.ok ? "text-emerald-700" : "text-red-700"}`}>{avisos[`${e.device_id}-${e.app}`]!.texto}</p>
+                        )}
+                      </td>
                     </tr>
                   )
                 })}

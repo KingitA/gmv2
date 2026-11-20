@@ -50,6 +50,8 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 
 | AU — **Actualización con un botón** (las 3 apps): franja ACTUALIZAR en el inicio, baja el APK firmado del bucket privado, verifica sha256 y abre el instalador; `npm run publicar:apk`; ERP → Ajustes → Equipos y apps | App Vendedor (dueño de core) | **Código hecho 18/11 en la rama `apps-actualizacion`**, migración `20261117b_mobile_versiones.sql` **sin aplicar**; APKs compiladas sin instalar. Ver "Actualización con un botón" abajo |
 
+| SE — **Hacer sonar un equipo perdido** (las 3 apps): FCM → alarma con la app cerrada; ERP Equipos y apps y app depósito "Buscar el equipo de un compañero" | App Vendedor (dueño de core) | **Código hecho 20/11 en la rama `equipos-sonar`**, migración `20261120_mobile_sonar_equipo.sql` **sin aplicar**; falta `FIREBASE_SERVICE_ACCOUNT_JSON` en Vercel y `mobile/firebase/google-services.json` para compilar. MOBILE.md §13 "Hacer sonar un equipo" |
+
 ## Versiones instaladas hoy
 
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |

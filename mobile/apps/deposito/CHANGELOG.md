@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.5.8 (versionCode 22) — 2026-11-20
+
+- Hacer sonar un equipo perdido: la oficina (o un compañero de depósito) lo hace sonar fuerte aunque la app esté cerrada; la app pide permiso de avisos
+
 ## v0.5.7 (versionCode 21) — 2026-11-18
 
 - Documentos de la recepcion: se pueden elegir varias fotos juntas desde archivo y sumar hojas desde archivo o camara en el mismo comprobante

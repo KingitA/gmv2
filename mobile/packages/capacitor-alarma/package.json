@@ -1,0 +1,10 @@
+{
+  "name": "@gm/capacitor-alarma",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plugin Capacitor: hacer sonar un equipo perdido (mensaje de Firebase Cloud Messaging → alarma fuerte, vibración y aviso de pantalla completa, con la app cerrada). Ver ../../../MOBILE.md",
+  "main": "index.js",
+  "files": ["android/src", "android/build.gradle", "index.js"],
+  "capacitor": { "android": { "src": "android" } },
+  "peerDependencies": { "@capacitor/core": ">=8.0.0" }
+}

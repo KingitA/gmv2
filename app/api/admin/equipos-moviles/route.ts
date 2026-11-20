@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { requirePermiso } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { motivoNoSuena } from "@/lib/mobile/sonar"
+import { cuentaServicio } from "@/lib/mobile/fcm"
 
 // GET /api/admin/equipos-moviles — equipos de las apps (vendedor / chofer / depósito):
 // usuario, versión instalada y última conexión, más la última versión publicada de cada
@@ -42,8 +44,11 @@ export async function GET() {
         app_version_code: e.app_version_code ?? null,
         ultimo_contacto_at: e.ultimo_contacto_at,
         revocado: !!e.revocado,
+        // Hacer sonar (20/11/2026): null = se puede; si no, por qué no (nunca se manda el token)
+        motivo_no_suena: motivoNoSuena(e),
       })),
       ultimas,
+      firebase_configurado: !!cuentaServicio(),
     },
     { headers: { "Cache-Control": "no-store" } },
   )

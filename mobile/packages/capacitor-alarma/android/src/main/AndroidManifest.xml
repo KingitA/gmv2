@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Hacer sonar un equipo perdido (MOBILE.md → "Hacer sonar un equipo") -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <application>
+        <!-- Recibe el mensaje de datos de Firebase (con la app cerrada también) -->
+        <service
+            android:name="com.gm.alarma.GmAlarmaMensajes"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Suena hasta 60 s o hasta que lo apaguen -->
+        <service
+            android:name="com.gm.alarma.AlarmaServicio"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <!-- "¡Te están buscando! — Tocá para apagar", encima de la pantalla bloqueada -->
+        <activity
+            android:name="com.gm.alarma.AlarmaActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+    </application>
+</manifest>

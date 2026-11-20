@@ -741,6 +741,48 @@ usuario, app, versión instalada ("al día" / "sin actualizar" contra la última
 publica una versión (`&obligatoria=1`, `&corrupto=1` para probar el sha256, `&off=1`
 la saca); `/__mock/apk` manda un "APK" de 2 MB de a poco para ver la barra.
 
+### Hacer sonar un equipo (20/11/2026)
+En el depósito los NuStar se pierden entre la mercadería: se los hace sonar desde el ERP
+(Ajustes → **Equipos y apps**, 🔔 HACER SONAR / DETENER, solo admin) o desde la app depósito
+(inicio, abajo de todo: **"Buscar el equipo de un compañero"** → `/buscar-equipo`, solo
+equipos de depósito). Funciona con la app CERRADA y la pantalla APAGADA.
+
+**Cómo llega**: Firebase Cloud Messaging, mensaje de **datos** de prioridad alta
+(`{ tipo: "sonar", mensaje: "Te busca <nombre>" }` / `{ tipo: "detener" }`). Lo recibe el
+servicio nativo `GmAlarmaMensajes` (plugin propio `mobile/packages/capacitor-alarma`, en las
+tres apps), sin el WebView. `AlarmaServicio` (servicio en primer plano, tipo mediaPlayback)
+suena con `USAGE_ALARM` a todo volumen del canal de alarma (sale aunque el equipo esté en
+silencio; con "no molestar" si Android deja pasar alarmas), vibra, prende la pantalla con
+`AlarmaActivity` ("¡Te están buscando! — TOCÁ PARA APAGAR", encima del bloqueo) y corta a
+los 60 s, al tocar, con APAGAR en la notificación o con "detener". Restaura el volumen.
+
+**Token**: `core/src/platform/alarma.ts` (`RegistroAlarma`) pide el token al plugin y lo
+manda a `POST /api/mobile/dispositivos/token` al iniciar sesión, al volver la señal y cuando
+Firebase lo cambia (solo si cambió; si el servidor no lo guardó, reintenta). Se guarda en
+`mobile_dispositivos.fcm_token`. **Permiso**: `<AvisoPermisoAvisos />` en el inicio de las
+tres apps explica en simple y pide POST_NOTIFICATIONS (Android 13+); "Ahora no" lo esconde
+hasta que se vuelva a abrir la app.
+
+**Servidor**: `POST /api/mobile/dispositivos/[device_id]/sonar|detener` `{ app }` (sesión del
+ERP o bearer de la app; `puedeSonar`: admin a cualquiera, depósito solo a depósito) →
+`lib/mobile/fcm.ts` (FCM HTTP v1; cuenta de servicio SOLO en la variable de entorno
+`FIREBASE_SERVICE_ACCOUNT_JSON`, el JSON entero, en Vercel; sin ella: "Falta configurar
+Firebase" y nada se rompe). Registro en `mobile_sonar_log` (quién, qué equipo, cuándo, desde
+dónde, qué contestó Firebase). `GET /api/mobile/dispositivos` = lista de la app depósito.
+Sin token, el ERP y la app dicen por qué: "Nunca inició sesión en este equipo" o "Todavía no
+actualizó la app (o no dio permiso de avisos)".
+
+**Configuración**: proyecto Firebase con las 3 apps (com.gm.vendedor / chofer / deposito);
+`google-services.json` en `mobile/firebase/` (**fuera del repo**, `.gitignore`; otra ruta con
+`GM_GOOGLE_SERVICES_JSON`): `build-apks` lo copia a `android/app/` de cada app (el
+`build.gradle` ya aplica google-services si existe). Sin el archivo el APK compila y avisa
+"no va a poder sonar". Migración `supabase/migrations/20261120_mobile_sonar_equipo.sql`
+(`fcm_token`, `fcm_token_at`, tabla `mobile_sonar_log`), idempotente.
+
+**Probar**: en depósito, "Buscar el equipo…" → el propio equipo tiene **PROBAR ACÁ** (suena
+sin servidor ni Firebase: prueba el sonido, la vibración y el aviso). Mocks:
+`scripts/mock-sonar.mjs` (lista con un equipo sin token; `/__mock/sonar` muestra lo pedido).
+
 ### Actualización OTA del bundle (propuesta, no implementada)
 Viable sin infra paga: `@capgo/capacitor-updater` en modo **self-hosted**
 (open source): el build sube `dist.zip` a Supabase Storage (bucket público de solo
