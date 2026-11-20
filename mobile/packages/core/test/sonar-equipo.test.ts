@@ -69,6 +69,37 @@ describe("App: el token de Firebase va al servidor", () => {
     expect(a.post).not.toHaveBeenCalled()
     expect(b.post).not.toHaveBeenCalled()
   })
+  it("Firebase que no contesta no traba: corta a los 20 s, deja el error y el próximo intento sale", async () => {
+    vi.useFakeTimers()
+    const post = vi.fn(async () => ({ ok: true }))
+    let colgado = true
+    const r = new RegistroAlarma({
+      app: "deposito", post, online: () => true, usuario: () => "u1",
+      leer: async () => undefined, guardar: async () => {},
+      plataforma: { token: () => (colgado ? new Promise<string>(() => {}) : Promise.resolve("tok-ok")), permiso: async () => true, pedirPermiso: async () => true },
+    })
+    const primero = r.enviarToken()
+    await vi.advanceTimersByTimeAsync(20_000)
+    await primero
+    expect(r.diag.fase).toBe("error")
+    expect(r.diag.detalle).toMatch(/no contestó/)
+    colgado = false
+    await r.enviarToken()
+    expect(post).toHaveBeenCalledWith("/api/mobile/dispositivos/token", { app: "deposito", token: "tok-ok" })
+    expect(r.diag.fase).toBe("registrado")
+    vi.useRealTimers()
+  })
+  it("REGISTRAR AHORA (forzar) lo manda aunque el equipo crea que ya lo mandó", async () => {
+    const { r, post } = armar()
+    await r.enviarToken()
+    await r.enviarToken({ forzar: true })
+    expect(post).toHaveBeenCalledTimes(2)
+  })
+  it("sin sesión deja el diagnóstico para la pantalla", async () => {
+    const a = armar({ usuario: null })
+    await a.r.enviarToken()
+    expect(a.r.diag.fase).toBe("sin_sesion")
+  })
   it("permiso de avisos: se ve y se pide", async () => {
     const { r } = armar()
     await r.revisarPermiso()

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
-import { ErrorHttp, probarAlarmaLocal, detenerAlarmaLocal, useOnline, useRuntime } from "@gm/core"
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { ErrorHttp, probarAlarmaLocal, detenerAlarmaLocal, useOnline, useRuntime, type DiagAlarma } from "@gm/core"
 import { fechaHora } from "@gm/formato"
 import { C, Marco } from "../ui"
 
@@ -14,7 +14,51 @@ interface Equipo {
   usuario: string | null
   ultimo_contacto_at: string | null
   motivo: string | null
+  tiene_token?: boolean
   es_este: boolean
+}
+
+const TEXTO_DIAG: Record<DiagAlarma["fase"], string> = {
+  sin_intentar: "todavía no lo intentó",
+  sin_firebase: "este APK no tiene Firebase",
+  sin_sesion: "falta iniciar sesión",
+  sin_senal: "sin señal",
+  pidiendo_token: "pidiéndole el registro a Google…",
+  enviando: "mandándolo a la oficina…",
+  registrado: "registrado",
+  error: "falló",
+}
+
+/** ESTE EQUIPO: ¿la oficina lo puede hacer sonar? Para diagnosticar sin cable. */
+function EstadoEsteEquipo({ e, onRegistrado }: { e: Equipo; onRegistrado: () => void }) {
+  const rt = useRuntime()
+  const diag = useSyncExternalStore(rt.alarma.suscribir, () => rt.alarma.diag)
+  const [registrando, setRegistrando] = useState(false)
+  const listo = e.tiene_token ?? !e.motivo
+  const registrar = async () => {
+    setRegistrando(true)
+    try {
+      await rt.alarma.enviarToken({ forzar: true })
+      onRegistrado()
+    } finally {
+      setRegistrando(false)
+    }
+  }
+  return (
+    <div style={{ borderRadius: 14, padding: 12, background: listo ? C.greenL : C.yellowL, border: `1px solid ${listo ? C.greenB : C.yellowB}` }}>
+      <div style={{ fontSize: 17, fontWeight: 800, color: listo ? C.green : C.yellow }}>
+        {listo ? "✅ Listo para sonar desde la oficina" : "⚠️ Todavía no se registró"}
+      </div>
+      <div style={{ fontSize: 13, color: C.sub, marginTop: 4 }}>
+        En este equipo: {TEXTO_DIAG[diag.fase]}{diag.detalle ? ` (${diag.detalle})` : ""}
+      </div>
+      {!listo && (
+        <button type="button" disabled={registrando} onClick={() => void registrar()} style={{ ...boton(C.text), marginTop: 10, minHeight: 52, fontSize: 18, opacity: registrando ? 0.6 : 1 }}>
+          {registrando ? "Registrando…" : "REGISTRAR AHORA"}
+        </button>
+      )}
+    </div>
+  )
 }
 
 const boton = (fondo: string, color = "#fff") => ({
@@ -78,6 +122,7 @@ export function BuscarEquipo() {
                   Equipo {e.device_id.slice(0, 6).toUpperCase()} · última vez {e.ultimo_contacto_at ? fechaHora(e.ultimo_contacto_at) : "—"}
                 </div>
               </div>
+              {e.es_este && <EstadoEsteEquipo e={e} onRegistrado={() => void cargar()} />}
               {e.es_este ? (
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 8 }}>
                   <button type="button" onClick={() => void probarAlarmaLocal()} style={boton(C.indigo)}>PROBAR ACÁ</button>

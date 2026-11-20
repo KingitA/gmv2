@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.5.9 (versionCode 23) — 2026-11-20
+
+- Hacer sonar: el equipo se registra solo (reintenta) y en Buscar un equipo se ve si la oficina lo puede hacer sonar, con REGISTRAR AHORA
+
 ## v0.5.8 (versionCode 22) — 2026-11-20
 
 - Hacer sonar un equipo perdido: la oficina (o un compañero de depósito) lo hace sonar fuerte aunque la app esté cerrada; la app pide permiso de avisos

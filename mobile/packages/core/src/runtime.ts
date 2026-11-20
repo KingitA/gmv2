@@ -175,7 +175,12 @@ export async function crearRuntime(config: ConfigApp): Promise<Runtime> {
   alarma.iniciar()
   auth.suscribir(() => void alarma.enviarToken())
   red.suscribir(() => void alarma.enviarToken())
-  alCambiarPrimerPlano((activo) => void (activo && alarma.revisarPermiso()))
+  // Al volver a la app: permiso (pudo darlo en Ajustes) y token (si todavía no llegó al servidor)
+  alCambiarPrimerPlano((activo) => {
+    if (!activo) return
+    void alarma.revisarPermiso()
+    void alarma.enviarToken()
+  })
 
   return {
     config, db, deviceId, api, auth, replica, outbox, sync, reloj, red, actualizacion, alarma,

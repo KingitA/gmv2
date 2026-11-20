@@ -20,7 +20,7 @@ export function atenderSonar(url, req, json, body) {
     const hace = (min) => new Date(Date.now() - min * 60_000).toISOString()
     return json(200, {
       equipos: [
-        { device_id: este, app: "deposito", usuario: "Vos", ultimo_contacto_at: hace(0), motivo: null, es_este: true },
+        { device_id: este, app: "deposito", usuario: "Vos", ultimo_contacto_at: hace(0), motivo: registro.tokens[este] ? null : "Todavía no actualizó la app (o no dio permiso de avisos).", tiene_token: !!registro.tokens[este], es_este: true },
         { device_id: "a1b2c3d4-0000-4000-8000-000000000001", app: "deposito", usuario: "Carlos", ultimo_contacto_at: hace(12), motivo: null, es_este: false },
         { device_id: "sin-token", app: "deposito", usuario: "Marta", ultimo_contacto_at: hace(60 * 26), motivo: "Todavía no actualizó la app (o no dio permiso de avisos).", es_este: false },
       ],

@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.util.Log;
 
 import androidx.core.content.ContextCompat;
 
@@ -35,6 +36,7 @@ import java.lang.ref.WeakReference;
 )
 public class GmAlarmaPlugin extends Plugin {
 
+    static final String TAG = "GmAlarma";
     private static WeakReference<GmAlarmaPlugin> instancia = new WeakReference<>(null);
 
     @Override
@@ -44,6 +46,7 @@ public class GmAlarmaPlugin extends Plugin {
     }
 
     static void tokenNuevo(Context ctx, String token) {
+        Log.i(TAG, "onNewToken: " + corto(token));
         GmAlarmaPlugin p = instancia.get();
         if (p != null) {
             JSObject d = new JSObject();
@@ -58,18 +61,32 @@ public class GmAlarmaPlugin extends Plugin {
         try {
             fm = FirebaseMessaging.getInstance();
         } catch (Exception e) {
+            Log.e(TAG, "token: Firebase sin configurar", e);
             call.reject("Este APK no tiene Firebase configurado", "SIN_FIREBASE");
             return;
         }
-        fm.getToken().addOnCompleteListener((t) -> {
-            if (t.isSuccessful() && t.getResult() != null) {
-                JSObject r = new JSObject();
-                r.put("token", t.getResult());
-                call.resolve(r);
-            } else {
-                call.reject("No se pudo obtener el token", "SIN_TOKEN");
-            }
-        });
+        Log.i(TAG, "token: pidiendo a Firebase…");
+        try {
+            fm.getToken().addOnCompleteListener((t) -> {
+                if (t.isSuccessful() && t.getResult() != null) {
+                    Log.i(TAG, "token: OK " + corto(t.getResult()));
+                    JSObject r = new JSObject();
+                    r.put("token", t.getResult());
+                    call.resolve(r);
+                } else {
+                    Exception e = t.getException();
+                    Log.e(TAG, "token: falló", e);
+                    call.reject("No se pudo obtener el token: " + (e != null ? e.getMessage() : "sin detalle"), "SIN_TOKEN");
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "token: excepción", e);
+            call.reject("No se pudo obtener el token: " + e.getMessage(), "SIN_TOKEN");
+        }
+    }
+
+    private static String corto(String t) {
+        return t == null ? "null" : t.substring(0, Math.min(12, t.length())) + "… (" + t.length() + ")";
     }
 
     private boolean tienePermiso() {
