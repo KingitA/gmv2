@@ -16,6 +16,8 @@ export interface EquipoCompanero {
   ultimo_contacto_at: string | null
   /** null = se puede hacer sonar; si no, por qué no */
   motivo: string | null
+  /** El servidor tiene el token de Firebase de este equipo (= puede sonar) */
+  tiene_token: boolean
   es_este: boolean
 }
 
@@ -43,6 +45,7 @@ export async function GET(request: Request) {
     usuario: e.usuario_id ? nombre.get(e.usuario_id) ?? null : null,
     ultimo_contacto_at: e.ultimo_contacto_at,
     motivo: motivoNoSuena(e),
+    tiene_token: !!e.fcm_token,
     es_este: e.device_id === sesion.deviceId,
   }))
   return NextResponse.json({ equipos }, { headers: { "Cache-Control": "no-store" } })

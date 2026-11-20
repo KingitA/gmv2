@@ -3,6 +3,8 @@ package com.gm.alarma;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 
+import android.util.Log;
+
 import java.util.Map;
 
 /**
@@ -18,6 +20,7 @@ public class GmAlarmaMensajes extends FirebaseMessagingService {
     public void onMessageReceived(RemoteMessage m) {
         Map<String, String> d = m.getData();
         String tipo = d != null ? d.get("tipo") : null;
+        Log.i(GmAlarmaPlugin.TAG, "mensaje FCM: tipo=" + tipo + " prioridad=" + m.getPriority());
         if ("sonar".equals(tipo)) AlarmaServicio.sonar(this, d.get("mensaje"));
         else if ("detener".equals(tipo)) AlarmaServicio.detener(this);
     }
