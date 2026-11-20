@@ -20,6 +20,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.util.Log;
 
 /**
  * Hace sonar el equipo (MOBILE.md → "Hacer sonar un equipo"): alarma FUERTE por el canal
@@ -146,18 +147,36 @@ public class AlarmaServicio extends Service {
             am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
         } catch (Exception ignored) {
         }
-        try {
-            Uri tono = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-            if (tono == null) tono = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-            player = new MediaPlayer();
-            player.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
-            player.setDataSource(this, tono);
-            player.setLooping(true);
-            player.prepare();
-            player.start();
-        } catch (Exception e) {
-            player = null;
+        // Sonido PROPIO primero (res/raw/gm_alarma.wav): el NuStar no tiene tono de alarma por
+        // defecto que se pueda abrir. Si falla, los del sistema. Un error acá NO corta la
+        // vibración ni la pantalla (van aparte).
+        Uri[] tonos = {
+            Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.gm_alarma),
+            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+        };
+        String[] nombres = { "propio (gm_alarma)", "alarma del sistema", "tono de llamada", "notificación" };
+        for (int k = 0; k < tonos.length && player == null; k++) {
+            if (tonos[k] == null) continue;
+            MediaPlayer mp = new MediaPlayer();
+            try {
+                mp.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
+                mp.setDataSource(this, tonos[k]);
+                mp.setLooping(true);
+                mp.prepare();
+                mp.start();
+                player = mp;
+                Log.i(GmAlarmaPlugin.TAG, "sonido: " + nombres[k]);
+            } catch (Exception e) {
+                Log.e(GmAlarmaPlugin.TAG, "sonido: falló " + nombres[k] + " — " + e.getMessage());
+                try {
+                    mp.release();
+                } catch (Exception ignored) {
+                }
+            }
         }
+        if (player == null) Log.e(GmAlarmaPlugin.TAG, "sonido: ninguno se pudo reproducir (solo vibra)");
         try {
             vibrador = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
             long[] patron = {0, 800, 400};
