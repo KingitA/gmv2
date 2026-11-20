@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.14 (versionCode 20) — 2026-11-20
+
+- Hacer sonar: el equipo se registra solo (reintenta) y suena con un sonido de alarma propio
+
 ## v0.3.13 (versionCode 19) — 2026-11-20
 
 - Hacer sonar un equipo perdido: la oficina (o un compañero de depósito) lo hace sonar fuerte aunque la app esté cerrada; la app pide permiso de avisos
