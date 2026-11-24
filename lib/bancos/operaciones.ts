@@ -513,11 +513,37 @@ export async function cuentasCredicoopDelSistema(db: SupabaseClient): Promise<Fi
   return ((data ?? []) as Fila[]).filter(esCuentaCredicoop)
 }
 
-/** VEP de ARCA pendientes de pago, con la operación en curso de cada uno si ya se mandó. */
-export async function vepsPendientes(db: SupabaseClient) {
-  const { cliente } = clienteCredicoop()
+/**
+ * CUIT de quienes generan los VEP de la empresa (el contador, el que opera en ARCA). El banco
+ * solo muestra un VEP si en la consulta va el CUIT de la persona que lo generó ("originante"):
+ * sin eso la lista viene vacía. Salen de CREDICOOP_VEP_ORIGINANTES ("20163027225,20123456789")
+ * más el que se escriba en la pantalla.
+ */
+export function originantesVep(extra?: string | null): string[] {
+  const todos = [...String(process.env.CREDICOOP_VEP_ORIGINANTES ?? "").split(","), String(extra ?? "")]
+    .map((x) => x.replace(/[^0-9]/g, "")).filter((x) => x.length === 11)
+  return [...new Set(todos)]
+}
+
+/**
+ * VEP pendientes según el banco. Las fechas del filtro son de VENCIMIENTO (máximo 180 días entre
+ * las dos): de hace 30 días a dentro de 149 (un VEP vence a los 30 días de generado). Se pregunta
+ * una vez sin originante y una por cada originante, y se juntan sin repetir.
+ */
+async function listarVepsPendientes(cliente: ReturnType<typeof clienteCredicoop>["cliente"], originantes: string[]) {
   const hoy = hoyISO()
-  const veps = await cliente.listarVeps(armarListaVeps(cliente.empresa, { idOrigen: randomUUID(), estado: "PENDIENTE_PAGO", desde: sumarDiasISO(hoy, -170), hasta: sumarDiasISO(hoy, 10) }))
+  const vistos = new Map<string, Awaited<ReturnType<typeof cliente.listarVeps>>[number]>()
+  for (const cuitOriginante of [undefined, ...originantes]) {
+    const lista = await cliente.listarVeps(armarListaVeps(cliente.empresa, { idOrigen: randomUUID(), estado: "PENDIENTE_PAGO", desde: sumarDiasISO(hoy, -30), hasta: sumarDiasISO(hoy, 149), cuitOriginante }))
+    for (const v of lista) if (v.numeroVep && !vistos.has(v.numeroVep)) vistos.set(v.numeroVep, v)
+  }
+  return [...vistos.values()]
+}
+
+/** VEP de ARCA pendientes de pago, con la operación en curso de cada uno si ya se mandó. */
+export async function vepsPendientes(db: SupabaseClient, originante?: string | null) {
+  const { cliente } = clienteCredicoop()
+  const veps = await listarVepsPendientes(cliente, originantesVep(originante))
   const numeros = veps.map((v) => v.numeroVep).filter(Boolean)
   let ops: Fila[] = []
   if (numeros.length) {
@@ -531,7 +557,7 @@ export async function vepsPendientes(db: SupabaseClient) {
  * Manda a firmar el pago de UN VEP. El importe y los CUIT se toman del banco. Si el importe que
  * informa el banco AHORA no es el que la persona vio en la pantalla, no se manda: se le muestra el nuevo.
  */
-export async function enviarPagoVep(db: SupabaseClient, p: { numeroVep: string; cuentaBancariaId: string; montoVisto: number | null; vencimientoId?: string | null }, usuarioId: string | null): Promise<Fila> {
+export async function enviarPagoVep(db: SupabaseClient, p: { numeroVep: string; cuentaBancariaId: string; montoVisto: number | null; vencimientoId?: string | null; cuitOriginante?: string | null }, usuarioId: string | null): Promise<Fila> {
   const { cliente, ambiente } = clienteCredicoop()
   const { data: cuenta, error } = await db.from("cuentas_bancarias").select("*").eq("id", p.cuentaBancariaId).maybeSingle()
   if (error) throw new Error(error.message)
@@ -539,7 +565,7 @@ export async function enviarPagoVep(db: SupabaseClient, p: { numeroVep: string; 
   if (!cbuValido(String(cuenta.cbu ?? ""))) throw new ErrorOperacion(`La cuenta "${cuenta.nombre}" no tiene cargado su CBU de 22 dígitos (Finanzas → Cuentas).`)
   // Se vuelve a pedir la lista: el VEP tiene que seguir pendiente y el importe es el que informa ARCA
   const hoy = hoyISO()
-  const veps = await cliente.listarVeps(armarListaVeps(cliente.empresa, { idOrigen: randomUUID(), estado: "PENDIENTE_PAGO", desde: sumarDiasISO(hoy, -170), hasta: sumarDiasISO(hoy, 10) }))
+  const veps = await listarVepsPendientes(cliente, originantesVep(p.cuitOriginante))
   const vep = veps.find((v) => v.numeroVep === String(p.numeroVep))
   if (!vep) throw new ErrorOperacion(`El VEP ${p.numeroVep} ya no figura como pendiente de pago en Credicoop.`)
   if (!(Number(vep.monto) > 0)) throw new ErrorOperacion(`El banco no informa el importe del VEP ${p.numeroVep}: no se puede mandar.`)

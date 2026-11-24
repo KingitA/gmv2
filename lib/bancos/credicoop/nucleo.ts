@@ -443,14 +443,19 @@ export function armarListaEcheqs(e: DatosEmpresa, p: { idOrigen: string; gestion
   }
 }
 
-/** VEP pendientes (o pagados) de ARCA. El banco admite hasta 180 días entre las dos fechas. */
-export function armarListaVeps(e: DatosEmpresa, p: { idOrigen: string; estado?: "PENDIENTE_PAGO" | "PAGADO"; desde?: string; hasta?: string; cuitContribuyente?: string }) {
+/**
+ * VEP pendientes (o pagados) de ARCA. Las fechas son de VENCIMIENTO del VEP y el banco admite hasta
+ * 180 días entre las dos. Si el VEP lo generó una persona (el contador) para la empresa, hay que
+ * mandar su CUIT como originante: si no, el banco no lo muestra.
+ */
+export function armarListaVeps(e: DatosEmpresa, p: { idOrigen: string; estado?: "PENDIENTE_PAGO" | "PAGADO"; desde?: string; hasta?: string; cuitContribuyente?: string; cuitOriginante?: string }) {
   exigirEmpresa(e); exigirIdOrigen(p.idOrigen)
   return {
     numeroAdherente: e.numeroAdherente, idOrigen: p.idOrigen,
     filtro: {
       estado: p.estado ?? "PENDIENTE_PAGO",
       ...(cuitDeOnce(p.cuitContribuyente) ? { cuitContribuyente: cuitDeOnce(p.cuitContribuyente) } : {}),
+      ...(cuitDeOnce(p.cuitOriginante) ? { cuitOriginante: cuitDeOnce(p.cuitOriginante) } : {}),
       ...(p.desde && p.hasta ? { fechaDesde: fechaBanco(p.desde), fechaHasta: fechaBanco(p.hasta) } : {}),
     },
   }
