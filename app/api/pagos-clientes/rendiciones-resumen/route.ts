@@ -36,7 +36,7 @@ export async function GET() {
         .from("rendiciones")
         .select(
           `id, viaje_id, cobrador_id, cobrador_tipo, fecha, estado, efectivo_declarado, efectivo_registrado,
-           diferencia, observaciones, confirmado_at, created_at, viajes(id, nombre),
+           diferencia, observaciones, confirmado_at, created_at,
            rendicion_items(pago_id, pagos_clientes(id, monto, fecha_pago, estado, forma_pago, clientes(nombre)))`
         )
         .neq("estado", "cancelada")
@@ -44,6 +44,14 @@ export async function GET() {
         .limit(60)
       if (error) throw error
       rendiciones = data || []
+      // rendiciones.viaje_id NO tiene FK a viajes: el embed viajes(...) fallaba
+      // ("Could not find a relationship") y la lista salía vacía. Nombres aparte.
+      const idsViaje = [...new Set(rendiciones.map((r: any) => r.viaje_id).filter(Boolean))]
+      if (idsViaje.length) {
+        const { data: vs } = await supabase.from("viajes").select("id, nombre").in("id", idsViaje)
+        const nombreViaje = new Map((vs || []).map((v: any) => [v.id, v.nombre]))
+        for (const r of rendiciones) r.viajes = r.viaje_id && nombreViaje.has(r.viaje_id) ? { id: r.viaje_id, nombre: nombreViaje.get(r.viaje_id) } : null
+      }
     } catch (e: any) {
       console.error("[rendiciones-resumen] error cargando rendiciones:", e?.message)
     }
