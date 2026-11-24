@@ -26,7 +26,6 @@ import { GET as catalogosFichaGET } from "@/app/api/vendedor/catalogos-ficha/rou
 import { GET as cuentasGET } from "@/app/api/vendedor/cuentas-bancarias/route"
 import { GET as zonasGET } from "@/app/api/vendedor/zonas/route"
 import { GET as billeteraGET } from "@/app/api/vendedor/billetera/route"
-import { GET as comisionesGET } from "@/app/api/vendedor/comisiones/route"
 import { GET as pagosPendientesGET } from "@/app/api/vendedor/pagos-pendientes/route"
 import { GET as estadisticasGET } from "@/app/api/vendedor/estadisticas/route"
 import { GET as rendicionesGET } from "@/app/api/viajante/rendiciones/route"
@@ -43,6 +42,7 @@ import { cargarComprados } from "@/lib/vendedor/comprados"
 import { contextoDevolucion } from "@/lib/cobranzas/origen-devolucion"
 import { agruparPorComprobante, KARDEX_COMISION_COLS, mapArticuloComision } from "@/lib/vendedor/comisiones-detalle"
 import { comisionGanadaPorComprobante, cuentaPersonalDe } from "@/lib/cuenta-corriente/cuenta-personal"
+import { calcularComisiones } from "@/lib/vendedor/comisiones-vendedor"
 import { cargarDetallePedido } from "@/lib/vendedor/detalle-pedido"
 import { cargarFichaCliente } from "@/lib/vendedor/ficha-cliente"
 import { frecuenciaHabituales, TOPE_HABITUALES } from "@/lib/vendedor/habituales"
@@ -250,10 +250,24 @@ const movimientosEnLote = (supabase: any, ids: string[]) =>
 const cuentas: DatasetDef = {
   nombre: "vendedor_cc",
   roles: ROLES,
-  async cargar(ctx) {
+  // Lentitud 24/11: antes se recalculaba TODA la cartera cada 15 min por equipo. Ahora
+  // solo los clientes marcados en el log (`cc_cliente`, triggers de
+  // 20261124a_mobile_cc_delta.sql); sin esa migración, snapshot como siempre.
+  tablas: ["cc_cliente"],
+  requiereLogDe: ["cc_cliente"],
+  // Red de seguridad: una vez por día la cartera entera (cambia la "versión" ⇒ snapshot),
+  // por lo que el log no ve (precios del contexto de devolución, imputaciones sueltas).
+  get version() {
+    return Number(hoyISO().replace(/-/g, ""))
+  },
+  async cargar(ctx, ids) {
     const vendedorIds = await vendedorIdsDe(ctx.supabase, ctx.sesion.user.id)
     if (!vendedorIds.length) return []
-    const cli = await fetchAllRows<{ id: string }>(() => ctx.supabase.from("clientes").select("id").in("vendedor_id", vendedorIds).eq("activo", true))
+    const cartera = await fetchAllRows<{ id: string }>(() => ctx.supabase.from("clientes").select("id").in("vendedor_id", vendedorIds).eq("activo", true))
+    // Por cambios: solo los marcados que son de su cartera (los demás salen como borrados)
+    const marcados = ids ? new Set(ids) : null
+    const cli = marcados ? cartera.filter((c) => marcados.has(c.id)) : cartera
+    if (!cli.length) return []
     const sesion = { vendedorIds, user: { id: ctx.sesion.user.id } }
     const movs = await movimientosEnLote(ctx.supabase, cli.map((c) => c.id))
     const filas = await enParalelo(cli, 8, (c) => cargarCuentaCliente(ctx.supabase, sesion, c.id, movs ? movs.get(c.id) ?? [] : null))
@@ -373,14 +387,15 @@ const billetera: DatasetDef = {
   nombre: "vendedor_billetera",
   roles: ROLES,
   async cargar(ctx) {
-    const [bill, cobrada, vendida, pendientes, rendiciones, estadisticas, vendedorIds] = await Promise.all([
+    // Las dos listas de comisiones salen de UNA lectura del kardex (lentitud 24/11:
+    // antes se llamaba la ruta dos veces y cada una leía toda la historia)
+    const vendedorIds = await vendedorIdsDe(ctx.supabase, ctx.sesion.user.id)
+    const [bill, { cobrada, vendida }, pendientes, rendiciones, estadisticas] = await Promise.all([
       llamarGET(billeteraGET, ctx, "/api/vendedor/billetera"),
-      llamarGET(comisionesGET, ctx, "/api/vendedor/comisiones?tipo=cobrada"),
-      llamarGET(comisionesGET, ctx, "/api/vendedor/comisiones?tipo=vendida"),
+      calcularComisiones(ctx.supabase, { vendedorIds, user: { id: ctx.sesion.user.id } }),
       llamarGET(pagosPendientesGET, ctx),
       llamarGET(rendicionesGET, ctx),
       llamarGET(estadisticasGET, ctx),
-      vendedorIdsDe(ctx.supabase, ctx.sesion.user.id),
     ])
     const recientes = new Set<string>()
     for (const l of [cobrada.pedidos || [], vendida.pedidos || []])
