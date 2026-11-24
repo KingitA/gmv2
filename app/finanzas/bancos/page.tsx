@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { DateInputAR } from "@/components/ui/date-input-ar"
+import { InputCUIT } from "@/components/ui/input-cuit"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -38,6 +39,7 @@ interface Estado {
 }
 interface Vep {
   numeroVep: string; descripcion: string; concepto: string; periodoFiscal: string; vence: string | null
+  cuitOriginante?: string
   monto: number | null; cuitContribuyente: string; operacion: OperacionBanco | null
 }
 interface Movs {
@@ -69,6 +71,11 @@ export default function BancosPage() {
   const [veps, setVeps] = useState<Vep[] | null>(null)
   const [vepError, setVepError] = useState<string | null>(null)
   const [vepAPagar, setVepAPagar] = useState<Vep | null>(null)
+  // CUIT de quien genera los VEP en ARCA: sin él el banco no los muestra. Se recuerda en este navegador.
+  const [originante, setOriginante] = useState("")
+  useEffect(() => { try { setOriginante(localStorage.getItem("bancos.vep.originante") ?? "") } catch {} }, [])
+  const cambiarOriginante = (v: string) => { setOriginante(v); try { localStorage.setItem("bancos.vep.originante", v) } catch {} }
+  const originanteDigitos = originante.replace(/\D/g, "")
   const [aRechazar, setARechazar] = useState<{ id: string; descripcion: string } | null>(null)
 
   const [desde, setDesde] = useState(sumarDiasISO(hoy, -7))
@@ -96,13 +103,13 @@ export default function BancosPage() {
 
   async function traerVeps() {
     setTrabajando("veps"); setVepError(null)
-    try { setVeps((await pedir("/api/bancos/credicoop/veps")).veps ?? []) }
+    try { setVeps((await pedir(`/api/bancos/credicoop/veps${originanteDigitos.length === 11 ? `?originante=${originanteDigitos}` : ""}`)).veps ?? []) }
     catch (e: any) { setVepError(e?.message || "No se pudieron traer los VEP"); setVeps(null) } finally { setTrabajando(null) }
   }
   async function pagarVep(v: Vep) {
     setVepAPagar(null); setTrabajando(`vep-${v.numeroVep}`)
     try {
-      await pedir("/api/bancos/credicoop/veps", { numero_vep: v.numeroVep, cuenta_bancaria_id: cuentaId, monto_visto: v.monto })
+      await pedir("/api/bancos/credicoop/veps", { numero_vep: v.numeroVep, cuenta_bancaria_id: cuentaId, monto_visto: v.monto, cuit_originante: v.cuitOriginante || originanteDigitos || null })
       toast.success("El pago del VEP quedó en Credicoop esperando la firma con token.", { duration: 10000 })
     } catch (e: any) { toast.error(e?.message || "No se pudo mandar el VEP", { duration: 15000 }) } finally { setTrabajando(null); await Promise.all([traerVeps(), cargar()]) }
   }
@@ -203,6 +210,13 @@ export default function BancosPage() {
 
           <Tarjeta titulo="VEP de ARCA pendientes de pago" ayuda="Los que informa Credicoop. Se mandan de a uno; el importe es el que informa ARCA."
             derecha={<Button size="sm" variant="outline" disabled={!conectado || trabajando === "veps"} onClick={traerVeps}><RefreshCw className={cn("h-4 w-4", trabajando === "veps" && "animate-spin")} /> Traer de Credicoop</Button>}>
+            <div className="mb-3 flex flex-wrap items-end gap-3">
+              <label className="text-sm">
+                <span className="mb-1 block font-medium text-neutro-700">CUIT de quien generó los VEP en ARCA</span>
+                <InputCUIT value={originante} onChange={cambiarOriginante} className="w-48" />
+              </label>
+              <p className="max-w-md text-xs text-neutro-500">El banco solo muestra los VEP si se le dice quién los generó (el contador o quien entra a ARCA). Sin este dato la lista puede venir vacía.</p>
+            </div>
             {vepError && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{vepError}</div>}
             {veps === null && !vepError && <p className="text-sm text-neutro-500">Tocá “Traer de Credicoop” para ver los VEP pendientes.</p>}
             {veps && veps.length === 0 && <p className="text-sm text-neutro-600">No hay VEP pendientes de pago.</p>}

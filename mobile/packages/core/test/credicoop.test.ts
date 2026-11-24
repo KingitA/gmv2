@@ -238,6 +238,12 @@ describe("Credicoop: VEP de ARCA", () => {
     expect((await cliente.consultarPagoVep({ idOrigen: "vep-1" })).resultado.estado).toBe("firmada")
     expect(await cliente.listarVeps(armarListaVeps(EMPRESA, { idOrigen: "v-2", estado: "PENDIENTE_PAGO" }))).toHaveLength(1)
   })
+
+  it("la lista de VEP manda el CUIT de quien los generó (originante) y fechas aaaaMMDD", () => {
+    const p = armarListaVeps(EMPRESA, { idOrigen: "v-3", desde: "2026-10-25", hasta: "2027-04-22", cuitOriginante: "20-16302722-5" })
+    expect(p.filtro).toEqual({ estado: "PENDIENTE_PAGO", cuitOriginante: "20163027225", fechaDesde: "20261025", fechaHasta: "20270422" })
+    expect(armarListaVeps(EMPRESA, { idOrigen: "v-4", cuitOriginante: "123" }).filtro).toEqual({ estado: "PENDIENTE_PAGO" })
+  })
   it("el mismo pago de VEP mandado dos veces se rechaza por repetido", async () => {
     const { cliente } = armar()
     const pago = armarPagoVep(EMPRESA, { idOrigen: "vep-2", cbuCuentaDebito: CBU_NUESTRO, numeroVep: 55366399, monto: 42750.5 })
