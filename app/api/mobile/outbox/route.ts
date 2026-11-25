@@ -79,7 +79,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ estado: "rechazado", error: e.message, codigo: e.codigo, ...datos } satisfies ResultadoOutbox, { status: 422 })
     }
     console.error(`[mobile/outbox] ${m.tipo}:`, e)
+    // Dato imposible (Juan 25/11/2026: un pedido con una cantidad mal tipeada daba un total
+    // de 10^36 y la base respondía "numeric field overflow"). Reintentarlo no sirve nunca y,
+    // como la cola es FIFO, trababa los pedidos siguientes del vendedor. Se rechaza: la app
+    // lo muestra en rojo ("no se pudo enviar"), los demás salen, y el vendedor lo edita y
+    // lo vuelve a guardar (operación nueva). No se marca completado: la clave queda libre.
+    const rechazoDeDato = mensajeDatoInvalido(e)
+    if (rechazoDeDato) {
+      await liberar(admin, m.idempotency_key).catch(() => {})
+      return NextResponse.json({ estado: "rechazado", error: rechazoDeDato } satisfies ResultadoOutbox, { status: 422 })
+    }
     await liberar(admin, m.idempotency_key).catch(() => {})
     return NextResponse.json({ error: "Error transitorio, se reintentará." }, { status: 503 })
   }
+}
+
+/**
+ * Errores de Postgres que dependen SOLO del dato (clase 22: número fuera de rango, texto
+ * inválido…; 23502/23514: campo obligatorio vacío o regla de la tabla). Por más que se
+ * reintente, el mismo payload falla igual. Las claves foráneas (23503) NO entran: pueden
+ * ser causales (el alta del cliente todavía no llegó) y se arreglan solas reintentando.
+ */
+function mensajeDatoInvalido(e: any): string | null {
+  const code = typeof e?.code === "string" ? e.code : ""
+  if (code === "22003") return "Hay un número fuera de rango (una cantidad o un precio mal tipeado, por ejemplo). Abrí el pedido, corregilo y volvé a guardarlo."
+  if (code.startsWith("22")) return "Hay un dato con un formato inválido. Abrí la operación, revisala y volvé a guardarla."
+  if (code === "23502" || code === "23514") return "Falta un dato obligatorio o hay un valor no permitido. Abrí la operación, revisala y volvé a guardarla."
+  return null
 }
