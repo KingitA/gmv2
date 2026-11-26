@@ -62,7 +62,7 @@ export async function idsArticulosDeProveedor(supabase: any, proveedorId: string
   return [...new Set<string>([...propios.map((a) => a.id), ...vinculados.map((a) => a.articulo_id)].filter(Boolean))]
 }
 
-export const COLS_ARTICULO_OC = "id, sku, ean13, descripcion, unidades_por_bulto, precio_compra, descuento1, descuento2, descuento3, descuento4, iva_compras, stock_actual, proveedor_id, activo"
+export const COLS_ARTICULO_OC = "id, sku, ean13, descripcion, unidades_por_bulto, precio_compra, descuento1, descuento2, descuento3, descuento4, iva_compras, stock_actual, proveedor_id, activo, imagen_url, marca_id"
 
 export interface ArticuloParaPedir {
   id: string
@@ -86,6 +86,10 @@ export interface ArticuloParaPedir {
   sugerido_bultos: number
   /** No es de este proveedor en la ficha: se agregó por vínculo o a mano */
   externo: boolean
+  /** Foto del artículo (articulos.imagen_url) */
+  imagen_url: string | null
+  /** Nombre de la marca (marcas.descripcion vía articulos.marca_id) */
+  marca: string | null
 }
 
 const num = (v: unknown) => {
@@ -131,6 +135,16 @@ export async function datosParaPedir(
     camino.set(c.articulo_id, (camino.get(c.articulo_id) || 0) + num(c.cantidad))
   }
 
+  // Nombre de la marca de cada artículo (si falla, la fila sale sin marca: no traba la orden)
+  const marcaIds = [...new Set<string>(arts.map((a: any) => a.marca_id).filter(Boolean))]
+  const marcas = new Map<string, string>()
+  if (marcaIds.length > 0) {
+    try {
+      const filasMarca = await fetchByIds<any>((ids) => supabase.from("marcas").select("id, descripcion").in("id", ids), marcaIds)
+      for (const m of filasMarca) if (m.descripcion) marcas.set(m.id, String(m.descripcion))
+    } catch { /* sin marcas */ }
+  }
+
   const conservar = new Set(p.conservarInactivos || [])
   const articulos: ArticuloParaPedir[] = arts.filter((a: any) => a.activo !== false || conservar.has(a.id)).map((a: any) => {
     const totalVendido = vendido.get(a.id) || 0
@@ -147,6 +161,8 @@ export async function datosParaPedir(
       stock_actual: stock, en_camino: stockCamino, vendido: totalVendido, venta_diaria: redondear(ventaDiaria),
       sugerido, sugerido_bultos: ub > 1 ? bultosParaCubrir(sugerido, ub) : sugerido,
       externo: a.proveedor_id !== p.proveedorId,
+      imagen_url: typeof a.imagen_url === "string" && a.imagen_url.trim() ? a.imagen_url : null,
+      marca: a.marca_id ? marcas.get(a.marca_id) ?? null : null,
     }
   })
   articulos.sort((a, b) => a.descripcion.localeCompare(b.descripcion, "es"))

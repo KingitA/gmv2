@@ -7,9 +7,10 @@
 // (función SQL oc_guardar): acá no se escribe nada en la base.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, CalendarClock, Loader2, Plus, Search, Send, Truck, X } from "lucide-react"
+import { AlertTriangle, CalendarClock, ImageOff, Loader2, Plus, Search, Send, Truck, X } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -20,7 +21,7 @@ import { DateInputAR } from "@/components/ui/date-input-ar"
 import { CargaProgreso } from "@/components/ui/carga-progreso"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { localMatch } from "@/lib/search/local-match"
-import { entero, fecha, hoyISO, moneda, numero, sumarDiasISO } from "@/lib/formato"
+import { entero, fecha, hoyISO, moneda, numero, redondear, sumarDiasISO } from "@/lib/formato"
 import { bultosParaCubrir } from "@/lib/deposito/unidades"
 import { netoRenglon, precioNeto, totalesOC, unidadesRenglon } from "@/lib/compras/oc-totales"
 import {
@@ -82,6 +83,16 @@ const renglonDe = (a: ArticuloParaPedir, f: Fila) => ({
   unidades_por_bulto: a.unidades_por_bulto, iva_compras: a.iva_compras,
 })
 const TOPE_FILAS = 150
+/** Se recuerda en este navegador si la persona usa la sugerencia o no */
+const CLAVE_SUGERENCIAS = "oc-dialogo-sugerencias"
+/** Precio por unidad: hasta 4 decimales */
+const DECIMALES_PRECIO = 4
+/** Más de esto arriba o abajo del precio de la ficha = probablemente mal escrito (ej. 1000 veces) */
+const DESVIO_SOSPECHOSO = 0.5
+/** Decimales para mostrar un precio por unidad: 2, o 4 si los tiene */
+const precioConDecimales = (p: number) => (redondear(p, 2) === redondear(p, DECIMALES_PRECIO) ? 2 : DECIMALES_PRECIO)
+
+export interface FotoArticulo { url: string; descripcion: string; marca: string | null }
 
 /**
  * Precio de un archivo importado → precio POR UNIDAD (lo único que guarda el sistema).
@@ -92,13 +103,16 @@ const precioPorUnidad = (precio: number, por: "bulto" | "unidad" | undefined, un
   por === "bulto" && unidadesPorBulto > 1 ? Math.round((precio / unidadesPorBulto) * 1e6) / 1e6 : precio
 
 // ─── Una fila de la tabla (memo: escribir en una no redibuja las otras) ────────────────────
-const FilaArticulo = memo(function FilaArticulo({ a, f, tipo, onCambio, onUsar }: {
+const FilaArticulo = memo(function FilaArticulo({ a, f, tipo, sugerencias, onCambio, onUsar, onVerFoto }: {
   a: ArticuloParaPedir
   f: Fila
   /** Cómo aplica el proveedor sus descuentos */
   tipo: "cascada" | "sobre_lista"
+  /** Mostrar en camino, venta del período y sugerido */
+  sugerencias: boolean
   onCambio: (id: string, cambio: Partial<Fila>) => void
   onUsar: (id: string) => void
+  onVerFoto: (foto: FotoArticulo) => void
 }) {
   const ub = a.unidades_por_bulto
   const r = renglonDe(a, f)
@@ -107,22 +121,44 @@ const FilaArticulo = memo(function FilaArticulo({ a, f, tipo, onCambio, onUsar }
   const cambioPrecio = Math.abs(neto - netoFicha) > 0.005
   const enBultos = (u: number) => (ub > 1 ? `${numero(u / ub, 0, 1)} bul` : null)
   const sugeridoEnUnidad = f.tipo === "bulto" ? a.sugerido_bultos : a.sugerido
+  // Precio de lista tipeado muy lejos del de la ficha (más de 50 % arriba o abajo): ¿error de tipeo?
+  const precioSospechoso = a.precio_compra > 0 && f.precio > 0 &&
+    (f.precio > a.precio_compra * (1 + DESVIO_SOSPECHOSO) || f.precio < a.precio_compra * (1 - DESVIO_SOSPECHOSO))
 
   return (
     <tr className={`border-b align-top ${f.cantidad > 0 ? "bg-accent/60" : ""}`}>
       <td className="px-2 py-1.5">
-        <div className="font-medium leading-tight">{a.descripcion}</div>
+        <div className="flex items-start gap-2">
+          {a.imagen_url ? (
+            <button type="button" onClick={() => onVerFoto({ url: a.imagen_url!, descripcion: a.descripcion, marca: a.marca })}
+              title="Ver la foto más grande" aria-label={`Ver la foto de ${a.descripcion}`}
+              className="size-9 shrink-0 overflow-hidden rounded border bg-white hover:ring-2 hover:ring-primary">
+              <img src={a.imagen_url} alt="" loading="lazy" className="size-full object-contain" />
+            </button>
+          ) : (
+            <div className="flex size-9 shrink-0 items-center justify-center rounded border border-dashed bg-muted/40 text-muted-foreground/50" title="Sin foto">
+              <ImageOff className="size-3.5" />
+            </div>
+          )}
+          <div className="min-w-0">
+        <div className="font-medium leading-tight">
+          {a.descripcion}
+          {a.marca && <span className="ml-1.5 whitespace-nowrap rounded bg-primary/10 px-1 text-[11px] font-semibold uppercase text-primary">{a.marca}</span>}
+        </div>
         <div className="text-xs text-muted-foreground">
           {a.sku ? `SKU ${a.sku}` : "sin SKU"}{a.ean13 ? ` · ${a.ean13}` : ""} · {ub > 1 ? `${entero(ub)} u por bulto` : <span className="font-semibold text-red-600">sin unidades por bulto</span>}
           {a.externo && <span className="ml-1.5 rounded bg-amber-100 px-1 text-amber-800">de otro proveedor</span>}
           {a.iva_compras === "adquisicion_stock" && <span className="ml-1.5 rounded bg-neutral-200 px-1 text-neutral-700">sin factura</span>}
           {a.iva_compras === "mixto" && <span className="ml-1.5 rounded bg-amber-100 px-1 text-amber-800">mixto</span>}
         </div>
+          </div>
+        </div>
       </td>
       <td className="px-2 py-1.5 text-right tabular-nums">
         <div className={a.stock_actual <= 0 ? "font-semibold text-red-600" : ""}>{entero(a.stock_actual)} u</div>
         {enBultos(a.stock_actual) && <div className="text-xs text-muted-foreground">{enBultos(a.stock_actual)}</div>}
       </td>
+      {sugerencias && <>
       <td className="px-2 py-1.5 text-right tabular-nums">
         {a.en_camino > 0 ? <><div className="text-purple-700">{entero(a.en_camino)} u</div>{enBultos(a.en_camino) && <div className="text-xs text-muted-foreground">{enBultos(a.en_camino)}</div>}</> : <span className="text-muted-foreground">—</span>}
       </td>
@@ -139,6 +175,7 @@ const FilaArticulo = memo(function FilaArticulo({ a, f, tipo, onCambio, onUsar }
           </button>
         ) : <span className="text-muted-foreground">—</span>}
       </td>
+      </>}
       <td className="px-2 py-1.5">
         <div className="flex gap-1">
           <InputMonto decimales={0} soloPositivos value={f.cantidad || null} onChange={(v) => onCambio(a.id, { cantidad: v ?? 0 })}
@@ -156,7 +193,13 @@ const FilaArticulo = memo(function FilaArticulo({ a, f, tipo, onCambio, onUsar }
         )}
       </td>
       <td className="px-2 py-1.5">
-        <InputMonto soloPositivos value={f.precio || null} onChange={(v) => onCambio(a.id, { precio: v ?? 0 })} className="h-8 w-28 text-right" aria-label="Precio de lista por unidad" />
+        <InputMonto decimales={DECIMALES_PRECIO} soloPositivos value={f.precio || null} onChange={(v) => onCambio(a.id, { precio: v ?? 0 })}
+          className={`h-8 w-32 text-right ${precioSospechoso ? "border-red-500 ring-1 ring-red-300" : ""}`} placeholder="0,00" aria-label="Precio de lista por unidad" />
+        {precioSospechoso && (
+          <div className="mt-0.5 max-w-[11rem] text-[11px] font-semibold leading-tight text-red-600" title="El punto separa los miles y la coma los decimales: 979.988 = novecientos setenta y nueve mil; 979,988 = novecientos setenta y nueve con 988.">
+            ¿Precio bien escrito? La ficha dice {moneda(a.precio_compra, precioConDecimales(a.precio_compra))}
+          </div>
+        )}
         <div className="mt-0.5 flex gap-0.5">
           {(["d1", "d2", "d3", "d4"] as const).map((k) => (
             <InputMonto key={k} soloPositivos value={f[k] || null} onChange={(v) => onCambio(a.id, { [k]: Math.min(100, v ?? 0) })}
@@ -264,6 +307,21 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
   const [diasObjetivo, setDiasObjetivo] = useState(45)
   const [agregar, setAgregar] = useState(false)
   const [guardando, setGuardando] = useState(false)
+  // Sugerencias prendidas o apagadas: arranca como la dejó la última vez en este navegador
+  const [sugerencias, setSugerencias] = useState(true)
+  const [foto, setFoto] = useState<FotoArticulo | null>(null)
+  useEffect(() => {
+    try {
+      const guardado = window.localStorage.getItem(CLAVE_SUGERENCIAS)
+      if (guardado === "0") setSugerencias(false)
+      else if (guardado === "1") setSugerencias(true)
+    } catch { /* sin localStorage: queda prendido */ }
+  }, [])
+  const cambiarSugerencias = (v: boolean) => {
+    setSugerencias(v)
+    if (!v) setSoloSugeridos(false)
+    try { window.localStorage.setItem(CLAVE_SUGERENCIAS, v ? "1" : "0") } catch { /* no se recuerda */ }
+  }
   const clave = useRef<string>("")
   const extras = useRef<string[]>([])
 
@@ -439,10 +497,10 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
   const visibles = useMemo(() => articulos.filter((a) => {
     const f = filas[a.id]
     if (soloConCantidad && !((f?.cantidad ?? 0) > 0)) return false
-    if (soloSugeridos && !(a.sugerido > 0) && !((f?.cantidad ?? 0) > 0)) return false
-    if (busca.trim() && !localMatch(busca, a.descripcion, a.sku, a.ean13)) return false
+    if (sugerencias && soloSugeridos && !(a.sugerido > 0) && !((f?.cantidad ?? 0) > 0)) return false
+    if (busca.trim() && !localMatch(busca, a.descripcion, a.sku, a.ean13, a.marca)) return false
     return true
-  }), [articulos, filas, soloConCantidad, soloSugeridos, busca])
+  }), [articulos, filas, soloConCantidad, soloSugeridos, sugerencias, busca])
   const mostradas = verTodas ? visibles : visibles.slice(0, TOPE_FILAS)
 
   // Cuándo se paga: lo mismo que va a generar la base como vencimientos estimados
@@ -607,7 +665,8 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
                 </div>
               )}
 
-              {/* Sugerencia y filtros */}
+              {/* Sugerencia (se apaga con el interruptor de abajo) */}
+              {sugerencias && (
               <div className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-lg border bg-blue-50/60 p-3">
                 <div>
                   <Label className="text-xs">Venta desde</Label>
@@ -636,13 +695,17 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
                   Sugerido = venta por día × {prep.periodo.dias_objetivo} días − stock − en camino ({prep.periodo.dias} días de venta).
                 </div>
               </div>
+              )}
 
               <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-sm font-medium" title="Prendido: período de venta, en camino, venta y cantidad sugerida. Apagado: solo la lista de artículos.">
+                  <Switch checked={sugerencias} onCheckedChange={cambiarSugerencias} aria-label="Mostrar sugerencias" /> Sugerencias
+                </label>
                 <div className="relative min-w-[240px] flex-1">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input placeholder="Filtrar por descripción, SKU o código de barras…" value={busca} onChange={(e) => setBusca(e.target.value)} className="h-9 pl-9" />
                 </div>
-                <label className="flex items-center gap-2 text-sm"><Checkbox checked={soloSugeridos} onCheckedChange={(c) => setSoloSugeridos(!!c)} /> Solo sugeridos</label>
+                {sugerencias && <label className="flex items-center gap-2 text-sm"><Checkbox checked={soloSugeridos} onCheckedChange={(c) => setSoloSugeridos(!!c)} /> Solo sugeridos</label>}
                 <label className="flex items-center gap-2 text-sm"><Checkbox checked={soloConCantidad} onCheckedChange={(c) => setSoloConCantidad(!!c)} /> Solo con cantidad ({conCantidad.length})</label>
                 {agregar
                   ? <div className="w-80"><EntitySearchSelect entity="articulos" placeholder="Buscar artículo de otro proveedor…" value={null} onSelect={agregarArticulo} compact autoFocus /></div>
@@ -655,14 +718,16 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
                 </div>
               ) : (
                 <div className="overflow-x-auto rounded-lg border">
-                  <table className="w-full min-w-[1100px] text-sm">
+                  <table className={`w-full text-sm ${sugerencias ? "min-w-[1100px]" : "min-w-[820px]"}`}>
                     <thead className="sticky top-0 z-10 bg-muted text-xs">
                       <tr className="border-b text-left">
                         <th className="px-2 py-2 font-semibold">Artículo</th>
                         <th className="px-2 py-2 text-right font-semibold">Stock</th>
-                        <th className="px-2 py-2 text-right font-semibold">En camino</th>
-                        <th className="px-2 py-2 text-right font-semibold">Venta del período</th>
-                        <th className="px-2 py-2 text-center font-semibold">Sugerido</th>
+                        {sugerencias && <>
+                          <th className="px-2 py-2 text-right font-semibold">En camino</th>
+                          <th className="px-2 py-2 text-right font-semibold">Venta del período</th>
+                          <th className="px-2 py-2 text-center font-semibold">Sugerido</th>
+                        </>}
                         <th className="px-2 py-2 font-semibold">Pedir</th>
                         <th className="px-2 py-2 font-semibold">Lista por UNIDAD y descuentos % <span className="font-normal text-muted-foreground">({prep.proveedor.tipo_descuento === "sobre_lista" ? "se suman, sobre lista" : "en cascada"})</span></th>
                         <th className="px-2 py-2 text-right font-semibold">Neto por unidad</th>
@@ -670,8 +735,8 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
                       </tr>
                     </thead>
                     <tbody>
-                      {mostradas.map((a) => <FilaArticulo key={a.id} a={a} f={filas[a.id] ?? filaDe(a)} tipo={prep.proveedor.tipo_descuento} onCambio={cambiarFila} onUsar={usarSugerencia} />)}
-                      {mostradas.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-muted-foreground">Ningún artículo coincide con el filtro.</td></tr>}
+                      {mostradas.map((a) => <FilaArticulo key={a.id} a={a} f={filas[a.id] ?? filaDe(a)} tipo={prep.proveedor.tipo_descuento} sugerencias={sugerencias} onCambio={cambiarFila} onUsar={usarSugerencia} onVerFoto={setFoto} />)}
+                      {mostradas.length === 0 && <tr><td colSpan={sugerencias ? 9 : 6} className="px-3 py-6 text-center text-muted-foreground">Ningún artículo coincide con el filtro.</td></tr>}
                     </tbody>
                   </table>
                   {visibles.length > mostradas.length && (
@@ -711,6 +776,19 @@ export function DialogoOrden({ abierto, inicio, onCerrar, onGuardada }: {
           </div>
         </div>
       </DialogContent>
+
+      {/* Foto del artículo en grande */}
+      <Dialog open={!!foto} onOpenChange={(a) => { if (!a) setFoto(null) }}>
+        <DialogContent className="z-[110] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="pr-6 text-base leading-tight">
+              {foto?.descripcion}
+              {foto?.marca && <span className="ml-2 rounded bg-primary/10 px-1.5 text-xs font-semibold uppercase text-primary">{foto.marca}</span>}
+            </DialogTitle>
+          </DialogHeader>
+          {foto && <img src={foto.url} alt={foto.descripcion} className="mx-auto max-h-[70vh] w-full rounded-md bg-white object-contain" />}
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }
