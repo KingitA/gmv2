@@ -2,6 +2,7 @@ import { MatchingEngine } from '@/lib/matching/matcher';
 import { sumarDocumentado } from '@/lib/compras/documentado';
 import { faltaLaFuncion } from '@/lib/utils/migracion-pendiente';
 import { resolveFactorConversion } from '@/lib/services/conversion';
+import { autoVincularPorOrden } from '@/lib/compras/vincular-renglon';
 
 // El OCR a veces devuelve el descuento como MONTO en pesos en vez de %.
 // Las columnas descuentoN son numeric(5,2): un monto grande revienta el insert.
@@ -263,6 +264,13 @@ export async function matchAndCreateDetalle(supabase: any, params: {
             const { error } = await supabase.from('ocr_conversion_warnings').insert(avisos);
             if (error) console.error('[matchAndCreateDetalle] warning insert error:', error.message);
         }
+    }
+
+    // Renglones que el matching no resolvió pero coinciden en cantidad y precio con UN SOLO artículo
+    // de la orden: se vinculan solos (aprendiendo la equivalencia), sin esperar a que alguien abra
+    // la verificación (lib/compras/vincular-renglon.ts). No tira: si falla quedan para vincular a mano.
+    if (guardados > 0 && recActual?.orden_compra_id) {
+        await autoVincularPorOrden(supabase, params.comprobante_id);
     }
 
     return Object.assign(matched, { descartados, renglones_leidos: params.items.length, renglones_guardados: guardados });
