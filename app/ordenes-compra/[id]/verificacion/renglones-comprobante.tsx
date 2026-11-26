@@ -40,7 +40,7 @@ interface Form {
 }
 const formVacio = (): Form => ({ linea_id: null, articulo_id: "", cantidad: null, unidad: "", precio: null, d1: null, d2: null, d3: null, d4: null })
 
-const ESTADO: Record<string, string> = { manual: "a mano", auto: "leído", sugerido: "sin confirmar", sin_match: "sin artículo", no_mercaderia: "no es mercadería" }
+const ESTADO: Record<string, string> = { manual: "a mano", auto: "leído", auto_oc: "automático (orden)", sugerido: "sin confirmar", sin_match: "sin artículo", no_mercaderia: "no es mercadería" }
 
 export function RenglonesComprobante({ comprobante, soloLectura, abrirEnAgregar, onCerrar, onCambio }: {
     comprobante: { id: string; tipo_comprobante: string; numero_comprobante: string } | null

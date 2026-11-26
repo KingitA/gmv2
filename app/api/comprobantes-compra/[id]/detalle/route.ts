@@ -1,12 +1,13 @@
 import { createAdminClient } from '@/lib/supabase/admin';
-import { sumarDocumentado } from '@/lib/compras/documentado';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requirePermiso } from '@/lib/auth';
-import { resolveFactorConversion } from '@/lib/services/conversion';
+import { articulosDeLaOrden, autoVincularPorOrden, vincularRenglon } from '@/lib/compras/vincular-renglon';
 
-// GET: detalle del comprobante con estado de match (para "Revisar matches")
+// GET: detalle del comprobante con estado de match (para "Vincular renglones de la factura").
+// Con ?con_orden=1 devuelve { filas, orden }: además los artículos de la orden de compra del
+// comprobante (foto, marca, lo pedido) para proponer el que coincide (lib/compras/coincidencia-oc.ts).
 export async function GET(
-    _request: NextRequest,
+    request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     const auth = await requireAuth();
@@ -32,7 +33,7 @@ export async function GET(
     // para que nadie la confirme sin mirar (lib/matching/compra.ts).
     const { data: comp } = await supabase
         .from('comprobantes_compra')
-        .select('proveedor_id, orden_compra:ordenes_compra(proveedor_id)')
+        .select('proveedor_id, orden_compra_id, orden_compra:ordenes_compra(proveedor_id)')
         .eq('id', comprobante_id)
         .maybeSingle();
     const oc: any = Array.isArray((comp as any)?.orden_compra) ? (comp as any).orden_compra[0] : (comp as any)?.orden_compra;
@@ -43,10 +44,34 @@ export async function GET(
         const otro = !!s && !!proveedorComprobante && !!s.proveedor_id && s.proveedor_id !== proveedorComprobante;
         return { ...r, sugerido_otro_proveedor: otro ? (p?.nombre || 'otro proveedor') : null };
     });
+    if (request.nextUrl.searchParams.get('con_orden') === '1') {
+        const ordenId = (comp as any)?.orden_compra_id as string | null;
+        const orden = ordenId ? await articulosDeLaOrden(supabase, ordenId) : [];
+        return NextResponse.json({ filas, orden });
+    }
     return NextResponse.json(filas);
 }
 
-// PATCH: confirmar/corregir el match de una línea del comprobante.
+// POST { accion: 'auto_vincular' }: vincula solos los renglones que coinciden con UN SOLO artículo
+// de la orden (mismo camino que el PATCH: aprende la equivalencia). La lectura del comprobante ya
+// lo hace (lib/services/detalle.ts); esto lo corre la pantalla para los comprobantes leídos antes.
+export async function POST(
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const auth = await requirePermiso('compras');
+    if (auth.error) return auth.error;
+    const { id: comprobante_id } = await params;
+    const body = await request.json().catch(() => ({}));
+    if (body?.accion !== 'auto_vincular') {
+        return NextResponse.json({ error: 'accion desconocida' }, { status: 400 });
+    }
+    const vinculados = await autoVincularPorOrden(createAdminClient(), comprobante_id);
+    return NextResponse.json({ success: true, vinculados });
+}
+
+// PATCH: confirmar/corregir el match de una línea del comprobante (también cambiar el artículo de
+// una línea ya vinculada, p. ej. un vínculo automático equivocado).
 // Aprende la equivalencia (RPC compras_aprender_equivalencia) para que la
 // próxima factura del mismo proveedor matchee exacto por código/descripción.
 export async function PATCH(
@@ -64,128 +89,9 @@ export async function PATCH(
             return NextResponse.json({ error: 'detalle_id y articulo_id son requeridos' }, { status: 400 });
         }
 
-        const supabase = createAdminClient();
-
-        const { data: detalle } = await supabase
-            .from('comprobantes_compra_detalle')
-            .select('*')
-            .eq('id', detalle_id)
-            .eq('comprobante_id', comprobante_id)
-            .maybeSingle();
-
-        if (!detalle) {
-            return NextResponse.json({ error: 'Línea de detalle no encontrada' }, { status: 404 });
-        }
-
-        const { data: comprobante } = await supabase
-            .from('comprobantes_compra')
-            .select('id, proveedor_id, orden_compra_id')
-            .eq('id', comprobante_id)
-            .maybeSingle();
-
-        if (!comprobante?.proveedor_id) {
-            return NextResponse.json({ error: 'Comprobante sin proveedor' }, { status: 400 });
-        }
-
-        // 1. Aprender la equivalencia proveedor↔artículo
-        const { error: rpcError } = await supabase.rpc('compras_aprender_equivalencia', {
-            p_articulo_id: articulo_id,
-            p_proveedor_id: comprobante.proveedor_id,
-            p_codigo_proveedor: detalle.codigo_proveedor || null,
-            p_descripcion: detalle.descripcion_proveedor || null,
-        });
-        if (rpcError) {
-            console.error('[detalle PATCH] aprender_equivalencia:', rpcError.message);
-        }
-
-        // 2. Vincular con la recepción de la OC (crear línea fuera_de_oc si no estaba pedida)
-        let recepcionItemId: string | null = detalle.recepcion_item_id;
-        // La línea sin vincular nació como 'unidad'; al vincularla se sabe si la factura la trae por bulto
-        let tipoCantidad: string | null = null;
-        if (comprobante.orden_compra_id) {
-            const { data: recepcion } = await supabase
-                .from('recepciones')
-                .select('id')
-                .eq('orden_compra_id', comprobante.orden_compra_id)
-                .neq('estado', 'cancelada')
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-
-            if (recepcion) {
-                let { data: recItem } = await supabase
-                    .from('recepciones_items')
-                    .select('*, articulo:articulos(id, unidades_por_bulto, precio_compra)')
-                    .eq('recepcion_id', recepcion.id)
-                    .eq('articulo_id', articulo_id)
-                    .maybeSingle();
-
-                if (!recItem) {
-                    const { data: nueva } = await supabase
-                        .from('recepciones_items')
-                        .insert({
-                            recepcion_id: recepcion.id,
-                            articulo_id,
-                            cantidad_oc: 0,
-                            cantidad_fisica: 0,
-                            estado_linea: 'pendiente',
-                            fuera_de_oc: true,
-                        })
-                        .select('*, articulo:articulos(id, unidades_por_bulto, precio_compra)')
-                        .single();
-                    recItem = nueva;
-                }
-
-                if (recItem) {
-                    const { data: proveedor } = await supabase
-                        .from('proveedores')
-                        .select('default_unidad_factura')
-                        .eq('id', comprobante.proveedor_id)
-                        .maybeSingle();
-
-                    const conversion = resolveFactorConversion({
-                        proveedorDefaultUnidad: proveedor?.default_unidad_factura,
-                        articuloUnidadesPorBulto: recItem.articulo?.unidades_por_bulto,
-                        descripcionOcr: detalle.descripcion_proveedor,
-                        precioDocumento: detalle.precio_unitario,
-                        costoBaseArticulo: recItem.articulo?.precio_compra,
-                    });
-
-                    const cantBase = Number(detalle.cantidad_facturada || 0) * conversion.factor;
-                    tipoCantidad = conversion.factor === 1 ? 'unidad' : 'bulto';
-
-                    await sumarDocumentado(supabase, recItem.id, cantBase, {
-                        precio_documentado: detalle.precio_unitario || 0,
-                        precio_real: detalle.precio_unitario || recItem.precio_oc || 0,
-                        cantidad_base: cantBase,
-                        factor_conversion: conversion.factor,
-                        conversion_source: conversion.source,
-                        requires_review: conversion.requiresReview,
-                    });
-
-                    recepcionItemId = recItem.id;
-                }
-            }
-        }
-
-        // 3. Actualizar la línea del detalle como confirmada manualmente
-        const { data: updated, error: updError } = await supabase
-            .from('comprobantes_compra_detalle')
-            .update({
-                articulo_id,
-                articulo_sugerido_id: null,
-                match_estado: 'manual',
-                recepcion_item_id: recepcionItemId,
-                // misma convención que el OCR: cantidad tal cual la factura + si son bultos o unidades
-                ...(tipoCantidad ? { tipo_cantidad: tipoCantidad } : {}),
-            })
-            .eq('id', detalle_id)
-            .select()
-            .single();
-
-        if (updError) throw updError;
-
-        return NextResponse.json({ success: true, detalle: updated });
+        const r = await vincularRenglon(createAdminClient(), { comprobante_id, detalle_id, articulo_id, match_estado: 'manual' });
+        if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
+        return NextResponse.json({ success: true, detalle: r.detalle });
     } catch (error: any) {
         console.error('[detalle PATCH] Error:', error);
         return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
