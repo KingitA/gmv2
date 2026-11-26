@@ -1,6 +1,8 @@
 import { sumarDocumentado } from "@/lib/compras/documentado"
 import { resolveFactorConversion } from "@/lib/services/conversion"
 import { vinculosAutomaticos, type ArticuloOrdenCoincidencia } from "@/lib/compras/coincidencia-oc"
+import { precioNeto } from "@/lib/compras/oc-totales"
+import { tipoDescuentoProveedor } from "@/lib/compras/tipo-descuento-proveedor"
 
 /**
  * Vincular un renglón de un comprobante de compra a un artículo (lo que hacía el PATCH de
@@ -185,11 +187,14 @@ export interface ArticuloDeLaOrden extends ArticuloOrdenCoincidencia {
 export async function articulosDeLaOrden(supabase: any, ordenId: string): Promise<ArticuloDeLaOrden[]> {
   const { data: det } = await supabase
     .from("ordenes_compra_detalle")
-    .select("articulo_id, cantidad_pedida, tipo_cantidad, precio_unitario")
+    .select("articulo_id, cantidad_pedida, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4")
     .eq("orden_compra_id", ordenId)
     .limit(2000)
   const renglones: any[] = (det || []).filter((d: any) => d.articulo_id)
   if (renglones.length === 0) return []
+  // La factura trae el precio NETO (con los descuentos de la orden aplicados), no el de lista
+  const { data: oc } = await supabase.from("ordenes_compra").select("proveedor_id").eq("id", ordenId).maybeSingle()
+  const tipoDescuento = await tipoDescuentoProveedor(supabase, oc?.proveedor_id)
   const ids = [...new Set(renglones.map((d) => d.articulo_id as string))]
   const { data: arts } = await supabase
     .from("articulos")
@@ -223,7 +228,11 @@ export async function articulosDeLaOrden(supabase: any, ordenId: string): Promis
       cantidad_pedida: Number(d.cantidad_pedida || 0),
       tipo_cantidad: d.tipo_cantidad === "unidad" ? "unidad" : "bulto",
       unidades_por_bulto: upb,
-      precio_unitario: Number(d.precio_unitario || 0),
+      precio_unitario: precioNeto({
+        precio_unitario: Number(d.precio_unitario || 0),
+        descuento1: Number(d.descuento1 || 0), descuento2: Number(d.descuento2 || 0),
+        descuento3: Number(d.descuento3 || 0), descuento4: Number(d.descuento4 || 0),
+      }, tipoDescuento),
       sku: a?.sku ?? null,
       descripcion: a?.descripcion || "—",
       imagen_url: typeof a?.imagen_url === "string" && a.imagen_url.trim() ? a.imagen_url : null,
