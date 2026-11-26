@@ -14,6 +14,13 @@ import { useEffect, useState } from "react"
 //  4. publica el alto del teclado en la variable CSS `--gm-teclado` (0px si el WebView ya
 //     achicó el contenido): un elemento fijo abajo que no sube solo usa
 //     `style={{ bottom: "var(--gm-teclado, 0px)" }}` o la clase `pb-[var(--gm-teclado,0px)]`.
+//
+// 26/11/2026 (Juan: "siempre hay algún botón tapado"): además, en las 3 apps,
+//  - AndroidManifest `windowSoftInputMode="adjustResize"`: Android avisa el teclado y el
+//    SystemBars de Capacitor achica el WebView (antes Android elegía solo y desplazaba).
+//  - styles.css: todo `fixed bottom-0` / `fixed inset-0` sube `--gm-teclado` y, con el
+//    teclado abierto, las hojas no pasan del alto libre (se desplazan por dentro).
+//  - Pantalla (vendedor y chofer) deja `--gm-teclado` abajo: el pie queda arriba.
 
 /** Alto que tapa el teclado: lo que falta del alto de la ventana en la parte visible. */
 export function altoTeclado(altoVentana: number, altoVisible: number, desdeArriba = 0): number {

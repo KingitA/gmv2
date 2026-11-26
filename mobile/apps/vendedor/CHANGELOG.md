@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.18 (versionCode 27) — 2026-11-26
+
+- Con el teclado abierto, los botones (Agregar al pedido, Confirmar, Guardar, Cobrar…) quedan arriba del teclado
+
 ## v0.4.17 (versionCode 26) — 2026-11-20
 
 - Hacer sonar: el equipo se registra solo (reintenta) y suena con un sonido de alarma propio
