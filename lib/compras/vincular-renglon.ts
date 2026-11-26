@@ -1,6 +1,6 @@
 import { sumarDocumentado } from "@/lib/compras/documentado"
 import { resolveFactorConversion } from "@/lib/services/conversion"
-import { vinculosAutomaticos, type ArticuloOrdenCoincidencia } from "@/lib/compras/coincidencia-oc"
+import { coincidencia, vinculosAutomaticos, type ArticuloOrdenCoincidencia } from "@/lib/compras/coincidencia-oc"
 import { precioNeto } from "@/lib/compras/oc-totales"
 import { tipoDescuentoProveedor } from "@/lib/compras/tipo-descuento-proveedor"
 
@@ -38,8 +38,15 @@ export async function vincularRenglon(
     .maybeSingle()
   if (!comprobante?.proveedor_id) return { ok: false, status: 400, error: "Comprobante sin proveedor" }
 
-  // Ya estaba vinculado a ESE artículo: no se vuelve a sumar (antes sumaba dos veces)
-  if (detalle.articulo_id && detalle.articulo_id === p.articulo_id) {
+  // ¿La factura lo trae en bultos o en unidades? Si el renglón coincide con lo pedido en la orden
+  // (cantidad y precio neto), eso manda: la descripción engaña ("40 PACKS X 1 UNI X 200 G" se leía
+  // como unidades por el "UNI", y son bultos). null = no coincide: se decide como antes.
+  const factorOC = await factorSegunOrden(supabase, comprobante.orden_compra_id, p.articulo_id, detalle)
+
+  // Ya estaba vinculado a ESE artículo: no se vuelve a sumar (antes sumaba dos veces), salvo que
+  // haya quedado en la unidad equivocada: entonces se rehace (resta lo sumado y suma bien).
+  const unidadBien = factorOC == null || (factorOC > 1) === (detalle.tipo_cantidad === "bulto")
+  if (detalle.articulo_id && detalle.articulo_id === p.articulo_id && unidadBien) {
     if (detalle.match_estado === matchEstado) return { ok: true, detalle }
     const { data: upd, error } = await supabase
       .from("comprobantes_compra_detalle")
@@ -129,7 +136,9 @@ export async function vincularRenglon(
           .eq("id", comprobante.proveedor_id)
           .maybeSingle()
 
-        const conversion = resolveFactorConversion({
+        const conversion = factorOC != null
+          ? { factor: factorOC, source: "COINCIDENCIA_OC", requiresReview: false }
+          : resolveFactorConversion({
           proveedorDefaultUnidad: proveedor?.default_unidad_factura,
           articuloUnidadesPorBulto: recItem.articulo?.unidades_por_bulto,
           descripcionOcr: detalle.descripcion_proveedor,
@@ -296,5 +305,25 @@ export async function autoVincularPorOrden(supabase: any, comprobanteId: string)
   } catch (e: any) {
     console.error("[autoVincularPorOrden] error:", e?.message || e)
     return 0
+  }
+}
+
+/**
+ * Factor de la factura según la orden: unidades por bulto si el renglón coincide con lo pedido EN
+ * BULTOS, 1 si coincide EN UNIDADES, null si no coincide con ese artículo de la orden.
+ */
+async function factorSegunOrden(supabase: any, ordenId: string | null, articuloId: string, detalle: any): Promise<number | null> {
+  if (!ordenId) return null
+  try {
+    const orden = await articulosDeLaOrden(supabase, ordenId)
+    const a = orden.find((x) => x.articulo_id === articuloId)
+    if (!a) return null
+    const forma = coincidencia({ cantidad: Number(detalle.cantidad_facturada || 0), precio: Number(detalle.precio_unitario || 0) }, a)
+    if (forma === "bulto") return Number(a.unidades_por_bulto) > 1 ? Number(a.unidades_por_bulto) : 1
+    if (forma === "unidad") return 1
+    return null
+  } catch (e: any) {
+    console.error("[vincularRenglon] factor según la orden:", e?.message || e)
+    return null
   }
 }
