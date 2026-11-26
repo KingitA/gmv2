@@ -267,7 +267,7 @@ export default function NCPendientesPage() {
                                         <TableCell className="font-medium">{nd.proveedor?.nombre || "—"}</TableCell>
                                         <TableCell>{nd.orden_compra?.numero_orden || "—"}</TableCell>
                                         <TableCell className="text-xs">{nd.asociado ? `${nd.asociado.tipo_comprobante} ${nd.asociado.numero_comprobante}` : "—"}</TableCell>
-                                        <TableCell className="text-right font-semibold">{formatCurrency(Number(nd.total_factura_declarado || 0))}</TableCell>
+                                        <TableCell className="text-right font-semibold">{Number(nd.total_factura_declarado || 0) > 0 ? formatCurrency(Number(nd.total_factura_declarado)) : <span className="text-amber-700">a confirmar</span>}</TableCell>
                                         <TableCell className="text-right">{diasEsperando(nd.created_at)}</TableCell>
                                         <TableCell><Button size="sm" variant="outline" onClick={() => quitarDebito(nd)}>Ya se cargó la factura</Button></TableCell>
                                     </TableRow>

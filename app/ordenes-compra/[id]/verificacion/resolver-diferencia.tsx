@@ -12,7 +12,7 @@ import { Loader2, Scale } from "lucide-react"
 import { toast } from "sonner"
 import { moneda } from "@/lib/formato"
 import { cant } from "@/lib/deposito/unidades"
-import { cuentaSobrante, reclamablePorDevolucion, type Importe } from "@/lib/compras/diferencias"
+import { cuentaNoPedidoSinFactura, cuentaSobrante, reclamablePorDevolucion, type Importe } from "@/lib/compras/diferencias"
 import type { FilaVerificacion } from "@/lib/compras/verificacion"
 
 // Ventana "Resolver diferencia" (E-94, E-44, E-43).
@@ -89,6 +89,9 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
     }, [destinoCantidad, rechazo, noPedido, sobrante, dif])
     const reclamoDevolucion = devolver > 0 ? reclamablePorDevolucion(dif, devolver) : null
     const sobra = sobrante ? cuentaSobrante(dif) : null
+    // No estaba en la orden, llegó y ninguna factura lo trae: se espera la factura, sin cargo o se devuelve
+    const npSinFactura = noPedido && !conCantidad ? cuentaNoPedidoSinFactura(dif, fila.costo_ficha) : null
+    const stockYaSubio = `Stock: ya subió ${cant(dif.recibido_unidades)} u cuando el depósito lo recibió; eso no cambia.`
 
     // ── Vista previa: qué va a pasar ──
     const previa: string[] = []
@@ -104,7 +107,17 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
         }
     }
     if ((conCantidad || noPedido) && destinoCantidad) {
-        if (destinoCantidad === "espera_factura" && sobra) {
+        if (destinoCantidad === "espera_factura" && npSinFactura) {
+            previa.push(stockYaSubio)
+            previa.push(npSinFactura.importe_a_confirmar
+                ? `Se espera la factura del proveedor por ${cant(npSinFactura.unidades)} u. Importe a confirmar: el artículo no tiene costo cargado en su ficha.`
+                : `Se espera la factura del proveedor por ${pesos(npSinFactura.espera_factura)} (${cant(npSinFactura.unidades)} u al costo actual del artículo, ${moneda(npSinFactura.neto_unidad)} neto por unidad).`)
+            previa.push("No es deuda todavía: queda anotada en \"Notas esperadas\" hasta que llegue la factura.")
+        } else if (destinoCantidad === "bonificado" && npSinFactura) {
+            previa.push(stockYaSubio)
+            previa.push("Queda sin cargo: no se paga nada y no se espera ninguna factura.")
+            previa.push("El costo del artículo no cambia.")
+        } else if (destinoCantidad === "espera_factura" && sobra) {
             previa.push(`La mercadería de más se queda en el stock y se espera la factura del proveedor por ${pesos(sobra.espera_factura)} (${cant(sobra.unidades)} u al precio de la orden).`)
             previa.push("No es deuda todavía: la deuda sigue siendo el total de los comprobantes cargados. Queda anotada en \"Notas esperadas\" hasta que llegue.")
         } else if (destinoCantidad === "bonificado" && sobra) {
@@ -112,7 +125,7 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
             previa.push(`Último costo del artículo: baja a ${moneda(sobra.ultimo_costo_bonificado)} por unidad (lo pagado repartido entre todo lo recibido). El precio de lista no se toca.`)
         } else if (destinoCantidad === "empresa") {
             previa.push(noPedido ? "El artículo queda aceptado como recibido (no estaba en la orden)." : sobrante ? "El sobrante queda aceptado: la mercadería se queda en el stock." : "La empresa asume el faltante: no se reclama nada.")
-            previa.push("Stock y cuenta corriente: sin cambios.")
+            previa.push(noPedido && dif.recibido_unidades > 0 ? `${stockYaSubio} Cuenta corriente: sin cambios (se paga lo facturado).` : "Stock y cuenta corriente: sin cambios.")
         } else if (destinoCantidad === "transporte") {
             previa.push(`Se le cargan ${pesos(faltanteImp!)} al transporte en su cuenta corriente.`)
             previa.push("Stock: sin cambios (solo entró lo que se contó).")
@@ -123,7 +136,7 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
                 ? `Stock: BAJA ${cant(devolver)} u (mercadería que entró y se devuelve). El faltante no toca el stock.`
                 : "Stock: sin cambios (el faltante nunca entró). Cuenta corriente: no cambia hasta que llegue la nota de crédito.")
         } else if (destinoCantidad === "devolver") {
-            previa.push(`Stock: BAJA ${cant(devolver)} u (se devuelve al proveedor).`)
+            previa.push(`Stock: BAJA ${cant(devolver)} u (se devuelve al proveedor${noPedido || sobrante ? "; había subido cuando el depósito lo recibió" : ""}).`)
             previa.push(reclamoDevolucion && reclamoDevolucion.total > 0
                 ? `Queda una nota de crédito ESPERADA por ${pesos(reclamoDevolucion)} (estaba facturado).`
                 : "No estaba facturado: no se genera nota de crédito.")
@@ -314,15 +327,27 @@ export function ResolverDiferencia({ fila, filasOC, transportes, ordenId, recepc
 
                     {noPedido && !conCantidad && (
                         <div className="space-y-2">
-                            <Label>NO PEDIDO: este artículo llegó o se facturó y no estaba en la orden</Label>
-                            <div className="grid gap-2">
+                            <Label>{npSinFactura
+                                ? `NO PEDIDO: llegaron ${cant(npSinFactura.unidades)} u que no estaban en la orden ni en ninguna factura`
+                                : "NO PEDIDO: este artículo llegó o se facturó y no estaba en la orden"}</Label>
+                            {npSinFactura ? (
+                                <div className="grid gap-2">
+                                    <Opcion activa={destinoCantidad === "espera_factura" && !vincularDestino} onClick={() => { setDestinoCantidad("espera_factura"); setVincularDestino("") }}
+                                        titulo="Se recibe y esperamos la factura"
+                                        detalle={`Se queda en el stock. El proveedor lo va a facturar: ${npSinFactura.importe_a_confirmar ? "importe a confirmar (el artículo no tiene costo cargado)" : `${pesos(npSinFactura.espera_factura)} al costo actual`}. Queda anotado como nota esperada.`} />
+                                    <Opcion activa={destinoCantidad === "bonificado" && !vincularDestino} onClick={() => { setDestinoCantidad("bonificado"); setVincularDestino("") }}
+                                        titulo="Se recibe sin cargo (bonificado)" detalle="Se queda en el stock y no se paga nada. El costo del artículo no cambia." />
+                                    <Opcion activa={destinoCantidad === "devolver" && !vincularDestino} onClick={() => { setDestinoCantidad("devolver"); setVincularDestino("") }}
+                                        titulo="Se devuelve" detalle={`Salen ${cant(dif.recibido_unidades)} u del stock. No estaba facturado: sin nota de crédito.`} />
+                                </div>
+                            ) : <div className="grid gap-2">
                                 <Opcion activa={destinoCantidad === "empresa" && !vincularDestino} onClick={() => { setDestinoCantidad("empresa"); setVincularDestino("") }}
                                     titulo="Aceptarlo" detalle={dif.factura ? `Se queda en el stock, al precio facturado (${moneda(dif.factura.neto_unidad)} neto por unidad).` : "Se queda en el stock. Todavía no está facturado."} />
                                 {dif.recibido_unidades > 0 && (
                                     <Opcion activa={destinoCantidad === "devolver" && !vincularDestino} onClick={() => { setDestinoCantidad("devolver"); setVincularDestino("") }}
                                         titulo="Devolverlo" detalle={`Salen ${cant(dif.recibido_unidades)} u del stock${dif.factura ? " y queda una nota de crédito esperada por lo facturado" : ""}.`} />
                                 )}
-                            </div>
+                            </div>}
                             <div className="border rounded-md p-3 space-y-2">
                                 <Label className="text-xs">O en realidad era OTRO artículo de la orden (duplicado en la base, o el proveedor cambió el código):</Label>
                                 <Select value={vincularDestino || "ninguno"} onValueChange={(v) => { setVincularDestino(v === "ninguno" ? "" : v); if (v !== "ninguno") setDestinoCantidad("") }}>

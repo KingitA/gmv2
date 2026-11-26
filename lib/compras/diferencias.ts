@@ -322,3 +322,47 @@ export function cuentaSobrante(dif: DiferenciaLinea): { unidades: number; espera
     ultimo_costo_bonificado: dif.recibido_unidades > 0 ? r4((dif.factura.neto_unidad * pagadas) / dif.recibido_unidades) : 0,
   }
 }
+
+/** Costo actual del artículo según su ficha, ya neto (lista con los descuentos como los aplica el proveedor). */
+export interface CostoFicha {
+  /** Neto por unidad (sin redondear). 0 = el artículo no tiene costo cargado. */
+  neto_unidad: number
+  iva_porcentaje: number
+}
+
+/**
+ * Costo de la ficha del artículo: precio_compra (por unidad) con sus descuentos según la ficha del
+ * proveedor (en cascada o sobre lista). IVA: 0 si el artículo se compra sin factura
+ * (iva_compras = adquisicion_stock); si no, 21 %.
+ */
+export function costoDeFicha(
+  a: { precio_compra?: unknown; descuento1?: unknown; descuento2?: unknown; descuento3?: unknown; descuento4?: unknown; iva_compras?: unknown } | null | undefined,
+  tipo?: TipoDescuento | null,
+): CostoFicha {
+  if (!a) return { neto_unidad: 0, iva_porcentaje: 21 }
+  const neto = netoCompra(a.precio_compra, [a.descuento1, a.descuento2, a.descuento3, a.descuento4], tipo)
+  return { neto_unidad: neto > 0 ? neto : 0, iva_porcentaje: a.iva_compras === "adquisicion_stock" ? 0 : 21 }
+}
+
+/**
+ * Artículo NO PEDIDO (no está en la orden) que llegó y NO está en ninguna factura (caso real
+ * OC-000014, 26/11): se puede recibir y esperar la factura, o recibir sin cargo (bonificado).
+ * La factura esperada = unidades recibidas × costo neto actual de la ficha + IVA. Si la ficha no
+ * tiene costo, se anota igual con las unidades y el importe queda "a confirmar" (en 0).
+ * Sin cargo no cambia el costo del artículo: no se pagó nada por esas unidades.
+ * null = no es ese caso (está en la orden, ya está facturado o no llegó nada).
+ */
+export function cuentaNoPedidoSinFactura(
+  dif: DiferenciaLinea,
+  costo: CostoFicha | null | undefined,
+): { unidades: number; neto_unidad: number; espera_factura: Importe; importe_a_confirmar: boolean } | null {
+  if (dif.oc || dif.factura || !(dif.recibido_unidades > 0)) return null
+  const neto = costo && costo.neto_unidad > 0 ? costo.neto_unidad : 0
+  const unidades = dif.recibido_unidades
+  return {
+    unidades,
+    neto_unidad: neto,
+    espera_factura: neto > 0 ? importe(unidades * neto, costo!.iva_porcentaje) : { neto: 0, iva: 0, total: 0 },
+    importe_a_confirmar: !(neto > 0),
+  }
+}

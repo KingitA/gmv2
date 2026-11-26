@@ -129,7 +129,7 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
   const articulosP: Promise<any[]> = medir("articulos", (async (): Promise<any[]> => {
       const todos: any[] = []
       for (let i = 0; i < idsArt.length; i += 200) {
-        const r = await supabase.from("articulos").select("id, sku, descripcion, unidades_por_bulto, iva_compras").in("id", idsArt.slice(i, i + 200))
+        const r = await supabase.from("articulos").select("id, sku, descripcion, unidades_por_bulto, iva_compras, precio_compra, descuento1, descuento2, descuento3, descuento4").in("id", idsArt.slice(i, i + 200))
         todos.push(...(ok<any[]>(r, "artículos") || []))
       }
       return todos
@@ -181,6 +181,8 @@ export async function cargarVerificacionOC(supabase: any, ordenId: string): Prom
     comprobantes,
     recibidos: recItems.filter((r) => Number(r.unidades) > 0).map((r) => ({ articulo_id: r.articulo_id, sku: skuDe.get(r.articulo_id)?.sku ?? null, descripcion: skuDe.get(r.articulo_id)?.descripcion ?? null })),
     cubiertos: detalle.filter((l) => l.articulo_id && validados.has(l.comprobante_id)).map((l) => l.articulo_id),
+    // Diferencia de cantidad ya resuelta (sin cargo, se espera la factura, devuelto o aceptado): no frena
+    resueltos: verificacion.filas.filter((f) => !!f.resuelto.cantidad).map((f) => f.articulo_id),
   })
   const pendientes = verificacion.filas
     .filter((f) => f.banderas.includes("pendiente"))

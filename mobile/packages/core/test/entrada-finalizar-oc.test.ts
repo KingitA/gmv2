@@ -61,8 +61,67 @@ describe("¿se puede finalizar la orden de compra?", () => {
     expect([r.puede, r.falta_factura]).toEqual([false, true])
   })
 
+  it("OC-000014: recibido sin factura pero con la diferencia resuelta (sin cargo, se espera la factura, devuelto o aceptado): no frena", () => {
+    const base = { comprobantes: [comp("FA", "validado")], recibidos: rec("a", "800138"), cubiertos: ["a"] }
+    const antes = evaluarFinalizarOC(base)
+    expect(antes.puede).toBe(false)
+    expect(antes.faltas.join(" ")).toMatch(/SKU-800138/)
+    const despues = evaluarFinalizarOC({ ...base, resueltos: ["800138"] })
+    expect(despues.puede).toBe(true)
+    expect(despues.sin_cubrir).toEqual([])
+  })
+
+  it("resolver OTRO artículo no cubre al que sigue sin factura", () => {
+    const r = evaluarFinalizarOC({ comprobantes: [comp("FA", "validado")], recibidos: rec("a", "b"), cubiertos: ["a"], resueltos: ["z"] })
+    expect(r.puede).toBe(false)
+    expect(r.sin_cubrir.map((x) => x.articulo_id)).toEqual(["b"])
+  })
+
+  it("resuelto no reemplaza a la factura: sin ningún comprobante con precios sigue faltando la factura", () => {
+    const r = evaluarFinalizarOC({ comprobantes: [], recibidos: rec("a"), cubiertos: [], resueltos: ["a"] })
+    expect([r.puede, r.falta_factura]).toEqual([false, true])
+  })
+
   it("nada recibido y factura validada: se puede (no hay mercadería que cubrir)", () => {
     expect(evaluarFinalizarOC({ comprobantes: [comp("FB", "validado")], recibidos: [], cubiertos: [] }).puede).toBe(true)
+  })
+})
+
+describe("no pedido y sin factura (OC-000014): qué se espera facturar", async () => {
+  const { calcularDiferencia, costoDeFicha, cuentaNoPedidoSinFactura } = await import("../../../../lib/compras/diferencias")
+  const noPedido = (recibido: number) => calcularDiferencia({ oc: null, factura: [], recibido_unidades: recibido })
+
+  it("300 u al costo neto de la ficha (en cascada) + IVA", () => {
+    const costo = costoDeFicha({ precio_compra: 1000, descuento1: 10, descuento2: 5, iva_compras: "factura" }, "cascada")
+    expect(costo.neto_unidad).toBeCloseTo(855, 6)
+    const x = cuentaNoPedidoSinFactura(noPedido(300), costo)!
+    expect(x.unidades).toBe(300)
+    expect(x.importe_a_confirmar).toBe(false)
+    expect(x.espera_factura).toEqual({ neto: 256500, iva: 53865, total: 310365 })
+  })
+
+  it("descuentos sobre lista según la ficha del proveedor", () => {
+    const costo = costoDeFicha({ precio_compra: 1000, descuento1: 10, descuento2: 5 }, "sobre_lista")
+    expect(costo.neto_unidad).toBeCloseTo(850, 6)
+  })
+
+  it("artículo sin factura (adquisición): sin IVA", () => {
+    const x = cuentaNoPedidoSinFactura(noPedido(10), costoDeFicha({ precio_compra: 100, iva_compras: "adquisicion_stock" }))!
+    expect(x.espera_factura).toEqual({ neto: 1000, iva: 0, total: 1000 })
+  })
+
+  it("sin costo en la ficha: se anota igual con las unidades, importe a confirmar", () => {
+    const x = cuentaNoPedidoSinFactura(noPedido(300), costoDeFicha({ precio_compra: 0 }))!
+    expect(x.unidades).toBe(300)
+    expect(x.importe_a_confirmar).toBe(true)
+    expect(x.espera_factura.total).toBe(0)
+  })
+
+  it("no aplica si está en la orden, si ya está facturado o si no llegó nada", () => {
+    const costo = costoDeFicha({ precio_compra: 100 })
+    expect(cuentaNoPedidoSinFactura(noPedido(0), costo)).toBeNull()
+    expect(cuentaNoPedidoSinFactura(calcularDiferencia({ oc: { cantidad_pedida: 10, factor: 1, precio_unitario: 100, descuentos: [] }, factura: [], recibido_unidades: 10 }), costo)).toBeNull()
+    expect(cuentaNoPedidoSinFactura(calcularDiferencia({ oc: null, factura: [{ cantidad_facturada: 10, factor: 1, precio_unitario: 100, descuentos: [], iva_porcentaje: 21 }], recibido_unidades: 10 }), costo)).toBeNull()
   })
 })
 
