@@ -155,7 +155,8 @@ export interface LineaRecepcion {
   fisicaUnidades: number
   /** Se pide o se cuenta por bulto y el artículo no tiene unidades por bulto cargadas */
   sinUnidadesPorBulto: boolean
-  articulo: { sku: string; descripcion: string; ean13?: string[] | string | null; codigo_bulto?: string | null; unidades_por_bulto?: number | null } | null
+  /** marca: texto ya resuelto (de la OC o, si no viene, del catálogo replicado) */
+  articulo: { sku: string; descripcion: string; ean13?: string[] | string | null; codigo_bulto?: string | null; unidades_por_bulto?: number | null; marca?: string | null } | null
 }
 
 export interface RecepcionVista {
@@ -233,7 +234,13 @@ export function resumenCierre(r: RecepcionVista): ResumenCierre {
 
 export function vistaRecepcion(o: OrdenRecepcion, ops: ItemOutbox[], articulo: (id: string) => Articulo | undefined): RecepcionVista {
   const infoOC = new Map(o.ordenes_compra_detalle.map((d) => [d.articulo_id, d.articulos]))
-  const info = (id: string): LineaRecepcion["articulo"] => infoOC.get(id) ?? articulo(id) ?? null
+  const info = (id: string): LineaRecepcion["articulo"] => {
+    const oc = infoOC.get(id)
+    const cat = articulo(id)
+    if (!oc) return cat ?? null
+    const { marca, ...resto } = oc
+    return { ...resto, marca: marca?.descripcion || cat?.marca || null }
+  }
 
   // Sin recepción en el servidor todavía: las líneas salen de la OC (igual que al crearla allá)
   const tipoOC = new Map(o.ordenes_compra_detalle.map((d) => [d.articulo_id, d.tipo_cantidad]))

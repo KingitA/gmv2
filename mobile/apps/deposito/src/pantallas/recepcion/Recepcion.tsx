@@ -188,6 +188,7 @@ function Linea({ l, accion, onAbrir, onFicha }: { l: LineaRecepcion; accion: { f
         </div>
         <div style={META}>
           <span style={{ color: C.light, fontSize: 13, fontFamily: "monospace", flexShrink: 0 }}>{l.articulo?.sku}</span>
+          {l.articulo?.marca && <span style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{l.articulo.marca}</span>}
           {l.sinEnviar && <SinEnviar />}
         </div>
       </div>
@@ -230,7 +231,7 @@ function Linea({ l, accion, onAbrir, onFicha }: { l: LineaRecepcion; accion: { f
 /** Datos para la ficha de un artículo que no esté en el catálogo replicado (p. ej. fuera de OC). */
 const respaldoDe = (r: RecepcionVista | null) => (articuloId: string): DatosFicha | undefined => {
   const a = r?.lineas.find((l) => l.articulo_id === articuloId)?.articulo
-  return a ? { id: articuloId, descripcion: a.descripcion, sku: a.sku, unidades_por_bulto: a.unidades_por_bulto, ean13: a.ean13 } : undefined
+  return a ? { id: articuloId, descripcion: a.descripcion, sku: a.sku, unidades_por_bulto: a.unidades_por_bulto, ean13: a.ean13, marca: a.marca ?? null } : undefined
 }
 
 /**
