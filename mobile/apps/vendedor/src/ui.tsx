@@ -39,7 +39,9 @@ export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFresc
   preciosVencidos?: boolean
 }) {
   return (
-    <div className={`flex h-dvh flex-col ${fondo} text-gray-900`}>
+    // --gm-teclado (core, ui/teclado.ts): si el WebView no se achicó con el teclado, el pie
+    // (Confirmar, Guardar, Cobrar…) termina ARRIBA del teclado (si se achicó vale 0px)
+    <div className={`flex h-dvh flex-col ${fondo} text-gray-900`} style={{ paddingBottom: "var(--gm-teclado, 0px)" }}>
       <Encabezado titulo={titulo} atras={atras} derecha={derecha} />
       <CartelPreciosVencidos visible={preciosVencidos} />
       {/* "Datos al …" solo cuando hace más de 15 min que no se actualiza (o falló / nunca bajó): pedido del dueño 14/10/2026 */}

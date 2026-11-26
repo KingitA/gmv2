@@ -52,6 +52,8 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 
 | SE — **Hacer sonar un equipo perdido** (las 3 apps): FCM → alarma con la app cerrada; ERP Equipos y apps y app depósito "Buscar el equipo de un compañero" | App Vendedor (dueño de core) | **Código hecho 20/11 en la rama `equipos-sonar`**, migración `20261120_mobile_sonar_equipo.sql` **sin aplicar**; falta `FIREBASE_SERVICE_ACCOUNT_JSON` en Vercel y `mobile/firebase/google-services.json` para compilar. MOBILE.md §13 "Hacer sonar un equipo" |
 
+| TK — **Botones tapados por el teclado** (Juan 26/11, S24 FE y NuStar): adjustResize en las 3 apps + en core lo fijo abajo y las hojas suben con `--gm-teclado`; pie de Pantalla (vendedor/chofer) arriba del teclado | App Vendedor (dueño de core) | **Hecho 26/11 en la rama `vendedor-teclado`**, APK vendedor compilada sin instalar ni publicar. Chofer y depósito lo reciben en su próxima APK |
+
 ## Versiones instaladas hoy
 
 | App | APK instalada | Fecha | Cambios del servidor que todavía no tiene |

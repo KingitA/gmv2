@@ -54,7 +54,9 @@ export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFresc
   titulo: string; atras?: boolean; derecha?: ReactNode; dataset?: string; etiquetaFrescura?: string; viejoTrasMin?: number; pie?: ReactNode; children: ReactNode; fondo?: string
 }) {
   return (
-    <div className={`flex h-dvh flex-col ${fondo} text-gray-900`}>
+    // --gm-teclado (core, ui/teclado.ts): si el WebView no se achicó con el teclado, el pie
+    // (Confirmar, Guardar, Cobrar…) termina ARRIBA del teclado (si se achicó vale 0px)
+    <div className={`flex h-dvh flex-col ${fondo} text-gray-900`} style={{ paddingBottom: "var(--gm-teclado, 0px)" }}>
       <Encabezado titulo={titulo} atras={atras} derecha={derecha} />
       {/* P2-32: el cartel "Datos al … · Actualizar" solo cuando el dato está viejo (como la app vendedor) */}
       {dataset && <Frescura dataset={dataset} etiqueta={etiquetaFrescura} viejoTrasMin={viejoTrasMin} soloSiViejo />}

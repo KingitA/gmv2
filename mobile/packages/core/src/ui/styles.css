@@ -24,6 +24,23 @@ body,
   height: 100%;
 }
 
+/* TECLADO (26/11/2026, ui/teclado.ts): si el WebView NO se achicó con el teclado,
+   --gm-teclado mide lo que tapa (si se achicó vale 0px). Todo lo FIJO ABAJO con las
+   clases de siempre (barra del carrito `fixed bottom-0`, hojas `fixed inset-0` con el
+   contenido abajo) sube por encima del teclado sin tocar pantalla por pantalla.
+   Fuera de @layer: le gana a las utilidades de Tailwind (bottom-0 / inset-0). */
+.fixed.bottom-0,
+.fixed.inset-0 {
+  bottom: var(--gm-teclado, 0px);
+}
+/* Con el teclado abierto, la hoja no puede ser más alta que lo que queda libre: se
+   desplaza por dentro (el campo enfocado lo trae a la vista teclado.ts) y su botón de
+   abajo (Agregar al pedido, Aplicar, Guardar) queda arriba del teclado. */
+.gm-teclado-abierto .fixed.inset-0 > * {
+  max-height: 100%;
+  overflow-y: auto;
+}
+
 body {
   margin: 0;
   background: #f8fafc;
