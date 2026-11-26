@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { FechaInput } from "@/components/finanzas/fecha-input"
-import { Loader2, Upload, ShieldCheck } from "lucide-react"
+import { Loader2, Upload, ShieldCheck, Wallet } from "lucide-react"
 import { toast } from "sonner"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { InputMonto } from "@/components/ui/input-monto"
@@ -18,18 +18,27 @@ import { fecha, formatCuit, porcentaje } from "@/lib/formato"
  * Ficha fiscal del proveedor (R6): régimen RG 830 y condición ante Ganancias,
  * certificados de exclusión, y carga de legajo/constancia con OCR — el sistema
  * propone los cambios y el usuario confirma antes de aplicar nada.
+ *
+ * `parte="pago"` muestra SOLO el acuerdo de pago (condiciones de pago: cuándo y cómo le pagamos);
+ * `parte="fiscal"` (por defecto) muestra Ganancias + certificados de exclusión + legajo.
+ * Cada parte manda solo sus campos al PUT (el endpoint actualiza solo lo que recibe).
  */
 export function FichaFiscalDialog({
   proveedorId,
   proveedorNombre,
   open,
   onOpenChange,
+  parte = "fiscal",
+  onGuardado,
 }: {
   proveedorId: string | null
   proveedorNombre: string
   open: boolean
   onOpenChange: (o: boolean) => void
+  parte?: "fiscal" | "pago"
+  onGuardado?: () => void
 }) {
+  const esPago = parte === "pago"
   const [data, setData] = useState<any>(null)
   const [errorCarga, setErrorCarga] = useState<string | null>(null)
   const [regimen, setRegimen] = useState("bienes")
@@ -125,11 +134,7 @@ export function FichaFiscalDialog({
     if (!proveedorId) return
     setSaving(true)
     try {
-      const body: any = {
-        regimen_ganancias: regimen,
-        condicion_ganancias: condicion,
-        // Solo se manda si se usa (así la ficha se sigue guardando aunque falte la migración 20261116p)
-        ...(condicion === "exento" ? { ganancias_exento_hasta: exentoHasta || null } : exentoHastaCargado ? { ganancias_exento_hasta: null } : {}),
+      const body: any = esPago ? {
         pago_blanco_medio: blanco.medio || null,
         pago_blanco_plazo_cheque: blanco.plazo_cheque !== "" ? parseInt(blanco.plazo_cheque) : null,
         pago_blanco_entrega: blanco.entrega || null,
@@ -140,9 +145,14 @@ export function FichaFiscalDialog({
         pago_negro_entrega: negroIgual ? null : (negro.entrega || null),
         pago_negro_dias: negroIgual ? null : (negro.dias !== "" ? parseInt(negro.dias) : null),
         pago_negro_desde: negroIgual ? null : (negro.desde || "factura"),
+      } : {
+        regimen_ganancias: regimen,
+        condicion_ganancias: condicion,
+        // Solo se manda si se usa (así la ficha se sigue guardando aunque falte la migración 20261116p)
+        ...(condicion === "exento" ? { ganancias_exento_hasta: exentoHasta || null } : exentoHastaCargado ? { ganancias_exento_hasta: null } : {}),
         desactivar_exclusiones: [...desactivar],
       }
-      if (nuevaExclusion && nuevaExclusion.desde && (nuevaExclusion.pct ?? 0) > 0) {
+      if (!esPago && nuevaExclusion && nuevaExclusion.desde && (nuevaExclusion.pct ?? 0) > 0) {
         body.exclusiones_nuevas = [{
           tipo: "retencion_ganancias",
           fecha_desde: nuevaExclusion.desde,
@@ -158,7 +168,8 @@ export function FichaFiscalDialog({
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error)
-      toast.success("Ficha fiscal actualizada")
+      toast.success(esPago ? "Condiciones de pago actualizadas" : "Ficha fiscal actualizada")
+      onGuardado?.()
       onOpenChange(false)
     } catch (e: any) {
       toast.error(e.message)
@@ -174,7 +185,9 @@ export function FichaFiscalDialog({
       <DialogContent className="max-w-lg max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-indigo-600" /> Ficha fiscal — {proveedorNombre}
+            {esPago
+              ? <><Wallet className="h-5 w-5 text-indigo-600" /> Condiciones de pago — {proveedorNombre}</>
+              : <><ShieldCheck className="h-5 w-5 text-indigo-600" /> Ficha fiscal — {proveedorNombre}</>}
           </DialogTitle>
         </DialogHeader>
 
@@ -184,7 +197,7 @@ export function FichaFiscalDialog({
           <CargaProgreso compacto mensajes={MENSAJES.general} className="mx-auto max-w-sm py-6" />
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            {!esPago && <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Régimen RG 830</Label>
                 <Select value={regimen} onValueChange={setRegimen}>
@@ -216,19 +229,19 @@ export function FichaFiscalDialog({
                   </div>
                 )}
               </div>
-            </div>
+            </div>}
 
             {/* Acuerdo de pago por canal — el vencimiento de cada comprobante lo hereda */}
-            <div className="rounded-xl border p-3 space-y-3">
-              <Label className="font-semibold">Acuerdo de pago por canal</Label>
-              {([["BLANCO (facturas)", blanco, setBlanco, false], ["NEGRO (adquisiciones)", negro, setNegro, true]] as const).map(([titulo, val, setVal, esNegro]) => (
+            {esPago && <div className="rounded-xl border p-3 space-y-3">
+              <p className="text-xs text-muted-foreground">Lo toman la orden de compra y los vencimientos.</p>
+              {([["CON FACTURA", blanco, setBlanco, false], ["SIN FACTURA", negro, setNegro, true]] as const).map(([titulo, val, setVal, esNegro]) => (
                 <div key={titulo} className={esNegro && negroIgual ? "opacity-40" : ""}>
                   <div className="flex items-center gap-3 mb-1.5">
                     <p className="text-xs font-bold tracking-wide text-slate-600">{titulo}</p>
                     {esNegro && (
                       <label className="flex items-center gap-1.5 text-xs cursor-pointer text-muted-foreground">
                         <input type="checkbox" className="h-3.5 w-3.5" checked={negroIgual} onChange={e => setNegroIgual(e.target.checked)} />
-                        igual que blanco
+                        igual que con factura
                       </label>
                     )}
                   </div>
@@ -287,8 +300,9 @@ export function FichaFiscalDialog({
                   )}
                 </div>
               ))}
-            </div>
+            </div>}
 
+            {!esPago && <>
             {/* Exclusiones vigentes */}
             <div>
               <Label className="mb-1 block">Certificados de exclusión</Label>
@@ -373,11 +387,12 @@ export function FichaFiscalDialog({
                 </div>
               )}
             </div>
+            </>}
 
             <div className="flex justify-end gap-2 pt-2 border-t">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
               <Button type="button" disabled={saving} onClick={guardar}>
-                {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />} Guardar ficha fiscal
+                {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin" />} {esPago ? "Guardar condiciones de pago" : "Guardar ficha fiscal"}
               </Button>
             </div>
           </div>

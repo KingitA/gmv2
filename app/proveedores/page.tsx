@@ -39,7 +39,7 @@ export default function ProveedoresPage() {
   const [importing, setImporting] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isHistorialOpen, setIsHistorialOpen] = useState(false)
-  const [fichaFiscal, setFichaFiscal] = useState<{ id: string; nombre: string } | null>(null)
+  const [fichaFiscal, setFichaFiscal] = useState<{ id: string; nombre: string; parte?: "fiscal" | "pago" } | null>(null)
   // Revisión 19/11: la ficha fiscal y la cuenta corriente del proveedor son del permiso de órdenes
   // de pago (solo admin; el servidor lo controla). A otro rol no se le ofrecen los botones.
   const { esAdmin, roles: misRoles } = useMisRoles()
@@ -371,7 +371,7 @@ export default function ProveedoresPage() {
       <main className="container mx-auto space-y-6 px-4 py-6 sm:px-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Fichas de proveedores</h1>
-          <p className="text-sm text-neutro-500">Datos, condiciones de compra, fiscal y cuenta corriente</p>
+          <p className="text-sm text-neutro-500">Datos, condiciones de compra y de pago, fiscal y cuenta corriente</p>
         </div>
         <Card className="shadow-sm">
           <CardHeader className="border-b bg-muted/30">
@@ -450,6 +450,8 @@ export default function ProveedoresPage() {
                       onSubmit={handleSubmit}
                       onCancelar={() => setIsDialogOpen(false)}
                       onFichaFiscal={editingProveedor && esAdmin ? () => setFichaFiscal({ id: editingProveedor.id, nombre: editingProveedor.nombre }) : undefined}
+                      onCondicionesPago={editingProveedor && esAdmin ? () => setFichaFiscal({ id: editingProveedor.id, nombre: editingProveedor.nombre, parte: "pago" }) : undefined}
+                      proveedorGuardado={editingProveedor ? (proveedores.find((p) => p.id === editingProveedor.id) ?? editingProveedor) : null}
                     />
                   </DialogContent>
                 </Dialog>
@@ -556,6 +558,8 @@ export default function ProveedoresPage() {
         proveedorId={fichaFiscal?.id ?? null}
         proveedorNombre={fichaFiscal?.nombre ?? ""}
         open={!!fichaFiscal}
+        parte={fichaFiscal?.parte ?? "fiscal"}
+        onGuardado={loadProveedores}
         onOpenChange={(o) => { if (!o) setFichaFiscal(null) }}
       />
     </div>
