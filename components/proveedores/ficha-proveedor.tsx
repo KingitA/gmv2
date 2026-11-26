@@ -3,11 +3,13 @@
 // Ficha de proveedor (crear + editar) con el sistema visual Megasur.
 // SOLO PRESENTACIÓN: va dentro del <DialogContent> de app/proveedores/page.tsx y usa
 // el mismo formData/setFormData, las mismas conversiones de cada campo y el mismo
-// guardado (onSubmit = handleSubmit de la página). La retención de Ganancias y el
-// acuerdo de pago siguen en la Ficha Fiscal (su propio modal y su propio guardado).
+// guardado (onSubmit = handleSubmit de la página). Las condiciones de pago (acuerdo de pago)
+// y la parte fiscal (Ganancias, certificados de exclusión) se editan cada una en su modal
+// (FichaFiscalDialog con parte="pago" / "fiscal"), con su propio guardado.
 
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Building2, Landmark, Receipt, ShieldCheck, ShoppingCart } from 'lucide-react'
+import { Building2, Landmark, Receipt, ShieldCheck, ShoppingCart, Wallet } from 'lucide-react'
+import { acuerdoDeProveedorConLegado, textoCanal } from '@/lib/compras/acuerdo-pago'
 import { DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,6 +31,10 @@ interface Props {
   onCancelar: () => void
   /** Abre la Ficha Fiscal de siempre (solo al editar un proveedor existente). */
   onFichaFiscal?: () => void
+  /** Abre el modal de condiciones de pago (acuerdo de pago). Solo al editar y con permiso. */
+  onCondicionesPago?: () => void
+  /** Fila del proveedor tal como está en la base (para mostrar el acuerdo de pago guardado). */
+  proveedorGuardado?: Record<string, any> | null
   /** Id del proveedor que se edita (para no contarlo como dueño de su propio código). */
   proveedorId?: string | null
 }
@@ -37,7 +43,8 @@ type InfoCodigo = { sugerido: string; codigo: string | null; disponible: boolean
 
 const iniciales = (n: string) => n.trim().split(/\s+/).slice(0, 2).map(p => p[0]).join('').toUpperCase() || '?'
 
-export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCancelar, onFichaFiscal, proveedorId }: Props) {
+export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCancelar, onFichaFiscal, onCondicionesPago, proveedorGuardado, proveedorId }: Props) {
+  const acuerdo = editando && proveedorGuardado ? acuerdoDeProveedorConLegado(proveedorGuardado) : null
   const set = (campo: string, valor: any) => setFormData({ ...formData, [campo]: valor })
 
   // Código de proveedor: NUNCA repetido. Se consulta mientras se escribe; si está tomado se
@@ -84,6 +91,7 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
       <FichaCuerpo secciones={[
         { id: 'datos', titulo: 'Datos y contacto' },
         { id: 'compra', titulo: 'Condiciones de compra' },
+        { id: 'pago', titulo: 'Condiciones de pago' },
         { id: 'fiscal', titulo: 'Fiscal', nota: faltaProvincia ? 'falta provincia' : undefined, aviso: faltaProvincia },
         { id: 'banco', titulo: 'Banco' },
       ]}>
@@ -177,14 +185,25 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
               </Select>
             </Campo>
           </Campos>
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-neutro-50/60 px-4 py-3">
-            <ShieldCheck className="size-5 shrink-0 text-azul-500" />
-            <p className="min-w-0 flex-1 text-[13px] text-neutro-500">
-              <b className="font-semibold text-neutro-600">Cuándo y cómo le pagamos</b> (medio, días o cuotas, desde la factura o la recepción) se carga en un solo lugar: el acuerdo de pago de la <b className="font-semibold text-neutro-600">ficha fiscal</b>. De ahí lo toman la orden de compra y los vencimientos.
-              {!editando && ' Disponible una vez creado el proveedor.'}
-            </p>
-            {editando && onFichaFiscal && <Button type="button" variant="outline" onClick={onFichaFiscal}>Abrir ficha fiscal</Button>}
-          </div>
+        </FichaSeccion>
+
+        <FichaSeccion id="pago" titulo="Condiciones de pago" icono={Wallet} ayuda="Cuándo y cómo le pagamos. Lo toman la orden de compra y los vencimientos.">
+          {!acuerdo ? (
+            <p className="text-[13px] text-neutro-500">Se carga una vez creado el proveedor.</p>
+          ) : (
+            <div className="flex flex-wrap items-start gap-3 rounded-xl border bg-neutro-50/60 px-4 py-3">
+              <dl className="grid min-w-0 flex-1 grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[13px]">
+                <dt className="font-semibold text-neutro-600">Con factura</dt>
+                <dd className="text-neutro-700">
+                  {textoCanal(acuerdo.blanco)}
+                  {acuerdo.blanco.de_legado && <span className="text-alerta-600"> (dato viejo: falta cargar el acuerdo)</span>}
+                </dd>
+                <dt className="font-semibold text-neutro-600">Sin factura</dt>
+                <dd className="text-neutro-700">{acuerdo.negro ? textoCanal(acuerdo.negro) : 'Igual que con factura'}</dd>
+              </dl>
+              {onCondicionesPago && <Button type="button" variant="outline" onClick={onCondicionesPago}>Editar</Button>}
+            </div>
+          )}
         </FichaSeccion>
 
         <FichaSeccion id="fiscal" titulo="Fiscal" icono={Receipt} aviso={faltaProvincia}
@@ -228,7 +247,7 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-neutro-50/60 px-4 py-3">
             <ShieldCheck className="size-5 shrink-0 text-azul-500" />
             <p className="min-w-0 flex-1 text-[13px] text-neutro-500">
-              La retención de Ganancias (RG 830) y el acuerdo de pago blanco/negro se cargan en la <b className="font-semibold text-neutro-600">ficha fiscal</b>.
+              La retención de Ganancias (RG 830) y los certificados de exclusión se cargan en la <b className="font-semibold text-neutro-600">ficha fiscal</b>.
               {!editando && ' Disponible una vez creado el proveedor.'}
             </p>
             {editando && onFichaFiscal && <Button type="button" variant="outline" onClick={onFichaFiscal}>Abrir ficha fiscal</Button>}
