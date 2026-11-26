@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requirePermiso } from '@/lib/auth';
 import { conversionesDeRecepcion } from '@/lib/deposito/recepciones';
 import { aUnidadesBase, unidadesPorBultoDe } from '@/lib/deposito/unidades';
-import { calcularDiferencia, combinarLineasOC, cuentaSobrante, reclamablePorDevolucion, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
+import { calcularDiferencia, combinarLineasOC, costoDeFicha, cuentaNoPedidoSinFactura, cuentaSobrante, reclamablePorDevolucion, type CostoFicha, type DiferenciaLinea, type LineaFactura, type LineaOC } from '@/lib/compras/diferencias';
 import { TIPOS_CON_PRECIOS } from '@/lib/compras/finalizar-oc';
 import { aplicarCostoDeFactura, registrarCostoEnHistorial } from '@/lib/compras/costo-y-kardex';
 import { tipoDescuentoProveedor } from '@/lib/compras/tipo-descuento-proveedor';
@@ -140,7 +140,7 @@ async function contexto(supabase: any, item: any, ocId: string | null, tipoDto: 
 }
 
 /** Qué se va a hacer, con los importes ya calculados. Lanza Rechazo si no corresponde. */
-function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destino, d: any, sku: string, descuentoAlPie: boolean) {
+function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destino, d: any, sku: string, descuentoAlPie: boolean, costoFicha: CostoFicha) {
     const devolver = Math.max(0, Number(d.devolver_unidades) || 0);
     // Devolver mercadería baja stock: solo tiene sentido en una diferencia de CANTIDAD que se le
     // reclama al proveedor o que asume la empresa. En cualquier otra combinación se rechaza.
@@ -152,8 +152,21 @@ function plan(dif: DiferenciaLinea, tipo: 'precio' | 'cantidad', destino: Destin
     }
     const base = { devolver_unidades: devolver, transporte_id: d.transporte_id || null, descripcion: (d.descripcion || '').trim() || null, detalle: dif };
 
-    if ((destino === 'espera_factura' || destino === 'bonificado') && (tipo !== 'cantidad' || dif.cantidad?.tipo !== 'sobrante')) {
-        throw new Rechazo('"Esperamos la factura" y "sin cargo (bonificado)" son solo para mercadería que llegó de más.', 'destino_invalido');
+    // Artículo que no estaba en la orden, llegó y no está en ninguna factura (OC-000014, 26/11)
+    const noPedido = tipo === 'cantidad' ? cuentaNoPedidoSinFactura(dif, costoFicha) : null;
+    if ((destino === 'espera_factura' || destino === 'bonificado') && (tipo !== 'cantidad' || (dif.cantidad?.tipo !== 'sobrante' && !noPedido))) {
+        throw new Rechazo('"Esperamos la factura" y "sin cargo (bonificado)" son solo para mercadería que llegó de más o que llegó sin estar en la orden ni en la factura.', 'destino_invalido');
+    }
+    if (noPedido && (destino === 'espera_factura' || destino === 'bonificado')) {
+        if (devolver > 0) throw new Rechazo('Si se devuelve la mercadería no hay factura que esperar ni queda sin cargo.', 'destino_invalido');
+        if (destino === 'espera_factura') {
+            // Se recibe y el proveedor lo va a facturar: nota de débito ESPERADA, al costo actual de la ficha
+            return { ...base, unidades: noPedido.unidades, neto: noPedido.espera_factura.neto, iva: noPedido.espera_factura.iva, total: noPedido.espera_factura.total,
+                origen_nc: 'sobrante', no_pedido: true, importe_a_confirmar: noPedido.importe_a_confirmar,
+                descripcion: base.descripcion || `Artículo no pedido ${sku}: ${noPedido.unidades} u recibidas sin facturar${noPedido.importe_a_confirmar ? ' (importe a confirmar: el artículo no tiene costo cargado)' : ''}` };
+        }
+        // Sin cargo: queda en el stock, no se paga nada y NO cambia el costo (no se pagó nada por esto)
+        return { ...base, unidades: noPedido.unidades, neto: 0, iva: 0, total: 0, origen_nc: null, no_pedido: true };
     }
 
     if (tipo === 'precio') {
@@ -335,7 +348,7 @@ export async function POST(
 
                 // La cuenta la hace el servidor: lo que mande el navegador como cantidad o precio no se usa
                 const { dif, hermanas, descuentoAlPie } = await contexto(supabase, item, rec.ocId, tipoDto, tipo === 'cantidad' ? (decision.faltante_comprobante_id || null) : null);
-                const p: any = plan(dif, tipo, destino, decision, articuloInfo?.sku || '', descuentoAlPie);
+                const p: any = plan(dif, tipo, destino, decision, articuloInfo?.sku || '', descuentoAlPie, costoDeFicha(articuloInfo, tipoDto));
                 if (destino === 'transporte' && rec.bultos) {
                     p.descripcion = `${p.descripcion || 'Faltante de mercadería'}. ${rec.bultos}`;
                     p.detalle = { ...p.detalle, control_bultos: rec.bultos };
@@ -348,6 +361,10 @@ export async function POST(
                 });
                 if (!rpc.error) r = rpc.data;
                 else if (faltaLaFuncion(rpc.error, 'recepcion_resolver_diferencia')) { sinFuncion = true; r = await resolverSinFuncion(supabase, item, hermanas, tipo, destino, p, auth.user.id); }
+                else if (p.importe_a_confirmar && String(rpc.error.details || '') === 'sin_importe') {
+                    // Sin la migración 20261126a la función no acepta una factura esperada sin importe
+                    throw new Rechazo('El artículo no tiene costo cargado en su ficha y todavía no se puede anotar la factura esperada con "importe a confirmar": falta aplicar una actualización del sistema (migración 20261126a). No se cambió nada. Mientras tanto: cargá el costo en la ficha del artículo y volvé a intentar.', 'falta_migracion');
+                }
                 else if (rpc.error.code === 'P0001' || rpc.error.code === 'P0002') throw new Rechazo(rpc.error.message, String(rpc.error.details || 'rechazado'));
                 else throw rpc.error;
 
@@ -434,6 +451,12 @@ export async function POST(
 
                 const mensaje = r.ya_resuelta
                     ? 'Esta diferencia ya estaba resuelta: no se generó nada nuevo.'
+                    : destino === 'espera_factura' && p.no_pedido
+                        ? (p.importe_a_confirmar
+                            ? `El artículo quedó recibido y se espera la factura del proveedor por ${p.unidades} u (importe a confirmar: el artículo no tiene costo cargado). Quedó en "Notas esperadas". No es deuda hasta que llegue.`
+                            : `El artículo quedó recibido y se espera la factura del proveedor por ${moneda(p.total)} (${moneda(p.neto)} neto + ${moneda(p.iva)} de IVA, al costo actual del artículo). Quedó en "Notas esperadas". No es deuda hasta que llegue.`)
+                    : destino === 'bonificado' && p.no_pedido
+                        ? 'El artículo quedó recibido sin cargo: se queda en el stock, no se paga nada y no se espera ninguna factura. El costo del artículo no se tocó.'
                     : destino === 'espera_factura'
                         ? `La mercadería de más quedó recibida y se espera la factura del proveedor por ${moneda(p.total)} (${moneda(p.neto)} neto + ${moneda(p.iva)} de IVA). No es deuda hasta que llegue.`
                     : destino === 'bonificado'

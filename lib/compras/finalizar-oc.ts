@@ -52,12 +52,16 @@ export interface ControlFinalizarOC {
 /**
  * Regla pura (tests: mobile/packages/core/test/entrada-finalizar-oc.test.ts).
  * `recibidos`: artículos con cantidad recibida > 0. `cubiertos`: artículos que figuran en
- * el detalle de un comprobante con precios validado.
+ * el detalle de un comprobante con precios validado. `resueltos`: artículos cuya diferencia de
+ * CANTIDAD ya se resolvió en la verificación (sin cargo / bonificado, se espera la factura —queda
+ * en "Notas esperadas"—, se devolvió o se aceptó sin factura): tampoco frenan aunque ninguna
+ * factura validada los traiga (caso OC-000014, 26/11).
  */
 export function evaluarFinalizarOC(p: {
   comprobantes: ComprobanteOC[]
   recibidos: Array<{ articulo_id: string; sku?: string | null; descripcion?: string | null }>
   cubiertos: Iterable<string>
+  resueltos?: Iterable<string>
 }): ControlFinalizarOC {
   const comps = p.comprobantes.filter((c) => c.estado !== "esperada")
   const conPreciosValidados = comps.filter((c) => esComprobanteConPrecios(c.tipo_comprobante) && VALIDADO.includes(c.estado))
@@ -78,7 +82,7 @@ export function evaluarFinalizarOC(p: {
     faltas.push(`Hay ${sinValidar.length} comprobante(s) sin validar: ${sinValidar.map((c) => `${c.tipo_comprobante} ${c.numero_comprobante}`).join(", ")}.`)
   }
 
-  const cubiertos = new Set(p.cubiertos)
+  const cubiertos = new Set([...p.cubiertos, ...(p.resueltos ?? [])])
   const vistos = new Set<string>()
   const sinCubrir: ControlFinalizarOC["sin_cubrir"] = []
   for (const r of p.recibidos) {
@@ -124,18 +128,22 @@ export async function controlFinalizarOC(supabase: any, ordenId: string): Promis
   if (recErr) throw recErr
   const recIds: string[] = (recs || []).map((r: any) => r.id)
   let recibidos: Array<{ articulo_id: string; sku: string | null; descripcion: string | null }> = []
+  const resueltos = new Set<string>()
   if (recIds.length > 0) {
     const { data: items, error: itErr } = await supabase
       .from("recepciones_items")
-      .select("articulo_id, cantidad_fisica, articulo:articulos(sku, descripcion)")
+      .select("articulo_id, cantidad_fisica, cantidad_diferencia_destino, articulo:articulos(sku, descripcion)")
       .in("recepcion_id", recIds)
-      .gt("cantidad_fisica", 0)
     if (itErr) throw itErr
-    recibidos = (items || []).map((i: any) => {
+    for (const i of items || []) if (i.articulo_id && i.cantidad_diferencia_destino) resueltos.add(i.articulo_id)
+    recibidos = (items || []).filter((i: any) => Number(i.cantidad_fisica) > 0).map((i: any) => {
       const a = Array.isArray(i.articulo) ? i.articulo[0] : i.articulo
       return { articulo_id: i.articulo_id, sku: a?.sku ?? null, descripcion: a?.descripcion ?? null }
     })
+    // Diferencias de cantidad resueltas (tabla de la migración 20261117b; sin ella valen las marcas de la línea)
+    const { data: res, error: resErr } = await supabase.from("recepciones_diferencias").select("articulo_id").in("recepcion_id", recIds).eq("tipo", "cantidad")
+    if (!resErr) for (const r of res || []) if (r.articulo_id) resueltos.add(r.articulo_id)
   }
 
-  return evaluarFinalizarOC({ comprobantes, recibidos, cubiertos })
+  return evaluarFinalizarOC({ comprobantes, recibidos, cubiertos, resueltos })
 }

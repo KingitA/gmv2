@@ -18,7 +18,7 @@
  */
 
 import { totalesOC } from "./oc-totales"
-import { calcularDiferencia, combinarLineasOC, netoCompra, type DiferenciaLinea, type LineaFactura, type TipoDescuento } from "./diferencias"
+import { calcularDiferencia, combinarLineasOC, costoDeFicha, netoCompra, type CostoFicha, type DiferenciaLinea, type LineaFactura, type TipoDescuento } from "./diferencias"
 import { esAdquisicion, esComprobanteConPrecios, esRemito } from "./finalizar-oc"
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
@@ -41,7 +41,12 @@ export interface DatosVerificacion {
     articulo_id: string; cantidad_pedida: number; tipo_cantidad?: string | null; precio_unitario: number
     descuento1?: number | null; descuento2?: number | null; descuento3?: number | null; descuento4?: number | null
   }>
-  articulos: Array<{ id: string; sku?: string | null; descripcion?: string | null; unidades_por_bulto?: number | null }>
+  articulos: Array<{
+    id: string; sku?: string | null; descripcion?: string | null; unidades_por_bulto?: number | null
+    /** Costo de la ficha (para valorizar lo no pedido y no facturado) */
+    precio_compra?: number | null; descuento1?: number | null; descuento2?: number | null; descuento3?: number | null; descuento4?: number | null
+    iva_compras?: string | null
+  }>
   comprobantes: Array<{
     id: string; tipo_comprobante: string; numero_comprobante: string; estado: string
     total_factura_declarado?: number | null; total_neto?: number | null; total_iva?: number | null; origen_nc?: string | null
@@ -90,6 +95,8 @@ export interface FilaVerificacion {
   /** Lo que sigue SIN resolver. Vacío = OK. */
   banderas: Bandera[]
   resuelto: { precio: string | null; cantidad: string | null }
+  /** Costo actual de la ficha del artículo, neto (para lo no pedido y sin factura) */
+  costo_ficha: CostoFicha
 }
 
 export interface ColumnaComprobante {
@@ -222,6 +229,7 @@ export function armarVerificacion(d: DatosVerificacion): Verificacion {
       dif,
       banderas,
       resuelto,
+      costo_ficha: costoDeFicha(a, tipoDto),
     }
   })
 
