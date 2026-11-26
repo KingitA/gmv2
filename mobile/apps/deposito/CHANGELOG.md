@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.5.11 (versionCode 25) — 2026-11-26
+
+- Recepción: la marca de cada artículo a la vista; botones que no tapa el teclado
+
 ## v0.5.10 (versionCode 24) — 2026-11-20
 
 - Hacer sonar: suena con un sonido de alarma propio (el equipo no tenía tono de alarma)
