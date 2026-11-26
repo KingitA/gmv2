@@ -9,6 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { sanitizarOr } from "@/lib/search/hybrid"
 import { parseMonto } from "@/lib/formato"
 import { hojasVisibles } from "@/lib/xlsx/hojas-visibles"
+import { ajustarAFraccion } from "@/lib/pedidos/fraccion-minima"
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "" })
 
@@ -842,7 +843,7 @@ Devolvé UNICAMENTE las palabras fundamentales sueltas en minúsculas en un JSON
                     const sbH = createAdminClient()
                     const { data: full } = await sbH
                         .from("articulos")
-                        .select("id, sku, descripcion, ean13, codigo_bulto, unidades_por_bulto, precio_base, precio_base_contado")
+                        .select("id, sku, descripcion, ean13, codigo_bulto, unidades_por_bulto, precio_base, precio_base_contado, cantidad_fraccion")
                         .eq("id", match.id)
                         .maybeSingle()
                     if (full) match = { ...match, ...full }
@@ -855,9 +856,13 @@ Devolvé UNICAMENTE las palabras fundamentales sueltas en minúsculas en un JSON
                 console.log(`[processMatches] ❌ "${originalTextForFrontend}" → SIN MATCH`)
             }
 
+            // Fracción = cantidad mínima (Juan 26/11/2026): el Excel dice 6 y la fracción es 12 → 12
+            const cantidadLeida = parseMonto(item.quantity) || 0 // la IA puede devolver "1.500" / "2,5"
+            const cantidad = match ? ajustarAFraccion(cantidadLeida, match.cantidad_fraccion) : cantidadLeida
+            if (cantidad !== cantidadLeida) console.log(`[processMatches] fracción: "${originalTextForFrontend}" ${cantidadLeida} → ${cantidad}`)
             return {
                 originalText: originalTextForFrontend,
-                quantity: parseMonto(item.quantity) || 0, // la IA puede devolver "1.500" / "2,5"
+                quantity: cantidad,
                 matchedProduct: match,
                 confidence: confidence
             }

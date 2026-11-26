@@ -114,7 +114,8 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                             precio_unitario: i.matchedProduct.precio_base || 0,
                             descuento: 0
                         })),
-                        observaciones: "Importado automáticamente vía IA"
+                        observaciones: "Importado automáticamente vía IA",
+                        ajustar_a_fraccion: true,
                     })
                     toast.success("Pedido creado automáticamente con éxito")
                     setOpen(false)
@@ -197,7 +198,8 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                     precio_unitario: i.matchedProduct.precio_base || 0,
                     descuento: 0
                 })),
-                observaciones: "Importado vía IA"
+                observaciones: "Importado vía IA",
+                ajustar_a_fraccion: true,
             }
             console.log("Payload:", payload)
 

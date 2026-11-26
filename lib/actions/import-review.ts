@@ -108,6 +108,7 @@ export async function approveImport(
         observaciones: "Aprobado desde importación",
         condiciones_proveedor: condicionesProveedor,
         condiciones_marca: condicionesMarca,
+        ajustar_a_fraccion: true,
     })
 
     // Marcar la importación como completada

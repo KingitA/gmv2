@@ -1,5 +1,6 @@
 "use server"
 
+import { ajustarItemsAFraccion } from "@/lib/pedidos/fraccion-minima"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
@@ -701,11 +702,15 @@ export async function createPedido(data: {
   // "en_venta": el vendedor está armando el pedido en vivo (autoguardado);
   // pasa a "pendiente" al confirmar (confirmarPedidoVendedor).
   estado_inicial?: "en_venta" | "pendiente" | "en_revision"
+  // Pedido importado (Excel / mail): cada renglón sube a la cantidad mínima de su fracción
+  // (Juan 26/11/2026, misma regla que la app vendedor). Los demás caminos no se tocan.
+  ajustar_a_fraccion?: boolean
 }) {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error("No autenticado")
+  if (data.ajustar_a_fraccion) data = { ...data, items: await ajustarItemsAFraccion(supabase, data.items) }
 
   const { data: clienteInfo, error: clienteError } = await supabase
     .from("clientes")
