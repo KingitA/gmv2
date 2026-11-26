@@ -120,7 +120,8 @@ export interface OrdenRecepcion {
     /** 'bulto' | 'unidad': en qué está pedida la línea (ausente en réplicas viejas = bulto, el valor por defecto de la base) */
     tipo_cantidad?: string | null
     articulo_id: string
-    articulos: { id: string; sku: string; descripcion: string; ean13?: string[] | string | null; unidades_por_bulto?: number | null } | null
+    /** marca: marca_id → marcas.descripcion (ausente en servidores viejos: se toma del catálogo) */
+    articulos: { id: string; sku: string; descripcion: string; ean13?: string[] | string | null; unidades_por_bulto?: number | null; marca?: { descripcion: string } | null } | null
   }>
   recepcion: {
     id: string

@@ -14,9 +14,13 @@ interface RecepcionItem {
   estado_linea: "pendiente"|"ok"|"faltante"
   /** E-30: en qué está pedida (y se cuenta) la línea; fuera de OC = unidad. El stock sube en unidades. */
   unidad?: UnidadConteo; upb?: number
-  articulos?: { sku: string; descripcion: string; ean13?: string; unidades_por_bulto?: number }
+  articulos?: { sku: string; descripcion: string; ean13?: string; unidades_por_bulto?: number; marca?: { descripcion?: string | null } | string | null }
 }
-interface ArticuloFound { id: string; sku: string; descripcion: string; ean13?: string; stock_actual: number }
+interface ArticuloFound { id: string; sku: string; descripcion: string; ean13?: string; stock_actual: number; marca?: { descripcion?: string | null } | null }
+
+/** Marca del artículo (viene como marca:marca_id(descripcion) o ya como texto). */
+const marcaDe = (a?: { marca?: { descripcion?: string | null } | string | null } | null): string | null =>
+  !a?.marca ? null : typeof a.marca === "string" ? a.marca : a.marca.descripcion || null
 
 const C = {
   bg:"#f4f6f9", white:"#ffffff", border:"#e5e7eb",
@@ -67,7 +71,10 @@ function SwipeItemOC({ item, onConfirm, saving, bgReveal, colorReveal, labelReve
         <div style={{ width:13, height:13, borderRadius:"50%", background:dot, flexShrink:0 }} />
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ color:C.text, fontWeight:700, fontSize:22, lineHeight:1.25, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.articulos?.descripcion || item.articulo_id}</div>
-          <div style={{ color:C.light, fontSize:15, fontFamily:"monospace", marginTop:4 }}>{item.articulos?.sku}</div>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:4, minWidth:0 }}>
+            <span style={{ color:C.light, fontSize:15, fontFamily:"monospace", flexShrink:0 }}>{item.articulos?.sku}</span>
+            {marcaDe(item.articulos) && <span style={{ color:C.sub, fontSize:13, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.03em", background:C.bg, border:`1px solid ${C.border}`, borderRadius:6, padding:"1px 7px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>{marcaDe(item.articulos)}</span>}
+          </div>
         </div>
         <div style={{ textAlign:"right", flexShrink:0 }}>
           {ok ? <>
@@ -197,7 +204,7 @@ export default function RecibirMercaderiaDetallePage() {
         return [...prev, {
           id: `local-${articuloSel.id}`, articulo_id: articuloSel.id,
           cantidad_oc: 0, cantidad_fisica: esFaltante?0:cantidad, estado_linea: nuevoEstado,
-          articulos: { sku: articuloSel.sku, descripcion: `⚠ ${articuloSel.descripcion} (NO PEDIDO)` },
+          articulos: { sku: articuloSel.sku, descripcion: `⚠ ${articuloSel.descripcion} (NO PEDIDO)`, marca: articuloSel.marca ?? null },
         } as RecepcionItem]
       })
       showToast(esFaltante?"Marcado como faltante":"✓ Guardado","ok")

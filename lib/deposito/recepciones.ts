@@ -246,7 +246,7 @@ export async function cargarOrdenesPendientes(supabase: any, ordenId?: string): 
           tipo_cantidad,
           articulo_id,
           precio_unitario,
-          articulos(id, sku, descripcion, ean13, unidades_por_bulto)
+          articulos(id, sku, descripcion, ean13, unidades_por_bulto, marca:marca_id(descripcion))
         )
       `)
     .in("estado", ESTADOS_A_RECIBIR)
