@@ -170,7 +170,7 @@ export interface PanelChequesBanco {
   instalado: boolean
   ajustes: AjustesChequesBanco
   cuentas: Array<{ id: string; nombre: string; saldo: number; en_clearing: number; cheques: number; proyectado: number; proxima: string | null }>
-  demorados: Array<{ id: string; numero: string | null; banco: string | null; monto: number; cuenta: string; fecha_deposito: string; esperada: string }>
+  demorados: Array<{ id: string; numero: string | null; banco: string | null; monto: number; cuenta: string; cuenta_banco_id: string | null; fecha_deposito: string; esperada: string }>
   avisos: Array<{
     id: string; tipo: "rechazo" | "acreditar" | "debitar"; fecha: string; monto: number; descripcion: string | null; cuenta: string
     cheques: Array<{ id: string; numero: string | null; banco: string | null; monto: number; cliente: string | null; estado: string }>
@@ -218,7 +218,7 @@ export async function panelChequesBanco(db: SupabaseClient): Promise<PanelCheque
 
   const demorados = deps
     .filter((d) => estaDemorado(d.fecha_deposito, hoy, fer, ajustes.dias_alerta))
-    .map((d) => ({ id: d.id, numero: d.numero ?? null, banco: d.banco ?? null, monto: d.monto, cuenta: nombre.get(d.cuenta_banco_id) ?? "", fecha_deposito: d.fecha_deposito, esperada: d.esperada ?? d.fecha_deposito }))
+    .map((d) => ({ id: d.id, numero: d.numero ?? null, banco: d.banco ?? null, monto: d.monto, cuenta: nombre.get(d.cuenta_banco_id) ?? "", cuenta_banco_id: (d.cuenta_banco_id as string | null) ?? null, fecha_deposito: d.fecha_deposito, esperada: d.esperada ?? d.fecha_deposito }))
     .sort((a, b) => a.fecha_deposito.localeCompare(b.fecha_deposito))
 
   const avs = (avRes.data ?? []) as Fila[]

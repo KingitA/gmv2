@@ -138,6 +138,14 @@ export async function importarExtracto(
         .catch((e) => { console.warn("[extractos] cheques contra el banco:", e); return null })
     : null
 
+  // ── Bancos tanda 5 (control diario): impuestos, comisiones, débitos automáticos y rendimientos
+  //    al libro de fondos (lib/bancos/control). En modo propuesta (por defecto) solo cuenta lo que
+  //    registraría; va DESPUÉS de cheques para no quitarle a la tanda 4 sus comisiones. Nunca lanza.
+  const cargos = nuevos
+    ? await Promise.all([import("@/lib/bancos/control/servidor"), import("@/lib/supabase/admin")])
+        .then(([m, a]) => m.revisarCargos(a.createAdminClient())).catch(() => null)
+    : null
+
   // Extracto sin filas nuevas: borrarlo para no ensuciar el historial
   if (nuevos === 0) {
     await supabase.from("banco_extractos").delete().eq("id", extracto.id)
@@ -150,5 +158,6 @@ export async function importarExtracto(
     matching: match,
     transferencias,
     cheques,
+    cargos,
   }
 }

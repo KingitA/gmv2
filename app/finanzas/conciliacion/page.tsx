@@ -208,6 +208,8 @@ export default function ConciliacionPage() {
             </Button>
             {/* Tanda 2 de bancos: impuestos y gastos del banco por mes y concepto */}
             <Button variant="outline" asChild><Link href="/finanzas/gastos-bancarios">Gastos bancarios</Link></Button>
+            {/* Tanda 5 de bancos: banco vs sistema y lo que falta explicar */}
+            <Button variant="outline" asChild><Link href="/finanzas/control-bancos">Control diario</Link></Button>
             {/* Tanda 1 de bancos: capturas del homebanking / Excel / PDF, sin duplicar */}
             <Button onClick={() => setActualizarOpen(true)} disabled={!cuentaId}>
               <ImagePlus className="h-4 w-4 mr-2" /> Actualizar banco
