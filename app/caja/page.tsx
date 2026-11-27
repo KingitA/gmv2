@@ -23,6 +23,7 @@ import { PorRendir } from "@/components/caja/por-rendir"
 import { TareasFallidas } from "@/components/caja/tareas-fallidas"
 import { CerrarDia } from "@/components/caja/cerrar-dia"
 import { ImputarPago, type PagoAImputar } from "@/components/caja/imputar-pago"
+import { BancoTransferencias } from "@/components/caja/banco-transferencias"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
 import { localMatch } from "@/lib/search/local-match"
@@ -54,6 +55,7 @@ interface FilaCaja {
   sin_imputaciones?: boolean
   imputable?: boolean
   imputacion_disponible?: number
+  banco?: "confirmada" | "no_aparecio"
 }
 
 interface FeedCaja {
@@ -187,7 +189,11 @@ function Fila({
       </span>
       <span className="w-[280px] flex-none min-w-0">
         <span className="block truncate text-[13px] font-bold text-slate-900">{f.quien}</span>
-        <span className="block truncate text-[11px] text-slate-500">{f.sub}</span>
+        <span className="block truncate text-[11px] text-slate-500">
+          {f.banco === "confirmada" && <span className="mr-1 rounded bg-green-100 px-1 font-semibold text-green-700">confirmada por el banco</span>}
+          {f.banco === "no_aparecio" && <span className="mr-1 rounded bg-red-100 px-1 font-semibold text-red-700">no apareció en el banco</span>}
+          {f.sub}
+        </span>
       </span>
       <span
         className="flex-1 min-w-0 truncate text-[12.5px] text-slate-600"
@@ -521,6 +527,9 @@ export default function CajaDelDiaPage() {
 
             {/* Por rendir: viajes/vendedores sin declarar + confirmadas con detalle */}
             {(tab === "todo" || tab === "rendicion") && <PorRendir recarga={refrescoPR} />}
+
+            {/* Créditos del banco: confirmadas solas, sin identificar (Vincular) y propuestas */}
+            {(tab === "todo" || tab === "transferencia") && <BancoTransferencias recarga={refrescoPR} onCambio={() => cargar(fecha, true)} />}
 
             {/* Pendientes de días anteriores */}
             {filasAnteriores.length > 0 && (

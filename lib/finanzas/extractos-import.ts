@@ -121,6 +121,11 @@ export async function importarExtracto(
   })
   if (matchErr) throw matchErr
 
+  // ── Bancos tanda 3 (transferencias de clientes): cruza los créditos que quedaron PENDIENTE con
+  // las transferencias informadas. La lógica está en lib/bancos/transferencias/; en modo propuesta
+  // no confirma nada. Nunca lanza ni frena la importación.
+  const transferencias = await import("@/lib/bancos/transferencias/servidor").then((m) => m.revisarTransferencias()).catch(() => null)
+
   // Extracto sin filas nuevas: borrarlo para no ensuciar el historial
   if (nuevos === 0) {
     await supabase.from("banco_extractos").delete().eq("id", extracto.id)
@@ -131,5 +136,6 @@ export async function importarExtracto(
     importados: nuevos,
     duplicados: limpias.length - nuevos,
     matching: match,
+    transferencias,
   }
 }
