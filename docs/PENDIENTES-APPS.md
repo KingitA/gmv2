@@ -53,6 +53,7 @@ Regla del dueño (20/10): cada agente trabaja en su propia rama o carpeta (workt
 | SE — **Hacer sonar un equipo perdido** (las 3 apps): FCM → alarma con la app cerrada; ERP Equipos y apps y app depósito "Buscar el equipo de un compañero" | App Vendedor (dueño de core) | **Código hecho 20/11 en la rama `equipos-sonar`**, migración `20261120_mobile_sonar_equipo.sql` **sin aplicar**; falta `FIREBASE_SERVICE_ACCOUNT_JSON` en Vercel y `mobile/firebase/google-services.json` para compilar. MOBILE.md §13 "Hacer sonar un equipo" |
 
 | TK — **Botones tapados por el teclado** (Juan 26/11, S24 FE y NuStar): adjustResize en las 3 apps + en core lo fijo abajo y las hojas suben con `--gm-teclado`; pie de Pantalla (vendedor/chofer) arriba del teclado | App Vendedor (dueño de core) | **Hecho 26/11 en la rama `vendedor-teclado`**, APK vendedor compilada sin instalar ni publicar. Chofer y depósito lo reciben en su próxima APK |
+| RU — **Rendición única del vendedor** (rendición real de Freije 27/11): una rendición por usuario con todos sus códigos y el retiro descontado; retiro descontado al instante en la billetera; "Enviar rendición"; físico (efectivo + cheques en papel) separado de lo virtual (transferencias + echeqs); cheques repetidos (mismo número y banco normalizado) rechazados en el cobro y en el servidor; campos faltantes en rojo | App Vendedor | **Hecho 27/11 en la rama `vendedor-rendicion-unica`**, SQL `20261127f_rendicion_unica_vendedor.sql` (rendicion_crear v6) y `20261127g_kardex_comision_vendedor_idx.sql` (índice CONCURRENTLY, correrlo solo) **sin aplicar**; APK vendedor compilada sin instalar ni publicar. Ver "Rendición única" abajo |
 
 ## Versiones instaladas hoy
 
@@ -297,6 +298,16 @@ Cambio solo de servidor, compatible con la APK instalada (los rechazos de negoci
 - El primer conteo sobre una entrega "borrador" (la crea la oficina al subir la factura antes de que llegue la mercadería) la pasa a "en proceso" y la orden a "recibida en parte": desde ahí la oficina ya no puede cancelar ni editar la orden.
 - La oficina ya no puede finalizar la orden mientras una entrega con conteos sigue abierta (409 "el depósito todavía está contando la entrega N").
 - Para una próxima APK (opcional): al recibir `orden_cerrada`, sacar la orden de la lista local sin esperar la próxima sincronización.
+
+## App Vendedor → Rendición única (27/11/2026, rama `vendedor-rendicion-unica`)
+
+Origen: Freije rindió y le salieron DOS rendiciones (una por código de vendedor) y el retiro de $1.114.893 quedó en una sola; la billetera siguió mostrando el total; la sync de la billetera cortaba con 57014.
+
+- **Servidor:** `/api/viajante/rendir` hace UNA llamada a `rendicion_crear` con todos los pagos del usuario, `p_cobrador_id` = código principal (`lib/vendedor/codigo-principal.ts`, el menor id) y `p_retiros_de` = todos sus códigos. Si la función v6 no está aplicada, cae al armado viejo por código (no rompe). El retiro se registra siempre en el código principal (`lib/cuenta-corriente/retiro.ts`).
+- **SQL sin aplicar:** `20261127f_rendicion_unica_vendedor.sql` (rendicion_crear v6 con `p_retiros_de`, el resto igual a v5) y `20261127g_kardex_comision_vendedor_idx.sql` (índice parcial del kardex para la sync de la billetera: CONCURRENTLY, correrlo solo, fuera de transacción).
+- **`/api/vendedor/pagos-pendientes`:** trae por pago y en el total `cheques_fisicos {cantidad, monto}`, `echeqs {cantidad, monto}` y `transferencias` (cheques contados una vez por cheque_id).
+- **Outbox `cobro.registrar`:** cheque repetido en el mismo cobro o ya cargado para el cliente (mismo número, banco normalizado: "Patagonia" = "BANCO PATAGONIA") → RechazoNegocio `CHEQUE_REPETIDO`. Bancos distintos se aceptan. `lib/cheques/duplicados.ts` (también en `@gm/cheques`).
+- **App (v0.4.19):** "Enviar rendición" sin elegir clientes; "Llevás a la oficina: Efectivo $X · N cheques $Y" y lo virtual aparte; el retiro se descuenta al instante en la billetera; rechazo del retiro en Retiro/Billetera (no en Inicio); en Cobrar "Falta monto del cheque N" con el campo en rojo, igual transferencias, y cheque/transferencia repetidos en el mismo cobro. La réplica del vendedor no trae cheques: el control contra cheques ya cargados del cliente lo hace solo el servidor.
 
 ## Condiciones de pago, fase 4 — lo que deja listo el servidor (fase 3, 19/11/2026, rama `cc-condiciones`)
 

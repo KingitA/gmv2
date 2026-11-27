@@ -156,6 +156,8 @@ export function Cobrar() {
   }, [])
   const [obs, setObs] = useState("")
   const [enviando, setEnviando] = useState(false)
+  /** Campos en rojo por fila de cheque/transferencia (problemaMetodos). */
+  const [errores, setErrores] = useState<Record<string, string[]>>({})
   const enviandoRef = useRef(false)
 
   const cliente = cuenta?.cliente ?? null
@@ -321,7 +323,6 @@ export function Cobrar() {
   }
 
   // Campos marcados en rojo al intentar registrar (falta un dato o cheque repetido), por fila
-  const [errores, setErrores] = useState<Record<string, string[]>>({})
   const conError = (m: Metodo, campo: string) => !!errores[m.id]?.includes(campo)
   const cls = (m: Metodo, campo: CampoCheque, base?: string) => `${clsOcr(m, campo, base)}${conError(m, campo) ? " !border-red-500 !bg-red-50" : ""}`
   const updateMetodo = (idx: number, patch: Partial<Metodo>) => {
