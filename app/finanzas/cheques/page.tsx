@@ -22,6 +22,7 @@ import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { ImportChequesDialog } from "@/components/finanzas/import-cheques-dialog"
 import { ChequesEmitidosDialog } from "@/components/finanzas/cheques-emitidos-dialog"
 import { ChequeManualDialog } from "@/components/finanzas/cheque-manual-dialog"
+import { ChequesBancoPanel } from "@/components/finanzas/cheques-banco-panel"
 import { useUrlParams } from "@/lib/hooks/use-url-state"
 import { fecha, fechaISO, hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
 import { cn } from "@/lib/utils"
@@ -436,6 +437,9 @@ function ChequesContenido() {
           </Button>
         </div>
       </div>
+
+      {/* ─── Cheques contra el banco: clearing, 96 h, rechazos (bancos tanda 4) ─── */}
+      <ChequesBancoPanel onCambio={loadCheques} />
 
       {/* ─── Resumen de cartera ─── */}
       <div className="mb-3 rounded-2xl border border-neutro-200 bg-white px-3 py-2">
