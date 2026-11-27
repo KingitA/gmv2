@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { nombresCobradores } from "@/lib/finanzas/nombres-cobradores"
+import { bancoDeCuenta } from "@/lib/bancos/lectura"
+import { estadoConexion } from "@/lib/bancos/credicoop/config"
 
 /**
  * GET /api/finanzas/cajas — todas las cuentas de fondos con sus saldos
@@ -9,6 +11,10 @@ import { nombresCobradores } from "@/lib/finanzas/nombres-cobradores"
  *
  * Grupos: EFECTIVO (cajas_financieras), BANCOS (cuentas_bancarias),
  * BOLSA (cuentas_inversion), BILLETERAS (choferes/viajantes con saldo).
+ *
+ * Bancos (Tanda 1 de bancos): además, el último saldo que informó el BANCO (banco_saldo_actual,
+ * migración 20261127a) y si la cuenta se lee sola (MercadoPago / Credicoop). Solo para mostrar:
+ * el saldo del sistema sigue saliendo del kardex.
  */
 export async function GET() {
   const auth = await requireAuth()
@@ -16,12 +22,28 @@ export async function GET() {
   try {
     const supabase = await createClient()
 
-    const [cajasRes, bancosRes, inversionRes, saldosRes] = await Promise.all([
+    const [cajasRes, bancosRes, inversionRes, saldosRes, bancoSaldosRes] = await Promise.all([
       supabase.from("cajas_financieras").select("id, nombre").eq("activo", true).order("nombre"),
       supabase.from("cuentas_bancarias").select("id, nombre, banco, api_banco").eq("activo", true).order("nombre"),
       supabase.from("cuentas_inversion").select("id, nombre, tipo_instrumento").eq("activo", true).order("nombre"),
       supabase.from("saldos_financieros").select("cuenta_tipo, cuenta_id, color, saldo, updated_at"),
+      // Sin la migración 20261127a la vista no existe: se sigue sin el saldo del banco
+      supabase.from("banco_saldo_actual").select("cuenta_bancaria_id, saldo, al, fuente"),
     ])
+    const bancoSaldo = new Map<string, { saldo: number; al: string; fuente: string }>()
+    for (const b of (bancoSaldosRes.error ? [] : bancoSaldosRes.data) || []) {
+      bancoSaldo.set((b as any).cuenta_bancaria_id, { saldo: Number((b as any).saldo), al: (b as any).al, fuente: (b as any).fuente })
+    }
+    const credicoop = estadoConexion()
+    const lecturaDe = (b: { banco?: string | null; nombre?: string | null; api_banco?: string | null }) => {
+      const banco = bancoDeCuenta(b)
+      if (banco === "mp") return { banco, auto: "mp", conectado: !!process.env.MP_ACCESS_TOKEN, aviso: process.env.MP_ACCESS_TOKEN ? null : "MercadoPago no conectado" }
+      if (b.api_banco === "credicoop") {
+        const prod = credicoop.conectado && credicoop.ambiente === "produccion"
+        return { banco, auto: "credicoop", conectado: prod, aviso: prod ? null : credicoop.conectado ? "Credicoop en prueba: no se lee solo" : "Credicoop no conectado" }
+      }
+      return { banco, auto: null, conectado: false, aviso: null }
+    }
 
     const saldos = saldosRes.data || []
     const saldoDe = (tipo: string, id: string) => {
@@ -53,6 +75,8 @@ export async function GET() {
         grupo: "BANCOS",
         // Conectada por API (Credicoop): el e-cheq lo emite el banco y él pone el número
         api_banco: (b as any).api_banco ?? null,
+        banco_saldo: bancoSaldo.get(b.id) ?? null,
+        lectura: lecturaDe(b as any),
         saldos: saldoDe("BANCO", b.id),
         updated_at: updatedDe("BANCO", b.id),
       })),

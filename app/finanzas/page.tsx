@@ -19,11 +19,17 @@ import { NuevoGastoDialog } from "@/components/finanzas/nuevo-gasto-dialog"
 import { CajaAjustesDialog } from "@/components/finanzas/caja-ajustes-dialog"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { cn } from "@/lib/utils"
-import { fecha, fechaCorta, fechaHora, fechaISO, hora, hoyISO, moneda, numero, sumarDiasISO } from "@/lib/formato"
+import { haceCuanto } from "@/lib/bancos/lectura/identidad"
+import { fecha, fechaCorta, fechaHora, fechaISO, hora, hoyISO, moneda, numero, redondear, sumarDiasISO } from "@/lib/formato"
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
-type Cuenta = CuentaAjustable & { grupo?: string; updated_at?: string | null }
+type Cuenta = CuentaAjustable & {
+  grupo?: string; updated_at?: string | null
+  /** Bancos: último saldo que informó el banco (capturas, extractos, API) — Tanda 1 de bancos */
+  banco_saldo?: { saldo: number; al: string; fuente: string } | null
+  lectura?: { auto: string | null; conectado: boolean; aviso: string | null } | null
+}
 type Cartera = "BLANCO" | "NEGRO" | "ECHEQ"
 interface Cheque { id: string; numero: string; monto: number; fecha_vencimiento: string; color: string; es_echeq: boolean }
 interface Ajuste { fecha: string; usuario: string | null; motivo: string | null }
@@ -174,6 +180,29 @@ export default function FinanzasPage() {
     )
   }
 
+  // Bancos: el saldo del SISTEMA (se toca para ajustarlo) y debajo lo que dice el BANCO, con cuándo
+  // se leyó y la diferencia si no coinciden. El saldo del banco solo se muestra: no cambia el sistema.
+  const FilaBanco = ({ c }: { c: Cuenta }) => {
+    const b = c.banco_saldo
+    const dif = b ? redondear(b.saldo - saldoDe(c)) : 0
+    return (
+      <div>
+        <FilaCuenta c={c} />
+        {b ? (
+          <div className="flex flex-wrap gap-x-1.5 px-1 pb-0.5 text-[11px] leading-tight text-neutro-400" title={`Según el banco (${b.fuente}), ${fechaHora(b.al)}`}>
+            <span>Banco <b className="font-semibold tabular-nums text-neutro-600">{moneda(b.saldo, 0)}</b></span>
+            <span>· {haceCuanto(b.al)}</span>
+            {Math.abs(dif) >= 1
+              ? <span className="font-semibold text-ambar-700">· dif. {moneda(dif, 0)}</span>
+              : <span className="text-exito-600">· coincide</span>}
+          </div>
+        ) : c.lectura?.aviso ? (
+          <div className="px-1 pb-0.5 text-[11px] leading-tight text-neutro-400">{c.lectura.aviso}</div>
+        ) : null}
+      </div>
+    )
+  }
+
   const Saldo = ({ titulo, valor, extraTitulo, children, title }: { titulo: string; valor: number; extraTitulo?: React.ReactNode; children?: React.ReactNode; title?: string }) => (
     <div className="min-w-0 rounded-xl border border-neutro-200 bg-white px-3.5 py-3" title={title}>
       <div className="flex items-baseline justify-between gap-2">
@@ -239,8 +268,9 @@ export default function FinanzasPage() {
         <Saldo titulo="Efectivo" valor={suma(efectivo)}>
           {efectivo.map(c => <FilaCuenta key={claveCuenta(c)} c={c} />)}
         </Saldo>
-        <Saldo titulo="Bancos" valor={suma(bancos)}>
-          {bancos.map(c => <FilaCuenta key={claveCuenta(c)} c={c} />)}
+        <Saldo titulo="Bancos" valor={suma(bancos)}
+          extraTitulo={<Link href="/finanzas/conciliacion" className="text-xs font-semibold text-azul-600 hover:underline">Actualizar</Link>}>
+          {bancos.map(c => <FilaBanco key={claveCuenta(c)} c={c} />)}
         </Saldo>
         <Saldo titulo="Cheques en cartera" valor={tramos.total}
           extraTitulo={<Link href="/finanzas/cheques" className="text-xs font-semibold text-azul-600 hover:underline">Ver</Link>}>

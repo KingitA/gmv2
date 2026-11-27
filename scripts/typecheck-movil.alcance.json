@@ -164,6 +164,16 @@
     "app/api/finanzas/panel/",
     "app/finanzas/cheques/page.tsx",
     "app/api/cheques/manual/",
-    "components/finanzas/cheque-manual-dialog.tsx"
+    "components/finanzas/cheque-manual-dialog.tsx",
+    "lib/bancos/lectura/",
+    "lib/bancos/lectura-servidor.ts",
+    "lib/bancos/lectura-ia.ts",
+    "lib/bancos/lectura-periodica.ts",
+    "lib/finanzas/extractos-import.ts",
+    "app/api/finanzas/bancos-lectura/",
+    "app/api/cron/bancos-lectura/",
+    "app/api/cron/mp-sync/",
+    "app/api/finanzas/extractos/mp/",
+    "components/finanzas/actualizar-banco-dialog.tsx"
   ]
 }

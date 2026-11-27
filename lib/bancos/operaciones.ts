@@ -20,8 +20,10 @@
  */
 import { randomUUID } from "node:crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
+import { ahoraISO, hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
 import { importarExtracto } from "@/lib/finanzas/extractos-import"
+import { extraerContraparte } from "@/lib/bancos/lectura"
+import { guardarSaldoBanco } from "@/lib/bancos/lectura-servidor"
 import { faltaLaFuncion } from "@/lib/utils/migracion-pendiente"
 import { clienteCredicoop, estadoConexion, simuladorEnUso, SIMULADOR_FIRMA_A_LOS_SEGUNDOS, type AmbienteCredicoop } from "./credicoop/config"
 import {
@@ -616,11 +618,19 @@ export async function traerMovimientos(db: SupabaseClient, p: { cuentaBancariaId
     const n = (vistos.get(ref) ?? 0) + 1
     vistos.set(ref, n)
     if (n > 1) ref += `#${n}`
-    return { fecha: m.fecha, descripcion: [m.descripcion, m.nroComprobante ? `comp. ${m.nroComprobante}` : ""].filter(Boolean).join(" — "), monto: m.monto, referencia_externa: ref }
+    const cp = extraerContraparte(m.descripcion, "")
+    return {
+      fecha: m.fecha, descripcion: [m.descripcion, m.nroComprobante ? `comp. ${m.nroComprobante}` : ""].filter(Boolean).join(" — "), monto: m.monto, referencia_externa: ref,
+      // Tanda 1 de bancos: datos del renglón para clasificar y para las transferencias de clientes
+      concepto_banco: [m.codOperativo, m.descripcion].filter(Boolean).join(" "), saldo_banco: m.saldo,
+      contraparte_nombre: cp.nombre, contraparte_cuit: cp.cuit, contraparte_cbu: cp.cbu,
+    }
   })
   const importado = real && movimientos.length
     ? await importarExtracto(db, { cuenta_bancaria_id: cuenta.id, fuente: "api_banco", movimientos, periodo_desde: p.desde, periodo_hasta: p.hasta, saldo_final: r.saldo, importado_por: usuarioId })
     : null
+  // Saldo del banco (solo el real): el encabezado de la consulta es el saldo de la cuenta ahora
+  if (real && r.saldo != null) await guardarSaldoBanco(db, { cuentaId: cuenta.id, saldo: r.saldo, al: ahoraISO(), fuente: "api_credicoop", usuarioId })
 
   // Propuesta (no se aplica sola): débitos que coinciden con una operación firmada desde el sistema, del mismo ambiente
   const coincidencias: Array<{ operacion_id: string; tipo: string; beneficiario: string | null; monto: number; fecha_movimiento: string; descripcion: string }> = []
