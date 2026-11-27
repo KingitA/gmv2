@@ -1,6 +1,7 @@
 import { createHash } from "crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
+import { revisarChequesContraBanco } from "@/lib/bancos/cheques/servidor"
 
 export interface MovImport {
   fecha: string // YYYY-MM-DD
@@ -121,6 +122,14 @@ export async function importarExtracto(
   })
   if (matchErr) throw matchErr
 
+  // ── Bancos tanda 4: cheques contra el banco (lib/bancos/cheques). Acredita depositados / debita
+  //    propios con UNA coincidencia (o solo propone, en modo propuesta) y avisa rechazos para que el
+  //    dueño los confirme. Nunca hace fallar el import.
+  const cheques = nuevos
+    ? await revisarChequesContraBanco(supabase, { extractoId: extracto.id, usuarioId: params.importado_por ?? null })
+        .catch((e) => { console.warn("[extractos] cheques contra el banco:", e); return null })
+    : null
+
   // Extracto sin filas nuevas: borrarlo para no ensuciar el historial
   if (nuevos === 0) {
     await supabase.from("banco_extractos").delete().eq("id", extracto.id)
@@ -131,5 +140,6 @@ export async function importarExtracto(
     importados: nuevos,
     duplicados: limpias.length - nuevos,
     matching: match,
+    cheques,
   }
 }
