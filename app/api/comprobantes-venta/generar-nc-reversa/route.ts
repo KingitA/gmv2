@@ -17,6 +17,7 @@ import { renglonAplicado } from "@/lib/pedidos/ajuste-devoluciones"
 import { pagoDelComprobante } from "@/lib/comprobantes/condicion-pago-comprobante"
 import { cuitDigitos, cuitValido, ahoraISO } from "@/lib/formato"
 import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from "@/lib/comprobantes/numeracion"
+import { observacionManualPedido } from "@/lib/pedidos/observacion-manual"
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -648,6 +649,7 @@ export async function POST(request: Request) {
           empresa:     empresaData,
           detalle:     detalleNC,
           pedido:      null,
+          observacionManual: await observacionManualPedido(supabase, devolucion.pedido_id),
           bonificaciones: [],
           marcaDesc,
           qrDataUrl,

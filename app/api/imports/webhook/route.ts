@@ -166,7 +166,8 @@ async function createOrderAutomated(supabase: any, clienteId: string, items: any
         total_flete: 0,
         total_impuestos: iva + percepciones,
         total,
-        observaciones: `Importado automáticamente desde ${source}`
+        // Nota del sistema (solo en el pedido, nunca en los comprobantes)
+        nota_origen: `Importado vía IA - ${source}`
     }).select().single()
 
     if (pedidoError) throw pedidoError

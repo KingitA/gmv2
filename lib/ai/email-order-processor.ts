@@ -12,6 +12,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { MODELO_CLAUDE, ESFUERZO_SIMPLE, TOPE_RESPUESTA_CORTA, textoDeRespuesta } from './modelos-claude'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { hoyISO } from '@/lib/formato'
+import { notaImportacionMail } from '@/lib/pedidos/nota-origen'
 
 // Lazy singleton for Claude
 let _anthropic: Anthropic | null = null
@@ -768,7 +769,8 @@ async function createOrderFromEmail(
         total_impuestos: iva + percepciones,
         total,
         metodo_facturacion_pedido: facturacionOverride || null,
-        observaciones: `Importado automáticamente desde Gmail — Asunto: "${emailData.subject}" — De: ${emailData.from}${unmatchedNote}`,
+        // Nota del sistema (solo en el pedido, nunca en los comprobantes): mail y adjuntos
+        nota_origen: `${notaImportacionMail(emailData.from, emailData.subject, emailData.attachments.map((a) => a.filename))}${unmatchedNote}`,
     }).select().single()
 
     if (pedidoError) throw pedidoError

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { codigoPostalCliente, generarYSubirRemitoPDF, type RemitoPDFData } from "@/lib/remitos/generar-remito"
 import { REQUIERE_CAE } from "@/lib/arca/tipos"
 import { palletsDePedidos } from "@/lib/viajes/bultos"
+import { observacionManualPedido } from "@/lib/pedidos/observacion-manual"
 
 /**
  * Re-renderiza el PDF de un remito YA numerado desde su fila (`remitos` +
@@ -47,7 +48,7 @@ export async function rehacerPDFRemito(admin: SupabaseClient, remitoId: string) 
       valor_declarado: Number(remito.valor_declarado ?? 0),
       bultos: remito.bultos ?? null,
       pallets: pallets || null,
-      observaciones: remito.observaciones ?? null,
+      observaciones: remito.observaciones ?? (await observacionManualPedido(admin, remito.pedido_id)),
       comprobante_numero: remito.comprobante?.numero_comprobante ?? null,
       comprobante_tipo: remito.comprobante?.tipo_comprobante ?? null,
       condicion_pago_texto: remito.comprobante?.condicion_pago_texto ?? null,

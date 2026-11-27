@@ -28,6 +28,7 @@ import { calcularHashPDF } from '@/lib/pdf/generar'
 import { REQUIERE_CAE } from '@/lib/arca/tipos'
 import { todayArgentina } from '@/lib/utils'
 import { palletsDePedidos } from '@/lib/viajes/bultos'
+import { observacionManualPedido } from "@/lib/pedidos/observacion-manual"
 
 const BUCKET = 'comprobantes_venta'
 const PV_REMITO = '0001'
@@ -234,6 +235,8 @@ export async function generarRemitosParaPedido(
             fecha:              todayArgentina(),
             valor_declarado:    Number(comp.total_factura ?? 0),
             bultos:             pedido.bultos && pedido.bultos > 0 ? pedido.bultos : null,
+            // Observación escrita a mano del pedido (Juan 27/11/2026); nunca la nota del sistema
+            observaciones:      await observacionManualPedido(supabase, pedido.id),
             pallets:            palletsPedido || null,
             comprobante_numero: comp.numero_comprobante,
             comprobante_tipo:   comp.tipo_comprobante,

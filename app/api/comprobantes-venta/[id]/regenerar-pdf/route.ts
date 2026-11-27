@@ -29,7 +29,7 @@ export async function POST(
       .select(`
         *,
         clientes(*),
-        pedidos(numero_pedido, condicion_entrega, vendedores(nombre)),
+        pedidos(numero_pedido, condicion_entrega, observaciones, vendedores(nombre)),
         comprobantes_venta_detalle(*, articulos(descripcion, sku, descuento_propio, marca_id))
       `)
       .eq('id', id)

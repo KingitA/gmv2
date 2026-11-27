@@ -147,11 +147,14 @@ export function buildPDFData(params: {
   empresa:        any
   detalle:        any[]
   pedido?:        any
+  /** Observación escrita a mano del pedido (si no viene, la de `pedido.observaciones`) */
+  observacionManual?: string | null
   bonificaciones?: any[]
   marcaDesc?:     Map<string, string>
   qrDataUrl?:     string
 }): ComprobantePDFData {
   const { comprobante, cliente, empresa, detalle, pedido, bonificaciones = [], marcaDesc, qrDataUrl } = params
+  const observacionManual = (params.observacionManual ?? pedido?.observaciones ?? '').trim() || null
 
   return {
     comprobante: {
@@ -192,6 +195,7 @@ export function buildPDFData(params: {
       inicio_actividades:   empresa?.inicio_actividades   ?? null,
       iibb:                 empresa?.iibb                 ?? null,
     },
+    observacion_manual: observacionManual,
     pedido: pedido ? {
       numero_pedido:     pedido.numero_pedido,
       condicion_entrega: pedido.condicion_entrega,

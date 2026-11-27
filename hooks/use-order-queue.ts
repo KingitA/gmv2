@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { parseOrderFile, processMatches, type ParseResult } from "@/lib/actions/ai-order-import"
 import { createPedido } from "@/lib/actions/pedidos"
+import { notaImportacionArchivos } from "@/lib/pedidos/nota-origen"
 
 export type QueueItemStatus = "waiting" | "processing" | "needs_review" | "done" | "error"
 
 // Condiciones del pedido tal como las recibe createPedido (las arma el panel
 // compartido: lib/pedidos/condiciones-form.ts → condicionesParaPedido).
-export type PedidoOverrides = Partial<Omit<Parameters<typeof createPedido>[0], "cliente_id" | "items" | "observaciones">>
+export type PedidoOverrides = Partial<Omit<Parameters<typeof createPedido>[0], "cliente_id" | "items" | "observaciones" | "nota_origen">>
 
 
 export type QueueItem = {
@@ -18,6 +19,8 @@ export type QueueItem = {
   files: File[]
   status: QueueItemStatus
   overrides?: PedidoOverrides
+  /** Escrita a mano en el modal (va al pie de los comprobantes) */
+  observaciones?: string
   parseResult?: ParseResult
   pedidoNumero?: string
   pedidoId?: string
@@ -29,13 +32,14 @@ export function useOrderQueue(onOrderCreated?: () => void) {
   const [queue, setQueue] = useState<QueueItem[]>([])
   const processingRef = useRef(false)
 
-  const addToQueue = useCallback((clienteId: string, clienteNombre: string, files: File[], overrides?: PedidoOverrides) => {
+  const addToQueue = useCallback((clienteId: string, clienteNombre: string, files: File[], overrides?: PedidoOverrides, observaciones?: string) => {
     const item: QueueItem = {
       id: crypto.randomUUID(),
       clienteId,
       clienteNombre,
       files,
       overrides,
+      observaciones: observaciones?.trim() || undefined,
       status: "waiting",
       addedAt: new Date(),
     }
@@ -94,7 +98,9 @@ export function useOrderQueue(onOrderCreated?: () => void) {
               precio_unitario: i.matchedProduct!.precio_base || 0,
               descuento: 0,
             })),
-            observaciones: "Importado vía IA",
+            // Nota del sistema con los archivos (solo pedido) + lo escrito a mano (también comprobantes)
+            nota_origen: notaImportacionArchivos(nextWaiting.files.map((f) => f.name)),
+            observaciones: nextWaiting.observaciones,
             ...nextWaiting.overrides,
           })
           updateItem(nextWaiting.id, {
@@ -141,7 +147,8 @@ export function useOrderQueue(onOrderCreated?: () => void) {
         precio_unitario: i.matchedProduct!.precio_base || 0,
         descuento: 0,
       })),
-      observaciones: "Importado vía IA",
+      nota_origen: notaImportacionArchivos((queueItem?.files ?? []).map((f) => f.name)),
+      observaciones: queueItem?.observaciones,
       ...queueItem?.overrides,
     })
 

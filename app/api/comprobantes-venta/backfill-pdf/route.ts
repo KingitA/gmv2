@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
         id, nombre_razon_social, cuit, condicion_iva, condicion_pago,
         direccion, localidad, telefono
       ),
-      pedidos(numero_pedido, condicion_entrega, vendedores(nombre)),
+      pedidos(numero_pedido, condicion_entrega, observaciones, vendedores(nombre)),
       comprobantes_venta_detalle(
         articulo_id, descripcion, cantidad, precio_unitario, precio_total,
         articulos(descripcion, sku, descuento_propio, marca_id)

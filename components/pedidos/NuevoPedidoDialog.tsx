@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Upload, Plus, X, Search, Check, FileText, MapPin } from "lucide-react"
 import type { PedidoOverrides } from "@/hooks/use-order-queue"
 import { CondicionesPedidoPanel, useCondicionesPedido } from "@/components/pedidos/CondicionesPedidoPanel"
@@ -22,7 +23,7 @@ type Cliente = {
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onAddToQueue: (clienteId: string, clienteNombre: string, files: File[], overrides?: PedidoOverrides) => void
+  onAddToQueue: (clienteId: string, clienteNombre: string, files: File[], overrides?: PedidoOverrides, observaciones?: string) => void
 }
 
 // Importación de pedidos (xlsx / imagen / pdf / eml): archivos + cliente +
@@ -37,6 +38,8 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   const [showDrop, setShowDrop] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [error, setError]       = useState<string | null>(null)
+  // Escrita a mano: viaja con el pedido igual que la del vendedor (va al pie de los comprobantes)
+  const [observaciones, setObservaciones] = useState("")
 
   const cond = useCondicionesPedido(cliente?.id)
   const clienteNombre = cliente?.nombre_razon_social || cliente?.razon_social || ""
@@ -82,6 +85,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     cancelarBusqueda()
     setFiles([])
     setCliente(null)
+    setObservaciones("")
     setQuery("")
     setResults([])
     setShowDrop(false)
@@ -95,7 +99,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     try {
       // "Guardar en la ficha": se guarda antes de encolar (el pedido congela la ficha nueva)
       await cond.guardarFichaSiCorresponde()
-      onAddToQueue(cliente.id, clienteNombre, files, cond.condiciones() as PedidoOverrides)
+      onAddToQueue(cliente.id, clienteNombre, files, cond.condiciones() as PedidoOverrides, observaciones)
       reset()
       onOpenChange(false)
     } catch (e: any) {
@@ -225,6 +229,23 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
               <CondicionesPedidoPanel estado={cond} />
             </div>
           )}
+
+          {/* ── Observaciones (escritas a mano) ─────────────────────────────── */}
+          <div className="space-y-2">
+            <Label htmlFor="obs-importacion" className="text-[11px] font-bold text-slate-500 uppercase tracking-wide block">
+              Observaciones
+            </Label>
+            <Textarea
+              id="obs-importacion"
+              value={observaciones}
+              onChange={(e) => setObservaciones(e.target.value)}
+              maxLength={1000}
+              rows={2}
+              placeholder="Ej: entregar antes del jueves, llamar antes de ir…"
+              className="resize-y text-sm"
+            />
+            <p className="text-[11px] text-slate-400">Se imprime en el pedido y al pie de los comprobantes.</p>
+          </div>
 
           {error && <p className="text-xs text-red-600">{error}</p>}
         </div>

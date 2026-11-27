@@ -92,7 +92,10 @@ type Pedido = {
   total_comision: number
   total_impuestos: number
   total: number
+  /** Escrita a mano (vendedor, oficina, importación): va al pie de los comprobantes */
   observaciones: string | null
+  /** Nota del SISTEMA ("Importado vía IA - archivo.xlsx"): solo en el pedido y su impresión */
+  nota_origen?: string | null
   prioridad: number
   fecha_entrega?: string | null
   condicion_entrega: string
@@ -201,6 +204,9 @@ const ESTADOS_PEDIDO = [
   { value: "eliminado", label: "Eliminado", color: "bg-gray-500" },
   { value: "sistema_viejo", label: "Sistema viejo", color: "bg-gray-400" },
 ]
+
+/** Texto escrito a mano dentro del HTML de la impresión (sin que un "<" rompa la hoja) */
+const escaparHtml = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 export default function ClientesPedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([])
@@ -862,7 +868,14 @@ export default function ClientesPedidosPage() {
             <div class="header">
               <div class="title">ORDEN DE PEDIDO #${pedido.numero_pedido}</div>
               <div style="color: #666;">Fecha: ${formatDateAR(pedido.fecha)}</div>
+              ${pedido.nota_origen ? `<div style="color: #888; font-size: 11px; margin-top: 2px;">${escaparHtml(pedido.nota_origen)}</div>` : ""}
             </div>
+
+            ${pedido.observaciones ? `
+            <div class="info-box" style="margin-bottom: 20px; border: 2px solid #0f172a;">
+              <div class="label">Observaciones</div>
+              <div style="font-size: 14px; font-weight: bold; white-space: pre-wrap;">${escaparHtml(pedido.observaciones)}</div>
+            </div>` : ""}
 
             <div class="info">
               <div class="info-box">
@@ -978,15 +991,6 @@ export default function ClientesPedidosPage() {
             </table>
 
             <div class="footer">
-              ${pedido.observaciones
-          ? `
-                <div style="margin-bottom: 15px;">
-                  <div class="label">Observaciones</div>
-                  <div style="font-size: 13px;">${pedido.observaciones}</div>
-                </div>
-              `
-          : ""
-        }
               <div class="total-row">
                 <span>TOTAL: ${moneda(pedido.total)}</span>
               </div>
@@ -2191,17 +2195,27 @@ export default function ClientesPedidosPage() {
                 </div>
               </div>
 
-              {/* Observaciones + Email */}
-              {pedidoSeleccionado.observaciones && (
+              {/* Observaciones (escritas a mano) + nota del sistema (origen) + Email */}
+              {(pedidoSeleccionado.observaciones || pedidoSeleccionado.nota_origen) && (
                 <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Observaciones</p>
-                  <p className="text-xs text-slate-600 leading-relaxed">{pedidoSeleccionado.observaciones.substring(0, 200)}{pedidoSeleccionado.observaciones.length > 200 ? "..." : ""}</p>
-                  {pedidoSeleccionado.observaciones.includes("Gmail") && (
+                  {pedidoSeleccionado.observaciones && (
+                    <>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Observaciones</p>
+                      <p className="text-sm font-medium text-slate-800 leading-relaxed whitespace-pre-wrap">{pedidoSeleccionado.observaciones}</p>
+                    </>
+                  )}
+                  {pedidoSeleccionado.nota_origen && (
+                    <p className={`text-[11px] text-slate-500 leading-relaxed ${pedidoSeleccionado.observaciones ? "mt-2" : ""}`} title="Nota del sistema: no va a los comprobantes">
+                      Origen: {pedidoSeleccionado.nota_origen}
+                    </p>
+                  )}
+                  {/(Gmail|mail de)/.test(pedidoSeleccionado.nota_origen || "") && (
                     <Button size="sm" variant="outline" className="mt-2 h-7 text-xs gap-1.5"
                       onClick={async () => {
-                        const obs = pedidoSeleccionado.observaciones || ""
-                        const deMatch = obs.match(/De:\s*(\S+)/)
-                        const asuntoMatch = obs.match(/Asunto:\s*"([^"]+)"/)
+                        // Notas viejas: "… Asunto: \"x\" — De: y"; nuevas: "Importado vía IA - mail de y: x" o "… (mail de y)"
+                        const obs = pedidoSeleccionado.nota_origen || ""
+                        const deMatch = obs.match(/De:\s*(\S+)/) || obs.match(/mail de ([^\s:)]+)/)
+                        const asuntoMatch = obs.match(/Asunto:\s*"([^"]+)"/) || obs.match(/mail de [^\s:)]+: (.+)$/)
                         if (deMatch || asuntoMatch) {
                           const { data } = await supabase.from("ai_emails").select("id")
                             .or([
