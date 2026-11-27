@@ -1,11 +1,29 @@
 import { createHash } from "crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
 
 export interface MovImport {
   fecha: string // YYYY-MM-DD
   descripcion: string
   monto: number // signado
   referencia_externa?: string | null
+  // Tanda 1 de bancos (migración 20261127a): todo opcional
+  hora?: string | null
+  contraparte_nombre?: string | null
+  contraparte_cuit?: string | null
+  contraparte_cbu?: string | null
+  concepto_banco?: string | null
+  saldo_banco?: number | null
+}
+
+export type FuenteDetalle = "captura" | "archivo" | "pdf" | "api"
+
+/** Familia de la fuente del extracto (columna fuente_detalle del movimiento). */
+export function fuenteDetalleDe(fuente: string): FuenteDetalle {
+  if (fuente === "captura") return "captura"
+  if (fuente === "pdf") return "pdf"
+  if (fuente.startsWith("api")) return "api"
+  return "archivo"
 }
 
 /**
@@ -26,6 +44,7 @@ export async function importarExtracto(
     importado_por?: string | null
   }
 ) {
+  const fuenteDetalle = fuenteDetalleDe(params.fuente)
   const limpias = params.movimientos
     .filter((m) => /^\d{4}-\d{2}-\d{2}$/.test(m.fecha) && Number(m.monto))
     .map((m) => ({ ...m, descripcion: (m.descripcion || "").trim(), monto: Number(m.monto) }))
@@ -45,36 +64,55 @@ export async function importarExtracto(
 
   const fechas = limpias.map((m) => m.fecha).sort()
 
-  const { data: extracto, error: extErr } = await supabase
-    .from("banco_extractos")
-    .insert({
-      cuenta_bancaria_id: params.cuenta_bancaria_id,
-      fuente: params.fuente,
-      periodo_desde: params.periodo_desde || fechas[0],
-      periodo_hasta: params.periodo_hasta || fechas[fechas.length - 1],
-      saldo_inicial: params.saldo_inicial ?? null,
-      saldo_final: params.saldo_final ?? null,
-      importado_por: params.importado_por ?? null,
-    })
-    .select("id")
-    .single()
-  if (extErr) throw extErr
-
-  const { data: insertados, error: movErr } = await supabase
-    .from("banco_extractos_movimientos")
-    .upsert(
-      limpias.map((m) => ({
-        extracto_id: extracto.id,
+  const cabecera = (fuente: string) =>
+    supabase
+      .from("banco_extractos")
+      .insert({
         cuenta_bancaria_id: params.cuenta_bancaria_id,
-        fecha: m.fecha,
-        descripcion: m.descripcion || null,
-        referencia_externa: m.referencia_externa,
-        monto: m.monto,
-      })),
-      { onConflict: "cuenta_bancaria_id,referencia_externa", ignoreDuplicates: true }
-    )
-    .select("id")
-  if (movErr) throw movErr
+        fuente,
+        periodo_desde: params.periodo_desde || fechas[0],
+        periodo_hasta: params.periodo_hasta || fechas[fechas.length - 1],
+        saldo_inicial: params.saldo_inicial ?? null,
+        saldo_final: params.saldo_final ?? null,
+        importado_por: params.importado_por ?? null,
+      })
+      .select("id")
+      .single()
+  let { data: extracto, error: extErr } = await cabecera(params.fuente)
+  // Sin la migración 20261127a la fuente 'captura' no pasa el CHECK: se guarda como 'excel'
+  if (extErr && (extErr as { code?: string }).code === "23514" && params.fuente === "captura") ({ data: extracto, error: extErr } = await cabecera("excel"))
+  if (extErr || !extracto) throw extErr ?? new Error("No se pudo crear el extracto")
+
+  const basicas = limpias.map((m) => ({
+    extracto_id: extracto.id,
+    cuenta_bancaria_id: params.cuenta_bancaria_id,
+    fecha: m.fecha,
+    descripcion: m.descripcion || null,
+    referencia_externa: m.referencia_externa,
+    monto: m.monto,
+  }))
+  const completas = limpias.map((m, i) => ({
+    ...basicas[i],
+    hora: m.hora ?? null,
+    contraparte_nombre: m.contraparte_nombre ?? null,
+    contraparte_cuit: m.contraparte_cuit ?? null,
+    contraparte_cbu: m.contraparte_cbu ?? null,
+    concepto_banco: m.concepto_banco ?? null,
+    saldo_banco: m.saldo_banco ?? null,
+    fuente_detalle: fuenteDetalle,
+  }))
+  const subir = (filas: Record<string, unknown>[]) =>
+    supabase
+      .from("banco_extractos_movimientos")
+      .upsert(filas, { onConflict: "cuenta_bancaria_id,referencia_externa", ignoreDuplicates: true })
+      .select("id")
+  let { data: insertados, error: movErr } = await subir(completas)
+  // Sin la migración 20261127a todavía: se guarda como antes (sin hora / contraparte / saldo)
+  if (movErr && faltaLaColumna(movErr)) ({ data: insertados, error: movErr } = await subir(basicas))
+  if (movErr) {
+    await supabase.from("banco_extractos").delete().eq("id", extracto.id)
+    throw movErr
+  }
 
   const nuevos = insertados?.length ?? 0
 

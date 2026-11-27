@@ -5,12 +5,13 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
-import { ArrowLeft, Landmark, RefreshCw, ExternalLink, Upload, Wand2 } from "lucide-react"
+import { ArrowLeft, Landmark, RefreshCw, ExternalLink, Upload, Wand2, ImagePlus } from "lucide-react"
 import Link from "next/link"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { ImportExtractoDialog } from "@/components/finanzas/import-extracto-dialog"
+import { ActualizarBancoDialog } from "@/components/finanzas/actualizar-banco-dialog"
 import { formatDateAR } from "@/lib/utils"
 import { fecha, moneda } from "@/lib/formato"
 import { labelCategoria, egresoDeCategoria } from "@/lib/finanzas/categorias-gasto"
@@ -32,7 +33,8 @@ export default function ConciliacionPage() {
   const { toast } = useToast()
 
   // ── Extracto bancario ──
-  const [bancos, setBancos] = useState<{ cuenta_id: string; nombre: string }[]>([])
+  const [bancos, setBancos] = useState<{ cuenta_id: string; nombre: string; lectura?: { banco: string; auto: string | null; conectado: boolean; aviso: string | null } }[]>([])
+  const [actualizarOpen, setActualizarOpen] = useState(false)
   const [cuentaId, setCuentaId] = useState("")
   const [movs, setMovs] = useState<any[]>([])
   const [loadingMovs, setLoadingMovs] = useState(false)
@@ -142,7 +144,9 @@ export default function ConciliacionPage() {
   // (vencimientos) se saldan una a una con su propio botón.
   const sugeridos = useMemo(() => movs.filter((m) => m.estado_matching === "SUGERIDO" && m.kardex_id), [movs])
   const pendientes = useMemo(() => movs.filter((m) => m.estado_matching === "PENDIENTE"), [movs])
-  const cuentaNombre = bancos.find((b) => b.cuenta_id === cuentaId)?.nombre ?? ""
+  const cuentaSel = bancos.find((b) => b.cuenta_id === cuentaId)
+  const cuentaNombre = cuentaSel?.nombre ?? ""
+  const esMp = cuentaSel?.lectura?.banco === "mp" || cuentaNombre.toLowerCase().includes("mercado")
 
   const porCuenta = items.reduce((acc: Record<string, any[]>, i) => {
     ;(acc[i.cuenta_destino] = acc[i.cuenta_destino] || []).push(i)
@@ -202,10 +206,17 @@ export default function ConciliacionPage() {
             <Button variant="outline" asChild>
               <Link href="/finanzas/bancos"><Landmark className="h-4 w-4 mr-2" /> Traer de Credicoop</Link>
             </Button>
+            {/* Tanda 1 de bancos: capturas del homebanking / Excel / PDF, sin duplicar */}
+            <Button onClick={() => setActualizarOpen(true)} disabled={!cuentaId}>
+              <ImagePlus className="h-4 w-4 mr-2" /> Actualizar banco
+            </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)} disabled={!cuentaId}>
               <Upload className="h-4 w-4 mr-2" /> Importar extracto
             </Button>
-            {cuentaNombre.toLowerCase().includes("mercado") && (
+            {esMp && cuentaSel?.lectura && !cuentaSel.lectura.conectado && (
+              <span className="rounded-md bg-neutro-100 px-2 py-1 text-xs font-semibold text-neutro-500">MercadoPago no conectado</span>
+            )}
+            {esMp && (cuentaSel?.lectura?.conectado ?? true) && (
               <Button variant="outline" disabled={accionando !== null}
                 onClick={async () => {
                   setAccionando("mp-sync")
@@ -213,7 +224,8 @@ export default function ConciliacionPage() {
                     const res = await fetch("/api/finanzas/extractos/mp", { method: "POST" })
                     const d = await res.json()
                     if (!res.ok) throw new Error(d.error)
-                    toast({ title: `MP sincronizado: ${d.importados ?? 0} nuevos, ${d.matching?.sugeridos ?? 0} sugeridos` })
+                    if (d.conectado === false) toast({ title: "MercadoPago no conectado" })
+                    else toast({ title: `MP sincronizado: ${d.importados ?? 0} nuevos, ${(d.matching as any)?.sugeridos ?? 0} sugeridos` })
                     loadMovs()
                   } catch (e: any) {
                     toast({ variant: "destructive", title: "Error MP", description: e.message })
@@ -273,10 +285,16 @@ export default function ConciliacionPage() {
                     const esDebito = Number(m.monto) < 0
                     return (
                       <tr key={m.id} className="border-b last:border-0 align-top">
-                        <td className="px-3 py-2 whitespace-nowrap">{formatDateAR(m.fecha)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {formatDateAR(m.fecha)}
+                          {m.hora && m.hora !== "00:00:00" && <span className="block text-xs text-muted-foreground">{String(m.hora).slice(0, 5)}</span>}
+                        </td>
                         <td className="px-3 py-2 max-w-[280px]">
                           <p className="truncate">{m.descripcion || "—"}</p>
-                          {m.referencia_externa && !m.referencia_externa.startsWith("h:") && (
+                          {(m.contraparte_nombre || m.contraparte_cuit) && (
+                            <p className="truncate text-xs text-muted-foreground">{[m.contraparte_nombre, m.contraparte_cuit].filter(Boolean).join(" · ")}</p>
+                          )}
+                          {m.referencia_externa && !m.referencia_externa.startsWith("h:") && !m.referencia_externa.includes("|") && (
                             <p className="text-xs text-muted-foreground">Ref {m.referencia_externa}</p>
                           )}
                         </td>
@@ -413,6 +431,16 @@ export default function ConciliacionPage() {
         </section>
       </main>
 
+      {cuentaId && (
+        <ActualizarBancoDialog
+          open={actualizarOpen}
+          onOpenChange={setActualizarOpen}
+          cuentaId={cuentaId}
+          cuentaNombre={cuentaNombre}
+          mp={esMp ? { conectado: !!cuentaSel?.lectura?.conectado } : null}
+          onSaved={loadMovs}
+        />
+      )}
       {cuentaId && (
         <ImportExtractoDialog
           open={importOpen}

@@ -1,5 +1,6 @@
 import type { MovImport } from "@/lib/finanzas/extractos-import"
 import { fechaISO } from "@/lib/formato"
+import { extraerContraparte } from "@/lib/bancos/lectura/contraparte"
 
 /**
  * Fuente de extracto: MercadoPago API (token en env MP_ACCESS_TOKEN).
@@ -53,12 +54,20 @@ export async function fetchMovimientosMP(
   )
   if (movRes.ok && Array.isArray(movRes.data?.results) && movRes.data.results.length) {
     const movimientos: MovImport[] = movRes.data.results
-      .map((m: any) => ({
-        fecha: fechaAR(m.date_created),
-        descripcion: [m.description, m.detail, m.type].filter(Boolean).join(" · "),
-        monto: Number(m.amount ?? 0),
-        referencia_externa: `mp:${m.id}`,
-      }))
+      .map((m: any) => {
+        const descripcion = [m.description, m.detail, m.type].filter(Boolean).join(" · ")
+        const cp = extraerContraparte(String(m.description ?? ""), String(m.detail ?? ""))
+        return {
+          fecha: fechaAR(m.date_created),
+          descripcion,
+          monto: Number(m.amount ?? 0),
+          referencia_externa: `mp:${m.id}`,
+          // Tanda 1 de bancos: concepto y contraparte (MP no informa CUIT)
+          concepto_banco: String(m.description ?? m.type ?? "") || null,
+          contraparte_nombre: cp.nombre,
+          saldo_banco: m.balance != null && Number.isFinite(Number(m.balance)) ? Number(m.balance) : null,
+        }
+      })
       .filter((m: MovImport) => m.monto !== 0)
     return { movimientos, fuente_detalle: "account/movements" }
   }
@@ -101,4 +110,20 @@ export async function fetchMovimientosMP(
     }
   }
   return { movimientos, fuente_detalle: "payments/search" }
+}
+
+/**
+ * Saldo de la cuenta de MercadoPago (dinero total), o null si la API no lo da para esta cuenta.
+ * Endpoint de MP: /users/{id}/mercadopago_account/balance (el id sale de /users/me).
+ */
+export async function saldoMP(): Promise<number | null> {
+  const token = process.env.MP_ACCESS_TOKEN
+  if (!token) return null
+  const yo = await mpGet("/users/me", token)
+  const id = yo.ok ? yo.data?.id : null
+  if (!id) return null
+  const r = await mpGet(`/users/${encodeURIComponent(String(id))}/mercadopago_account/balance`, token)
+  if (!r.ok) return null
+  const total = Number(r.data?.total_amount ?? r.data?.available_balance)
+  return Number.isFinite(total) ? total : null
 }
