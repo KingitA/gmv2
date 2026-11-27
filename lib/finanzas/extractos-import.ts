@@ -1,6 +1,7 @@
 import { createHash } from "crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { faltaLaColumna } from "@/lib/utils/migracion-pendiente"
+import { clasificarExtracto } from "@/lib/bancos/clasificacion-servidor" // Tanda 2 de bancos
 
 export interface MovImport {
   fecha: string // YYYY-MM-DD
@@ -120,6 +121,10 @@ export async function importarExtracto(
     p_extracto_id: extracto.id,
   })
   if (matchErr) throw matchErr
+
+  // ── Después de extracto_matchear: cada tanda de bancos agrega SU llamada en su propia línea ──
+  // Tanda 2 (impuestos y gastos): solo clasifica (concepto_id); no toca kardex ni saldos, nunca falla.
+  if (nuevos) await clasificarExtracto(supabase, extracto.id)
 
   // Extracto sin filas nuevas: borrarlo para no ensuciar el historial
   if (nuevos === 0) {
