@@ -29,6 +29,7 @@ import { cobertura } from "./clasificador"
 import { estadoPlanMes, mesSiguiente } from "@/lib/viajes/plan-mes"
 import { ausenciasEntre } from "@/lib/viajes/calendario-laboral"
 import { crearHerramientasCompras, deudaSegunCuentaCorriente } from "./herramientas-compras"
+import { crearHerramientasBancos } from "./herramientas-bancos"
 
 export interface Contexto {
   db: SupabaseClient
@@ -1797,6 +1798,14 @@ const herramientasCompras = crearHerramientasCompras({
   error: (mensaje) => new ErrorHerramienta(mensaje),
 })
 
+// Bancos (lib/jarvis/herramientas-bancos.ts, Tanda 2 del plan de bancos): saldos_bancos,
+// movimientos_bancarios, gastos_bancarios_por_concepto, resumen_bancos, transferencia_de.
+const herramientasBancos = crearHerramientasBancos({
+  resolverCliente,
+  tabla,
+  error: (mensaje) => new ErrorHerramienta(mensaje),
+})
+
 export const HERRAMIENTAS: Herramienta[] = [
   indicadoresTablero, ventas, deudaClientes, clientesHabitos, fichaCliente, articulosVendidos,
   coberturaStock, proveedores, pagosProveedores, cheques, operacion, comisiones,
@@ -1804,6 +1813,7 @@ export const HERRAMIENTAS: Herramienta[] = [
   indicadoresExternos, insumosProveedor, clasificacionArticulos, calendarioViajes, ausenciasPersonal,
   facturacion, historiaPedido, cobrosRealizados, ordenesDePago, cambiosArticulo, gastosPagados,
   ...herramientasCompras,
+  ...herramientasBancos,
 ]
 
 /** Las que escriben en la agenda: /recalcular NUNCA las corre. */
