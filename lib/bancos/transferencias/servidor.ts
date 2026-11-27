@@ -316,7 +316,7 @@ export interface PanelTransferencias {
   disponible: boolean
   modo_propuesta: boolean
   sin_identificar: {
-    movimiento_id: string; fecha: string; hora: string | null; monto: number; banco: string
+    movimiento_id: string; cuenta_bancaria_id: string; fecha: string; hora: string | null; monto: number; banco: string
     nombre: string | null; cuit: string | null; concepto: string | null
     /** En propuesta: con qué cobro se confirmaría */
     propuesta: { pago_id: string; detalle_id: string; cliente_id: string; cliente: string; por: string } | null
@@ -326,7 +326,7 @@ export interface PanelTransferencias {
     informadas: { pago_id: string; detalle_id: string; cliente: string; fecha: string; banco: string }[]
   }[]
   confirmadas: { movimiento_id: string; pago_id: string; cliente: string; monto: number; fecha: string; banco: string; origen: string; at: string }[]
-  no_aparecieron: { pago_id: string; cliente: string; monto: number; fecha: string; banco: string }[]
+  no_aparecieron: { pago_id: string; cuenta_bancaria_id: string | null; cliente: string; monto: number; fecha: string; banco: string }[]
 }
 
 const MOTIVOS: Record<string, string> = {
@@ -360,7 +360,7 @@ export async function panelTransferencias(db: SupabaseClient): Promise<PanelTran
       .filter((i) => !i.vinculada && i.solo_este_medio && Math.abs(i.monto - c.monto) < 1 && Math.abs(Date.parse(i.fecha) - Date.parse(c.fecha)) <= 10 * 86_400_000)
       .slice(0, 6)
     sin_identificar.push({
-      movimiento_id: c.id, fecha: c.fecha, hora: c.hora ?? null, monto: c.monto, banco: c.banco_nombre ?? "Banco",
+      movimiento_id: c.id, cuenta_bancaria_id: c.cuenta_bancaria_id, fecha: c.fecha, hora: c.hora ?? null, monto: c.monto, banco: c.banco_nombre ?? "Banco",
       nombre: c.contraparte_nombre ?? null, cuit: c.contraparte_cuit ?? null, concepto: c.concepto_banco || c.descripcion || null,
       propuesta: prop && informada ? { pago_id: prop.pago_id, detalle_id: prop.detalle_id, cliente_id: prop.cliente_id, cliente: informada.cliente_nombre, por: dec?.accion === "confirmar" && dec.por === "pagador" ? "por quien pagó" : "única coincidencia" } : null,
       motivo: dec?.accion === "nada" ? MOTIVOS[dec.motivo] ?? null : null,
@@ -375,7 +375,7 @@ export async function panelTransferencias(db: SupabaseClient): Promise<PanelTran
 
   const no_aparecieron = d.informadas
     .filter((i) => noAparecio(i, d.hoy, i.cuenta_bancaria_id ? d.ultimaLectura.get(i.cuenta_bancaria_id) : null, d.feriados))
-    .map((i) => ({ pago_id: i.pago_id, cliente: i.cliente_nombre, monto: i.monto, fecha: i.fecha, banco: d.cuentas.get(i.cuenta_bancaria_id ?? "") ?? "Banco" }))
+    .map((i) => ({ pago_id: i.pago_id, cuenta_bancaria_id: i.cuenta_bancaria_id ?? null, cliente: i.cliente_nombre, monto: i.monto, fecha: i.fecha, banco: d.cuentas.get(i.cuenta_bancaria_id ?? "") ?? "Banco" }))
 
   // Confirmadas con el banco en los últimos 7 días
   const { data: vinc } = await db.from("banco_transferencias_vinculos")
