@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.4.19 (versionCode 28) — 2026-11-27
+
+- Rendición única con todos tus códigos; el retiro se descuenta al instante; efectivo y cheques separados de lo virtual; cheques repetidos y datos faltantes marcados en rojo
+
 ## v0.4.18 (versionCode 27) — 2026-11-26
 
 - Con el teclado abierto, los botones (Agregar al pedido, Confirmar, Guardar, Cobrar…) quedan arriba del teclado
