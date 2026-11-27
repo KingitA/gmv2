@@ -125,6 +125,10 @@ export async function importarExtracto(
   // ── Después de extracto_matchear: cada tanda de bancos agrega SU llamada en su propia línea ──
   // Tanda 2 (impuestos y gastos): solo clasifica (concepto_id); no toca kardex ni saldos, nunca falla.
   if (nuevos) await clasificarExtracto(supabase, extracto.id)
+  // ── Bancos tanda 3 (transferencias de clientes): cruza los créditos que quedaron PENDIENTE con
+  // las transferencias informadas. La lógica está en lib/bancos/transferencias/; en modo propuesta
+  // no confirma nada. Nunca lanza ni frena la importación.
+  const transferencias = await import("@/lib/bancos/transferencias/servidor").then((m) => m.revisarTransferencias()).catch(() => null)
 
   // Extracto sin filas nuevas: borrarlo para no ensuciar el historial
   if (nuevos === 0) {
@@ -136,5 +140,6 @@ export async function importarExtracto(
     importados: nuevos,
     duplicados: limpias.length - nuevos,
     matching: match,
+    transferencias,
   }
 }

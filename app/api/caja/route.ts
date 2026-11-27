@@ -5,6 +5,8 @@ import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
 import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from "@/lib/utils"
 import { fecha as fechaAR, moneda } from "@/lib/formato"
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { marcasBancoParaCaja } from "@/lib/bancos/transferencias/servidor"
 
 // ─── La Caja del Día — Etapa 1 (lectura) ────────────────────────────────────
 // Feed unificado del libro diario de plata para /caja. Combina en TS (sin SQL
@@ -52,6 +54,8 @@ interface FilaCaja {
    *  imputación (los de choferes/viajantes suelen venir ya imputados). */
   imputable?: boolean
   imputacion_disponible?: number
+  /** Bancos tanda 3: confirmada con el crédito del banco / informada que no apareció en el banco */
+  banco?: "confirmada" | "no_aparecio"
 }
 
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
@@ -657,6 +661,11 @@ export async function GET(request: NextRequest) {
       const { descuadresReales } = await import("@/lib/cuenta-corriente/descuadres")
       reconciliacionDescuadres = (await descuadresReales(supabase, recon || [])).length
     } catch { /* la vista puede no existir aún */ }
+
+    // ── Bancos tanda 3: marcas de las transferencias (lib/bancos/transferencias) ──
+    const marcas = await marcasBancoParaCaja(createAdminClient(), [...new Set(filas.map((f) => f.pago_id).filter((x): x is string => !!x))])
+    for (const f of filas) if (f.pago_id && marcas.porBanco.has(f.pago_id)) f.banco = "confirmada"
+    for (const f of [...filasPend, ...filasPendAnteriores]) if (f.pago_id && marcas.noAparecio.has(f.pago_id)) f.banco = "no_aparecio"
 
     // ── Armado final ──
     const delDia = [...filas, ...filasPend].sort((a, b) => (a.hora ?? "").localeCompare(b.hora ?? ""))
