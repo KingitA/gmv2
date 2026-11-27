@@ -110,7 +110,9 @@ export async function POST(request: NextRequest) {
           precio_unitario: 0, // el motor calcula desde lista/segmento
           descuento: 0,
         })),
-        observaciones: observaciones ? `Mostrador — ${observaciones}` : "Venta mostrador",
+        // Lo escrito a mano va a los comprobantes; "Venta mostrador" es nota del sistema
+        observaciones: observaciones || undefined,
+        nota_origen: "Venta mostrador",
         ...(condiciones as any),
       })
     } catch (e: any) {

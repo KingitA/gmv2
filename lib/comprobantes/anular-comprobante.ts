@@ -17,6 +17,7 @@ import { cuitDigitos, cuitValido, normalizarCuit } from '@/lib/formato'
 import { reservarNumero, tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from '@/lib/comprobantes/numeracion'
 import { aplicarDevolucionesAlAnular, type DevolucionesAplicadas } from '@/lib/pedidos/ajuste-devoluciones-refacturado'
 import { montoAnulacion, stockAReingresar } from '@/lib/pedidos/ajuste-devoluciones'
+import { observacionManualPedido } from "@/lib/pedidos/observacion-manual"
 
 /**
  * ANULAR UN COMPROBANTE de venta = emitir su inverso exacto (FA→NC con CAE,
@@ -592,6 +593,8 @@ async function anularComprobanteEnTurno(
         condicion_pago_texto: (inversoInsert as any).condicion_pago_texto ?? null,
         fecha_vencimiento:    (inversoInsert as any).fecha_vencimiento ?? null,
       },
+      // El inverso lleva la observación escrita a mano del pedido de la original
+      observacionManual: parcial ? null : await observacionManualPedido(supabase, original.pedido_id),
       cliente:        original.cliente,
       empresa:        empresaData,
       detalle:        detalleInserts.map((d: any, i: number) => ({

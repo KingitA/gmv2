@@ -15,6 +15,7 @@ import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeH
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { cuitDigitos, cuitValido } from "@/lib/formato"
 import { tomarTurnoFiscal, formatoNumeroComprobante, type TurnoFiscal } from "@/lib/comprobantes/numeracion"
+import { observacionManualPedido } from "@/lib/pedidos/observacion-manual"
 
 /**
  * Genera Notas de Débito (NDA/NDB) para ventas.
@@ -358,6 +359,7 @@ export async function POST(request: Request) {
         empresa:       empresaConfig,
         detalle:       detalleND,
         pedido:        null,
+          observacionManual: await observacionManualPedido(supabase, pedido_id),
         bonificaciones: [],
         marcaDesc,
         qrDataUrl,

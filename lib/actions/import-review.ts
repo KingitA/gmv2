@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
 import { createPedido, type CondicionProveedor, type CondicionMarca } from "@/lib/actions/pedidos"
+import { notaImportacionArchivos, notaImportacionMail } from "@/lib/pedidos/nota-origen"
 
 export async function getPendingImports() {
     const supabase = await createClient()
@@ -102,10 +103,17 @@ export async function approveImport(
 
     if (itemsPedido.length === 0) throw new Error("El pedido no tiene artículos vinculados")
 
+    // Nota del sistema con el archivo / mail de origen (no va a los comprobantes)
+    const { data: imp } = await supabase.from("imports").select("meta").eq("id", importId).maybeSingle()
+    const meta = (imp as any)?.meta || {}
+    const nota = meta.source === "gmail"
+        ? notaImportacionMail(meta.sender, meta.subject, [meta.file_name])
+        : notaImportacionArchivos([meta.file_name])
+
     const pedido = await createPedido({
         cliente_id: clienteId,
         items: itemsPedido,
-        observaciones: "Aprobado desde importación",
+        nota_origen: `${nota} (aprobado desde la revisión)`,
         condiciones_proveedor: condicionesProveedor,
         condiciones_marca: condicionesMarca,
         ajustar_a_fraccion: true,

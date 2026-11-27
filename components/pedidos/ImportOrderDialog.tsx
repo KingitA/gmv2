@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Upload, Loader2, CheckCircle, AlertTriangle, Search, AlertCircle, X, Check, ChevronsUpDown } from "lucide-react"
 import { parseOrderFile, type ParseResult, type ParsedItem } from "@/lib/actions/ai-order-import"
 import { createPedido } from "@/lib/actions/pedidos"
+import { notaImportacionArchivos } from "@/lib/pedidos/nota-origen"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
@@ -71,6 +72,7 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
         setAnalyzing(true)
         try {
             const formData = new FormData()
+            setNombresArchivos(Array.from(files).map((f) => f.name))
             Array.from(files).forEach(file => {
                 formData.append("file", file)
             })
@@ -114,7 +116,7 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                             precio_unitario: i.matchedProduct.precio_base || 0,
                             descuento: 0
                         })),
-                        observaciones: "Importado automáticamente vía IA",
+                        nota_origen: notaImportacionArchivos(Array.from(files).map((f) => f.name)),
                         ajustar_a_fraccion: true,
                     })
                     toast.success("Pedido creado automáticamente con éxito")
@@ -137,6 +139,7 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
     }
 
     const [creating, setCreating] = useState(false)
+    const [nombresArchivos, setNombresArchivos] = useState<string[]>([])
 
     // Manual Product Linking States
     const [searchingIdx, setSearchingIdx] = useState<number | null>(null)
@@ -198,7 +201,7 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                     precio_unitario: i.matchedProduct.precio_base || 0,
                     descuento: 0
                 })),
-                observaciones: "Importado vía IA",
+                nota_origen: notaImportacionArchivos(nombresArchivos),
                 ajustar_a_fraccion: true,
             }
             console.log("Payload:", payload)

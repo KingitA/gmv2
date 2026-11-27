@@ -672,7 +672,10 @@ export async function createPedido(data: {
     precio_unitario: number  // ignored — price is always calculated from lista/metodo
     descuento: number
   }>
+  /** Escrita a mano (vendedor, oficina, importación): se imprime al pie de los comprobantes */
   observaciones?: string
+  /** Nota del SISTEMA ("Importado vía IA - archivo.xlsx"): solo en el pedido y su impresión */
+  nota_origen?: string
   zona_entrega?: string
   // Condiciones generales (todo el pedido)
   metodo_facturacion_pedido?: string
@@ -876,7 +879,10 @@ export async function createPedido(data: {
       // si la ficha no la tiene: no frena nada, el ERP la muestra en rojo.
       ...columnasPedido(condicionDeFicha(clienteInfo)),
       total: Math.round((total + percepciones) * 100) / 100,
-      observaciones: data.observaciones,
+      // Lo escrito a mano (va al pie de los comprobantes) y la nota del sistema, aparte
+      // (solo en el pedido y su impresión) — Juan 27/11/2026
+      observaciones: data.observaciones?.trim() || null,
+      ...(data.nota_origen?.trim() ? { nota_origen: data.nota_origen.trim() } : {}),
       creado_por: user.id,
     })
     .select()

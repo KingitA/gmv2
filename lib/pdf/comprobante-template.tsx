@@ -185,6 +185,8 @@ export interface ComprobantePDFData {
     condicion_entrega?: string
     vendedor?: string
   } | null
+  /** Observación ESCRITA A MANO del pedido (Juan 27/11/2026): al pie, en OBSERVACIONES. Nunca la nota del sistema */
+  observacion_manual?: string | null
   detalle: Array<{
     articulo_id?: string
     descripcion: string
@@ -438,7 +440,8 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
           <View style={s.totArea}>
             <View style={s.totObs}>
               <Text style={s.totObsTit}>OBSERVACIONES</Text>
-              <Text style={s.totObsText}>{comp.observaciones || '—'}</Text>
+              {data.observacion_manual ? <Text style={s.totObsText}>{data.observacion_manual}</Text> : null}
+              {comp.observaciones || !data.observacion_manual ? <Text style={s.totObsText}>{comp.observaciones || '—'}</Text> : null}
               {/* Leyenda fiscal: solo comprobantes fiscales (no presupuesto/reversa) */}
               {!esPresRev && (
                 <Text style={s.totObsLegal}>

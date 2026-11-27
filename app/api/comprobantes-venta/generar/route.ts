@@ -723,7 +723,7 @@ async function generarPedido(body: any, auth: { user: { id: string } }) {
       try {
         const { data: compFull } = await supabase
           .from('comprobantes_venta')
-          .select('*, clientes(*), pedidos(numero_pedido, condicion_entrega, vendedores(nombre)), comprobantes_venta_detalle(*, articulos(descripcion, sku, descuento_propio, marca_id, rubro_id, categoria_id, subcategoria_id))')
+          .select('*, clientes(*), pedidos(numero_pedido, condicion_entrega, observaciones, vendedores(nombre)), comprobantes_venta_detalle(*, articulos(descripcion, sku, descuento_propio, marca_id, rubro_id, categoria_id, subcategoria_id))')
           .eq('id', comp.id)
           .single()
 

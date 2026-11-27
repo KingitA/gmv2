@@ -98,7 +98,7 @@ export default function PedidoEditPage() {
     const [pedRes, itemsRes, listasRes, vendRes, compRes] = await Promise.all([
       supabase.from("pedidos").select(`
         id, numero_pedido, fecha, estado, total, subtotal, cliente_id, bonif_mercaderia_pct, bonif_pedido, condiciones_cliente,
-        metodo_facturacion_pedido, condicion_entrega, observaciones,
+        metodo_facturacion_pedido, condicion_entrega, observaciones, nota_origen,
         lista_precio_pedido_id, lista_limpieza_pedido_id, metodo_limpieza_pedido,
         lista_perf0_pedido_id, metodo_perf0_pedido,
         lista_perf_plus_pedido_id, metodo_perf_plus_pedido,
@@ -554,9 +554,12 @@ export default function PedidoEditPage() {
                     className="h-9"
                     value={headerForm.observaciones}
                     onChange={(e) => setHeaderForm({ ...headerForm, observaciones: e.target.value })}
-                    placeholder="Notas internas del pedido..."
+                    placeholder="Escrita a mano: se imprime en el pedido y al pie de los comprobantes"
                     disabled={!editable}
                   />
+                  {pedido?.nota_origen && (
+                    <p className="mt-1 text-[11px] text-slate-500" title="Nota del sistema: no va a los comprobantes">Origen: {pedido.nota_origen}</p>
+                  )}
                 </div>
               </div>
 
