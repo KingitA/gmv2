@@ -25,20 +25,22 @@ const SCHEMA: any = {
           detalle: { type: SchemaType.STRING, description: "texto de la columna Detalle (nombre + CUIT), vacío si es '-'" },
           contraparte_nombre: { type: SchemaType.STRING },
           contraparte_cuit: { type: SchemaType.STRING, description: "11 dígitos si se ve" },
-          debito: { type: SchemaType.NUMBER, description: "importe de la columna Débito, positivo; 0 si no hay" },
-          credito: { type: SchemaType.NUMBER, description: "importe de la columna Crédito, positivo; 0 si no hay" },
-          importe: { type: SchemaType.NUMBER, description: "si hay una sola columna de importe: con su signo (negativo = débito)" },
-          saldo: { type: SchemaType.NUMBER, description: "saldo del renglón si se ve; si no, omitir" },
+          debito: { type: SchemaType.NUMBER, nullable: true, description: "importe de la columna Débito, positivo; 0 si no hay" },
+          credito: { type: SchemaType.NUMBER, nullable: true, description: "importe de la columna Crédito, positivo; 0 si no hay" },
+          importe: { type: SchemaType.NUMBER, nullable: true, description: "si hay una sola columna de importe: con su signo (negativo = débito)" },
+          saldo: { type: SchemaType.NUMBER, nullable: true, description: "saldo del renglón si se ve; si no, null" },
           referencia: { type: SchemaType.STRING, description: "número de comprobante / operación si se ve" },
           cortado: { type: SchemaType.BOOLEAN, description: "true si el renglón está cortado por el borde de la imagen" },
         },
-        required: ["fecha"],
+        // Gemini con responseSchema suele devolver SOLO los campos obligatorios: se piden todos
+        // (los que no se ven van vacíos o null). Con solo "fecha" devolvía renglones sin importe.
+        required: ["fecha", "hora", "concepto", "detalle", "contraparte_nombre", "contraparte_cuit", "debito", "credito", "importe", "saldo", "referencia", "cortado"],
       },
     },
-    saldo_cuenta: { type: SchemaType.NUMBER, description: "saldo de la cuenta del encabezado de la pantalla (Saldo disponible / Saldo actual), si se ve" },
+    saldo_cuenta: { type: SchemaType.NUMBER, nullable: true, description: "saldo de la cuenta del encabezado de la pantalla (Saldo disponible / Saldo actual), si se ve" },
     orden: { type: SchemaType.STRING, description: "nuevo_primero si lo más nuevo está arriba; viejo_primero si no" },
   },
-  required: ["movimientos"],
+  required: ["movimientos", "saldo_cuenta", "orden"],
 }
 
 const BASE = `Sos un transcriptor de movimientos bancarios argentinos. Te paso una CAPTURA DE PANTALLA del homebanking (o un extracto).
