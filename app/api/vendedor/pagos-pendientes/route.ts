@@ -14,7 +14,7 @@ export async function GET() {
 
     const { data: pagos, error } = await supabase
       .from("pagos_clientes")
-      .select("id, monto, fecha_pago, forma_pago, clientes(id, nombre), pagos_detalle(tipo_pago, monto)")
+      .select("id, monto, fecha_pago, forma_pago, clientes(id, nombre), pagos_detalle(tipo_pago, monto, color_cheque, cheque_id, cheque:cheque_id(es_echeq))")
       .in("vendedor_id", session.vendedorIds)
       .eq("estado", "pendiente_rendicion")
       .order("fecha_pago", { ascending: true })
@@ -40,6 +40,14 @@ export async function GET() {
 
     let totalEfectivo = 0
     let totalOtros = 0
+    // FÍSICO (efectivo en pesos + cheques de papel en unidades) vs VIRTUAL (transferencias y
+    // echeqs): nunca un total mezclado (Juan, 27/11/2026)
+    const chequesFisicos = { cantidad: 0, monto: 0 }
+    const echeqs = { cantidad: 0, monto: 0 }
+    let transferencias = 0
+    // Un cheque = un papel: el compartido entre varios clientes se cuenta UNA vez (como la billetera)
+    const papeles = new Set<string>()
+    const echeqsVistos = new Set<string>()
     const resultado = pagosFiltrados.map((p: any) => {
       const detalles: any[] = p.pagos_detalle || []
       const efectivo = detalles
@@ -49,10 +57,34 @@ export async function GET() {
       const ef = sinDetalle ? Number(p.monto) : efectivo
       totalEfectivo += ef
       totalOtros += Number(p.monto) - ef
+      const fis = { cantidad: 0, monto: 0 }
+      const ech = { cantidad: 0, monto: 0 }
+      let transf = 0
+      for (const d of detalles) {
+        const tipo = (d.tipo_pago || "").toLowerCase()
+        const m = Number(d.monto) || 0
+        // echeq = virtual (mismo criterio que esDetalleDigital de lib/cobranzas/crear.ts)
+        if (tipo === "cheque" && ((d.color_cheque || "").toUpperCase() === "ECHEQ" || d.cheque?.es_echeq)) {
+          if (!d.cheque_id || !echeqsVistos.has(d.cheque_id)) ech.cantidad++
+          if (d.cheque_id) echeqsVistos.add(d.cheque_id)
+          ech.monto += m
+        } else if (tipo === "cheque") {
+          if (!d.cheque_id || !papeles.has(d.cheque_id)) fis.cantidad++
+          if (d.cheque_id) papeles.add(d.cheque_id)
+          fis.monto += m
+        }
+        else if (tipo === "transferencia" || tipo === "deposito") transf += m
+      }
+      chequesFisicos.cantidad += fis.cantidad; chequesFisicos.monto += fis.monto
+      echeqs.cantidad += ech.cantidad; echeqs.monto += ech.monto
+      transferencias += transf
       return {
         id: p.id,
         monto: Number(p.monto),
         monto_efectivo: ef,
+        cheques_fisicos: fis,
+        echeqs: ech,
+        transferencias: transf,
         fecha_pago: p.fecha_pago,
         cliente_nombre: p.clientes?.nombre || "—",
         metodo_resumen: detalles.length
@@ -79,6 +111,9 @@ export async function GET() {
       total: resultado.reduce((s, p) => s + p.monto, 0),
       total_efectivo: totalEfectivo,
       total_otros: totalOtros,
+      cheques_fisicos: { cantidad: chequesFisicos.cantidad, monto: Math.round(chequesFisicos.monto * 100) / 100 },
+      echeqs: { cantidad: echeqs.cantidad, monto: Math.round(echeqs.monto * 100) / 100 },
+      transferencias: Math.round(transferencias * 100) / 100,
       retiros_sin_rendir: retirosSinRendir,
     })
   } catch (error: any) {

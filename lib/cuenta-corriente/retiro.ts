@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { billeteraConCuentaPersonal, cuentaPersonalDe } from "@/lib/cuenta-corriente/cuenta-personal"
 import { moneda } from "@/lib/formato"
+import { codigoPrincipal } from "@/lib/vendedor/codigo-principal"
 
 /**
  * RETIRO del vendedor (regla del dueño 19/10/2026): lo hace él mismo desde la
@@ -66,19 +67,10 @@ export async function registrarRetiro(
     )
   }
 
-  // Billetera del código de vendedor con más efectivo sin rendir (la rendición
-  // se arma por código: el retiro tiene que caer en la misma)
-  const { data: pagos } = await supabase
-    .from("pagos_clientes")
-    .select("vendedor_id, pagos_detalle(tipo_pago, monto)")
-    .in("vendedor_id", args.vendedorIds)
-    .eq("estado", "pendiente_rendicion")
-  const efectivoDe = new Map<string, number>()
-  for (const p of pagos || []) {
-    const ef = ((p as any).pagos_detalle || []).filter((d: any) => d.tipo_pago === "efectivo").reduce((s: number, d: any) => s + Number(d.monto || 0), 0)
-    efectivoDe.set(p.vendedor_id, (efectivoDe.get(p.vendedor_id) || 0) + ef)
-  }
-  const vendedorId = [...efectivoDe.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || args.vendedorIds[0]
+  // Rendición única (27/11/2026): el retiro va SIEMPRE al código principal del usuario
+  // (el mismo de su rendición) y rendicion_crear v6 lo descuenta aunque sean varios códigos.
+  // Antes caía en el código con más efectivo ese día y se descontaba solo de ESA rendición.
+  const vendedorId = codigoPrincipal(args.vendedorIds)
 
   const concepto = `Retiro de efectivo${args.observaciones ? ` · ${args.observaciones}` : ""}`
   const { data: mov, error: movErr } = await supabase

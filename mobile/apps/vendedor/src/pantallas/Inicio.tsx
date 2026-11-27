@@ -74,7 +74,8 @@ export function Inicio() {
     >
       {toast}
       {/* Lo que la oficina rechazó (un cobro, un pedido…) se ve apenas se abre la app: no queda escondido en un contador */}
-      <Rechazos items={rechazosDe(ops, "")} ayuda="Eso NO quedó registrado en el sistema. Revisalo y, si corresponde, cargalo de nuevo." />
+      {/* El retiro rechazado se ve en la billetera (27/11), no acá */}
+      <Rechazos items={rechazosDe(ops, "").filter((o) => !o.tipo.startsWith("retiro."))} ayuda="Eso NO quedó registrado en el sistema. Revisalo y, si corresponde, cargalo de nuevo." />
       {/* Veredicto del BCRA de los cheques cobrados (llega después del cobro, también si se cargó sin señal) */}
       <AvisosBcra />
       <div className="mx-auto w-full max-w-2xl space-y-6 p-4">

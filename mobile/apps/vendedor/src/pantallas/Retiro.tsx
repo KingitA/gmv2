@@ -2,8 +2,9 @@ import { useState } from "react"
 import { useNavigate } from "react-router"
 import { DS } from "../datasets"
 import { useBilletera, type OpRetiro } from "../datos/billetera"
-import { useEncolar } from "../datos/hooks"
-import { formatCurrency, MontoInput, Pantalla, SinDescargar, useToast } from "../ui"
+import { useNoEnviados } from "@gm/core"
+import { rechazosDe, useEncolar } from "../datos/hooks"
+import { formatCurrency, MontoInput, Pantalla, Rechazos, SinDescargar, useToast } from "../ui"
 
 // Retiro de efectivo (regla del dueño 19/10/2026): el vendedor retira él mismo de la plata
 // que tiene en la mano. Se debita en su cuenta personal y baja lo que tiene que rendir; la
@@ -16,6 +17,7 @@ export function Retiro() {
   const encolar = useEncolar()
   const { toast, mostrar } = useToast()
   const { data, cargando } = useBilletera()
+  const ops = useNoEnviados()
   const [monto, setMonto] = useState(0)
   const [obs, setObs] = useState("")
   const [guardando, setGuardando] = useState(false)
@@ -54,6 +56,8 @@ export function Retiro() {
       }
     >
       {toast}
+      {/* Un retiro anterior rechazado: el motivo acá, corto (27/11) */}
+      <Rechazos items={rechazosDe(ops, "retiro.")} ayuda="El retiro NO quedó registrado." />
       <div className="mx-auto w-full max-w-2xl space-y-4 p-4">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 text-center">
           <p className="text-sm text-gray-500">Efectivo de la empresa en tu mano</p>

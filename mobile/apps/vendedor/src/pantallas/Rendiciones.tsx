@@ -2,21 +2,31 @@ import { useEffect, useState } from "react"
 import { ErrorHttp, ErrorSesion, useContadoresOutbox, useOnline, useOverlay, useParamEstado, useRuntime } from "@gm/core"
 import { fecha, fechaHora, redondear } from "@gm/formato"
 import { DS } from "../datasets"
-import { efectivoARendir, useBilletera } from "../datos/billetera"
+import { efectivoARendir, textoCheques, textoFisico, textoVirtual, useBilletera } from "../datos/billetera"
 import { useFilaBilletera, useRefrescarAlEntrar } from "../datos/hooks"
 import { fechaAR, formatCurrency, HojaConfirmar, MontoInput, Pantalla, SinDescargar, useToast } from "../ui"
 
-// Rendiciones del viajante (= app/vendedor/rendiciones/page.tsx) — vos declarás
+// Enviar rendición (= app/vendedor/rendiciones/page.tsx) — vos declarás
 // (POST /api/viajante/rendir) y la plata pasa a "en viaje a oficina" (billetera en 0);
 // oficina confirma cuando recibe el dinero (segunda firma, rendicion_confirmar).
+// RENDICIÓN ÚNICA (Juan, 27/11/2026): no se eligen cobros. Va TODO lo que tiene en la mano,
+// sumando todos sus códigos de vendedor (un usuario = una rendición). Lo FÍSICO (efectivo en
+// pesos, cheques de papel en unidades con su monto) va separado de lo VIRTUAL
+// (transferencias y echeqs): nunca un total mezclado.
 //
 // Lecturas: filas "pagos_pendientes" y "rendiciones" de vendedor_billetera.
 // Rendir es ONLINE-ONLY a propósito (RPC atómica de plata en el servidor): no pasa por el outbox.
+
+interface Cantidad { cantidad: number; monto: number }
 
 interface PagoPendiente {
   id: string
   monto: number
   monto_efectivo?: number
+  /** Servidor desde 27/11 (ausente = servidor viejo) */
+  cheques_fisicos?: Cantidad
+  echeqs?: Cantidad
+  transferencias?: number
   fecha_pago: string
   cliente_nombre: string
   metodo_resumen: string
@@ -44,7 +54,10 @@ interface Rendicion {
   pagos: PagoRendicion[]
 }
 
-interface FilaPendientes { pagos?: PagoPendiente[]; total?: number; total_efectivo?: number; total_otros?: number }
+interface FilaPendientes {
+  pagos?: PagoPendiente[]; total?: number; total_efectivo?: number; total_otros?: number
+  cheques_fisicos?: Cantidad; echeqs?: Cantidad; transferencias?: number
+}
 interface FilaRendiciones { rendiciones?: Rendicion[] }
 
 const SIN_PAGOS: PagoPendiente[] = []
@@ -63,44 +76,34 @@ export function Rendiciones() {
   const { fila: hist } = useFilaBilletera<FilaRendiciones>("rendiciones")
   const pagos = pend?.pagos ?? SIN_PAGOS
   const historial = hist?.rendiciones ?? []
-  const totales = { total_efectivo: pend?.total_efectivo || 0, total_otros: pend?.total_otros || 0 }
+  const efectivoCobrado = pend?.total_efectivo || 0
+  const chequesFis = pend?.cheques_fisicos ?? null
+  const echeqs = pend?.echeqs ?? null
+  const transf = pend?.transferencias ?? null
 
   const { data: billetera } = useBilletera()
   const retiros = billetera?.retiros_sin_rendir || 0
 
-  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set())
   const [efectivoDeclarado, setEfectivoDeclarado] = useState<number>(0)
   const [obs, setObs] = useState("")
   const [enviando, setEnviando] = useState(false)
 
-  // Igual que `cargar()` de la web: cuando cambia lo pendiente, todo seleccionado y como declarado
-  // lo que tiene que llevar (efectivo − retiros). La firma evita pisar lo que tocó el usuario en
-  // cada sync sin cambios.
-  const firma = `${pagos.map((p) => p.id).join(",")}|${pend?.total_efectivo ?? 0}|${retiros}`
+  // Cuando cambia lo pendiente, se propone lo que tiene que llevar (efectivo − retiros). La
+  // firma evita pisar lo que tocó el usuario en cada sync sin cambios.
+  const firma = `${pagos.map((p) => p.id).join(",")}|${efectivoCobrado}|${retiros}`
   useEffect(() => {
-    setSeleccionados(new Set(pagos.map((p) => p.id)))
-    setEfectivoDeclarado(efectivoARendir(pend?.total_efectivo || 0, retiros))
+    setEfectivoDeclarado(efectivoARendir(efectivoCobrado, retiros))
   }, [firma]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggle = (id: string) => {
-    setSeleccionados((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const elegidos = pagos.filter((p) => seleccionados.has(p.id))
-  const totalSeleccionado = elegidos.reduce((s, p) => s + p.monto, 0)
-  const efectivoSel = elegidos.reduce((s, p) => s + (p.monto_efectivo ?? 0), 0)
-  const esperado = efectivoARendir(efectivoSel, retiros)
+  // Va TODO lo pendiente (rendición única): no se eligen cobros
+  const esperado = efectivoARendir(efectivoCobrado, retiros)
   const difDeclarado = redondear(efectivoDeclarado - esperado)
-  const cuantos = `${elegidos.length} cobro${elegidos.length === 1 ? "" : "s"}`
+  const fisico = textoFisico(esperado, chequesFis)
+  const virtual = textoVirtual(transf, echeqs)
 
   const rendir = async () => {
     confirmar.cerrar()
-    if (!elegidos.length || enviando) return
+    if (!pagos.length || enviando) return
     if (!online) {
       mostrar("Necesitás conexión para rendir", "err")
       return
@@ -109,16 +112,15 @@ export function Rendiciones() {
     try {
       const d = await api.post<{ error?: string; efectivo_declarado?: number }>(
         "/api/viajante/rendir",
-        { pago_ids: elegidos.map((p) => p.id), efectivo_declarado: efectivoDeclarado, observaciones: obs || null },
+        // Sin pago_ids: el servidor toma TODO lo pendiente de todos tus códigos (rendición única)
+        { efectivo_declarado: efectivoDeclarado, observaciones: obs || null },
         { timeoutMs: 30_000 },
       )
       if (d?.error) {
         mostrar(d.error || "Error al rendir.", "err")
         return
       }
-      mostrar(
-        `✅ Rendición enviada: ${cuantos} por ${formatCurrency(totalSeleccionado)}, efectivo declarado ${formatCurrency(Number(d?.efectivo_declarado ?? efectivoDeclarado))}. La plata figura "en viaje a oficina" hasta que la confirmen.`,
-      )
+      mostrar(`✅ Rendición enviada: efectivo ${formatCurrency(Number(d?.efectivo_declarado ?? efectivoDeclarado))}${chequesFis?.cantidad ? ` · ${textoCheques(chequesFis)}` : ""}. Queda "en viaje a oficina" hasta que la confirmen.`)
       setObs("")
     } catch (e) {
       if (e instanceof ErrorHttp) mostrar(e.message || "Error al rendir.", "err")
@@ -132,7 +134,7 @@ export function Rendiciones() {
   }
 
   return (
-    <Pantalla titulo="🧾 Rendiciones" dataset={DS.billetera}>
+    <Pantalla titulo="🧾 Enviar rendición" dataset={DS.billetera}>
       {toast}
       <div className="bg-emerald-700 px-5 py-2 text-sm text-emerald-100">Vos rendís, oficina confirma al recibir</div>
 
@@ -148,38 +150,43 @@ export function Rendiciones() {
         <div className="mx-auto w-full max-w-2xl space-y-5 p-4 pb-10">
           {/* ── Dinero para rendir ── */}
           <section>
-            <h2 className="mb-2 text-lg font-bold text-gray-700">Dinero para rendir ({pagos.length})</h2>
+            <h2 className="mb-2 text-lg font-bold text-gray-700">Lo que tenés para rendir</h2>
             {pagos.length ? (
               <div className="space-y-2">
-                {pagos.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => toggle(p.id)}
-                    className={`flex min-h-11 w-full items-center justify-between rounded-xl border-2 bg-white p-3 text-left ${seleccionados.has(p.id) ? "border-emerald-500" : "border-gray-200"}`}
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate font-bold text-gray-900">
-                        {seleccionados.has(p.id) ? "☑" : "☐"} {p.cliente_nombre}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {fechaPago(p.fecha_pago)} · {p.metodo_resumen}
-                      </p>
-                    </div>
-                    <p className="ml-2 shrink-0 font-bold text-gray-900">{formatCurrency(p.monto)}</p>
-                  </button>
-                ))}
-
-                <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
-                  <div className="flex justify-between text-sm text-gray-500">
-                    <span>Efectivo estimado: {formatCurrency(totales.total_efectivo)}</span>
-                    <span>Cheques/transf.: {formatCurrency(totales.total_otros)}</span>
-                  </div>
+                {/* FÍSICO: lo que entregás en mano (efectivo en pesos, cheques en unidades) */}
+                <div className="rounded-xl border-2 border-emerald-500 bg-white p-4">
+                  <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Llevás a la oficina</p>
+                  <p className="mt-1 text-xl font-bold text-gray-900">{fisico}</p>
                   {retiros > 0 && (
-                    <p className="rounded-lg bg-indigo-50 p-2 text-sm text-indigo-900">
-                      Cobraste {formatCurrency(efectivoSel)} en efectivo − retiraste {formatCurrency(retiros)} ={" "}
-                      <b>llevás {formatCurrency(esperado)}</b>
+                    <p className="mt-2 rounded-lg bg-indigo-50 p-2 text-sm text-indigo-900">
+                      Cobraste {formatCurrency(efectivoCobrado)} en efectivo − retiraste {formatCurrency(retiros)} = <b>llevás {formatCurrency(esperado)}</b>
                     </p>
                   )}
+                </div>
+                {/* VIRTUAL: no se entrega en mano, la oficina la confirma en el banco */}
+                {virtual && (
+                  <div className="rounded-xl border border-gray-200 bg-white p-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Virtual (no se lleva: la confirma la oficina)</p>
+                    <p className="mt-1 font-bold text-gray-800">{virtual}</p>
+                  </div>
+                )}
+                {/* Detalle: de qué cobros sale (no se eligen: va todo) */}
+                <details className="rounded-xl border border-gray-200 bg-white">
+                  <summary className="min-h-11 cursor-pointer p-3 text-sm font-bold text-gray-600">Ver los {pagos.length} cobros que incluye</summary>
+                  <div className="divide-y divide-gray-100 border-t border-gray-100">
+                    {pagos.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-gray-900">{p.cliente_nombre}</p>
+                          <p className="text-xs text-gray-500">{fechaPago(p.fecha_pago)} · {p.metodo_resumen}</p>
+                        </div>
+                        <p className="ml-2 shrink-0 text-sm font-bold text-gray-800">{formatCurrency(p.monto)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+
+                <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
                   <div>
                     <label className="mb-1 block font-bold text-gray-700">💵 Efectivo contado (declarado)</label>
                     <MontoInput
@@ -194,10 +201,10 @@ export function Rendiciones() {
                   </div>
                   <button
                     onClick={confirmar.abrir}
-                    disabled={enviando || !elegidos.length || !online}
+                    disabled={enviando || !pagos.length || !online}
                     className="w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold text-white disabled:bg-gray-300"
                   >
-                    {enviando ? "Enviando..." : !online ? "Necesitás conexión para rendir" : "📤 RENDIR DINERO"}
+                    {enviando ? "Enviando..." : !online ? "Necesitás conexión para rendir" : "📤 ENVIAR RENDICIÓN"}
                   </button>
                   <p className="text-center text-xs text-gray-400">Oficina recibe el aviso de que el dinero está en viaje y tu billetera queda en 0.</p>
                 </div>
@@ -284,11 +291,12 @@ export function Rendiciones() {
       <HojaConfirmar
         abierta={confirmar.abierto}
         onCerrar={confirmar.cerrar}
-        titulo={`¿Rendir ${cuantos} por ${formatCurrency(totalSeleccionado)}?`}
-        confirmar="Rendir"
+        titulo="¿Enviar la rendición?"
+        confirmar="Enviar"
         onConfirmar={() => void rendir()}
       >
-        <p>Efectivo que declarás llevar: <b>{formatCurrency(efectivoDeclarado)}</b></p>
+        <p>Llevás: <b>{textoFisico(efectivoDeclarado, chequesFis)}</b></p>
+        {virtual && <p className="mt-1 text-gray-600">Virtual (lo confirma la oficina): {virtual}</p>}
         {difDeclarado !== 0 && (
           <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800">
             ⚠ Según los cobros{retiros > 0 ? " y lo que retiraste" : ""} deberías llevar {formatCurrency(esperado)} en efectivo ({difDeclarado > 0 ? "sobran" : "faltan"} {formatCurrency(Math.abs(difDeclarado))}). Oficina lo va

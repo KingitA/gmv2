@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
-import { useOnline, useParamEstado, useRuntime } from "@gm/core"
+import { useNoEnviados, useOnline, useParamEstado, useRuntime } from "@gm/core"
 import { fecha } from "@gm/formato"
 import { DS } from "../datasets"
-import { useFilaBilletera, useRefrescarAlEntrar } from "../datos/hooks"
+import { rechazosDe, useFilaBilletera, useRefrescarAlEntrar } from "../datos/hooks"
 import { useBilletera } from "../datos/billetera"
-import { fechaCorta, formatCurrency, NecesitaConexion, Pantalla, SinDescargar } from "../ui"
+import { fechaCorta, formatCurrency, NecesitaConexion, Pantalla, Rechazos, SinDescargar } from "../ui"
 
 // Billetera del viajante (= app/vendedor/billetera/page.tsx). Todo sale de la réplica
 // (dataset vendedor_billetera, filas por id):
@@ -102,10 +102,13 @@ export function Billetera() {
 
   // Billetera en dos cajitas (datos/billetera.ts), con los retiros sin enviar ya descontados
   const { data, cargando } = useBilletera()
+  const ops = useNoEnviados()
   const { fila: comData, cargando: comCargando } = useFilaBilletera<ComisionesData>(`comisiones:${comTipo}`)
 
   return (
     <Pantalla titulo="Mi Billetera" dataset={DS.billetera}>
+      {/* Retiro rechazado: se ve ACÁ (no solo en el Inicio), corto y claro (27/11) */}
+      <Rechazos items={rechazosDe(ops, "retiro.")} ayuda="El retiro NO quedó registrado." />
       {cargando ? null : !data ? (
         <SinDescargar que="la billetera" />
       ) : (
@@ -117,7 +120,7 @@ export function Billetera() {
             <p className="text-xs text-emerald-200">efectivo cobrado{(data.retiros_sin_rendir || 0) > 0.005 ? `, menos ${formatCurrency(data.retiros_sin_rendir)} que retiraste` : ""}</p>
             {(data.cheques_cantidad || 0) > 0 && (
               <p className="mt-1 text-sm font-medium text-emerald-100">
-                🧾 {data.cheques_cantidad} {data.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano
+                🧾 {data.cheques_cantidad} {data.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano{data.desglose?.cheques > 0 ? ` · ${formatCurrency(data.desglose.cheques)}` : ""}
               </p>
             )}
             <p className="mt-1 text-xs text-emerald-200">
@@ -138,7 +141,7 @@ export function Billetera() {
               </div>
             )}
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <button onClick={() => navigate("/rendiciones")} className="min-h-12 rounded-xl bg-white font-bold text-emerald-700">🧾 Rendiciones</button>
+              <button onClick={() => navigate("/rendiciones")} className="min-h-12 rounded-xl bg-white font-bold text-emerald-700">🧾 Enviar rendición</button>
               <button onClick={() => navigate("/billetera/retiro")} className="min-h-12 rounded-xl border-2 border-white/70 font-bold text-white">💸 Retirar</button>
             </div>
             <p className="mt-2 text-xs text-emerald-200">Vos rendís el dinero; oficina lo confirma al recibirlo (doble firma).</p>

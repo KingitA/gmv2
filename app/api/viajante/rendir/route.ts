@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
+import { codigoPrincipal } from "@/lib/vendedor/codigo-principal"
 
 /**
  * POST /api/viajante/rendir — el viajante DECLARA su rendición (Fase E).
@@ -8,8 +9,11 @@ import { requireVendedor } from "@/lib/vendedor/session"
  * (rendicion_crear); la CONFIRMA oficina desde el ERP (segunda firma,
  * rendicion_confirmar) — el viajante nunca se auto-verifica.
  *
- * Si el usuario tiene varios registros de vendedor, se crea una rendición
- * por billetera (los pagos se agrupan por su vendedor_id).
+ * RENDICIÓN ÚNICA (27/11/2026): un usuario = UNA rendición, aunque tenga varios códigos
+ * de vendedor (ej. FREIJE DANIEL y FREIJE DANIEL LISTA NECO). Va TODO lo pendiente (ya no
+ * se eligen cobros), con el código principal, y descuenta los retiros de TODOS sus códigos
+ * (rendicion_crear v6, p_retiros_de — migración 20261127f). Sin esa migración aplicada,
+ * cae a lo de antes: una rendición por código.
  */
 export async function POST(request: NextRequest) {
   const session = await requireVendedor()
@@ -47,7 +51,23 @@ export async function POST(request: NextRequest) {
     const rendiciones: any[] = []
     let declaradoRestante = Number(efectivo_declarado) || 0
 
-    for (const [vendedorId, ids] of grupos) {
+    // Rendición única: una sola llamada con todos los pagos y los retiros de todos los códigos
+    const unica = await supabase.rpc("rendicion_crear", {
+      p_cobrador_id: codigoPrincipal(session.vendedorIds),
+      p_cobrador_tipo: "viajante",
+      p_pago_ids: pagos.map((p) => p.id),
+      p_efectivo_declarado: declaradoRestante,
+      p_viaje_id: null,
+      p_observaciones: observaciones || null,
+      p_usuario_id: session.user.id,
+      p_retiros_de: session.vendedorIds,
+    })
+    // PGRST202 / 42883 = la base todavía no tiene la v6 (p_retiros_de): sigue como antes
+    const sinV6 = unica.error && (unica.error.code === "PGRST202" || unica.error.code === "42883" || /p_retiros_de|could not find the function/i.test(unica.error.message))
+    if (unica.error && !sinV6) return NextResponse.json({ error: unica.error.message }, { status: 400 })
+    if (!unica.error) rendiciones.push(unica.data)
+
+    for (const [vendedorId, ids] of sinV6 ? grupos : new Map<string, string[]>()) {
       // Efectivo registrado del grupo (para repartir lo declarado si hay >1 grupo)
       const { data: dets } = await supabase
         .from("pagos_detalle")

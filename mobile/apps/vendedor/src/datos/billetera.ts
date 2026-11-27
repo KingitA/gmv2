@@ -9,6 +9,7 @@
 import { useMemo } from "react"
 import { useNoEnviados, type ItemOutbox } from "@gm/core"
 import { useFilaBilletera } from "./hooks"
+import { moneda } from "@gm/formato"
 
 export interface CuentaPersonal {
   cliente_id: string
@@ -116,4 +117,42 @@ export function useBilletera() {
     return b && transfLocales.length ? { ...b, transferencias: [...transfLocales, ...(b.transferencias || [])] } : b
   }, [fila, sinEnviar, transfLocales])
   return { data, cargando, retirosSinEnviar: sinEnviar }
+}
+
+// ─── Físico vs virtual (Juan, 27/11/2026) ─────────────────────────────────────
+// Nunca un total mezclado ("los cobros suman $2.864.893"): lo FÍSICO (efectivo en pesos,
+// cheques de papel en UNIDADES con su monto) separado de lo VIRTUAL (transferencias, echeqs).
+
+
+interface CantidadMonto { cantidad: number; monto: number }
+
+/** "1 cheque $750.000,00" · "3 cheques $1.200.000,00" */
+export function textoCheques(c: CantidadMonto): string {
+  return `${c.cantidad} ${c.cantidad === 1 ? "cheque" : "cheques"} ${moneda(c.monto)}`
+}
+
+/** Lo que se entrega en mano: "Efectivo $2.114.893,00 · 1 cheque $750.000,00" */
+export function textoFisico(efectivo: number, cheques: CantidadMonto | null | undefined): string {
+  const partes = [`Efectivo ${moneda(efectivo)}`]
+  if (cheques?.cantidad) partes.push(textoCheques(cheques))
+  return partes.join(" · ")
+}
+
+/** Lo que no se entrega: "Transferencias $50.000,00 · 1 echeq $30.000,00" ("" = nada) */
+export function textoVirtual(transferencias: number | null | undefined, echeqs: CantidadMonto | null | undefined): string {
+  const partes: string[] = []
+  if ((transferencias || 0) > 0.005) partes.push(`Transferencias ${moneda(transferencias!)}`)
+  if (echeqs?.cantidad) partes.push(`${echeqs.cantidad} ${echeqs.cantidad === 1 ? "echeq" : "echeqs"} ${moneda(echeqs.monto)}`)
+  return partes.join(" · ")
+}
+
+// ─── Retiro aplicado sin billetera nueva ──────────────────────────────────────
+
+/**
+ * El retiro llegó al servidor pero la billetera del servidor no vino (el sync de la billetera
+ * puede tardar o fallar): se descuenta en la fila local para que "en la mano" y "para enviar a
+ * la oficina" muestren lo que quedó EN EL MOMENTO. El próximo sync trae la verdad del servidor.
+ */
+export function descontarRetiro(b: BilleteraData, monto: number): BilleteraData {
+  return billeteraVisible(b, monto) ?? b
 }
