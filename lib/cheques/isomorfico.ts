@@ -8,3 +8,4 @@
 export * from "./validar"
 export * from "./fila"
 export * from "./bcra"
+export * from "./duplicados"

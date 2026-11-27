@@ -47,6 +47,7 @@ import { asignarPedidoAlViaje } from "@/lib/vendedor/viajes-reparto"
 import { llamarRuta } from "./rutas"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
 import { columnasPedido } from "@/lib/pedidos/condicion-pago-pedido"
+import { chequesRepetidos, mismoCheque } from "@/lib/cheques/duplicados"
 import type { CondicionPago } from "@/lib/clientes/condicion-pago"
 
 const ROLES = ["vendedor"]
@@ -565,6 +566,37 @@ const clienteBonificaciones: HandlerDef<{ cliente_id: string; viajante?: Record<
 
 // ─── Cobros y devoluciones ───────────────────────────────────────────────────
 
+/**
+ * Cheques repetidos (27/11/2026, cobro de GENTILI): no dos cheques con el mismo número del
+ * mismo cliente salvo bancos distintos (banco normalizado). Dentro del cobro y contra los
+ * cheques ya cargados del cliente. Un REINTENTO del mismo cobro (ya creó su pago) no se
+ * controla: sus cheques son los suyos.
+ */
+async function controlarChequesRepetidos(ctx: CtxOutbox, payload: Record<string, any>, idemKey: string) {
+  const cheques: Array<{ banco?: string; numero_cheque?: string; tipo?: string }> = (payload.metodos || []).filter((m: any) => m?.tipo === "cheque")
+  if (!cheques.length) return
+  const enElCobro = chequesRepetidos(cheques)
+  if (enElCobro.length) throw new RechazoNegocio(`El cheque ${cheques[enElCobro[0]!]!.numero_cheque} está dos veces en este cobro.`, "CHEQUE_REPETIDO")
+
+  const clienteIds: string[] = [...new Set<string>((payload.clientes || []).map((c: any) => c.cliente_id).filter(esUuid))]
+  if (!clienteIds.length) return
+  // ¿Reintento? (mismas claves que arma POST /api/viajante/cobro por cliente)
+  const claves = clienteIds.length === 1 ? [idemKey] : clienteIds.map((_, i) => idemKey.slice(0, 14) + "e" + idemKey.slice(15, 34) + String(10 + i))
+  const { data: previo } = await ctx.admin.from("pagos_clientes").select("id").in("idempotency_key", claves).limit(1)
+  if (previo?.length) return
+
+  const { data: yaCargados, error } = await ctx.admin
+    .from("cheques")
+    .select("banco, numero, estado, cliente_origen_id")
+    .in("cliente_origen_id", clienteIds)
+    .limit(2000)
+  if (error) throw new Error(`cheques del cliente: ${error.message}`)
+  for (const ch of cheques) {
+    const igual = (yaCargados || []).find((y: any) => !/^ANULAD/i.test(y.estado || "") && mismoCheque({ banco: y.banco, numero: y.numero }, { banco: ch.banco, numero: ch.numero_cheque }))
+    if (igual) throw new RechazoNegocio(`El cheque ${ch.numero_cheque} (${igual.banco}) ya está cargado para este cliente: no se carga dos veces.`, "CHEQUE_REPETIDO")
+  }
+}
+
 /** Payload = body de POST /api/viajante/cobro (la clave de idempotencia es la de la operación). */
 const cobroRegistrar: HandlerDef<Record<string, any>> = {
   tipo: "cobro.registrar",
@@ -574,6 +606,7 @@ const cobroRegistrar: HandlerDef<Record<string, any>> = {
     // Fotos capturadas SIN señal: viajan en base64 dentro del cobro (fotos_pendientes) y
     // se suben acá, antes de registrar, para que queden en pago_comprobantes como las demás.
     const { fotos_pendientes, ...resto } = m.payload
+    await controlarChequesRepetidos(ctx, m.payload, m.idempotency_key)
     const subidas = await subirFotosPendientes(ctx.admin, fotos_pendientes)
     const comprobante_urls = [...(Array.isArray(resto.comprobante_urls) ? resto.comprobante_urls : []), ...subidas.map((f) => f.url)]
     const r = await llamarRuta(cobroPOST, ctx, { ruta: "/api/viajante/cobro", method: "POST", body: { ...resto, comprobante_urls, idempotency_key: m.idempotency_key } })

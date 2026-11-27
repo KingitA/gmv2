@@ -25,6 +25,7 @@ import { usePdfComprobantes } from "../../datos/comprobantes-pdf"
 import { ResumenCuenta } from "./comprobantes-ui"
 import { fecha, normalizarCuit } from "@gm/formato"
 import { AvisosBcra, CuitInput, FechaInput, MontoInput, Pantalla, Rechazos, dejarAviso, dejarAvisoSinCuit, formatCurrency, round2, useToast } from "../../ui"
+import { problemaMetodos } from "../../datos/cobro-metodos"
 import { saldoVisible } from "../../datos/saldo"
 import { devolucionDescuentaEnCobro, vaContra } from "@gm/vendedor"
 
@@ -319,8 +320,15 @@ export function Cobrar() {
     })
   }
 
-  const updateMetodo = (idx: number, patch: Partial<Metodo>) =>
+  // Campos marcados en rojo al intentar registrar (falta un dato o cheque repetido), por fila
+  const [errores, setErrores] = useState<Record<string, string[]>>({})
+  const conError = (m: Metodo, campo: string) => !!errores[m.id]?.includes(campo)
+  const cls = (m: Metodo, campo: CampoCheque, base?: string) => `${clsOcr(m, campo, base)}${conError(m, campo) ? " !border-red-500 !bg-red-50" : ""}`
+  const updateMetodo = (idx: number, patch: Partial<Metodo>) => {
+    const id = metodos[idx]?.id
+    if (id && errores[id]) setErrores((prev) => ({ ...prev, [id]: (prev[id] || []).filter((c) => !(c in patch)) }))
     setMetodos((prev) => prev.map((m, i) => (i === idx ? (Object.entries(patch) as Array<[keyof Metodo, any]>).reduce((f, [k, v]) => editarCampo(f, k, v), m) : m)))
+  }
   const setFila = (id: string, fn: (f: Metodo) => Metodo) => setMetodos((prev) => prev.map((m) => (m.id === id ? fn(m) : m)))
 
   // ── Fotos → fila al instante → OCR en segundo plano (nunca bloquea) ──
@@ -387,10 +395,14 @@ export function Cobrar() {
       mostrar("Ingresá efectivo, cheques/transferencias o descontá una devolución.", "err")
       return
     }
-    for (const m of metodos) {
-      const f = faltantes(m)
-      if (f.length) return mostrar(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${f.join(", ")}.`, "err")
+    // Falta un dato o está repetido: mensaje corto, el campo en rojo y la fila abierta (27/11)
+    const problema = problemaMetodos(metodos)
+    if (problema) {
+      setErrores(problema.errores)
+      setMetodoAbierto(problema.idx)
+      return mostrar(problema.texto, "err")
     }
+    setErrores({})
 
     const impFinal: Record<string, number> = { ...imputaciones }
     let ajustePorRedondeo = 0
@@ -900,7 +912,7 @@ export function Cobrar() {
                     {m.tipo === "transferencia" ? ` · ${cuentas.find((c) => c.id === m.cuenta_bancaria_id)?.banco || "sin cuenta"}` : ""}
                   </span>
                   {m.ocr.estado === "leyendo" && <span className="shrink-0 text-xs text-gray-400">OCR…</span>}
-                  <MontoInput valor={m.monto} onCambio={(v) => updateMetodo(idx, { monto: v })} className={clsOcr(m, "monto", CLS_MONTO)} />
+                  <MontoInput valor={m.monto} onCambio={(v) => updateMetodo(idx, { monto: v })} className={cls(m, "monto", CLS_MONTO)} />
                   <button
                     onClick={() => {
                       setMetodos((prev) => prev.filter((_, i) => i !== idx))
@@ -917,10 +929,10 @@ export function Cobrar() {
                   <div className="grid grid-cols-2 gap-2 bg-gray-50/60 px-3 pb-3 pt-2">
                     {m.tipo === "cheque" ? (
                       <>
-                        <input value={m.banco} onChange={(e) => updateMetodo(idx, { banco: e.target.value })} placeholder="Banco *" className={clsOcr(m, "banco")} />
-                        <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" inputMode="numeric" className={clsOcr(m, "numero_cheque")} />
-                        <FechaInput valor={m.fecha_cheque} onCambio={(v) => updateMetodo(idx, { fecha_cheque: v })} className={clsOcr(m, "fecha_cheque")} />
-                        <CuitInput sinError value={m.cuit_emisor} onChange={(v) => updateMetodo(idx, { cuit_emisor: v })} placeholder="CUIT emisor" className={clsOcr(m, "cuit_emisor")} />
+                        <input value={m.banco} onChange={(e) => updateMetodo(idx, { banco: e.target.value })} placeholder="Banco *" className={cls(m, "banco")} />
+                        <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" inputMode="numeric" className={cls(m, "numero_cheque")} />
+                        <FechaInput valor={m.fecha_cheque} onCambio={(v) => updateMetodo(idx, { fecha_cheque: v })} className={cls(m, "fecha_cheque")} />
+                        <CuitInput sinError value={m.cuit_emisor} onChange={(v) => updateMetodo(idx, { cuit_emisor: v })} placeholder="CUIT emisor" className={cls(m, "cuit_emisor")} />
                         {m.cuit_emisor && !cuitValido(m.cuit_emisor) && <p className="col-span-2 text-xs font-medium text-red-600">⚠️ El CUIT no cierra (dígito verificador): revisalo en el cheque. Se registra igual, pero no se consulta en el BCRA.</p>}
                         {!m.cuit_emisor && <p className="col-span-2 text-xs font-medium text-amber-700">⚠️ Sin CUIT: este cheque no se consulta en el BCRA (queda sin control de riesgo).</p>}
                         {cuitValido(m.cuit_emisor) && <p className="col-span-2 text-xs text-gray-500">Al registrar, el CUIT se consulta en el BCRA en segundo plano; el resultado llega como aviso.</p>}
@@ -931,7 +943,7 @@ export function Cobrar() {
                       </>
                     ) : (
                       <>
-                        <select value={m.cuenta_bancaria_id} onChange={(e) => updateMetodo(idx, { cuenta_bancaria_id: e.target.value })} className="col-span-2 min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
+                        <select value={m.cuenta_bancaria_id} onChange={(e) => updateMetodo(idx, { cuenta_bancaria_id: e.target.value })} className={`col-span-2 min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm ${conError(m, "cuenta_bancaria_id") ? "!border-red-500 !bg-red-50" : ""}`}>
                           <option value="">Cuenta destino *</option>
                           {cuentas.map((cb) => (
                             <option key={cb.id} value={cb.id}>
@@ -939,7 +951,7 @@ export function Cobrar() {
                             </option>
                           ))}
                         </select>
-                        <input value={m.referencia_transferencia} onChange={(e) => updateMetodo(idx, { referencia_transferencia: e.target.value })} placeholder="N° operación" className="col-span-2 min-h-11 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                        <input value={m.referencia_transferencia} onChange={(e) => updateMetodo(idx, { referencia_transferencia: e.target.value })} placeholder="N° operación" className={`col-span-2 min-h-11 rounded-lg border border-gray-300 px-3 py-2 text-sm ${conError(m, "referencia_transferencia") ? "!border-red-500 !bg-red-50" : ""}`} />
                       </>
                     )}
                   </div>
